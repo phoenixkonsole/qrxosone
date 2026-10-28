@@ -1,0 +1,25 @@
+QRX OS One 68K v0.20.3.7.4.6.6.17 regression hardening
+
+ROOT CAUSES ADDRESSED
+- Files window jump/disappear: custom drag used coordinates relative to the moving window, causing feedback. Uses screen mouse coordinates now.
+- Files resize flicker: gesture state stabilized; redraw remains refresh/end-gesture driven instead of coordinate feedback.
+- Drawer navigation: .6.6.16 drawer double-click path patch retained and audited; drawer entries enter in the same window. Parent remains available.
+- Terminal history: .6.6.13 added RAWKEY logic but the generic IDCMP replacement could hit the wrong window mask. .6.6.17 explicitly enables IDCMP_RAWKEY on g_terminal.
+- Terminal shell: cd <path> changes AmigaDOS CurrentDir; pwd reports CD; Linux-like QRXUnix aliases remain; unknown commands are attempted directly as AmigaDOS commands.
+- QRX Web / ARES visibility: both remain strict HUNK critical runtime binaries and are now exposed through QRX APPS plus terminal aliases web/browser and ares/antivirus.
+- Unified chrome: ARES converted from native mixed decoration to QRX borderless chrome. QRX Web, QRXAI and unified apps retain common 29px QRX chrome; their custom drag logic now uses stable screen coordinates.
+
+SERVER DEPLOY
+cd /tmp
+unzip qrx-amiga68k-live-v0.20.3.7.4.6.6.17-regression-hardening.zip
+cd qrx-amiga68k-live-v0.20.3.7.4.6.6.17-regression-hardening
+sudo ./deploy.sh
+
+TEST
+1. Files: double click C, then nested drawers repeatedly; path must change rather than flash/root-reset.
+2. Drag Files by title for 10+ seconds in circles; no oscillation/disappearance.
+3. Resize Files repeatedly; content must settle without runaway repaint.
+4. Terminal: type help, version, then Up/Down; TAB on 'bro' -> browser if completion table updated by build patch; cd QRX:, pwd, ls.
+5. Terminal: browser; ares.
+6. QRX APPS: WEB and ARES AV entries visible and launchable.
+7. Compare Writer/Sheet/Presenter/Hardware/Settings/Welcome/AI/Web/ARES chrome.

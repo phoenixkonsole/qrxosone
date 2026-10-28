@@ -1,0 +1,18 @@
+#include <exec/types.h>
+#include <intuition/intuition.h>
+#include <graphics/rastport.h>
+#include <dos/dos.h>
+#include <proto/exec.h>
+#include <proto/intuition.h>
+#include <proto/graphics.h>
+#include <proto/dos.h>
+#include <string.h>
+#include <stdio.h>
+#include "qrx_theme.h"
+struct IntuitionBase *IntuitionBase=0; struct GfxBase *GfxBase=0; struct DosLibrary *DOSBase=0; static struct Window*w=0; static char status[160]="Ready - choose QUICK SCAN";
+static void line(struct RastPort*r,int x,int y,const char*s){Move(r,x,y);Text(r,(STRPTR)s,strlen(s));}
+static void box(struct RastPort*r,UBYTE p,int x1,int y1,int x2,int y2){SetAPen(r,p);RectFill(r,x1,y1,x2,y2);}
+static void button(struct RastPort*r,int x,int y,int ww,const char*s){box(r,1,x,y,x+ww,y+20);SetAPen(r,qrx_theme_legacy_pen(2));Move(r,x,y+20);Draw(r,x+ww,y+20);SetAPen(r,qrx_theme_legacy_pen(3));line(r,x+6,y+14,s);}
+static int scan(const char*p){BPTR f=Open((STRPTR)p,MODE_OLDFILE);char b[512];LONG n;int suspicious=0;if(!f){snprintf(status,sizeof(status),"Cannot open %s",p);return 10;}while((n=Read(f,b,sizeof(b)))>0){if(n>=4&&(!memcmp(b,"EICAR",5)||!memcmp(b,"MZ",2)))suspicious=1;}Close(f);snprintf(status,sizeof(status),suspicious?"REVIEW: suspicious signature in %s":"CLEAN: %s",p);return suspicious?10:0;}
+static void draw(void){struct RastPort*r=w->RPort;qrx_theme_frame(w,"ARES Antivirus");SetAPen(r,qrx_theme_legacy_pen(2));line(r,12,53,"LOCAL SECURITY CENTER");SetAPen(r,qrx_theme_legacy_pen(3));line(r,12,75,"No cloud upload | local scan | download gate");button(r,12,92,120,"QUICK SCAN");SetAPen(r,qrx_theme_legacy_pen(3));line(r,12,132,status);line(r,12,158,"Signature database: QRX:ARES/signatures.db");line(r,12,180,"QRX Web hands downloads to ARES before execution.");}
+int main(int argc,char**argv){struct Screen*s=0;ULONG sig;int drag=0;LONG dragx=0,dragy=0,dragleft=0,dragtop=0;IntuitionBase=(struct IntuitionBase*)OpenLibrary((CONST_STRPTR)"intuition.library",39);GfxBase=(struct GfxBase*)OpenLibrary((CONST_STRPTR)"graphics.library",39);DOSBase=(struct DosLibrary*)OpenLibrary((CONST_STRPTR)"dos.library",39);if(argc>1){int rc=scan(argv[1]);PutStr((CONST_STRPTR)status);PutStr((CONST_STRPTR)"\n");return rc;}if(!IntuitionBase||!GfxBase||!DOSBase)return 20;qrx_theme_load();s=LockPubScreen(0);if(!s)return 20;w=OpenWindowTags(NULL,WA_PubScreen,(ULONG)s,WA_Left,45,WA_Top,45,WA_Width,520,WA_Height,220,WA_Flags,WFLG_ACTIVATE|WFLG_BORDERLESS|WFLG_SMART_REFRESH|WFLG_RMBTRAP|WFLG_REPORTMOUSE,WA_IDCMP,IDCMP_MOUSEBUTTONS|IDCMP_MOUSEMOVE|IDCMP_REFRESHWINDOW|IDCMP_INTUITICKS,TAG_DONE);if(!w)return 20;draw();sig=1UL<<w->UserPort->mp_SigBit;for(;;){struct IntuiMessage*m;Wait(sig);while((m=(struct IntuiMessage*)GetMsg(w->UserPort))){ULONG c=m->Class;UWORD code=m->Code;WORD x=m->MouseX,y=m->MouseY;ReplyMsg((struct Message*)m);if(c==IDCMP_REFRESHWINDOW){BeginRefresh(w);draw();EndRefresh(w,TRUE);}else if(c==IDCMP_MOUSEBUTTONS&&code==SELECTDOWN){if(y<28){if(qrx_theme_close_hit(w,x,y))goto done;if(qrx_theme_back_hit(w,x,y))WindowToBack(w);else if(qrx_theme_drag_hit(w,x,y)){drag=1;dragx=s->MouseX;dragy=s->MouseY;dragleft=w->LeftEdge;dragtop=w->TopEdge;}}else if(x>=12&&x<=132&&y>=92&&y<=112){scan("QRX:C/QRXDesktop");draw();}}else if(c==IDCMP_MOUSEBUTTONS&&code==SELECTUP)drag=0;else if(c==IDCMP_INTUITICKS){if(w->MouseY>=92&&w->MouseY<=112)qrx_theme_tooltip(w,w->MouseX+8,w->MouseY+10,"Scan QRXDesktop locally with ARES");}else if(c==IDCMP_MOUSEMOVE&&drag){LONG nl=dragleft+(LONG)s->MouseX-dragx,nt=dragtop+(LONG)s->MouseY-dragy;MoveWindow(w,nl-w->LeftEdge,nt-w->TopEdge);}}}done:CloseWindow(w);UnlockPubScreen(0,s);return 0;}

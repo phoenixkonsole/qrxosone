@@ -1,0 +1,35 @@
+QRX Amiga68k consolidated merge audit
+=====================================
+Merged inputs:
+- v0.20.3.7.4.6.5.6 IPrefs no-reset / preserved Workbench screen FULL
+- v0.20.3.7.4.6.5.9 Flat Retro UI / ECS-OCS visual baseline FULL
+- v0.20.3.7.4.6.6 Diagnostics Center / Desktop Foundation
+
+Audit result:
+- No functional v5.6 file is absent from v5.9.
+- v5.9 is a functional superset of v5.6.
+- The canonical QRXDesktop baseline IS present in the uploaded v5.9 FULL package:
+  tools/qrx_desktop.v0.20.1.baseline.c
+  SHA-256: 7faa9a24e38f2dea93c469ef5f5088a66a6a58912a5d39785f8baf00ca6e44ca
+- That hash matches /tmp/qrx-amiga68k-live-v0.20/src/qrx_desktop.c from the server transcript.
+- The earlier deployment failure was caused by executing the standalone v5.9 deployer from /tmp;
+  ROOT therefore became /tmp and the deployer looked for /tmp/tools/qrx_desktop.v0.20.1.baseline.c.
+  The FULL v5.9 ZIP itself was not missing that baseline.
+- v5.9 adds requester-free volume discovery, clean desktop host, flat-retro UI,
+  QRXHardware baseline/patching and v5.9 validator on top of the v5.6 line.
+- v5.9's changed v5.6 patchers retain the same logic while advancing the internal marker to v5.7.
+- Python __pycache__ was removed from the consolidated release.
+- Per-file SHA-256 sidecars and aggregate SHA256SUMS were regenerated for base-v5.9.
+- Diagnostics v6.6 is embedded, so no external --base-deploy path is required.
+
+v0.20.3.7.4.6.6.2 gate fix:
+- Corrected QRXDesktop requester-free marker gate to .5.8, matching its patcher marker.
+- Corrected QRXHardware requester-free marker gate to .5.8, matching its patcher marker.
+- No feature/source patch removed; .5.9 Flat Retro UI gate remains .5.9.
+
+v0.20.3.7.4.6.6.4 compile hotfix:
+- QRXDiagnostics now defines AROS proto library bases with their exact declared types:
+  struct IntuitionBase *, struct GfxBase *, struct DosLibrary *.
+- Removed conflicting static struct Library declarations.
+- Replaced snprintf with bounded-use sprintf for compatibility with this Deadwood SDK header profile.
+- Expanded is_file cleanup statements to avoid misleading-indentation warning.

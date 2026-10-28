@@ -1,0 +1,6 @@
+QRX OS One 6.6.22.1
+Fixes the build-stopping assumption that every ReactOS ISO contains clock.exe.
+calc.exe and notepad.exe remain mandatory. The third app is selected deterministically from:
+clock.exe, mspaint.exe, wordpad.exe, regedit.exe, taskmgr.exe, charmap.exe, cmd.exe.
+The exact selection is recorded in QRX:Diagnostics/REACTOS-THIRD-APP.txt.
+The recursive PE audit now accepts the actual selected smoke-test set.

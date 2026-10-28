@@ -1,0 +1,77 @@
+QRX OS One 0.20.3.7.4.6.6.22.5 - QRX86 GRT Executor + m68k JIT Foundation
+
+Implemented in this release
+===========================
+
+1. QRXGRT1 is no longer only a diagnostic serialization format.
+   QRX:C/QRX86GRTExec consumes the mapped ReactOS address space, bridge table
+   and dependency-ordered initialization plan emitted by QRXWinGuestRuntime.
+
+2. Real guest initialization execution path.
+   - HOST_NTDLL_BOOTSTRAP builds a minimal x86 TEB/PEB/stack environment.
+   - FS points at the TEB; FS:[18h] / FS:[30h] have NT-compatible bootstrap
+     values used by normal 32-bit Windows/ReactOS code.
+   - DLL TLS callbacks and DllMain(DLL_PROCESS_ATTACH) are invoked with a real
+     x86 stack and a sentinel return address.
+   - EXE TLS and the PE entry point can then run through the same executor.
+   - --init-only stops after DLL/TLS initialization for focused testing.
+
+3. ntdll host bridge execution.
+   Synthetic bridge addresses from the 22.4 linker are dispatched by the
+   executor. The first concrete bridge layer includes memory/string setup,
+   process heap allocation, last-error, basic critical-section bootstrap,
+   time/performance queries and early virtual-memory functions. Unimplemented
+   bridge calls return STATUS_NOT_IMPLEMENTED instead of pretending success,
+   except explicitly harmless bootstrap no-ops documented in source.
+
+4. IA-32 reference interpreter / fallback.
+   The new core implements the common 32-bit integer/control-flow subset needed
+   to begin ReactOS DLL initialization: ModRM/SIB, FS segment override, MOV,
+   LEA, stack operations, ALU/test/cmp, Jcc, CALL/JMP/RET, MOVSX/MOVZX,
+   CMPXCHG/XADD, IMUL core, shifts, REP string operations, CPUID/RDTSC bootstrap
+   and related instructions. Unsupported opcodes fail closed and report module,
+   EIP/RVA and raw bytes.
+
+5. Tiered block/JIT foundation.
+   - guest EIPs are cached as basic blocks;
+   - the interpreter remains the correctness/reference fallback;
+   - on m68k, hot blocks are materialized as executable native code-cache
+     entries consisting of generated JSR-threaded helper sequences;
+   - instruction cache is flushed with Exec CacheClearU();
+   - the block ABI is intentionally stable so individual helpers can be
+     replaced with direct m68k instruction emission incrementally.
+
+   This is a genuine dynamically generated native m68k execution path, but it
+   is deliberately a FOUNDATION: the first backend still calls semantic helpers
+   for guest instructions. It does not yet claim the speed of a mature direct
+   x86->m68k optimizer. Direct ALU/register emission, lazy-EFLAGS and block
+   chaining remain the next performance tier after correctness traces prove the
+   ReactOS initialization paths.
+
+6. QRX commands / tests.
+   winjit <exe>   - build a QRXGRT handoff and execute it with JIT enabled
+   wintrace <exe> - same, with detailed block/bridge trace
+   reactoscalc / reactosnotepad now use the GRT/JIT executor as the primary
+   ReactOS path. The older QRXWinRun command remains available explicitly for
+   side-by-side compatibility testing.
+   TestWinGuestInit runs Calculator DLL/TLS initialization with full trace.
+
+Validation performed while packaging
+====================================
+
+- source/integration gates: PASS
+- portable host compile: -std=c99 -Wall -Wextra -Werror: PASS
+- native-JIT preprocessor branch syntax with a stub Exec header: PASS
+- synthetic DllMain return test: PASS
+- synthetic FS:[18h] / TEB test: PASS
+- synthetic ntdll RtlGetProcessHeap bridge test: PASS
+- prior 6.6.21 / theme / 22.3 / 22.4 validators: PASS
+
+Not claimed until the user's Deadwood build/boot proves it
+==========================================================
+
+- successful m68k AROS compile/HUNK conversion of QRX86GRTExec
+- complete ReactOS DLL initialization
+- Calculator/Notepad/Solitaire GUI opening
+- complete IA-32 instruction coverage
+- high-performance direct x86->m68k code generation

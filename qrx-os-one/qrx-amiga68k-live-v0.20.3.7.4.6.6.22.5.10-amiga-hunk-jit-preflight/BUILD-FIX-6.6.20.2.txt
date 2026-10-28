@@ -1,0 +1,11 @@
+QRX OS 68K v0.20.3.7.4.6.6.20.2
+Canonical desktop compiler fix
+
+- Removed duplicate redraw_terminal_input() definition introduced by overlapping terminal/flicker patches.
+- Removed obsolete second terminal-history implementation and unreachable duplicate IDCMP_RAWKEY branch.
+- Preserved one terminal history implementation (g_term_history) and one completion helper.
+- TAB now uses qrx_complete() through the active RAWKEY handler.
+- Preserved qrx_term_scroll independently.
+- Recomputed canonical source SHA256 using a relative filename.
+
+The signedness/format diagnostics emitted by the Deadwood AROS headers are warnings; the duplicate function was the fatal compiler error addressed here.

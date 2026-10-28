@@ -1,0 +1,15 @@
+QRX OS One 6.6.22.3 - QRX86 Guest PE32 Module Loader Foundation
+
+Added QRXWinGuestLoader, a native m68k/AROS HUNK diagnostic/runtime component that maps PE32/i386 EXE/DLL images, recursively loads ReactOS System32 dependencies, applies IMAGE_REL_BASED_HIGHLOW relocations, resolves imports by name and ordinal, resolves forwarded exports, detects cycles/TLS, and patches guest IAT entries with deterministic guest virtual addresses.
+
+This is the loader/linker stage. It intentionally does not execute x86 DllMain/TLS callbacks or the EXE entry point yet. QRXWinRun remains the existing executor/WinRT and is run after the loader preflight by the ReactOS test commands. The next integration step is to share the mapped module address space with QRX86 execution and provide the NT/Win32 host bridge needed by ntdll/kernel32/user32/gdi32.
+
+Commands:
+  winload <exe>
+  reactoscalc
+  reactosnotepad
+  reactosthird
+  reactossolitaire
+  reactostest
+
+ReactOS Solitaire detection accepts sol.exe (normal ReactOS name) or solitaire.exe. Presence and dependency closure are recorded under QRX:Diagnostics.

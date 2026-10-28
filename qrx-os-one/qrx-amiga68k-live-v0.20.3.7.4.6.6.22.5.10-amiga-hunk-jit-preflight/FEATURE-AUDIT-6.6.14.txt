@@ -1,0 +1,14 @@
+6.6.14 audit
+PASS build integration: ARESAntivirus + QRXWeb compiled with native Deadwood AROS compiler, HUNK-converted, final ISO gated.
+PASS QRXWeb tabs: 6 tab state slots and click selection.
+PASS JavaScript policy: no JS engine; script content ignored.
+PASS unsupported media policy: video/audio/iframe represented as blocked placeholders by parser.
+PASS ad/tracker prefilter: URL gate before fetch for known patterns.
+PASS child-safe default: Safe Mode ON and downloads OFF.
+PASS wrapping/scroll baseline: browser text is width-bounded and scrollable with cursor keys.
+PASS ARES local streaming scanner and browser-compatible CLI scan entry point.
+PARTIAL HTML: compact text-centric parser, not HTML5 conformance.
+PARTIAL CSS: architecture/policy baseline only; full CSS box model is not implemented yet.
+OPEN native image pixels: PNG/JPEG/GIF decoder ABI and 68K optimized implementations are next gate; 6.6.14 recognizes image slots but uses placeholders rather than pretending decoding works.
+OPEN parental PIN/settings UI: safe defaults are enforced, but managed PIN/profile editor is next gate.
+OPEN HTTP backend: QRXWeb uses installed C:wget/C:curl if available; native socket/TLS fetcher is not yet bundled.

@@ -1,0 +1,12 @@
+{
+  "release": "v0.20.3.7.4.6.5.9",
+  "base": "v0.20.3.7.4.6.5.8",
+  "codename": "QRX Flat Retro UI / ECS-OCS Visual Baseline",
+  "preserves": [
+    "requester-free volume discovery",
+    "clean public-screen host",
+    "QRX assign persistence",
+    "Deadwood native AROS ABI",
+    "full unfiltered AROS HostFS"
+  ]
+}

@@ -1,0 +1,18 @@
+QRX OS One Amiga68K 0.20.3.7.4.6.6.20
+Canonical Build Pipeline Audit
+
+FIXED
+- QRXDesktop is no longer reconstructed at deploy time by an ordered legacy patch cascade.
+- A complete canonical qrx_desktop.c is shipped with SHA256 provenance.
+- deploy.sh copies that source atomically and validates feature markers before compiling.
+- The historical patch scripts remain in the archive only as development/history artifacts; deploy does not execute them.
+- This removes the observed "desktop message anchor missing" failure class.
+- Canonical source includes hierarchical Files navigation, terminal CWD, RAWKEY/history path,
+  stable screen-coordinate drag logic, desktop context menu, unified interaction code, QRXWeb/ARES launch commands.
+- Existing Deadwood source pin, native m68k AROS compiler, ELF machine gate, elf2hunk gate and final ISO extraction gate remain.
+
+NETWORK / HTTPS
+- Native bsdsocket DNS/TCP/HTTP from 6.6.19 is preserved.
+- HTTPS remains fail-closed until AmiSSL is present and ABI-validated against this exact Deadwood m68k AROS build.
+- No curl/wget downgrade and no plaintext fallback is introduced.
+- This release deliberately fixes the build pipeline first so the following AmiSSL integration can be tested on a reproducible source.

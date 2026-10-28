@@ -1,0 +1,1 @@
+22.5.10: conservative host-side HUNK header audit and m68k JIT static preflight. No claims of native compatibility or JIT crash resolution. Full 22.5.9 sources retained.

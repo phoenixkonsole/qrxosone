@@ -1,0 +1,3 @@
+QRX OS One 6.6.22.5.1 build fix
+
+Fixes the server-observed QRXWinGuestLoader compilation failure caused by missing C runtime declarations for FILE/fopen/fseek/SEEK_*/malloc/free/printf/fprintf/snprintf/strtoul. Both qrx_win_guest_loader.c and qrx_net.c now explicitly include stdio.h and stdlib.h. diagnostics-v6.6/deploy.sh has a preflight gate proving those headers are present before compilation. No QRX86/JIT semantics were changed.

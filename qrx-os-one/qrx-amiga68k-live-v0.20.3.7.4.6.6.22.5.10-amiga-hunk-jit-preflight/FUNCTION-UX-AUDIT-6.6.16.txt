@@ -1,0 +1,20 @@
+QRX OS One 68K v0.20.3.7.4.6.6.16 - File/UI/AI/Web regression hardening
+
+FIXED
+- File Manager: drawer double-click now changes g_files_path and reloads the selected drawer in the same window. Drive buttons are entry points, not the only navigation level.
+- Writer/Spreadsheet/Presenter: OPEN/SAVE now invoke a real ASL file requester and retain the selected path; no longer fixed-only QRX:Documents filenames.
+- Window chrome: QRX unified apps, QRXAI and QRXWeb use the same 28/29px QRX title geometry and right-side _, +, X button spacing. QRXAI/Web no longer mix the prior one-button/native decoration styles.
+- QRXAI: phrase variants map to shared intents (greeting, identity, wellbeing, thanks, goodbye, joke); knowledge matching rewards multi-key context hits. More DE/EN variants and multiple joke responses added.
+- QRXWeb: local file:// loading added. about:benchmark runs a deterministic 2000-iteration HTML parser workload.
+- QRX Test Suite Page: local HTML installed as QRX:Documents/QRX-test-suite-page.html with typography, layout, image, forms, table and benchmark instructions.
+
+TEST
+1. QRX Drive -> double click a drawer -> path/list must change; repeat into nested drawer.
+2. Writer/Spreadsheet/Presenter -> OPEN/SAVE -> requester must navigate drawers and return selected filename.
+3. Compare QRXAI, QRXWeb and unified app title bars: same title height/button spacing.
+4. QRXAI phrases: "Erzaehl was lustiges", "Bring mich zum lachen", "Wer genau bist du?", "Alles gut bei dir?", "Moin".
+5. QRXWeb -> file://QRX:Documents/QRX-test-suite-page.html
+6. QRXWeb -> about:benchmark; record elapsed ticks and ops/sec for each machine/emulator.
+
+NOTE
+QRXWeb remains a deliberately small 68K functional HTML core. The test page exposes unsupported controls/media as regressions/feature gaps rather than pretending full modern-browser compatibility.

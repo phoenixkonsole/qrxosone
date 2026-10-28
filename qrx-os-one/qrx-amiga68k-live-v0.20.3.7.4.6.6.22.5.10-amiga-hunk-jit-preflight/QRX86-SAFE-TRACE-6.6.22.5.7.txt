@@ -1,0 +1,7 @@
+QRX86 6.6.22.5.7 Safe Interpreter/Trace
+- wintrace forces --jit=off.
+- wintrace uses a 100000-step per-init watchdog.
+- --trace defaults to a 100000-step watchdog unless explicitly overridden.
+- Trace console output is capped at 2000 block lines to avoid locking the 68K UI on logging alone.
+- Watchdog exits through QRX86 fault reporting instead of intentionally spinning forever.
+- winjit/reactoscalc remain JIT paths for later controlled JIT repair; do not use them until native JIT memory/cache semantics are fixed.

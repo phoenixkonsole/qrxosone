@@ -1,0 +1,37 @@
+# CLAUDE HANDOFF — QRX OS One 22.5.10 → 22.5.11+
+
+Du übernimmst die Entwicklung von QRX OS One. Im beigefügten ZIP liegt der KUMULATIVE, vollständige Projektquellstand 0.20.3.7.4.6.6.22.5.10, nicht nur ein Patch. Arbeite ausschließlich auf dieser Basis, niemals auf einem älteren Snapshot. Beginne mit Inventur, Prüfsummenprüfung, Build-Gates und einer unveränderten Working Copy. Bewahre ALLE bestehenden Funktionen und Dateien.
+
+ZIEL: 22.5.11 als tatsächlich testbare AmigaOS-3.x-HUNK-Launcher-Integration + isolierter m68k-JIT-Selbsttest. Danach PPC32-Interpreter-Grundlage für AmigaOS 4 und Linux/PPC, ohne bereits Kompatibilität zu behaupten.
+
+SYSTEM/BUILD:
+- Ziel: Deadwood AROS Motorola 68K, echte m68k/HUNK-Binaries. Buildserver: /opt/qrx-os-one/deadwood-aros-build; AROS Core Ref 29dfac42dd55cddf813c695ab603f19ce2108656.
+- Verwende vorhandene AROS-Toolchain, nicht m68k-amigaos-gcc. Baue ELF m68k (ELF machine=4), konvertiere mit Deadwood elf2hunk, prüfe HUNK-Magic 000003f3. Verifiziere den Inhalt des FINALEN ISO mit xorriso. Bewahre die bekannte Emergency-Boot-Geometrie 3520 Sektoren.
+- Vor jeder Änderung: ZIP-Integrität, vorhandene SHA-Sidecars, Manifest und alle bestehenden Validatoren prüfen. SHA-Gates niemals umgehen oder bloß neu berechnen, um eine ungewollte Quelländerung zu kaschieren; Differenzen erklären.
+- Alle Änderungen kumulativ; keine Dateien aus vorherigen Releases entfernen; vollständiges ZIP, SHA256SUMS, changelog, reproduzierbare Tests und Build-/ISO-Protokoll liefern.
+
+AKTUELLER FUNKTIONSSTAND:
+- QRX-Desktop mit Themes QRX/Windows/Mac/Amiga, Filemanager, Terminal, QRXWeb, QRXAI; native Netzwerkfunktionen und ReactOS/Win32-Gastpfad. Nicht regressieren.
+- QRX86 PE32-Loader, Guest Runtime, x86-Interpreter und experimenteller m68k-JIT in diagnostics-v6.6/tools/qrx86_grt_exec.c.
+- Nach echtem 'Illegal instruction' (PC 0x052881D2) im QRX86-JIT ist native JIT-Ausführung aus Sicherheitsgründen gesperrt. `wintrace` muss Interpreter-only bleiben. Watchdog zählt einzelne Gastinstruktionen; prüfe diese Aussage im Code und mit Tests.
+- 22.5.9: compatibility/qrx-binary-identify.py (HUNK/ELF/PPC Formatidentifikation).
+- 22.5.10: compatibility/qrx-hunk-audit.py und qrx-jit-preflight.py: statische HUNK-/JIT-Checks, KEIN Beleg für native Ausführung.
+- Bisherige Probleme: fehlende stdio Deklaration, veraltete SHA-Sidecar, Freeze von wintrace bei JIT=on. Vorhandene Buildfixes berücksichtigen.
+
+AUFGABE 22.5.11:
+1. Prüfe zunächst komplette Quellen, Build-Skripte, Runtime, CLI, Integrationspfade und Dokumentation. Erzeuge Funktions-/Regressionsinventar.
+2. Implementiere einen echten AROS-m68k-kompatiblen Launcher für klassische AmigaOS-1.x–3.x-HUNK-Anwendungen mit robustem Pfad-/Argumenthandling, DOS-Prozessstart, Rückgabecode, Fehlermeldungen und fehlenden Library-Abhängigkeiten soweit zuverlässig erkennbar. Nutze AROS-eigene DOS/Exec-APIs und erfinde keine AmigaOS-4-Kompatibilität. Biete `amigarun <path>` und `amigacheck <path>` als Desktop/Terminal-Integration, ohne bestehende Commands zu beschädigen. Verifiziere mit einem selbstgebauten kleinen HUNK-Testprogramm auf Zielhardware/Emulator.
+3. JIT: Baue eine separate, opt-in, NICHT beim normalen Boot oder ReactOS-Start aufgerufene `qrx-jit-selftest`-Binary. Zuerst Byte-Emission/Alignment/Cache-Kohärenz/ABI testen, dann kontrolliert native Ausführung einer minimalen RTS-Sequenz und eines JSR-Helfers auf AROS m68k. Beachte, dass ein 'Illegal instruction' nicht in C abgefangen werden kann; dokumentiere Snapshot/Emulator-Absicherung. Wenn Ausführung nicht sicher validierbar ist, NUR statische Checks anbieten und JIT deaktiviert lassen. JIT erst nach erfolgreichem Zieltest schrittweise freigeben.
+4. Interpreter: überprüfe echte Instruktionszählung, max-steps, Trace-Limit, Fehlerpfade, und dass `wintrace` nicht einfriert. Native JIT für reguläre Anwendungen bleibt standardmäßig OFF.
+5. Für PPC nur einen Architektur-/ABI-Plan mit klaren getrennten Linux-PPC32- und AmigaOS-4-Laufzeiten erstellen; keine voreiligen Behauptungen. Keine unlizenzierte OS4-ROM/Library-Bundles.
+6. Automatisierte Tests für Parser, falsche HUNK/ELF, fehlende Libraries, ungültige Pfade, Quoting, Returncodes und JIT-Byteemission; Regressionstests für alte Funktionen. Host-GCC-Tests nicht als Beweis für Deadwood-m68k ausgeben.
+7. Am Ende eine KUMULATIVE 22.5.11-ZIP (vollständiger Source), README, SHA256SUMS, Testreport, Installationsanleitung und klare Trennung zwischen lokal getestet und nur auf Zielsystem zu prüfen.
+
+WICHTIGE REGELN:
+- Kein Feature-Verlust; keine Fake-Stubs als 'fertig' bezeichnen; keine Erfolgsmeldung ohne tatsächlichen Test.
+- Keine unkontrollierte Ausführung dynamischen JIT-Codes im regulären QRX-Desktop.
+- Bei Fehlschlag den Fehler anhand des Logs reparieren und sämtliche Gates erneut durchlaufen lassen.
+- Falls Deadwood-Buildumgebung nicht verfügbar: transparent benennen, keine native Build-Erfolge erfinden.
+- Arbeite agentisch bis ein überprüfbares Ergebnis vorliegt; stelle nur Fragen bei wirklich blockierenden fehlenden Informationen.
+
+Starte jetzt mit: Archiv prüfen → vollständige Source-Inventur → SHA-Gates → 22.5.11-Implementierung → Tests → kumulatives Release-ZIP.

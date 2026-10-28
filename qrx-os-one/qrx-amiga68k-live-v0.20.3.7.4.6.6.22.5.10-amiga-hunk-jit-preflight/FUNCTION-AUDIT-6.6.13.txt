@@ -1,0 +1,60 @@
+QRX OS One 68K — Functional Audit 6.6.13
+
+DESKTOP / WINDOW MANAGEMENT
+[FIX] Closing QRX Terminal no longer exits QRXDesktop; X sends Terminal behind other windows.
+[ADD] Clicking an application/title decoration activates and fronts that window.
+[ADD] Unified application chrome: back/minimize, maximize/restore, close.
+[KEEP] Amiga-style front/back workflow through title activation + back button.
+[KEEP] Native QRX primary-shell boot before Wanderer; Wanderer is fallback after QRX session exits.
+
+TERMINAL
+[ADD] 16-entry command history.
+[ADD] Up/Down history navigation via RAWKEY.
+[ADD] TAB completion for core QRX commands.
+[ADD] Page-style scroll state.
+[FIX] Output wraps to current terminal width; prompt horizontally clips to visible tail.
+
+WRITER
+[ADD] Native document buffer, multiline editing, word-wrapped WYSIWYG page area.
+[ADD] Open/Save toolbar and persistent QRX:Documents/Writer.txt.
+[ADD] Compact formatting ribbon baseline (Bold/Italic/Align/Size controls visible).
+[ADD] Scrollbar/status bar and unified QRX chrome.
+
+SPREADSHEET
+[ADD] 20x8 editable grid, selection, formula bar, Open/Save.
+[ADD] Numeric values, =number op number (+,-,*,/) and =SUM(A1:B2) evaluation.
+[ADD] Persistent QRX:Documents/Sheet.qrxsheet.
+[ADD] Compact ribbon and scrollbar.
+
+PRESENTER
+[ADD] Up to 16 slides; Add Slide, Delete Slide, slide selection and content editing.
+[ADD] Open/Save to QRX:Documents/Presentation.qrxpres.
+[ADD] Compact ribbon and presentation command baseline.
+
+QRXAI
+[FIX] Dynamic text wrapping based on window width and clipped input tail.
+[ADD] German/English small-talk responses: greetings, thanks, how-are-you, morning/night, identity, jokes.
+[ADD] Harmless humorous responses to common insults.
+[ADD] Safety response for suicidal/self-harm language: emergency 112 + TelefonSeelsorge 116 123 / 0800 1110111 / 0800 1110222.
+[KEEP] Local KB retrieval and red orb / line-eye avatar.
+
+SETTINGS / SYSTEM
+[KEEP] QRX Settings groups AROS ScreenMode, AHI, Network, Input, Locale and Boot preferences.
+[KEEP] Hardware and Welcome use unified QRX chrome.
+
+QRX86 / WIN32 / WINE TESTING
+[ADD] Build searches imported ReactOS System32 for calc.exe, notepad.exe, then clock.exe and copies the first available test executable to QRX:Windows/Tests/.
+[ADD] QRX:S/TestWin32 invokes it through QRXWinRun.
+[ADD] QRX:S/TestWine runs QRXWineHostTest, QRXWineServicesTest, QRXWineDisplayTest and QRXWineBoot.
+[ADD] Compatibility Center includes both test scripts.
+
+BUILD GATES
+[KEEP] Deadwood native AROS compiler only.
+[KEEP] ELF/m68k proof -> elf2hunk -> HUNK 000003f3 final ISO gates.
+[KEEP] Full AROS tree and ReactOS/Wine/QRX86 payload; no stripped replacement distribution.
+
+LIMITS / NEXT DEPTH
+- Writer formatting buttons establish the compact ribbon UI; rich styled-span persistence is not yet a full word-processor document format.
+- Spreadsheet formula engine intentionally implements a small safe subset, not Excel compatibility.
+- Presenter has multi-slide authoring; transitions/media/master slides are later features.
+- QRXAI is a local retrieval/rule assistant, not a transformer LLM.
