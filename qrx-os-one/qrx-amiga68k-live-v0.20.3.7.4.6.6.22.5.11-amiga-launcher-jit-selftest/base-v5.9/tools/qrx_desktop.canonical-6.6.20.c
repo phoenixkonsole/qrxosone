@@ -282,7 +282,7 @@ static int line_count = 0;
 static char input[INPUT_LEN + 1];
 static int input_len = 0;
 static int qrx_term_scroll = 0;
-static void qrx_complete(void){static const char*cmds[]={"help","version","info","mem","clear","about","writer","sheet","presenter","hardware","files","htop","ai","compat","qrx86","x86run","winrun","wineboot","reactosnotepad",0};int i,n=0,hit=-1;for(i=0;cmds[i];i++)if(!strncmp(cmds[i],input,input_len)){n++;hit=i;}if(n==1){strncpy(input,cmds[hit],INPUT_LEN);input[INPUT_LEN]=0;input_len=strlen(input);}}
+static void qrx_complete(void){static const char*cmds[]={"help","version","info","mem","clear","about","writer","sheet","presenter","hardware","files","htop","ai","compat","qrx86","x86run","winrun","wineboot","reactosnotepad","amigarun","amigacheck",0};int i,n=0,hit=-1;for(i=0;cmds[i];i++)if(!strncmp(cmds[i],input,input_len)){n++;hit=i;}if(n==1){strncpy(input,cmds[hit],INPUT_LEN);input[INPUT_LEN]=0;input_len=strlen(input);}}
 
 static ULONG rgb32(UBYTE v) {
     return ((ULONG)v << 24) | ((ULONG)v << 16) | ((ULONG)v << 8) | (ULONG)v;
@@ -2906,6 +2906,7 @@ static int execute_command(const char *cmd) {
         add_line("writer sheet presenter hardware usb display posix linux linuxabi linuxrun qrx86 x86run x86check win winrun wine wineprobe wineboot winedisplay wineservices dynarec winext msi winrt winscan winload wininit winbridge winjit wintrace notepadprobe reactoscalc reactosnotepad reactosthird reactossolitaire reactostest compat profile elf unix");
         add_line("pwd ls cat cp mv rm mkdir uname socket mmap");
         add_line("windows focus <n> desktop open legacy takeover runmode ai chat color quit");
+        add_line("amigacheck <prog>  amigarun [ASYNC] [STACK=n] <prog> [args]  (AmigaOS 1.x-3.x HUNK)");
     } else if (!strcmp(cmd, "version") || !strcmp(cmd, "ver")) {
         add_line("QRX OS One Amiga 68K native desktop v0.20");
     } else if (!strcmp(cmd, "info")) {
@@ -3275,6 +3276,14 @@ static int execute_command(const char *cmd) {
             snprintf(buf, sizeof(buf), "Slave: %.60s", profile.slave);
             add_line(buf);
         }
+    } else if (!strncmp(cmd, "amigacheck ", 11)) {
+        /* 22.5.11: classic HUNK check through QRXAmigaRun (AROS LoadSeg + library probe). */
+        snprintf(doscmd, sizeof(doscmd), "QRX:C/QRXAmigaRun CHECK %s", cmd + 11);
+        execute_capture(doscmd);
+    } else if (!strncmp(cmd, "amigarun ", 9)) {
+        /* 22.5.11: synchronous DOS-process start with return code; ASYNC for GUI programs. */
+        snprintf(doscmd, sizeof(doscmd), "QRX:C/QRXAmigaRun %s", cmd + 9);
+        execute_capture(doscmd);
     } else if (!strncmp(cmd, "run ", 4)) {
         launch_native(cmd + 4);
     } else if (!strcmp(cmd, "ai") || !strcmp(cmd, "chat")) {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 IFS=$'\n\t'
-REL="0.20.3.7.4.6.6.22.5.8"
+REL="0.20.3.7.4.6.6.22.5.11"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="${QRX_DEADWOOD_WORKSPACE:-/opt/qrx-os-one/deadwood-aros-build}"
 AROS_REF="${QRX_DEADWOOD_REF:-29dfac42dd55cddf813c695ab603f19ce2108656}"
@@ -110,6 +110,28 @@ for n in QRXArosAbi02 QRXArosAbi05 QRXDiagnostics QRXAI QRXHtop QRXCompatCenter 
 CRITICAL=(QRXDesktop QRXWriter QRXSpreadsheet QRXPresenter QRXHardware QRXSettings QRXWelcome ARESAntivirus QRXWeb QRXWinGuestLoader QRXWinGuestRuntime QRX86GRTExec QRXUnix QRXELF QRXPosixTest)
 for n in "${CRITICAL[@]}"; do [[ -s "$SYSROOT/QRX/C/$n" ]] || die "critical runtime missing: $n"; convert_one "$SYSROOT/QRX/C/$n" "$HUNKROOT/QRX/C/$n"; done
 cp -f "$ROOT/tools/qrx-system-test" "$SYSROOT/QRX/S/SystemTest"; cp -f "$ROOT/tools/qrx-system-test" "$HUNKROOT/QRX/S/SystemTest"
+# 22.5.11: classic AmigaOS HUNK launcher (amigarun/amigacheck) + opt-in JIT self-test.
+say "Building 22.5.11 QRXAmigaRun / amigacheck / qrx-jit-selftest / HUNK test programs"
+RT2211="$ROOT/../amiga-runtime-22.5.11"
+[[ -x "$RT2211/build-target.sh" ]] || die "22.5.11 amiga-runtime sources missing"
+QRX_AROS_CC="$AROS_CC" QRX_ELF2HUNK="$ELF2HUNK" QRX_AROS_CFLAGS="$(printf '%s ' "${CCARGS[@]:6}")" \
+  bash "$RT2211/build-target.sh" "$STAGE/rt2211" || die "22.5.11 target build failed"
+mkdir -p "$SYSROOT/QRX/Tests/Amiga" "$HUNKROOT/QRX/Tests/Amiga" "$SYSROOT/QRX/Docs" "$HUNKROOT/QRX/Docs"
+for n in QRXAmigaRun amigarun amigacheck qrx-jit-selftest; do
+  convert_one "$STAGE/rt2211/hunk/$n" "$HUNKROOT/QRX/C/$n"; cp -f "$HUNKROOT/QRX/C/$n" "$SYSROOT/QRX/C/$n"
+done
+for n in QRXHunkTest QRXHunkTestNeedLib; do
+  convert_one "$STAGE/rt2211/hunk/$n" "$HUNKROOT/QRX/Tests/Amiga/$n"; cp -f "$HUNKROOT/QRX/Tests/Amiga/$n" "$SYSROOT/QRX/Tests/Amiga/$n"
+done
+for f in "$STAGE/rt2211/fixtures/"*; do cp -f "$f" "$SYSROOT/QRX/Tests/Amiga/"; cp -f "$f" "$HUNKROOT/QRX/Tests/Amiga/"; done
+cp -f "$RT2211/target/TestAmigaRun" "$SYSROOT/QRX/S/TestAmigaRun"; cp -f "$RT2211/target/TestAmigaRun" "$HUNKROOT/QRX/S/TestAmigaRun"
+for d in JIT-SELFTEST-22.5.11.txt AMIGA-LAUNCHER-22.5.11.txt; do
+  cp -f "$RT2211/$d" "$SYSROOT/QRX/Docs/$d"; cp -f "$RT2211/$d" "$HUNKROOT/QRX/Docs/$d"
+done
+# qrx-jit-selftest must stay opt-in: never referenced by boot or ReactOS/QRX86 scripts.
+if grep -rlsI 'qrx-jit-selftest' "$SYSROOT/S" "$SYSROOT/QRX/S" "$HUNKROOT/QRX/S" 2>/dev/null | grep -v '/TestAmigaRun$' | grep -q .; then
+  die "qrx-jit-selftest referenced from a startup/runtime script; it must stay manual"
+fi
 cat > "$SYSROOT/QRX/Diagnostics/ABI-PROOF-README.txt" <<EOF
 QRX $REL strict Deadwood native AROS ABI packaging proof
 Compiler: $AROS_CC
@@ -212,7 +234,7 @@ command -v xorriso >/dev/null 2>&1 || die "xorriso required for final ISO proof"
 ISOEX="$STAGE/iso-root"; mkdir -p "$ISOEX"
 xorriso -osirrox on -indev "$ISO" -extract / "$ISOEX" >/dev/null 2>&1 || die "final ISO extraction failed"
 find_iso_file(){ local name="$1"; find "$ISOEX" -type f -path '*/QRX/C/*' -name "$name" -print -quit; }
-FINAL=(QRXArosAbi02 QRXArosAbi05 QRXDiagnostics QRXAI QRXHtop QRXCompatCenter "${CRITICAL[@]}")
+FINAL=(QRXArosAbi02 QRXArosAbi05 QRXDiagnostics QRXAI QRXHtop QRXCompatCenter QRXAmigaRun amigarun amigacheck qrx-jit-selftest "${CRITICAL[@]}")
 for n in "${FINAL[@]}"; do p="$(find_iso_file "$n")"; [[ -n "$p" && -s "$p" ]] || die "FINAL ISO GATE: QRX:C/$n missing"; magic="$(od -An -tx1 -N4 "$p"|tr -d ' \n')"; [[ "$magic" == 000003f3 ]] || die "FINAL ISO GATE: $n is not HUNK (magic=$magic)"; echo "ISO-PROOF QRX:C/$n format=HUNK size=$(stat -c %s "$p") sha256=$(sha256sum "$p"|awk '{print $1}')"; done
 # Ensure diagnostics support file also made it into the image.
 find "$ISOEX" -type f -path '*/QRX/S/SystemTest' -print -quit | grep -q . || die "FINAL ISO GATE: QRX:S/SystemTest missing"
@@ -221,6 +243,8 @@ find "$ISOEX" -type f -path '*/QRX/S/TestReactOS3' -print -quit | grep -q . || d
 find "$ISOEX" -type f -path '*/QRX/S/TestWinGuestInit' -print -quit | grep -q . || die "FINAL ISO GATE: QRX:S/TestWinGuestInit missing"
 find "$ISOEX" -type f -path '*/QRX/C/QRX86GRTExec' -print -quit | grep -q . || die "FINAL ISO GATE: QRX:C/QRX86GRTExec missing"
 find "$ISOEX" -type f -path '*/QRX/S/RunReactOSSolitaire' -print -quit | grep -q . || die "FINAL ISO GATE: QRX:S/RunReactOSSolitaire missing"
+for n in QRXHunkTest QRXHunkTestNeedLib; do p="$(find "$ISOEX" -type f -path "*/QRX/Tests/Amiga/$n" -print -quit)"; [[ -n "$p" && "$(od -An -tx1 -N4 "$p"|tr -d ' \n')" == 000003f3 ]] || die "FINAL ISO GATE: QRX:Tests/Amiga/$n missing or not HUNK"; echo "ISO-PROOF QRX:Tests/Amiga/$n format=HUNK"; done
+find "$ISOEX" -type f -path '*/QRX/S/TestAmigaRun' -print -quit | grep -q . || die "FINAL ISO GATE: QRX:S/TestAmigaRun missing"
 for n in calc.exe notepad.exe kernel32.dll ntdll.dll user32.dll gdi32.dll advapi32.dll; do find "$ISOEX" -type f -ipath "*/QRX/Windows/ReactOS/System32/$n" -print -quit | grep -q . || die "FINAL ISO GATE: ReactOS System32/$n missing"; done
 find "$ISOEX" -type f -ipath "*/QRX/Windows/ReactOS/System32/$ROS_THIRD" -print -quit | grep -q . || die "FINAL ISO GATE: selected ReactOS third app $ROS_THIRD missing"
 if [[ -n "$ROS_SOL" ]]; then

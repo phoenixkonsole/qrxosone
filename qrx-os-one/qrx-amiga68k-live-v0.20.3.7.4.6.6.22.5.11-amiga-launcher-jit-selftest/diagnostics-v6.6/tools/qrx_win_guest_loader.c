@@ -412,8 +412,11 @@ static void usage(void) {
     puts("Execution and DllMain/TLS callbacks are intentionally the next QRX86 stage.");
 }
 
+/* 22.5.11: QRXLoader is large (tens to hundreds of KB); never place it on the
+ * AmigaDOS process stack (4-64 KB, no MMU guard on m68k). Keep it in BSS. */
+static QRXLoader l;
 int main(int argc, char **argv) {
-    QRXLoader l; const char *target=NULL; const char *base; char logical[QRX_MAX_NAME]; QRXModule *root; int i,rc=1;
+    const char *target=NULL; const char *base; char logical[QRX_MAX_NAME]; QRXModule *root; int i,rc=1;
     memset(&l,0,sizeof(l)); l.next_base=QRX_GUEST_FALLBACK_BASE; l.verbose=1; snprintf(l.system32,sizeof(l.system32),"%s",QRX_DEFAULT_SYSTEM32);
     for (i=1;i<argc;i++) {
         if (!strcmp(argv[i],"--quiet")) l.verbose=0;

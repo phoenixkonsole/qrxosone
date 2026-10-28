@@ -1,0 +1,92 @@
+QRX OS One 22.5.11 - amigarun / amigacheck (QRXAmigaRun)
+=========================================================
+
+Purpose
+-------
+Start classic AmigaOS 1.x-3.x m68k programs (HUNK load files) on the Deadwood
+AROS m68k system that QRX OS One runs on, with clear diagnostics instead of
+silent failure.  Only AROS' own exec.library/dos.library are used.  Nothing in
+this tool emulates AmigaOS 4, PowerPC, Kickstart ROM internals or custom-chip
+hardware; whether a given program really works still depends on AROS API
+coverage, the libraries installed and any direct hardware access the program
+does.
+
+Installed files (LiveCD)
+------------------------
+  QRX:C/QRXAmigaRun        the tool
+  QRX:C/amigarun           same binary, run mode   (selected by program name)
+  QRX:C/amigacheck         same binary, check mode (selected by program name)
+  QRX:Tests/Amiga/...      self-built HUNK test programs + negative fixtures
+  QRX:S/TestAmigaRun       scripted target test (prints "QRXTEST <id> rc=<n>")
+  QRX:Docs/AMIGA-LAUNCHER-22.5.11.txt
+
+QRXDesktop terminal: `amigacheck <prog>` and `amigarun [options] <prog> [args]`
+call QRX:C/QRXAmigaRun.  The existing `run`, `open`, `legacy`, `takeover` and
+`whdload` commands are unchanged.
+
+Usage
+-----
+  amigacheck [STRICT] [NOLOAD] <program>
+  amigarun   [ASYNC] [QUIET] [FORCE] [STRICT] [STACK=<bytes>] <program> [arguments]
+  QRXAmigaRun CHECK <program>            explicit check mode
+
+  Options must come before the program; "--" ends option parsing (for a
+  program literally called CHECK etc.).  GNU style aliases: --check -c --async
+  --quiet -q --force --strict --noload --stack <n>.
+  Paths with spaces use AmigaDOS quoting: "Work:My Game/Game"; inside quotes
+  ** is *, *" is ", *N is a newline, *E is ESC.  Everything after the program
+  is passed to it verbatim (its own quoting is preserved).
+
+What the check does
+-------------------
+ 1. Lock/Examine: missing path, directory, protection bit e (not executable).
+ 2. Structural parse of the whole file (bounds-checked, nothing executed):
+    HUNK_HEADER (resident name list, hunk table, CHIP/FAST/extended flags),
+    CODE/DATA/BSS, RELOC32/16/8, RELOC32SHORT/DREL32/RELRELOC32 incl. padding,
+    SYMBOL, DEBUG, NAME, END, OVERLAY/BREAK.  Relocation targets and offsets
+    are validated against the declared hunk sizes; payload larger than the
+    header allocation, missing hunks, unknown hunk types and HUNK_EXT
+    (unresolved object) are errors.
+ 3. Classification of non-HUNK files with a precise hint: AROS-native ELF/m68k
+    (runnable), Linux/m68k ELF (use linuxrun), PowerPC ELF (AmigaOS 4 /
+    MorphOS / Linux-PPC: not supported), other-CPU ELF, x86 MZ/PE (use winrun /
+    wintrace), text/scripts (use Execute / rx), HUNK_UNIT objects, HUNK_LIB.
+ 4. Library/device references: names ending in ".library"/".device" found in
+    the CODE/DATA payload are probed without side effects (exec LibList /
+    DeviceList, ROM resident modules via FindResident, LIBS:/DEVS:, PROGDIR
+    libs/ and devs/).  This is a heuristic: it finds names stored as strings
+    (the normal case for OpenLibrary/OpenDevice), it cannot know whether a
+    library is optional or which minimum version the program needs.
+ 5. Real loader proof: AROS LoadSeg() + UnLoadSeg() (skip with NOLOAD).
+
+Exit codes (usable from scripts via $RC / IF WARN)
+---------------------------------------------------
+  check:  0 runnable, nothing suspicious
+          5 runnable with warnings (missing library/device, Chip RAM request,
+            overlay, protection bit, first hunk not CODE, AROS ELF, ...)
+         10 not runnable as an AmigaOS 1.x-3.x / AROS m68k program
+         20 path missing/unreadable/directory or invalid launcher arguments
+  run:    the program's own return code (0 OK, 5 WARN, 10 ERROR, 20 FAIL...)
+          20 if it was not started (check failed, STRICT with missing library,
+          SystemTags could not start it); result2 is shown with Fault() text.
+
+Run mode details
+----------------
+ * A check is always performed first; programs that are not runnable are not
+   started unless FORCE is given.  Missing libraries only warn unless STRICT.
+ * The program is started through dos.library SystemTags() as a real DOS
+   process under the user shell, with the launcher's Input()/Output(), so its
+   console output and return code behave as in a normal Shell.
+ * STACK=<bytes> temporarily sets the CLI default stack for the child.
+ * ASYNC starts it detached with NIL: streams (use for GUI programs from the
+   QRXDesktop terminal, otherwise the terminal waits until the program ends).
+ * Every invocation appends one line to T:QRX-AmigaRun.log.
+
+Known limits (not hidden)
+-------------------------
+ * No Workbench (icon/WBStartup) launch; no automatic installation of missing
+   libraries; no CPU-model check (a 68020+ program on a 68000 still crashes).
+ * Programs that bang OCS/ECS/AGA hardware, patch Kickstart vectors or need
+   specific Kickstart ROM behaviour may fail on AROS even when the check
+   passes.  For games/demos use the existing WHDLoad/TAKEOVER paths.
+ * Overlay programs: only the root node is validated.
