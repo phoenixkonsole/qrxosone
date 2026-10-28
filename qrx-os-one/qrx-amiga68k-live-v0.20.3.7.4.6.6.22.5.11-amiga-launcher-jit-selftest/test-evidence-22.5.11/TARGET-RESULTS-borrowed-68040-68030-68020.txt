@@ -1,0 +1,132 @@
+== CPU 68040: harness COMPLETED
+  PASS T01-check-valid                rc=0 expected {0}
+  PASS T02-run-rc7-args               rc=7 expected {7}
+  PASS T03-run-path-with-spaces       rc=0 expected {0}
+  PASS T04-run-rc5-warn               rc=5 expected {5}
+  PASS T05-check-missing-library      rc=5 expected {5}
+  PASS T06-run-missing-library        rc=20 expected {20}
+  PASS T07-strict-refuses             rc=20 expected {20}
+  PASS T08-check-missing-path         rc=20 expected {20}
+  PASS T09-run-missing-path           rc=20 expected {20}
+  PASS T10-check-script               rc=10 expected {10}
+  PASS T11-check-empty                rc=10 expected {10}
+  PASS T12-check-truncated-hunk       rc=10 expected {10}
+  PASS T13-run-truncated-refused      rc=20 expected {20}
+  PASS T14-check-ppc-elf              rc=10 expected {10}
+  PASS T15-check-x86-pe               rc=10 expected {10}
+  PASS T16-check-system-command       rc=5 expected {0, 5}
+  PASS T17-run-system-command         rc=0 expected {0}
+  PASS T18-run-async                  rc=0 expected {0}
+  PASS T19-run-directory              rc=20 expected {20}
+  PASS T20-bad-quoting                rc=20 expected nonzero
+  PASS T21-explicit-check-keyword     rc=0 expected {0}
+  PASS T22-run-stack-option           rc=3 expected {3}
+  PASS T23-jit-selftest-static        rc=0 expected {0}
+  PASS JIT-STATIC                     rc=0 expected {0}
+  PASS JIT-EXECUTE                    rc=0 expected {0}
+  PASS QRX86-HELP                     rc=0 expected {0}
+  PASS QRX86-COUNT6                   rc=0 expected {0}
+  PASS QRX86-REPFULL                  rc=0 expected {0}
+  PASS QRX86-MOVR8                    rc=0 expected {0}
+  PASS QRX86-JITON-QUARANTINE         rc=0 expected {0}
+  PASS QRX86-WINTRACE-SPIN            rc=1 expected nonzero
+  PASS QRX86-WINTRACE-REPSPIN         rc=1 expected nonzero
+  PASS T02 quoted argument arrives as one argv entry
+  PASS T05 missing library is reported by name
+  PASS T14 PPC ELF classified
+  PASS T17 output of launched program visible
+  PASS test script ran to completion
+  PASS QRX86 counts 6 guest instructions on m68k
+  PASS QRX86 REP STOSB completes on m68k
+  PASS QRX86 MOV r8,imm8 on m68k
+  PASS QRX86 --jit=on stays quarantined on m68k
+  PASS wintrace endless loop stopped by watchdog on m68k
+  PASS wintrace REP endless loop stopped by watchdog on m68k
+== CPU 68030: harness COMPLETED
+  PASS T01-check-valid                rc=0 expected {0}
+  PASS T02-run-rc7-args               rc=7 expected {7}
+  PASS T03-run-path-with-spaces       rc=0 expected {0}
+  PASS T04-run-rc5-warn               rc=5 expected {5}
+  PASS T05-check-missing-library      rc=5 expected {5}
+  PASS T06-run-missing-library        rc=20 expected {20}
+  PASS T07-strict-refuses             rc=20 expected {20}
+  PASS T08-check-missing-path         rc=20 expected {20}
+  PASS T09-run-missing-path           rc=20 expected {20}
+  PASS T10-check-script               rc=10 expected {10}
+  PASS T11-check-empty                rc=10 expected {10}
+  PASS T12-check-truncated-hunk       rc=10 expected {10}
+  PASS T13-run-truncated-refused      rc=20 expected {20}
+  PASS T14-check-ppc-elf              rc=10 expected {10}
+  PASS T15-check-x86-pe               rc=10 expected {10}
+  PASS T16-check-system-command       rc=5 expected {0, 5}
+  PASS T17-run-system-command         rc=0 expected {0}
+  PASS T18-run-async                  rc=0 expected {0}
+  PASS T19-run-directory              rc=20 expected {20}
+  PASS T20-bad-quoting                rc=20 expected nonzero
+  PASS T21-explicit-check-keyword     rc=0 expected {0}
+  PASS T22-run-stack-option           rc=3 expected {3}
+  PASS T23-jit-selftest-static        rc=0 expected {0}
+  PASS JIT-STATIC                     rc=0 expected {0}
+  PASS JIT-EXECUTE                    rc=0 expected {0}
+  PASS QRX86-HELP                     rc=0 expected {0}
+  PASS QRX86-COUNT6                   rc=0 expected {0}
+  PASS QRX86-REPFULL                  rc=0 expected {0}
+  PASS QRX86-MOVR8                    rc=0 expected {0}
+  PASS QRX86-JITON-QUARANTINE         rc=0 expected {0}
+  PASS QRX86-WINTRACE-SPIN            rc=1 expected nonzero
+  PASS QRX86-WINTRACE-REPSPIN         rc=1 expected nonzero
+  PASS T02 quoted argument arrives as one argv entry
+  PASS T05 missing library is reported by name
+  PASS T14 PPC ELF classified
+  PASS T17 output of launched program visible
+  PASS test script ran to completion
+  PASS QRX86 counts 6 guest instructions on m68k
+  PASS QRX86 REP STOSB completes on m68k
+  PASS QRX86 MOV r8,imm8 on m68k
+  PASS QRX86 --jit=on stays quarantined on m68k
+  PASS wintrace endless loop stopped by watchdog on m68k
+  PASS wintrace REP endless loop stopped by watchdog on m68k
+== CPU 68020: harness COMPLETED
+  PASS T01-check-valid                rc=0 expected {0}
+  PASS T02-run-rc7-args               rc=7 expected {7}
+  PASS T03-run-path-with-spaces       rc=0 expected {0}
+  PASS T04-run-rc5-warn               rc=5 expected {5}
+  PASS T05-check-missing-library      rc=5 expected {5}
+  PASS T06-run-missing-library        rc=20 expected {20}
+  PASS T07-strict-refuses             rc=20 expected {20}
+  PASS T08-check-missing-path         rc=20 expected {20}
+  PASS T09-run-missing-path           rc=20 expected {20}
+  PASS T10-check-script               rc=10 expected {10}
+  PASS T11-check-empty                rc=10 expected {10}
+  PASS T12-check-truncated-hunk       rc=10 expected {10}
+  PASS T13-run-truncated-refused      rc=20 expected {20}
+  PASS T14-check-ppc-elf              rc=10 expected {10}
+  PASS T15-check-x86-pe               rc=10 expected {10}
+  PASS T16-check-system-command       rc=5 expected {0, 5}
+  PASS T17-run-system-command         rc=0 expected {0}
+  PASS T18-run-async                  rc=0 expected {0}
+  PASS T19-run-directory              rc=20 expected {20}
+  PASS T20-bad-quoting                rc=20 expected nonzero
+  PASS T21-explicit-check-keyword     rc=0 expected {0}
+  PASS T22-run-stack-option           rc=3 expected {3}
+  PASS T23-jit-selftest-static        rc=0 expected {0}
+  PASS JIT-STATIC                     rc=0 expected {0}
+  PASS JIT-EXECUTE                    rc=0 expected {0}
+  PASS QRX86-HELP                     rc=0 expected {0}
+  PASS QRX86-COUNT6                   rc=0 expected {0}
+  PASS QRX86-REPFULL                  rc=0 expected {0}
+  PASS QRX86-MOVR8                    rc=0 expected {0}
+  PASS QRX86-JITON-QUARANTINE         rc=0 expected {0}
+  PASS QRX86-WINTRACE-SPIN            rc=1 expected nonzero
+  PASS QRX86-WINTRACE-REPSPIN         rc=1 expected nonzero
+  PASS T02 quoted argument arrives as one argv entry
+  PASS T05 missing library is reported by name
+  PASS T14 PPC ELF classified
+  PASS T17 output of launched program visible
+  PASS test script ran to completion
+  PASS QRX86 counts 6 guest instructions on m68k
+  PASS QRX86 REP STOSB completes on m68k
+  PASS QRX86 MOV r8,imm8 on m68k
+  PASS QRX86 --jit=on stays quarantined on m68k
+  PASS wintrace endless loop stopped by watchdog on m68k
+  PASS wintrace REP endless loop stopped by watchdog on m68k

@@ -46,16 +46,18 @@ They are kept unchanged (cumulative rule) and documented here.
 
 Intentional source changes in 22.5.11 (hash changes are expected)
 ------------------------------------------------------------------
- base-v5.9/tools/qrx_desktop.canonical-6.6.20.c     + amigarun / amigacheck terminal commands, help, completion
+ base-v5.9/tools/qrx_desktop.canonical-6.6.20.c     + amigarun/amigacheck, welcome on|off, JAM1 text, RTG wallpaper
+                                                      cache, ENV:QRXSCREEN, LAlt+F1..F4 return-value fix
  base-v5.9/tools/qrx_desktop.canonical-6.6.20.c.sha256
      old b29702582eb7916942b656f7e3ce133dec3c97a97c0bb771eb6dbd2a96c3cb79
-     new a475a4a4cbf93b71a2464916b6d6e7a6d128c72eaea419a0043d64ddcd9b4470
+     new 0a86e6baf62faa362bd86056f645e7222aa63dd8eb1cebc3d42813b1526e5bf3
      (updated together with the source change above; validate-22.5.11.py
       re-proves sidecar == source, and every 6.6.20 feature gate in
       base-v5.9/deploy.sh still matches)
  diagnostics-v6.6/tools/qrx86_grt_exec.c            VM in BSS, REP chunking/accounting, MOV r8,imm8
  diagnostics-v6.6/tools/qrx_win_guest_loader.c      loader state in BSS
- diagnostics-v6.6/tools/qrx_win_guest_runtime.c     loader state in BSS
+ diagnostics-v6.6/tools/qrx_win_guest_runtime.c     loader state in BSS, FILE shim only without SDK stdio
+ diagnostics-v6.6/tools/qrx_theme.h, qrx_unified_apps.c  JAM1 text, menu strip only in document apps
  diagnostics-v6.6/deploy.sh                          REL 22.5.11, build/install/ISO gates for 22.5.11 tools
  deploy.sh                                          runs validate-22.5.11.py
  new: amiga-runtime-22.5.11/**, tests-22.5.11/**, validate-22.5.11.py,

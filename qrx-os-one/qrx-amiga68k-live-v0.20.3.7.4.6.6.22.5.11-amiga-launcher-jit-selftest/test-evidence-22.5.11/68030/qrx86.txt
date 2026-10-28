@@ -1,0 +1,31 @@
+QRX86GRTExec: QRX:Tests/QRX86/count6.qrxgrt modules=1 bridges=0 init=2 JIT=off threshold=2
+QRX86GRTExec: backend=m68k native-threaded JIT + interpreter fallback
+QRX86 INIT 000 HOST_NTDLL_BOOTSTRAP TEB=7ffde000 PEB=7ffdf000
+QRX86 EXEC DLLMAIN_PROCESS_ATTACH     target=00400100 module=test.dll
+QRX86 RETURN DLLMAIN_PROCESS_ATTACH   eax=00000001 steps=6
+QRX86 EXEC PASS init-calls=2 steps=6 blocks=1 block-runs=1 native-jit-runs=0 interp-steps=6 bridges=0
+QRXTEST QRX86-COUNT6 rc=0
+QRX86GRTExec: QRX:Tests/QRX86/repfull.qrxgrt modules=1 bridges=0 init=2 JIT=off threshold=2
+QRX86GRTExec: backend=m68k native-threaded JIT + interpreter fallback
+QRX86 INIT 000 HOST_NTDLL_BOOTSTRAP TEB=7ffde000 PEB=7ffdf000
+QRX86 EXEC DLLMAIN_PROCESS_ATTACH     target=00400100 module=test.dll
+QRX86 RETURN DLLMAIN_PROCESS_ATTACH   eax=00000000 steps=1000021
+QRX86 EXEC PASS init-calls=2 steps=1000021 blocks=4 block-runs=19 native-jit-runs=0 interp-steps=21 bridges=0
+QRXTEST QRX86-REPFULL rc=0
+QRX86GRTExec: QRX:Tests/QRX86/movr8.qrxgrt modules=1 bridges=0 init=2 JIT=off threshold=2
+QRX86GRTExec: backend=m68k native-threaded JIT + interpreter fallback
+QRX86 INIT 000 HOST_NTDLL_BOOTSTRAP TEB=7ffde000 PEB=7ffdf000
+QRX86 EXEC DLLMAIN_PROCESS_ATTACH     target=00400100 module=test.dll
+QRX86 RETURN DLLMAIN_PROCESS_ATTACH   eax=00001234 steps=5
+QRX86 EXEC PASS init-calls=2 steps=5 blocks=4 block-runs=4 native-jit-runs=0 interp-steps=5 bridges=0
+QRXTEST QRX86-MOVR8 rc=0
+QRX86 SAFETY: native JIT quarantined pending on-target instruction-cache/ABI validation; using interpreter
+QRX86GRTExec: QRX:Tests/QRX86/ret.qrxgrt modules=1 bridges=0 init=2 JIT=off threshold=2
+QRX86GRTExec: backend=m68k native-threaded JIT + interpreter fallback
+QRX86 INIT 000 HOST_NTDLL_BOOTSTRAP TEB=7ffde000 PEB=7ffdf000
+QRX86 EXEC DLLMAIN_PROCESS_ATTACH     target=00400100 module=test.dll
+QRX86 RETURN DLLMAIN_PROCESS_ATTACH   eax=00000001 steps=2
+QRX86 EXEC PASS init-calls=2 steps=2 blocks=1 block-runs=1 native-jit-runs=0 interp-steps=2 bridges=0
+QRXTEST QRX86-JITON-QUARANTINE rc=0
+QRXTEST QRX86-WINTRACE-SPIN rc=1
+QRXTEST QRX86-WINTRACE-REPSPIN rc=1

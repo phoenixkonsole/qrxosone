@@ -1,0 +1,11 @@
+VERS:		AROS version 41.3, Exec version 51.8 
+PROCESSOR 1:	[M68K/BE] MC68060 (Rev. #0)
+L1 I-CACHE:	8192 bytes
+L1 D-CACHE:	8192 bytes
+RAM:
+		Node Type 0xA, Attributes 0x505 (FAST), at $07000020-$07ffffff (16.0 meg)
+		Node Type 0xA, Attributes 0x405 (FAST), at $40000020-$7fffffff (1024.0 meg)
+		Node Type 0xA, Attributes 0x1703 (CHIP), at $00001000-$001fffff (2.0 meg)
+		Node Type 0xA, Attributes 0x400 (ROM), at $00f80000-$00ffffff (512 K)
+		Node Type 0xA, Attributes 0x400 (ROM), at $00e00000-$00e7ffff (512 K)
+ARGS:		

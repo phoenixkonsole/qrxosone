@@ -53,6 +53,15 @@ real = hashlib.sha256((root / 'base-v5.9/tools/qrx_desktop.canonical-6.6.20.c').
 if side != real:
     fail.append('canonical desktop sidecar does not match source (deploy SHA gate would fail)')
 
+# Fixes found while building/running on Deadwood m68k (22.5.11)
+for f in ['qrx86_grt_exec.c', 'qrx_win_guest_loader.c', 'qrx_win_guest_runtime.c']:
+    need(f'diagnostics-v6.6/tools/{f}', '!defined(_STDC_STDIO_H_) && !defined(_POSIXC_STDIO_H_)', 'typedef void QRX_FILE')
+need('base-v5.9/tools/qrx_desktop.canonical-6.6.20.c', 'qrx_workspace_switch((int)code-1); return 1;',
+     'SetDrMd(rp, JAM1);', 'qrx_free_wallpaper_cache();', 'BltBitMapRastPort(g_wall_cache', 'GetVar((STRPTR)"QRXSCREEN"',
+     'g_welcome_autostart', '"welcome=%s\\n"')
+need('diagnostics-v6.6/tools/qrx_theme.h', 'SetDrMd(r,JAM1)')
+need('diagnostics-v6.6/tools/qrx_unified_apps.c', 'defined(APP_WRITER)||defined(APP_SHEET)||defined(APP_PRESENTER)')
+
 # Deploy wiring
 dep = need('diagnostics-v6.6/deploy.sh', 'REL="0.20.3.7.4.6.6.22.5.11"', 'build-target.sh', 'QRXAmigaRun amigarun amigacheck qrx-jit-selftest',
            'FINAL ISO GATE: QRX:Tests/Amiga/', 'qrx-jit-selftest referenced from a startup/runtime script')

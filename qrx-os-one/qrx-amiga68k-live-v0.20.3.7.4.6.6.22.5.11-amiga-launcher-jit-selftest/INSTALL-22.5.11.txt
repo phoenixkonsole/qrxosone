@@ -70,3 +70,12 @@ F. After booting the LiveCD (manual smoke test on real hardware/emulator)
   QRX:C/qrx-jit-selftest                  static only
   QRX:C/qrx-jit-selftest LOGDIR=<persistent dir> EXECUTE   only with a snapshot / resettable machine
   QRXDesktop terminal: amigacheck <prog>, amigarun [ASYNC] <prog> [args]
+
+G. Extra emulator test helpers (not installed on the LiveCD)
+------------------------------------------------------------
+  amiga-runtime-22.5.11/tests/amiga/qrx_modelist.c    QRXModeList: lists display modes (RTG proof)
+  amiga-runtime-22.5.11/tests/amiga/qrx_screengrab.c  QRXScreenGrab: front screen -> PPM (RTG-safe)
+  amiga-runtime-22.5.11/tests/desktop/gen-test-wallpaper.py
+      SYNTHETIC qrx_wallpaper.h to compile QRXDesktop without the v0.20 payload
+  Pass the built HUNKs via QRX_EXTRA_C="..." to run-fsuae-tests.sh;
+  QRX_DESKTOP_SCREEN=rtg starts QRXDesktop on its own RTG screen.

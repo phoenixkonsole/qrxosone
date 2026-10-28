@@ -1,0 +1,5 @@
+QRX86 BLOCK module=test.dll eip=00400100 rva=00000100 count=1 hits=1999 jit=ir/interp
+QRX86 TRACE: output limit reached; execution continues under watchdog
+QRX86 WATCHDOG: guest instruction budget reached (100000); stopping guest safely
+QRX86 STOP where=DLLMAIN_PROCESS_ATTACH fault=5 module=test.dll eip=00400100 rva=00000100 bytes=
+QRX86 INIT FAIL index=1 kind=DLLMAIN_PROCESS_ATTACH module=test.dll

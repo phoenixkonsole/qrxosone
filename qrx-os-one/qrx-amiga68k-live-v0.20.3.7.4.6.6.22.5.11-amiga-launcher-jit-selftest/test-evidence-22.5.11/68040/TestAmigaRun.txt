@@ -1,0 +1,270 @@
+QRXTEST BEGIN 22.5.11
+QRXAMIGARUN CHECK QRX:Tests/Amiga/QRXHunkTest
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 4656 bytes
+  hunks    : 5  relocs: 158  chip: 0  fast: 0  any: 3916 bytes
+    hunk 0 CODE 3432 bytes
+    hunk 1 DATA 388 bytes
+    hunk 2 DATA 4 bytes
+    hunk 3 DATA 4 bytes
+    hunk 4 BSS 88 bytes
+  library  : dos.library -> ok (in memory)
+  library  : stdlib.library -> ok (in memory)
+  library  : intuition.library -> ok (in memory)
+  (library/device names are found by scanning the program image; optional or
+   version-specific requirements cannot be decided statically)
+  RESULT   : RUNNABLE (structure + AROS LoadSeg OK)
+QRXTEST T01-check-valid rc=0
+QRXAMIGARUN CHECK QRX:Tests/Amiga/QRXHunkTest
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 4656 bytes
+  hunks    : 5  relocs: 158  chip: 0  fast: 0  any: 3916 bytes
+    hunk 0 CODE 3432 bytes
+    hunk 1 DATA 388 bytes
+    hunk 2 DATA 4 bytes
+    hunk 3 DATA 4 bytes
+    hunk 4 BSS 88 bytes
+  library  : dos.library -> ok (in memory)
+  library  : stdlib.library -> ok (in memory)
+  library  : intuition.library -> ok (in memory)
+  (library/device names are found by scanning the program image; optional or
+   version-specific requirements cannot be decided statically)
+  RESULT   : RUNNABLE (structure + AROS LoadSeg OK)
+QRXHUNKTEST argc=3
+QRXHUNKTEST arg[1]=<RC=7>
+QRXHUNKTEST arg[2]=<two words>
+QRXHUNKTEST arg[3]=<plain>
+QRXHUNKTEST rc=7
+QRXAMIGARUN RESULT rc=7 (WARN)
+QRXTEST T02-run-rc7-args rc=7
+QRXAMIGARUN CHECK RAM:QRX Test Dir/QRX Hunk Test
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 4656 bytes
+  hunks    : 5  relocs: 158  chip: 0  fast: 0  any: 3916 bytes
+    hunk 0 CODE 3432 bytes
+    hunk 1 DATA 388 bytes
+    hunk 2 DATA 4 bytes
+    hunk 3 DATA 4 bytes
+    hunk 4 BSS 88 bytes
+  library  : dos.library -> ok (in memory)
+  library  : stdlib.library -> ok (in memory)
+  library  : intuition.library -> ok (in memory)
+  (library/device names are found by scanning the program image; optional or
+   version-specific requirements cannot be decided statically)
+  RESULT   : RUNNABLE (structure + AROS LoadSeg OK)
+QRXHUNKTEST argc=1
+QRXHUNKTEST arg[1]=<spaced>
+QRXHUNKTEST rc=0
+QRXAMIGARUN RESULT rc=0 (OK)
+QRXTEST T03-run-path-with-spaces rc=0
+QRXAMIGARUN CHECK RAM:QRX Test Dir/QRX Hunk Test
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 4656 bytes
+  hunks    : 5  relocs: 158  chip: 0  fast: 0  any: 3916 bytes
+    hunk 0 CODE 3432 bytes
+    hunk 1 DATA 388 bytes
+    hunk 2 DATA 4 bytes
+    hunk 3 DATA 4 bytes
+    hunk 4 BSS 88 bytes
+  library  : dos.library -> ok (in memory)
+  library  : stdlib.library -> ok (in memory)
+  library  : intuition.library -> ok (in memory)
+  (library/device names are found by scanning the program image; optional or
+   version-specific requirements cannot be decided statically)
+  RESULT   : RUNNABLE (structure + AROS LoadSeg OK)
+QRXHUNKTEST argc=1
+QRXHUNKTEST arg[1]=<RC=5>
+QRXHUNKTEST rc=5
+QRXAMIGARUN RESULT rc=5 (WARN)
+QRXTEST T04-run-rc5-warn rc=5
+QRXAMIGARUN CHECK QRX:Tests/Amiga/QRXHunkTestNeedLib
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 5016 bytes
+  hunks    : 5  relocs: 172  chip: 0  fast: 0  any: 4224 bytes
+    hunk 0 CODE 3608 bytes
+    hunk 1 DATA 516 bytes
+    hunk 2 DATA 4 bytes
+    hunk 3 DATA 4 bytes
+    hunk 4 BSS 92 bytes
+  library  : dos.library -> ok (in memory)
+  library  : qrxnonexistent.library -> MISSING
+  library  : stdlib.library -> ok (in memory)
+  library  : exec.library -> ok (in memory)
+  library  : intuition.library -> ok (in memory)
+  (library/device names are found by scanning the program image; optional or
+   version-specific requirements cannot be decided statically)
+  RESULT   : RUNNABLE WITH WARNINGS
+QRXTEST T05-check-missing-library rc=5
+QRXAMIGARUN CHECK QRX:Tests/Amiga/QRXHunkTestNeedLib
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 5016 bytes
+  hunks    : 5  relocs: 172  chip: 0  fast: 0  any: 4224 bytes
+    hunk 0 CODE 3608 bytes
+    hunk 1 DATA 516 bytes
+    hunk 2 DATA 4 bytes
+    hunk 3 DATA 4 bytes
+    hunk 4 BSS 92 bytes
+  library  : dos.library -> ok (in memory)
+  library  : qrxnonexistent.library -> MISSING
+  library  : stdlib.library -> ok (in memory)
+  library  : exec.library -> ok (in memory)
+  library  : intuition.library -> ok (in memory)
+  (library/device names are found by scanning the program image; optional or
+   version-specific requirements cannot be decided statically)
+  RESULT   : RUNNABLE WITH WARNINGS
+QRXHUNKTEST argc=0
+QRXHUNKTEST cannot open qrxnonexistent.library
+QRXAMIGARUN RESULT rc=20 (FAIL) result2=209 filesystem action type unknown
+QRXTEST T06-run-missing-library rc=20
+QRXAMIGARUN CHECK QRX:Tests/Amiga/QRXHunkTestNeedLib
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 5016 bytes
+  hunks    : 5  relocs: 172  chip: 0  fast: 0  any: 4224 bytes
+    hunk 0 CODE 3608 bytes
+    hunk 1 DATA 516 bytes
+    hunk 2 DATA 4 bytes
+    hunk 3 DATA 4 bytes
+    hunk 4 BSS 92 bytes
+  library  : dos.library -> ok (in memory)
+  library  : qrxnonexistent.library -> MISSING
+  library  : stdlib.library -> ok (in memory)
+  library  : exec.library -> ok (in memory)
+  library  : intuition.library -> ok (in memory)
+  (library/device names are found by scanning the program image; optional or
+   version-specific requirements cannot be decided statically)
+  RESULT   : RUNNABLE WITH WARNINGS
+QRXAMIGARUN: not started, STRICT and a library/device is missing
+QRXTEST T07-strict-refuses rc=20
+QRXAMIGARUN ERROR: cannot access RAM:qrx-does-not-exist: object not found
+QRXTEST T08-check-missing-path rc=20
+QRXAMIGARUN ERROR: cannot access RAM:qrx-does-not-exist: object not found
+QRXTEST T09-run-missing-path rc=20
+QRXAMIGARUN CHECK S:Startup-Sequence
+  format   : text / AmigaDOS or ARexx script
+  size     : 2983 bytes
+  RESULT   : NOT RUNNABLE - text file: run AmigaDOS scripts with 'Execute', ARexx with 'rx'
+QRXTEST T10-check-script rc=10
+QRXAMIGARUN CHECK RAM:qrx-empty-file
+  format   : empty file
+  size     : 0 bytes
+  RESULT   : NOT RUNNABLE - file is empty
+QRXTEST T11-check-empty rc=10
+QRXAMIGARUN CHECK QRX:Tests/Amiga/QRXHunkTestTruncated
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 2328 bytes
+  hunks    : 5  relocs: 0  chip: 0  fast: 0  any: 3916 bytes
+    hunk 0 CODE 3432 bytes
+    hunk 1 ? 388 bytes
+    hunk 2 ? 4 bytes
+    hunk 3 ? 4 bytes
+    hunk 4 ? 88 bytes
+  RESULT   : NOT RUNNABLE - truncated hunk payload, hunk 0x00000000
+QRXTEST T12-check-truncated-hunk rc=10
+QRXAMIGARUN CHECK QRX:Tests/Amiga/QRXHunkTestTruncated
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 2328 bytes
+  hunks    : 5  relocs: 0  chip: 0  fast: 0  any: 3916 bytes
+    hunk 0 CODE 3432 bytes
+    hunk 1 ? 388 bytes
+    hunk 2 ? 4 bytes
+    hunk 3 ? 4 bytes
+    hunk 4 ? 88 bytes
+  RESULT   : NOT RUNNABLE - truncated hunk payload, hunk 0x00000000
+QRXAMIGARUN: not started (use FORCE to try anyway)
+QRXTEST T13-run-truncated-refused rc=20
+QRXAMIGARUN CHECK QRX:Tests/Amiga/ppc-os4-elf.fixture
+  format   : PowerPC ELF (AmigaOS 4 / MorphOS / Linux-PPC)
+  size     : 64 bytes
+  RESULT   : NOT RUNNABLE - PowerPC ELF (AmigaOS 4/MorphOS/Linux-PPC) is NOT supported; see PPC-ARCHITECTURE-PLAN-22.5.11.txt
+QRXTEST T14-check-ppc-elf rc=10
+QRXAMIGARUN CHECK QRX:Tests/Amiga/x86-pe.fixture
+  format   : DOS/Windows MZ/PE image (x86)
+  size     : 64 bytes
+  RESULT   : NOT RUNNABLE - x86 DOS/Windows image: use 'winrun'/'wintrace' (QRX86), not the AmigaOS launcher
+QRXTEST T15-check-x86-pe rc=10
+QRXAMIGARUN CHECK C:Dir
+  format   : AROS native ELF/m68k executable
+  size     : 8268 bytes
+  note     : AROS-native ELF program, not a classic AmigaOS binary
+  RESULT   : RUNNABLE WITH WARNINGS
+QRXTEST T16-check-system-command rc=5
+QRXAMIGARUN CHECK C:Echo
+  format   : AROS native ELF/m68k executable
+  size     : 1876 bytes
+  note     : AROS-native ELF program, not a classic AmigaOS binary
+  RESULT   : RUNNABLE WITH WARNINGS
+QRX echo through amigarun
+QRXAMIGARUN RESULT rc=0 (OK)
+QRXTEST T17-run-system-command rc=0
+QRXTEST T18-run-async rc=0
+QRXAMIGARUN ERROR: is a directory, not a program: RAM:QRX Test Dir
+QRXTEST T19-run-directory rc=20
+QRXTEST T20-bad-quoting rc=20
+QRXAMIGARUN CHECK QRX:Tests/Amiga/QRXHunkTest
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 4656 bytes
+  hunks    : 5  relocs: 158  chip: 0  fast: 0  any: 3916 bytes
+    hunk 0 CODE 3432 bytes
+    hunk 1 DATA 388 bytes
+    hunk 2 DATA 4 bytes
+    hunk 3 DATA 4 bytes
+    hunk 4 BSS 88 bytes
+  library  : dos.library -> ok (in memory)
+  library  : stdlib.library -> ok (in memory)
+  library  : intuition.library -> ok (in memory)
+  (library/device names are found by scanning the program image; optional or
+   version-specific requirements cannot be decided statically)
+  RESULT   : RUNNABLE (structure + AROS LoadSeg OK)
+QRXTEST T21-explicit-check-keyword rc=0
+QRXAMIGARUN CHECK QRX:Tests/Amiga/QRXHunkTest
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 4656 bytes
+  hunks    : 5  relocs: 158  chip: 0  fast: 0  any: 3916 bytes
+    hunk 0 CODE 3432 bytes
+    hunk 1 DATA 388 bytes
+    hunk 2 DATA 4 bytes
+    hunk 3 DATA 4 bytes
+    hunk 4 BSS 88 bytes
+  library  : dos.library -> ok (in memory)
+  library  : stdlib.library -> ok (in memory)
+  library  : intuition.library -> ok (in memory)
+  (library/device names are found by scanning the program image; optional or
+   version-specific requirements cannot be decided statically)
+  RESULT   : RUNNABLE (structure + AROS LoadSeg OK)
+QRXHUNKTEST argc=1
+QRXHUNKTEST arg[1]=<RC=3>
+QRXHUNKTEST rc=3
+QRXAMIGARUN RESULT rc=3 (WARN)
+QRXTEST T22-run-stack-option rc=3
+QRX-JIT-SELFTEST 22.5.11 (opt-in; does NOT enable the QRX86 JIT)
+CPU: 68040 +FPU  AttnFlags=0x0000a07f  CACR(CacheControl)=0x80001111 copyback
+PASS S1 byte-emission
+PASS S2 alloc+alignment  addr=0x075e7f8c (longword aligned)
+PASS S3 copy+CacheClearE/U+readback
+NOTE native execution NOT performed (static stages only). Re-run with EXECUTE inside
+     an emulator snapshot to execute generated code.
+QRX-JIT-SELFTEST RESULT: PASS (static only)
+QRX86GRTExec native JIT remains quarantined regardless of this result.
+QRXTEST T23-jit-selftest-static rc=0
+QRXAMIGARUN mode=check rc=0 result2=0 program=QRX:Tests/Amiga/QRXHunkTest
+QRXAMIGARUN mode=run rc=7 result2=209 program=QRX:Tests/Amiga/QRXHunkTest
+QRXAMIGARUN mode=run rc=0 result2=0 program=RAM:QRX Test Dir/QRX Hunk Test
+QRXAMIGARUN mode=run rc=5 result2=209 program=RAM:QRX Test Dir/QRX Hunk Test
+QRXAMIGARUN mode=check rc=5 result2=0 program=QRX:Tests/Amiga/QRXHunkTestNeedLib
+QRXAMIGARUN mode=run rc=20 result2=209 program=QRX:Tests/Amiga/QRXHunkTestNeedLib
+QRXAMIGARUN mode=run rc=-1 result2=0 program=QRX:Tests/Amiga/QRXHunkTestNeedLib
+QRXAMIGARUN mode=check rc=20 result2=0 program=RAM:qrx-does-not-exist
+QRXAMIGARUN mode=run rc=-1 result2=0 program=RAM:qrx-does-not-exist
+QRXAMIGARUN mode=check rc=10 result2=0 program=S:Startup-Sequence
+QRXAMIGARUN mode=check rc=10 result2=0 program=RAM:qrx-empty-file
+QRXAMIGARUN mode=check rc=10 result2=0 program=QRX:Tests/Amiga/QRXHunkTestTruncated
+QRXAMIGARUN mode=run rc=-1 result2=0 program=QRX:Tests/Amiga/QRXHunkTestTruncated
+QRXAMIGARUN mode=check rc=10 result2=0 program=QRX:Tests/Amiga/ppc-os4-elf.fixture
+QRXAMIGARUN mode=check rc=10 result2=0 program=QRX:Tests/Amiga/x86-pe.fixture
+QRXAMIGARUN mode=check rc=5 result2=0 program=C:Dir
+QRXAMIGARUN mode=run rc=0 result2=0 program=C:Echo
+QRXAMIGARUN mode=async rc=0 result2=0 program=QRX:Tests/Amiga/QRXHunkTest
+QRXAMIGARUN mode=run rc=-1 result2=0 program=RAM:QRX Test Dir
+QRXAMIGARUN mode=check rc=0 result2=0 program=QRX:Tests/Amiga/QRXHunkTest
+QRXAMIGARUN mode=run rc=3 result2=209 program=QRX:Tests/Amiga/QRXHunkTest
+QRXTEST END

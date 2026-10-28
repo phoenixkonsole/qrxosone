@@ -1,0 +1,2 @@
+QRXGRAB 640x480 depth=8 title=Workbench Screen
+QRXGRAB 640x480 depth=8 title=Workbench Screen

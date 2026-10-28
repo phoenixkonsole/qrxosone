@@ -69,9 +69,20 @@ machine usually has to be reset.  Therefore:
     runs EXECUTE on emulated 68020, 68030, 68040 and 68060 configurations and
     records the per-CPU result in its report.
 
+Results 22.5.11 (FS-UAE, Deadwood AROS master 5b5fd4c, see TESTREPORT-22.5.11.txt)
+--------------------------------------------------------------------------------
+  68020 (no data cache)      static PASS   EXECUTE S4-S8 PASS
+  68030                      static PASS   EXECUTE S4-S8 PASS
+  68040 copyback caches      static PASS   EXECUTE S4-S8 PASS
+  68060 copyback caches      static PASS   EXECUTE S4-S8 PASS
+  Evidence: test-evidence-22.5.11/<cpu>/jit-*.txt.  These are emulator
+  results (FS-UAE's 68040/68060 cache emulation is not cycle-exact); real
+  hardware is still required before any JIT release.
+
 Release procedure for the QRX86 JIT (not done in 22.5.11)
 ----------------------------------------------------------
  1. qrx-jit-selftest EXECUTE passes on 68020/030/040/060 targets.
+    -> done in FS-UAE (above); still open on real 68040/68060 hardware.
  2. QRX86GRTExec (with the 22.5.11 VM-in-BSS fix) runs TestWinGuestInit and
     reactoscalc in interpreter mode on the target without a crash.
  3. The JIT path charges every guest instruction to the watchdog and has its

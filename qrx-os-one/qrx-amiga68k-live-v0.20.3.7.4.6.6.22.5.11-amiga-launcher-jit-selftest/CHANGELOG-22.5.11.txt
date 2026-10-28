@@ -39,6 +39,29 @@ Fixed
 * QRX86 interpreter: MOV r8,imm8 (opcodes B0-B7, incl. AH/CH/DH/BH) was missing
   and failed closed.
 
+* QRX86GRTExec / QRXWinGuestLoader / QRXWinGuestRuntime: the 22.5.3-22.5.6
+  opaque-FILE shim collided with a complete Deadwood SDK (posixc/stdc stdio.h:
+  "conflicting types for fopen", real compile error with the master build).
+  The shim is now used only when stdio.h did not declare FILE itself.
+* QRXDesktop: LAlt+F1..F4 (workspace switch) returned an undefined value from
+  the terminal handler; a 0 there ended the desktop.  Now returns 1.
+* QRXDesktop + all theme apps: text is drawn transparent (JAM1).  On a borrowed
+  Wanderer screen every string had a grey box (host BPen 0) behind it.
+* QRX apps: the "File Edit View Insert Format Help" strip is drawn only in
+  Writer/Spreadsheet/Presenter and after the title (it overlapped the Welcome,
+  Settings and Hardware titles).
+
+Resource-saving desktop (measured in FS-UAE, see TESTREPORT-22.5.11.txt)
+-----------------------------------------------------------------------
+* RTG wallpaper cache: the 640x512 RLE wallpaper is rendered once into an
+  off-screen friend bitmap and blitted on every later redraw (was ~21 000
+  RectFill calls per redraw on RTG).  Falls back to the old path if the bitmap
+  cannot be allocated; freed before CloseScreen.
+* `welcome on|off` terminal command / prefs key `welcome=`: the Welcome dialog
+  (separate process + window) can be kept from starting with the desktop.
+* ENV:QRXSCREEN=rtg|own opens QRX's own RTG screen; default stays "borrow the
+  existing public screen" (no extra display memory).
+
 Unchanged on purpose
 --------------------
 * QRX86 native JIT stays quarantined; --jit=on runs the interpreter.
