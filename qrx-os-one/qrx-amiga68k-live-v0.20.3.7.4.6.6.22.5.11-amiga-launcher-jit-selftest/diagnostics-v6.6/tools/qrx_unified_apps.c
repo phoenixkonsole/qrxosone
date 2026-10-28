@@ -19,7 +19,14 @@ static int dirty=0,maxed=0,backed=0,scroll=0; static WORD ox,oy,ow,oh; static ch
 static void box(struct RastPort*r,UBYTE p,WORD a,WORD b,WORD c,WORD d){SetAPen(r,qrx_theme_legacy_pen(p));RectFill(r,a,b,c,d);} static void txt(struct RastPort*r,UBYTE p,WORD x,WORD y,const char*s){SetAPen(r,qrx_theme_legacy_pen(p));Move(r,x,y);Text(r,(STRPTR)s,strlen(s));}
 static void btn(struct RastPort*r,WORD x,WORD y,WORD w,const char*s){qrx_theme_button(r,x,y,w,s);}
 static WORD wrap(struct RastPort*r,UBYTE p,WORD x,WORD y,const char*s,int cols,WORD maxy){char b[96];int n,c;while(*s&&y<maxy){while(*s==' ')s++;n=strlen(s);if(n>cols)n=cols;c=n;if(s[n]&&n==cols){while(c>10&&s[c]!=' ')c--;if(c<=10)c=n;}memcpy(b,s,c);b[c]=0;txt(r,p,x,y,b);s+=c;y+=12;}return y;}
-static void frame(struct Window*w,const char*title){qrx_theme_frame(w,title);if(qrx_theme_mode==QRX_THEME_QRX)txt(w->RPort,2,150,18,"File   Edit   View   Insert   Format   Help");}
+/* 22.5.11: the document menu strip is only meaningful for Writer/Sheet/Presenter and
+ * is placed after the title instead of at a fixed x=150 (it overlapped longer titles
+ * such as "Welcome to QRX OS One"); it is skipped when the window is too narrow. */
+static void frame(struct Window*w,const char*title){qrx_theme_frame(w,title);
+#if defined(APP_WRITER)||defined(APP_SHEET)||defined(APP_PRESENTER)
+if(qrx_theme_mode==QRX_THEME_QRX){static const char m[]="File   Edit   View   Insert   Format   Help";WORD x=(WORD)(60+strlen(title)*8+24);if(x<150)x=150;if(x+(WORD)(sizeof(m)-1)*8<w->Width-90)txt(w->RPort,2,x,18,m);}
+#endif
+}
 static int qrx_file_request(struct Window*w,int save,char*dest,int cap){
  struct FileRequester*fr;if(!AslBase)return 0;
  fr=(struct FileRequester*)AllocAslRequestTags(ASL_FileRequest,

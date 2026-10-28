@@ -16,7 +16,9 @@
  * without publishing the ISO-C stdio/stdlib declarations through the selected
  * include set. Keep the PE loader independent of that header quirk. FILE is
  * opaque here; only FILE* crosses the ABI. */
-#if defined(__AROS__)
+/* 22.5.11: only when the selected SDK stdio.h did not declare FILE/fopen
+ * itself - a complete Deadwood SDK (posixc/stdc stdio) conflicts with this shim. */
+#if defined(__AROS__) && !defined(_STDC_STDIO_H_) && !defined(_POSIXC_STDIO_H_) && !defined(_STDIO_H) && !defined(_STDIO_H_)
 typedef void QRX_FILE;
 extern QRX_FILE *fopen(const char *, const char *);
 extern int fclose(QRX_FILE *);

@@ -359,7 +359,7 @@ int main(int argc, char **argv)
     }
     if (!q.quiet || rc) {
         out("QRXAMIGARUN RESULT rc="); outn(rc); out(" ("); out(qrx_rc_class(rc)); out(")");
-        if (rc && res2) {
+        if (rc >= RETURN_ERROR && res2) {           /* IoErr is only meaningful for failures */
             fault_text(res2, ebuf, sizeof(ebuf));
             out(" result2="); outn(res2);
             if (ebuf[0]) { out(" "); out(ebuf); }

@@ -5,8 +5,11 @@ Assign QRX: SYS:QRX >NIL:
 Echo "QRXHARNESS boot ok" >QRXOUT:boot.txt
 Version >>QRXOUT:boot.txt
 Avail >QRXOUT:avail-boot.txt
+IF EXISTS QRX:C/QRXModeList
+  QRX:C/QRXModeList >QRXOUT:modes.txt
+ENDIF
 ShowConfig >QRXOUT:showconfig.txt
-Execute QRX:S/TestAmigaRun >QRXOUT:TestAmigaRun.txt
+Execute QRX:S/TestAmigaRun.qrxout
 QRX:C/qrx-jit-selftest LOGDIR=QRXOUT: >QRXOUT:jit-static.txt
 Echo "QRXTEST JIT-STATIC rc=$RC" >>QRXOUT:jit-static.txt
 QRX:C/qrx-jit-selftest LOGDIR=QRXOUT: EXECUTE >QRXOUT:jit-execute.txt
@@ -31,11 +34,21 @@ IF EXISTS QRX:C/QRX86GRTExec
 ENDIF
 IF EXISTS QRX:C/QRXDesktop
   Avail >QRXOUT:avail-before-desktop.txt
-  Run >NIL: QRX:C/QRXDesktop
+  Run >QRXOUT:desktop-stdout.txt QRX:C/QRXDesktop
   Wait 40
   Avail >QRXOUT:avail-with-desktop.txt
+  IF EXISTS QRX:C/QRXScreenGrab
+    QRX:C/QRXScreenGrab QRXOUT:desktop-screen.ppm >QRXOUT:grab.txt
+    Wait 60
+    QRX:C/QRXScreenGrab QRXOUT:desktop-screen-late.ppm >>QRXOUT:grab.txt
+  ENDIF
   Echo "snap" >QRXOUT:SNAP-DESKTOP
-  Wait 20
+  ; wait until the host harness has taken the RTG screenshot (host always acks)
+  Lab qrxsnap
+  IF NOT EXISTS QRXOUT:SNAP-ACK
+    Wait 1
+    Skip qrxsnap BACK
+  ENDIF
 ENDIF
 Avail >QRXOUT:avail-end.txt
 Echo "done" >QRXOUT:DONE

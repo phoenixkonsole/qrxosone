@@ -29,7 +29,9 @@
 /* Deadwood AROS/m68k SDK compatibility; see QRXWinGuestRuntime. FILE stays
  * opaque and diagnostics use stdout so no SDK-specific stderr object ABI is
  * required. */
-#if defined(__AROS__)
+/* 22.5.11: only when the selected SDK stdio.h did not declare FILE/fopen
+ * itself - a complete Deadwood SDK (posixc/stdc stdio) conflicts with this shim. */
+#if defined(__AROS__) && !defined(_STDC_STDIO_H_) && !defined(_POSIXC_STDIO_H_) && !defined(_STDIO_H) && !defined(_STDIO_H_)
 typedef void QRX_FILE;
 extern QRX_FILE *fopen(const char *, const char *);
 extern int fclose(QRX_FILE *);

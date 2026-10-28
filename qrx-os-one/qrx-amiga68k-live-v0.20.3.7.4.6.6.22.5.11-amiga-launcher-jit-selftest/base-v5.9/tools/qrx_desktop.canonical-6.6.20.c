@@ -568,6 +568,9 @@ static void save_preferences(void) {
 
 static void text_at(struct RastPort *rp, UBYTE pen, WORD x, WORD y, const char *s) {
     if (!rp || !s) return;
+    /* 22.5.11: every caller fills the background first; JAM1 keeps the host
+     * screen's BPen (grey on a borrowed Wanderer screen) from boxing the text. */
+    SetDrMd(rp, JAM1);
     SetAPen(rp, qrx_pen(pen));
     Move(rp, x, y);
     Text(rp, (STRPTR)s, (ULONG)strlen(s));
@@ -604,6 +607,23 @@ static void qrx_flat_button(struct RastPort *rp, WORD x1, WORD y1, WORD x2, WORD
     Move(rp,x1+1,y2-1); Draw(rp,x1+1,y1+1); Draw(rp,x2-1,y1+1);
     SetAPen(rp,qrx_pen(PEN_DARK)); Move(rp,x2-1,y1+1); Draw(rp,x2-1,y2-1); Draw(rp,x1+1,y2-1);
 }
+/* 22.5.11 resource saving: on RTG/deep screens the RLE wallpaper used to be
+ * re-rendered with one RectFill per colour run on EVERY desktop redraw.  It is
+ * now rendered once into an off-screen friend bitmap and blitted afterwards.
+ * If the bitmap cannot be allocated the old direct path is used unchanged. */
+static struct BitMap *g_wall_cache;
+static WORD g_wall_cache_w, g_wall_cache_h;
+static ULONG g_wall_renders, g_wall_blits;
+
+static void qrx_free_wallpaper_cache(void) {
+    if (g_wall_cache) {
+        WaitBlit();
+        FreeBitMap(g_wall_cache);
+        g_wall_cache = NULL;
+    }
+    g_wall_cache_w = g_wall_cache_h = 0;
+}
+
 static void draw_wallpaper(struct Screen *s) {
     struct BitMap *bm;
     struct RastPort *rp;
@@ -668,6 +688,28 @@ static void draw_wallpaper(struct Screen *s) {
                   ? (g_screen_height - QRX_H) / 2 : 0;
         WORD draw_w = g_screen_width < QRX_W ? g_screen_width : QRX_W;
         WORD draw_h = g_screen_height < QRX_H ? g_screen_height : QRX_H;
+        struct RastPort crp;
+        struct RastPort *dst = rp;
+        WORD dx = xoff, dy = yoff;
+
+        if (g_wall_cache && (g_wall_cache_w != draw_w || g_wall_cache_h != draw_h))
+            qrx_free_wallpaper_cache();
+        if (g_wall_cache) {
+            BltBitMapRastPort(g_wall_cache, 0, 0, rp, xoff, yoff, draw_w, draw_h, 0xC0);
+            g_wall_blits++;
+            return;
+        }
+        g_wall_cache = AllocBitMap((ULONG)draw_w, (ULONG)draw_h,
+                                   GetBitMapAttr(bm, BMA_DEPTH), BMF_MINPLANES, bm);
+        if (g_wall_cache) {
+            InitRastPort(&crp);
+            crp.BitMap = g_wall_cache;
+            dst = &crp;
+            dx = dy = 0;
+            g_wall_cache_w = draw_w;
+            g_wall_cache_h = draw_h;
+        }
+        g_wall_renders++;
 
         for (y = 0; y < draw_h; ++y) {
             ULONG pos = qrx_rle_line_offset[y];
@@ -683,12 +725,16 @@ static void draw_wallpaper(struct Screen *s) {
                     clipped = draw_w - x;
 
                 if (clipped > 0) {
-                    SetAPen(rp, qrx_pen(pen));
-                    RectFill(rp, xoff + x, yoff + y,
-                             xoff + x + clipped - 1, yoff + y);
+                    SetAPen(dst, qrx_pen(pen));
+                    RectFill(dst, dx + x, dy + y,
+                             dx + x + clipped - 1, dy + y);
                 }
                 x += run;
             }
+        }
+        if (dst != rp) {
+            BltBitMapRastPort(g_wall_cache, 0, 0, rp, xoff, yoff, draw_w, draw_h, 0xC0);
+            g_wall_blits++;
         }
     }
 }
@@ -3470,7 +3516,7 @@ static int handle_terminal_message(struct IntuiMessage *msg) {
         update_window_gesture(mx, my);
     } else if (cls == IDCMP_RAWKEY) {
         if ((msg->Qualifier & IEQUALIFIER_LALT) && code == 0x42) { qrx_cycle_window(); return 1; }
-        if ((msg->Qualifier & IEQUALIFIER_LALT) && code >= 0x01 && code <= 0x04) { qrx_workspace_switch((int)code-1); return; }
+        if ((msg->Qualifier & IEQUALIFIER_LALT) && code >= 0x01 && code <= 0x04) { qrx_workspace_switch((int)code-1); return 1; /* 22.5.11: was an undefined return value; 0 closed the desktop */ }
         if ((msg->Qualifier & IEQUALIFIER_LALT) && code == 0x12) { qrx_expose_toggle(); return 1; }
         if (code == 0x4c && g_term_hist_count) { /* cursor up */
             if (g_term_hist_pos < g_term_hist_count) g_term_hist_pos++;
@@ -3766,8 +3812,17 @@ static int qrx_open_runtime_screen(void) {
     g_host_title_was_visible = 0;
 
     {
-        struct Screen *host = LockPubScreen(NULL);
-        if (host) qrx_adopt_public_screen(host);
+        /* 22.5.11: ENV:QRXSCREEN=rtg (or own) opens QRX's own RTG/AGA screen instead of
+         * borrowing the default public screen.  Default (unset) is unchanged: borrowing
+         * costs no extra display memory and keeps the proven requester-free host. */
+        char want[16];
+        LONG n = GetVar((STRPTR)"QRXSCREEN", (STRPTR)want, sizeof(want), 0);
+        int own = n > 0 && (!strcmp(want, "rtg") || !strcmp(want, "RTG") ||
+                            !strcmp(want, "own") || !strcmp(want, "OWN"));
+        if (!own) {
+            struct Screen *host = LockPubScreen(NULL);
+            if (host) qrx_adopt_public_screen(host);
+        }
     }
 
     for (i = 0; !g_screen && i < (int)(sizeof(candidates) / sizeof(candidates[0])); ++i) {
@@ -3951,6 +4006,7 @@ static void qrx_close_runtime_screen(void) {
         } else {
             SetDefaultPubScreen(NULL);
             PubScreenStatus(g_screen, PSNF_PRIVATE);
+            qrx_free_wallpaper_cache();
             CloseScreen(g_screen);
         }
         g_screen = NULL;

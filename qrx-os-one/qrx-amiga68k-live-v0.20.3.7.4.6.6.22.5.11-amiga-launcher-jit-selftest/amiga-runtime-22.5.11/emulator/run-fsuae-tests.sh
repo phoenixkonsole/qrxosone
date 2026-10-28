@@ -28,10 +28,18 @@ for cpu in $CPUS; do
   for n in QRXHunkTest QRXHunkTestNeedLib; do cp "$QRXC/hunk/$n" "$W/sys/QRX/Tests/Amiga/"; done
   cp "$QRXC"/fixtures/* "$W/sys/QRX/Tests/Amiga/"
   cp "$HERE/../target/TestAmigaRun" "$W/sys/QRX/S/TestAmigaRun"
+  # AROS Execute/Shell keep script output on the console even when the Execute
+  # command itself is redirected, so the harness copy redirects every command.
+  awk '/^[[:space:]]*;/ || /^[[:space:]]*$/ || /FailAt/ || />/ {print; next} {print $0 " >>QRXOUT:TestAmigaRun.txt"}' \
+      "$HERE/../target/TestAmigaRun" > "$W/sys/QRX/S/TestAmigaRun.qrxout"
   mkdir -p "$W/sys/QRX/Tests/QRX86"
   python3 -B "$HERE/../../tests-22.5.11/qrxgrt_fixture.py" "$W/sys/QRX/Tests/QRX86" >/dev/null
   [[ -n "${QRX_EXTRA_C:-}" ]] && cp ${QRX_EXTRA_C} "$W/sys/QRX/C/" || true
   cp "$HERE/User-Startup.qrxtest" "$W/sys/S/User-Startup"
+  # QRX_DESKTOP_SCREEN=rtg makes QRXDesktop open its own RTG screen (ENV:QRXSCREEN)
+  if [[ -n "${QRX_DESKTOP_SCREEN:-}" ]]; then
+    sed -i "s|^  Run >QRXOUT:desktop-stdout.txt QRX:C/QRXDesktop|  SetEnv QRXSCREEN ${QRX_DESKTOP_SCREEN}\n  Run >QRXOUT:desktop-stdout.txt QRX:C/QRXDesktop|" "$W/sys/S/User-Startup"
+  fi
   case "$cpu" in
     68060) model=A4000/040; cpuopt="cpu = 68060";;
     68040) model=A4000/040; cpuopt="cpu = 68040";;
@@ -50,6 +58,7 @@ motherboard_ram = $mb
 zorro_iii_memory = $zmem
 graphics_card = uaegfx
 graphics_memory = 262144
+uae_gfxcard_size = 256
 hard_drive_0 = $W/sys
 hard_drive_0_label = AROS
 hard_drive_0_priority = 6
@@ -75,18 +84,20 @@ CFG
   pid=$!
   t=0
   while (( t < TIMEOUT )); do
-    [[ -f "$W/out/DONE" ]] && break
-    if [[ -f "$W/out/SNAP-DESKTOP" && ! -f "$W/out/desktop-$cpu.png" ]]; then
-      sleep 5; DISPLAY="$(cat "$W/display" 2>/dev/null)" import -window root "$W/out/desktop-$cpu.png" 2>/dev/null || true
+    if [[ -f "$W/out/SNAP-DESKTOP" && ! -f "$W/out/SNAP-ACK" ]]; then
+      sleep 3; DISPLAY=":$dnum" import -window root "$W/out/desktop-$cpu.png" 2>/dev/null || true
+      echo ack > "$W/out/SNAP-ACK"
     fi
+    [[ -f "$W/out/DONE" ]] && break
     kill -0 $pid 2>/dev/null || break
-    sleep 5; t=$((t+5))
+    sleep 2; t=$((t+2))
   done
   sleep 3
   DISPLAY=":$dnum" import -window root "$W/out/final-$cpu.png" 2>/dev/null || true
   kill $pid 2>/dev/null || true; sleep 2; kill -9 $pid 2>/dev/null || true; kill $xpid 2>/dev/null || true
   status=TIMEOUT; [[ -f "$W/out/DONE" ]] && status=COMPLETED
   echo "[$cpu] $status after ${t}s"
+  for f in "$W"/out/*.ppm; do [[ -f "$f" ]] && convert "$f" "${f%.ppm}.png" 2>/dev/null && rm -f "$f"; done
   cp -a "$W/out" "$REP/results-$cpu"
   cp "$W/fs-uae.stdout" "$REP/results-$cpu/fs-uae.stdout" 2>/dev/null || true
   find "$W/home" -name 'fs-uae.log*' -exec cp {} "$REP/results-$cpu/" \; 2>/dev/null || true

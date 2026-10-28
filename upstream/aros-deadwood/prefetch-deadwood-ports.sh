@@ -42,7 +42,14 @@ have expat-2.7.3.tar.bz2 || cp "$(get $GH/libexpat/libexpat/releases/download/R_
 have jpegsrc.v9f.tar.gz || repack "$(get $U/universe/libj/libjpeg9/libjpeg9_9f.orig.tar.gz)" jpeg-9f jpeg-9f jpegsrc.v9f.tar.gz
 have freetype-2.14.1.tar.gz || gittar freetype/freetype VER-2-14-1 freetype-2.14.1 freetype-2.14.1.tar.gz
 have xz-5.8.1.tar.gz || cp "$(get $GH/tukaani-project/xz/releases/download/v5.8.1/xz-5.8.1.tar.gz)" "$PORTS/"
-have tiff-4.7.1.tar.xz || repack "$(get $U/main/t/tiff/tiff_4.7.1.orig.tar.bz2)" libtiff-v4.7.1 tiff-4.7.1 tiff-4.7.1.tar.xz
+if ! have tiff-4.7.1.tar.xz; then
+  # Ubuntu's orig is a git export: generate tiffvers.h like the release tarball has it.
+  d="$(mktemp -d "$W/tiff.XXXX")"; tar xjf "$(get $U/main/t/tiff/tiff_4.7.1.orig.tar.bz2)" -C "$d"; mv "$d/libtiff-v4.7.1" "$d/tiff-4.7.1"
+  t="$d/tiff-4.7.1"; v="$(cat "$t/VERSION")"; rd="$(cat "$t/RELEASE-DATE")"
+  sed -e "s/@LIBTIFF_VERSION@/$v/g" -e "s/@LIBTIFF_RELEASE_DATE@/$rd/g" -e "s/@LIBTIFF_MAJOR_VERSION@/${v%%.*}/g" \
+      -e "s/@LIBTIFF_MINOR_VERSION@/$(echo "$v" | cut -d. -f2)/g" -e "s/@LIBTIFF_MICRO_VERSION@/${v##*.}/g" \
+      "$t/libtiff/tiffvers.h.cmake.in" > "$t/libtiff/tiffvers.h"
+  tar cJf "$PORTS/tiff-4.7.1.tar.xz" -C "$d" tiff-4.7.1; echo "staged tiff-4.7.1.tar.xz (+generated tiffvers.h)"; fi
 have libwebp-1.5.0.tar.gz || cp "$(get $U/main/libw/libwebp/libwebp_1.5.0.orig.tar.gz)" "$PORTS/libwebp-1.5.0.tar.gz"
 have bzip2-1.0.8.tar.gz || cp "$(get $U/main/b/bzip2/bzip2_1.0.8.orig.tar.gz)" "$PORTS/bzip2-1.0.8.tar.gz"
 have mesa-20.0.8.tar.gz || repack "$(get $U/main/m/mesa/mesa_20.0.8.orig.tar.gz)" mesa-20.0.8 mesa-20.0.8 mesa-20.0.8.tar.gz

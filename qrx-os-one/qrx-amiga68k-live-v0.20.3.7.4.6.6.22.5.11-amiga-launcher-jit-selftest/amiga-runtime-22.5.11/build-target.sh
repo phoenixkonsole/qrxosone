@@ -11,7 +11,7 @@ CC="${QRX_AROS_CC:?QRX_AROS_CC (Deadwood m68k-aros-gcc) required}"
 E2H="${QRX_ELF2HUNK:?QRX_ELF2HUNK (Deadwood elf2hunk) required}"
 case "$CC" in *m68k-amigaos-gcc) echo "ERROR: legacy m68k-amigaos-gcc rejected" >&2; exit 2;; esac
 read -r -a EXTRA <<< "${QRX_AROS_CFLAGS:-}"
-CFLAGS=(-Os -m68020 -fno-pic -fno-PIC -Wall -Wextra -fstack-usage "${EXTRA[@]}")
+CFLAGS=(-Os -m68020 -fno-pic -fno-PIC -Wall -Wextra -Wno-volatile-register-var -fstack-usage "${EXTRA[@]}")
 mkdir -p "$OUT/elf" "$OUT/hunk" "$OUT/su"
 build(){ local name="$1"; shift
   (cd "$OUT/su" && "$CC" "${CFLAGS[@]}" -I"$HERE/src" -o "$OUT/elf/$name.elf" "$@")
