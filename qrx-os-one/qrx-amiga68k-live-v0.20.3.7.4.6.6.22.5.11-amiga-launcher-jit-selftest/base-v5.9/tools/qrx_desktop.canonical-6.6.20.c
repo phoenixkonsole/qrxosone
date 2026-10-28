@@ -220,6 +220,8 @@ static char g_term_cwd[FILE_PATH_LEN + 1] = "SYS:";
 static char g_term_history[TERM_HISTORY][INPUT_LEN + 1];
 static int g_term_hist_count = 0, g_term_hist_pos = 0;
 static int g_file_icon_view = 1;
+/* 22.5.11: QRXWelcome autostart can be switched off to save one process + window (prefs welcome=off). */
+static int g_welcome_autostart = 1;
 static char g_file_status[160] = "";
 static int g_delete_armed = 0;
 
@@ -512,6 +514,8 @@ static void load_preferences(void) {
             g_files_path[FILE_PATH_LEN] = 0;
         } else if (!strncmp(buf, "view=", 5)) {
             g_file_icon_view = !strcmp(buf + 5, "icons");
+        } else if (!strncmp(buf, "welcome=", 8)) {
+            g_welcome_autostart = strcmp(buf + 8, "off") != 0;
         } else if (sscanf(buf, "terminal=%d,%d,%d,%d", &l, &t, &w, &h) == 4) {
             if (w >= TERM_MIN_W && h >= TERM_MIN_H &&
                 l >= 0 && t >= 22 && l < 2048 && t < 1536) {
@@ -539,7 +543,7 @@ static void sync_terminal_geometry(void) {
 
 static void save_preferences(void) {
     BPTR fh;
-    char buf[192];
+    char buf[224];
 
     sync_terminal_geometry();
     fh = Open((STRPTR)PREFS_PATH, MODE_NEWFILE);
@@ -550,12 +554,14 @@ static void save_preferences(void) {
              "look=%s\n"
              "terminal=%d,%d,%d,%d\n"
              "files=%s\n"
-             "view=%s\n",
+             "view=%s\n"
+             "welcome=%s\n",
              look_key(g_look),
              (int)g_term_left, (int)g_term_top,
              (int)g_term_width, (int)g_term_height,
              g_files_path,
-             g_file_icon_view ? "icons" : "list");
+             g_file_icon_view ? "icons" : "list",
+             g_welcome_autostart ? "on" : "off");
     FPuts(fh, buf);
     Close(fh);
 }
@@ -2907,6 +2913,7 @@ static int execute_command(const char *cmd) {
         add_line("pwd ls cat cp mv rm mkdir uname socket mmap");
         add_line("windows focus <n> desktop open legacy takeover runmode ai chat color quit");
         add_line("amigacheck <prog>  amigarun [ASYNC] [STACK=n] <prog> [args]  (AmigaOS 1.x-3.x HUNK)");
+        add_line("welcome on|off  (Welcome dialog autostart)");
     } else if (!strcmp(cmd, "version") || !strcmp(cmd, "ver")) {
         add_line("QRX OS One Amiga 68K native desktop v0.20");
     } else if (!strcmp(cmd, "info")) {
@@ -3276,6 +3283,11 @@ static int execute_command(const char *cmd) {
             snprintf(buf, sizeof(buf), "Slave: %.60s", profile.slave);
             add_line(buf);
         }
+    } else if (!strcmp(cmd, "welcome off") || !strcmp(cmd, "welcome on")) {
+        g_welcome_autostart = !strcmp(cmd, "welcome on");
+        save_preferences();
+        add_line(g_welcome_autostart ? "Welcome dialog will open at desktop start." :
+                                       "Welcome dialog autostart off (saves a process and a window).");
     } else if (!strncmp(cmd, "amigacheck ", 11)) {
         /* 22.5.11: classic HUNK check through QRXAmigaRun (AROS LoadSeg + library probe). */
         snprintf(doscmd, sizeof(doscmd), "QRX:C/QRXAmigaRun CHECK %s", cmd + 11);
@@ -3674,7 +3686,7 @@ static int run_desktop(void) {
         g_resume_notice[0] = 0;
     }
     redraw_all();
-    launch_native("QRX:C/QRXWelcome");
+    if (g_welcome_autostart) launch_native("QRX:C/QRXWelcome");
 
     term_sig = 1UL << g_terminal->UserPort->mp_SigBit;
     desk_sig = 1UL << g_desktop->UserPort->mp_SigBit;

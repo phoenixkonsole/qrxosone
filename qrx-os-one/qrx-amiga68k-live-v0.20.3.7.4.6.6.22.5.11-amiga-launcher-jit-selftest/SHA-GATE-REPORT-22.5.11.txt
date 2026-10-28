@@ -1,0 +1,64 @@
+QRX OS One 22.5.11 - SHA gate report for the 22.5.10 input and the 22.5.11 changes
+====================================================================================
+
+Input archive
+-------------
+QRX-OS-One-22.5.10-CUMULATIVE-CLAUDE-HANDOFF.zip
+  sha256 ec6793bd54bbb641a7f56a27138ecc641a850483e9426d39cebede7318173cc8
+  `unzip -t`: no errors, 136 files.
+HANDOFF_SOURCE_SHA256.txt names a *different* file
+  (qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.10-amiga-hunk-jit-preflight.zip,
+   37713f1c...) that is not part of the handoff ZIP (the handoff contains the
+  unpacked tree instead).  It could not be verified and was not "recomputed".
+
+Gates that PASS unchanged in 22.5.10
+------------------------------------
+* base-v5.9/tools/qrx_desktop.canonical-6.6.20.c.sha256 (the only SHA gate
+  that base-v5.9/deploy.sh enforces): OK.
+* 23 of 26 per-file bare-hash sidecars in base-v5.9 match.
+* Existing validators: validate-6.6.21, validate-theme-6.6.22.2,
+  validate-qrx86-6.6.22.3/.4/.5, selftest-qrx86-6.6.22.5.sh,
+  compatibility/test-foundation.py: PASS.
+
+Pre-existing mismatches in 22.5.10 (explained, NOT re-hashed)
+-------------------------------------------------------------
+The historic manifests were never refreshed after later in-place edits.  The
+file timestamps inside the ZIP show each edit happened after its manifest:
+
+ file                                               manifest(s)                    file mtime (ZIP)    explanation
+ base-v5.9/deploy.sh                                sidecar, SHA256SUMS, -6.6.6    2026-10-03..       canonical-desktop switch + elf2hunk/ABI fixes (BUILD-FIX-6.6.20.x, MERGE-AUDIT)
+ base-v5.9/tools/patch-qrxdesktop-requester-...py   sidecar, SHA256SUMS, -6.6.6    2026-10-03 12:09   6.6.17 regression patch, superseded by canonical source
+ base-v5.9/tools/qrx_desktop.v0.20.1.baseline.c     sidecar, SHA256SUMS, -6.6.6    2026-10-03 14:21   historical baseline edited by 6.6.13-6.6.17; not used by deploy since 6.6.20
+ base-v5.9/tools/patch-qrxdesktop-interaction-...py SHA256SUMS-6.6.6               2026-10-03 14:30   6.6.13+ terminal/AI changes
+ deploy.sh, diagnostics-v6.6/{README.txt,deploy.sh,tools/qrx-system-test,qrx_ai.c,qrx_diagnostics.c}
+                                                    SHA256SUMS-6.6.6               later releases     6.6.7..22.5.10 feature work
+ base-v5.9/tools/__pycache__/*.pyc (18 entries)     SHA256SUMS-6.6.22.5.7          absent             pycache deliberately removed (MERGE-AUDIT)
+ base-v5.9/tools/qrx_desktop.canonical-6.6.20.c.sha256  SHA256SUMS-6.6.22.5.7      2026-10-27 22:15   sidecar rewritten with a relative file name (BUILD-FIX-6.6.20.2)
+ diagnostics-v6.6/deploy.sh, tools/qrx86_grt_exec.c SHA256SUMS-6.6.22.5.7          22.5.8/22.5.9      JIT quarantine + REL 22.5.8
+
+Two legacy validators fail and are NOT part of any deploy chain:
+* base-v5.9/tools/validate-v0.20.3.7.4.6.5.9.py expects the retired
+  patch-qrxdesktop-requester-free-clean-host.py call in base deploy.sh
+  (removed when 6.6.20 introduced the canonical desktop source).
+* base-v5.9/tools/verify-qrxdesktop-source.py checks the pre-6.6.20 patched
+  desktop layout (qrx_boot_stage markers).
+They are kept unchanged (cumulative rule) and documented here.
+
+Intentional source changes in 22.5.11 (hash changes are expected)
+------------------------------------------------------------------
+ base-v5.9/tools/qrx_desktop.canonical-6.6.20.c     + amigarun / amigacheck terminal commands, help, completion
+ base-v5.9/tools/qrx_desktop.canonical-6.6.20.c.sha256
+     old b29702582eb7916942b656f7e3ce133dec3c97a97c0bb771eb6dbd2a96c3cb79
+     new a475a4a4cbf93b71a2464916b6d6e7a6d128c72eaea419a0043d64ddcd9b4470
+     (updated together with the source change above; validate-22.5.11.py
+      re-proves sidecar == source, and every 6.6.20 feature gate in
+      base-v5.9/deploy.sh still matches)
+ diagnostics-v6.6/tools/qrx86_grt_exec.c            VM in BSS, REP chunking/accounting, MOV r8,imm8
+ diagnostics-v6.6/tools/qrx_win_guest_loader.c      loader state in BSS
+ diagnostics-v6.6/tools/qrx_win_guest_runtime.c     loader state in BSS
+ diagnostics-v6.6/deploy.sh                          REL 22.5.11, build/install/ISO gates for 22.5.11 tools
+ deploy.sh                                          runs validate-22.5.11.py
+ new: amiga-runtime-22.5.11/**, tests-22.5.11/**, validate-22.5.11.py,
+      compatibility/PPC-ARCHITECTURE-PLAN-22.5.11.txt, *-22.5.11.txt
+All files of all earlier manifests are still present (validate-22.5.11.py gate).
+The complete 22.5.11 tree is listed in SHA256SUMS-22.5.11.
