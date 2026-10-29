@@ -406,8 +406,9 @@ FN(m_vsprintf) { return (uint32_t)fmt_to(w, a[0], -1, 0, a[1], 0, a[2], 0); }
 FN(m_vswprintf) { return (uint32_t)fmt_to(w, a[0], -1, 1, a[1], 1, a[2], 0); }
 static void file_out(qwin *w, uint32_t file, const wchar16 *s, int n)
 {
-    FILE *o = (g_iob && file == g_iob + 64) ? stderr : stdout;
+    FILE *o = qw_stream_host(w, file);
     int i;
+    if (!o) o = (g_iob && file == g_iob + 64) ? stderr : stdout;
     for (i = 0; i < n; i++) fputc(s[i] < 256 ? (int)s[i] : '?', o);
     fflush(o);
 }
@@ -416,13 +417,14 @@ FN(m_fprintf) { wbuf o; o.b = g_fbuf; o.n = 0; o.max = 16384; qfmt(w, &o, a[1], 
 FN(m_printf) { wbuf o; o.b = g_fbuf; o.n = 0; o.max = 16384; qfmt(w, &o, a[0], 0, C->r[X86_ESP] + 8); file_out(w, 0, g_fbuf, o.n < 16383 ? o.n : 16383); return (uint32_t)o.n; }
 FN(m_fwrite) {
     uint32_t n = a[1] * a[2], i;
-    FILE *o = (g_iob && a[3] == g_iob + 64) ? stderr : stdout;
+    FILE *o = qw_stream_host(w, a[3]);
+    if (!o) o = (g_iob && a[3] == g_iob + 64) ? stderr : stdout;
     for (i = 0; i < n; i++) fputc(x86_rd8(C, a[0] + i), o);
     fflush(o);
     return a[2];
 }
-FN(m_fputc) { FILE *o = (g_iob && a[1] == g_iob + 64) ? stderr : stdout; fputc((int)(a[0] & 0xFF), o); return a[0]; }
-FN(m_fflush) { UNUSED; fflush(stdout); return 0; }
+FN(m_fputc) { FILE *o = qw_stream_host(w, a[1]); if (!o) o = (g_iob && a[1] == g_iob + 64) ? stderr : stdout; fputc((int)(a[0] & 0xFF), o); return a[0]; }
+FN(m_fflush) { FILE *o = qw_stream_host(w, a[0]); UNUSED; fflush(o ? o : stdout); return 0; }
 FN(m_puts) { char b[1024]; qw_rd_str(w, a[0], b, sizeof(b)); puts(b); return 0; }
 FN(m_swscanf) { return (uint32_t)qscan(w, a[0], 1, a[1], 1, C->r[X86_ESP] + 12); }
 FN(m_sscanf) { return (uint32_t)qscan(w, a[0], 0, a[1], 0, C->r[X86_ESP] + 12); }
@@ -566,7 +568,7 @@ FN(k_GetModuleFileNameW) {
     const char *b = strrchr(w->exe_path, '/');
     char p[300]; wchar16 t[300];
     int n;
-    snprintf(p, sizeof(p), "C:\\QRX\\%s", b ? b + 1 : w->exe_path);
+    snprintf(p, sizeof(p), "C:\\%s", b ? b + 1 : w->exe_path);
     a2w(t, p, 300);
     n = qw_wr_wstr(w, a[1], t, (int)a[2]);
     return (uint32_t)n;
@@ -574,7 +576,7 @@ FN(k_GetModuleFileNameW) {
 FN(k_GetModuleFileNameA) {
     const char *b = strrchr(w->exe_path, '/');
     char p[300]; uint32_t i;
-    snprintf(p, sizeof(p), "C:\\QRX\\%s", b ? b + 1 : w->exe_path);
+    snprintf(p, sizeof(p), "C:\\%s", b ? b + 1 : w->exe_path);
     for (i = 0; p[i] && i + 1 < a[2]; i++) x86_wr8(C, a[1] + i, (uint8_t)p[i]);
     if (a[2]) x86_wr8(C, a[1] + i, 0);
     return i;
@@ -752,7 +754,7 @@ FN(k_WaitForMultipleObjects) {
     if (a[2]) { for (i = 0; i < a[0] && i < 64; i++) sync_wait(w, RD32(a[1] + i * 4), 0); return 0; }
     return a[3] != 0xFFFFFFFFu ? 0x102 : 0;
 }
-FN(k_CloseHandle) { int i = sync_idx(a[0]); UNUSED; if (i >= 0) g_sync[i].type = SY_FREE; return 1; }
+FN(k_CloseHandle) { int i = sync_idx(a[0]); UNUSED; if (i >= 0) g_sync[i].type = SY_FREE; else qw_file_close(w, a[0]); return 1; }
 
 /* ====================================================================== advapi32: in-memory registry */
 typedef struct qreg { char path[200]; char name[64]; uint32_t type, size; uint8_t data[512]; struct qreg *next; } qreg;

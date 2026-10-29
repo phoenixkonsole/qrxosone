@@ -133,7 +133,7 @@ uint32_t qw_data(qwin *w, uint32_t n)
 }
 
 /* ---------------------------------------------------------------- thunks */
-static const qhle *tables[] = { qw_kernel32, qw_user32, qw_gdi32, qw_misc, qw_ansi, NULL };
+static const qhle *tables[] = { qw_files, qw_kernel32, qw_user32, qw_gdi32, qw_misc, qw_ansi, qw_dx, NULL };
 
 static int dllcmp(const char *a, const char *b)
 {
@@ -149,7 +149,7 @@ const qhle *qw_find_hle(const char *dll, const char *name)
     for (t = 0; tables[t]; t++)
         for (e = tables[t]; e->name; e++)
             if (!strcmp(e->name, name) && (!dll || !dllcmp(e->dll, dll))) return e;
-    return NULL;
+    return strstr(name, "::") ? qw_find_dx(name) : NULL;      /* COM methods (dx.c) */
 }
 
 uint32_t qw_data_import(qwin *w, const char *dll, const char *name);

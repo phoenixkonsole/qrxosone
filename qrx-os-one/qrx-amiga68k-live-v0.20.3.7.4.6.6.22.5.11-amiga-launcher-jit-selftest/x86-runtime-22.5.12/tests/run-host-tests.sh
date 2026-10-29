@@ -77,6 +77,13 @@ if command -v i686-w64-mingw32-gcc >/dev/null; then
   i686-w64-mingw32-gcc -O2 -mwindows -o qrxclock.exe "$HERE/win32/apps/qrxclock.c" -lgdi32
   ./qrx-win32 -s "$HERE/../apps-22.5.12/x86/clock-test.txt" qrxclock.exe >/dev/null 2>&1 && [[ -s clock-analog.ppm && -s clock-digital.ppm && -s clock-info.ppm ]] && ok "QRXClock (MinGW PE) analog/digital/info snapshots" || ko "QRXClock"
 else sk "QRXClock (no mingw)"; fi
+if command -v i686-w64-mingw32-gcc >/dev/null; then
+  i686-w64-mingw32-gcc -O2 -mwindows -o dxtest.exe "$HERE/win32/apps/dxtest.c" -lddraw -ldsound -ldinput -ldxguid
+  rm -f dxtest.log dx-frame.ppm
+  ./qrx-win32 -s "$HERE/../apps-22.5.12/x86/dx-test.txt" dxtest.exe 60 >/dev/null 2>&1
+  grep -q "RESULT PASS" dxtest.log 2>/dev/null && [[ -s dx-frame.ppm ]] && ok "DirectX 3 test (DirectDraw 640x480x8 flip/palette/colour key/GetDC, DirectSound, DirectInput)" \
+    || { ko "DirectX 3 test"; grep -E "FAIL|RESULT" dxtest.log 2>/dev/null; }
+else sk "DirectX test (no mingw)"; fi
 
 echo "QRX-X86-HOST-TESTS pass=$pass fail=$fail skip=$skip"
 [[ $fail == 0 ]]

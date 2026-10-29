@@ -8,6 +8,7 @@ static uint32_t le32(const uint8_t *b) { return (uint32_t)b[0] | ((uint32_t)b[1]
 
 #include <ctype.h>
 #include <dirent.h>
+#include <unistd.h>
 
 static qmod *pe_map(qwin *w, const uint8_t *b, size_t n, const char *name, int is_dll);
 
@@ -124,8 +125,13 @@ static int find_dll_file(qwin *w, const char *name, char *out, size_t max)
     struct dirent *e;
     lower_base(want, name, sizeof(want));
     if (sl) { size_t L = (size_t)(sl - w->exe_path); if (L >= sizeof(dir)) return 0; memcpy(dir, w->exe_path, L); dir[L] = 0; }
-    else { const char *co = strrchr(w->exe_path, ':'); if (co) { size_t L = (size_t)(co - w->exe_path) + 1; memcpy(dir, w->exe_path, L); dir[L] = 0; } else strcpy(dir, "."); }
-    d = opendir(dir[0] ? dir : ".");
+    else {
+        const char *co = strrchr(w->exe_path, ':');
+        if (co) { size_t L = (size_t)(co - w->exe_path) + 1; memcpy(dir, w->exe_path, L); dir[L] = 0; }
+        else if (!getcwd(dir, sizeof(dir))) strcpy(dir, ".");   /* AROS posixc: "." is not a directory name */
+    }
+    d = opendir(dir);
+    if (!d && w->verbose) qw_log(w, "cannot list %s for %s", dir, want);
     if (!d) return 0;
     while ((e = readdir(d))) {
         char low[256];

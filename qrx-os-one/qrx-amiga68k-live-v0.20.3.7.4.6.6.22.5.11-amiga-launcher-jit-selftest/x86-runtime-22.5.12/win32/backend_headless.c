@@ -26,6 +26,7 @@ typedef struct hl {
     FILE *script;
     uint64_t now;
     uint64_t pending;
+    uint64_t ic;                          /* guest instructions already turned into time */
     int line;
     char typebuf[256];
     int typepos, typeup;
@@ -47,7 +48,19 @@ static void hl_destroy(qwin *w, qwnd *t) { (void)w; t->be = NULL; }
 static void hl_present(qwin *w, qwnd *t) { (void)w; (void)t; }
 static void hl_title(qwin *w, qwnd *t) { (void)w; (void)t; }
 static void hl_menu(qwin *w, qwnd *t) { (void)w; (void)t; }
-static uint64_t hl_now(qwin *w) { (void)w; return g_hl.now; }
+/* deterministic virtual clock: script waits plus executed guest instructions
+ * (HL_IPMS per millisecond), so busy game loops (PeekMessage + GetTickCount) see
+ * time pass and scripted events still arrive */
+#define HL_IPMS 10000u
+static void hl_tick(qwin *w)
+{
+    uint64_t d = (w->cpu.icount - g_hl.ic) / HL_IPMS;
+    if (!d) return;
+    g_hl.ic += d * HL_IPMS;
+    g_hl.now += d;
+    g_hl.pending = g_hl.pending > d ? g_hl.pending - d : 0;
+}
+static uint64_t hl_now(qwin *w) { hl_tick(w); return g_hl.now; }
 
 static int vk_of_char(int ch)
 {
@@ -65,6 +78,7 @@ static int vk_of_char(int ch)
 static int hl_wait(qwin *w, uint32_t timeout, qevent *ev)
 {
     char line[512], *cmd, *rest;
+    hl_tick(w);
     for (;;) {
         if (g_hl.pending) {
             uint64_t adv = timeout < g_hl.pending ? timeout : g_hl.pending;

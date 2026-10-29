@@ -1385,7 +1385,22 @@ int user_pump(qwin *w, int block, qmsg *out, uint32_t filt)
         dx = first_dirty(w, 0, 1);
         if (dx) { memset(out, 0, sizeof(*out)); out->hwnd = dx->h; out->msg = WM_PAINT; return 1; }
         user_render_all(w);
-        if (!block) return 0;
+        if (!block) {
+            /* PeekMessage: poll the backend once so input (and test scripts) reach
+             * programs that never block (game loops) */
+            qevent ev;
+            int r;
+            memset(&ev, 0, sizeof(ev));
+            r = spins < 8 ? w->be->wait(w, 0, &ev) : 0;
+            if (r > 0) { spins++; script_event(w, &ev); continue; }
+            if (r < 0) {
+                qwnd *t = active_top(w);
+                if (++spins > 3 || !t) { w->exiting = 1; continue; }
+                win_post(w, t->h, WM_CLOSE, 0, 0);
+                continue;
+            }
+            return 0;
+        }
         /* wait for input or the next timer */
         {
             uint64_t next = now + 1000000u;

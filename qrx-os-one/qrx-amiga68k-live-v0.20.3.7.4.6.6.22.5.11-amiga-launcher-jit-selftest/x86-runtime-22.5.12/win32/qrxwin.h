@@ -310,6 +310,11 @@ uint32_t qw_data_import(qwin *w, const char *dll, const char *name);
 uint32_t user_message_box(qwin *w, uint32_t owner, const wchar16 *text, const wchar16 *title, uint32_t type);
 extern const qhle qw_misc[];
 extern const qhle qw_ansi[];   /* ansi.c */
+extern const qhle qw_files[];  /* files.c */
+extern const qhle qw_dx[];     /* dx.c: DirectDraw/DirectSound/DirectInput */
+const qhle *qw_find_dx(const char *name);   /* COM method thunks "IDirectDraw::CreateSurface" */
+FILE *qw_stream_host(qwin *w, uint32_t gfile);    /* host FILE of a guest fopen() stream, NULL otherwise */
+int  qw_file_close(qwin *w, uint32_t h);          /* CloseHandle for file/find handles */
 
 /* backends */
 extern const qbackend qw_headless;
