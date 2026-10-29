@@ -42,7 +42,11 @@ need('x86-runtime-22.5.12/win32/gdi.c', 'qw_bitmap_from_dib', 'gdi_drawtext', 'B
 need('x86-runtime-22.5.12/win32/kernel.c', 'qfmt', 'qscan', 'RegSetValueExW', '__wgetmainargs')
 need('x86-runtime-22.5.12/win32/backend_aros.c', 'WritePixelArray', 'MapRawKey', 'WA_RMBTrap')
 need('x86-runtime-22.5.12/win32/qrxwin_fontdata.h', 'AROS Public License', 'qfont_table')
-need('x86-runtime-22.5.12/build-target.sh', '-fno-optimize-sibling-calls', '000003f3', 'qrx-win32', 'qrx-i386')
+need('x86-runtime-22.5.12/build-target.sh', '-fno-optimize-sibling-calls', '000003f3', 'qrx-win32', 'qrx-i386', 'build-qmath.sh')
+need('x86-runtime-22.5.12/qmath/qmath.h', '#define floor qm_floor', '#define frexp qm_frexp')
+need('x86-runtime-22.5.12/qmath/COPYRIGHT.musl', 'MIT')
+need('x86-runtime-22.5.12/core/qrx86core.c', '../qmath/qmath.h', 'nanfix')
+need('x86-runtime-22.5.12/win32/kernel.c', 'qf_format', 'qf_strtod')
 need('x86-runtime-22.5.12/X86-RUNTIME-22.5.12.txt', 'ReactOS 0.4.15 contains NO stand-alone clock program', 'NOT a proof')
 need('diagnostics-v6.6/deploy.sh', 'REL="0.20.3.7.4.6.6.22.5.12"', 'x86-runtime-22.5.12', 'qrx-i386 qrx-win32', 'qrxclock.exe')
 need('deploy.sh', 'validate-22.5.12.py', 'validate-22.5.11.py')
@@ -75,7 +79,8 @@ if gcc and subprocess.run([gcc, '-m32', '-x', 'c', '-o', os.devnull, '-'], input
     with tempfile.TemporaryDirectory() as td:
         t = pathlib.Path(td)
         cf = ['-std=gnu99', '-O2', '-w']
-        subprocess.run([gcc, *cf, '-o', t / 'qrx-i386', x86 / 'core/qrx86core.c', x86 / 'linux/qrx86linux.c', x86 / 'linux/qrx_i386_main.c', '-lm'], check=True)
+        subprocess.run(['bash', x86 / 'qmath/build-qmath.sh', gcc, 'ar', t], check=True, capture_output=True)
+        subprocess.run([gcc, *cf, '-o', t / 'qrx-i386', x86 / 'core/qrx86core.c', x86 / 'linux/qrx86linux.c', x86 / 'linux/qrx_i386_main.c', t / 'libqmath.a', '-lm'], check=True)
         subprocess.run([sys.executable, x86 / 'tests/gen-diff-test.py', t / 'd.S', t / 'd.meta', '22512', '6'], check=True, capture_output=True)
         subprocess.run([gcc, '-m32', '-nostdlib', '-static', '-o', t / 'd', t / 'd.S'], check=True)
         nat = subprocess.run([t / 'd'], capture_output=True)

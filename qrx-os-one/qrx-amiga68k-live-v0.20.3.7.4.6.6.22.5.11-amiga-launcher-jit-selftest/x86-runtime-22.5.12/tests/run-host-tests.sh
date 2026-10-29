@@ -15,8 +15,9 @@ ko(){ echo "FAIL $*"; fail=$((fail+1)); }
 sk(){ echo "SKIP $*"; skip=$((skip+1)); }
 
 CF=(-std=gnu99 -O2 -Wall -Wno-unused-parameter -Wno-sign-compare -Wno-format-truncation)
-gcc "${CF[@]}" -o qrx-i386 "$HERE"/core/qrx86core.c "$HERE"/linux/*.c -lm && ok "build qrx-i386" || { ko "build qrx-i386"; exit 1; }
-gcc "${CF[@]}" -o qrx-win32 "$HERE"/core/qrx86core.c "$HERE"/win32/*.c -lm && ok "build qrx-win32" || { ko "build qrx-win32"; exit 1; }
+bash "$HERE/qmath/build-qmath.sh" gcc ar "$WK" >/dev/null || { ko "build qmath"; exit 1; }
+gcc "${CF[@]}" -o qrx-i386 "$HERE"/core/qrx86core.c "$HERE"/linux/*.c "$WK/libqmath.a" -lm && ok "build qrx-i386" || { ko "build qrx-i386"; exit 1; }
+gcc "${CF[@]}" -o qrx-win32 "$HERE"/core/qrx86core.c "$HERE"/win32/*.c "$WK/libqmath.a" -lm && ok "build qrx-win32" || { ko "build qrx-win32"; exit 1; }
 
 # 1. integer differential test (several seeds)
 for seed in 22512 1 2; do

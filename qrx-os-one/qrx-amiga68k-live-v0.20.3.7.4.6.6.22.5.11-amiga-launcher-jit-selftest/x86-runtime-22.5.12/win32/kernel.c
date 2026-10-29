@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include "../qmath/qmath.h"    /* msvcrt math -> qm_* (deterministic, host libm not trusted) */
+#include "../qmath/qfloat.h"
 #include <time.h>
 #include <ctype.h>
 #include <sys/time.h>
@@ -94,7 +96,19 @@ static int qfmt(qwin *w, wbuf *o, uint32_t fmt, int fwide, uint32_t ap)
             puts8(o, tmp);
             break; }
         case 'p': snprintf(tmp, sizeof(tmp), "%08X", RD32(ap)); ap += 4; puts8(o, tmp); break;
-        case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': {
+        case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': {
+            double d = argd(w, ap);
+            int fl = 0, k;
+            ap += 8;
+            for (k = 1; k < sl && (spec[k] < '1' || spec[k] > '9') && spec[k] != '.'; k++) {
+                if (spec[k] == '-') fl |= QF_LEFT; else if (spec[k] == '+') fl |= QF_PLUS; else if (spec[k] == ' ') fl |= QF_SPACE;
+                else if (spec[k] == '#') fl |= QF_ALT; else if (spec[k] == '0') fl |= QF_ZERO;
+            }
+            /* exact digits independent of the host C library (AROS printf is not exact) */
+            qf_format(tmp, sizeof(tmp), d, (int)ch, prec, fl, width < 0 ? 0 : width);
+            puts8(o, tmp);
+            break; }
+        case 'a': case 'A': {
             double d = argd(w, ap); ap += 8;
             spec[sl++] = (char)ch; spec[sl] = 0;
             snprintf(tmp, sizeof(tmp), spec, d);
@@ -189,7 +203,7 @@ static int qscan(qwin *w, uint32_t in, int iwide, uint32_t fmt, int fwide, uint3
             }
             tmp[n] = 0;
             if (!n) break;
-            d = strtod(tmp, NULL);
+            d = qf_strtod(tmp, NULL);
             if (!skip) {
                 uint32_t p = RD32(ap); ap += 4;
                 if (lng) { uint64_t u; memcpy(&u, &d, 8); WR32(p, (uint32_t)u); WR32(p + 4, (uint32_t)(u >> 32)); }
@@ -367,11 +381,11 @@ FN(m_isspace) { UNUSED; return a[0] < 256 && isspace((int)a[0]); }
 FN(m_isalpha) { UNUSED; return a[0] < 256 && isalpha((int)a[0]); }
 FN(m_atoi) { char b[64]; qw_rd_str(w, a[0], b, 64); return (uint32_t)atoi(b); }
 FN(m_wtoi) { wchar16 t[64]; char b[64]; qw_rd_wstr(w, a[0], t, 64); w2a(b, t, 64); return (uint32_t)atoi(b); }
-FN(m_atof) { char b[128]; qw_rd_str(w, a[0], b, 128); return retd(w, strtod(b, NULL)); }
+FN(m_atof) { char b[128]; qw_rd_str(w, a[0], b, 128); return retd(w, qf_strtod(b, NULL)); }
 FN(m_wcstod) {
     wchar16 t[128]; char b[128], *e; double d;
     qw_rd_wstr(w, a[0], t, 128); w2a(b, t, 128);
-    d = strtod(b, &e);
+    d = qf_strtod(b, &e);
     if (a[1]) WR32(a[1], a[0] + (uint32_t)(e - b) * 2);
     return retd(w, d);
 }
@@ -417,7 +431,9 @@ FN(m_isnan) { double d = dbl(a, 0); UNUSED; return isnan(d) ? 1 : 0; }
 #define MATH1(nm, f) FN(nm) { return retd(w, f(dbl(a, 0))); }
 MATH1(m_sin, sin) MATH1(m_cos, cos) MATH1(m_tan, tan) MATH1(m_asin, asin) MATH1(m_acos, acos) MATH1(m_atan, atan)
 MATH1(m_sinh, sinh) MATH1(m_cosh, cosh) MATH1(m_tanh, tanh) MATH1(m_exp, exp) MATH1(m_log, log) MATH1(m_log10, log10)
-MATH1(m_sqrt, sqrt) MATH1(m_floor, floor) MATH1(m_ceil, ceil) MATH1(m_fabs, fabs)
+static double q_sqrt(double x) { return __builtin_sqrt(x); }
+static double q_fabs(double x) { return __builtin_fabs(x); }
+MATH1(m_sqrt, q_sqrt) MATH1(m_floor, floor) MATH1(m_ceil, ceil) MATH1(m_fabs, q_fabs)
 FN(m_pow) { return retd(w, pow(dbl(a, 0), dbl(a, 2))); }
 FN(m_fmod) { return retd(w, fmod(dbl(a, 0), dbl(a, 2))); }
 FN(m_atan2) { return retd(w, atan2(dbl(a, 0), dbl(a, 2))); }

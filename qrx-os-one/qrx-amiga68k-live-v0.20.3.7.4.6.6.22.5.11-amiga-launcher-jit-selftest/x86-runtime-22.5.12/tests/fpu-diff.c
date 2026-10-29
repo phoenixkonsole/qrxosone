@@ -46,7 +46,7 @@ int main(void)
         P("cmov", f_cmov(a, b, i & 1));
         printf("ist %d %d %d %d %lld %d\n", f_ist(md(a, 2e9), 0x027F), f_ist(md(a, 2e9), 0x067F), f_ist(md(a, 2e9), 0x0A7F), f_ist(md(a, 2e9), 0x0E7F), (long long)f_ist64(md(a, 9e18)), f_ist16(md(a, 3e4)));
         printf("com %04x %04x %04x %02x %02x\n", f_com(a, b), f_com(a, a), f_xam(a), f_comi(a, b), f_comi(b, b));
-        P("~sin", f_sin(md(a, 100))); P("~cos", f_cos(md(a, 100))); P("big-sin", f_sin(a * 1e25)); P("inf-sin", f_sin(a * 1e300 * 1e10)); P("~tan", f_tan(md(a, 1.5)));
+        P("~sin", f_sin(md(a, 100))); P("~cos", f_cos(md(a, 100))); P("~big-sin", f_sin(a * 1e25)); P("inf-sin", f_sin(a * 1e300 * 1e10)); P("~tan", f_tan(md(a, 1.5)));
         P("~patan", f_patan(a, b)); P("~yl2x", f_yl2x(pa, b)); P("~2xm1", f_2xm1(a / (1.0 + fabs(a))));
     }
     P("~exp", exp(1.5)); P("~log", log(10.0)); P("~pow", pow(2.5, 3.7)); P("~atan2", atan2(1.0, 3.0));

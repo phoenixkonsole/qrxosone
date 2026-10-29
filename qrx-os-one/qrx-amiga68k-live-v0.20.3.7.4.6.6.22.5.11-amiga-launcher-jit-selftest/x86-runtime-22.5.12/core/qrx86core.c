@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include "../qmath/qmath.h"   /* sin/floor/frexp/... -> qm_* (host libm is not trusted) */
 #include "qrx86core.h"
 
 #if defined(__GNUC__)
@@ -662,6 +663,8 @@ static uint64_t d2u(double d) { uint64_t u; memcpy(&u, &d, 8); return u; }
 static uint64_t m_r64(x86cpu *c, uint32_t a) { return (uint64_t)m_r32(c, a) | ((uint64_t)m_r32(c, a + 4) << 32); }
 static void m_w64(x86cpu *c, uint32_t a, uint64_t v) { m_w32(c, a, (uint32_t)v); m_w32(c, a + 4, (uint32_t)(v >> 32)); }
 
+static double bits2d(uint64_t u) { double d; memcpy(&d, &u, 8); return d; }
+#define X87_INDEFINITE 0xFFF8000000000000ull
 static double ld80(x86cpu *c, uint32_t a)
 {
     uint64_t man = m_r64(c, a);
@@ -669,7 +672,7 @@ static double ld80(x86cpu *c, uint32_t a)
     int e = se & 0x7FFF, neg = se >> 15;
     double v;
     if (e == 0 && man == 0) v = 0.0;
-    else if (e == 0x7FFF) v = (man << 1) ? NAN : INFINITY;
+    else if (e == 0x7FFF) v = (man << 1) ? bits2d(0x7FF8000000000000ull | ((man >> 11) & 0xFFFFFFFFFFFFFull)) : bits2d(0x7FF0000000000000ull);
     else v = ldexp((double)man, e - 16383 - 63);
     return neg ? -v : v;
 }
@@ -696,8 +699,23 @@ static int64_t fto_int(x86cpu *c, double v, int bits, int trunc)
     if (r != r || r >= lim || r < -lim) return bits == 16 ? -32768 : bits == 32 ? (int64_t)INT32_MIN : INT64_MIN;
     return x86_d2i64(r);
 }
+/* x87 NaN semantics, independent of the host FPU (the 68k FPU's default NaN is
+ * 7FFF...FFFF, x86 uses the negative "real indefinite" FFF8000000000000) */
+static double nanfix(double r, double a, double b)
+{
+    uint64_t ua, ub;
+    int na, nb;
+    if (r == r) return r;
+    memcpy(&ua, &a, 8); memcpy(&ub, &b, 8);
+    na = a != a; nb = b != b;
+    if (na && nb) return bits2d(((ua & 0xFFFFFFFFFFFFFull) >= (ub & 0xFFFFFFFFFFFFFull) ? ua : ub) | 0x0008000000000000ull);
+    if (na) return bits2d(ua | 0x0008000000000000ull);
+    if (nb) return bits2d(ub | 0x0008000000000000ull);
+    return bits2d(X87_INDEFINITE);
+}
 static void fpu_arith(double *dst, double src, int op)
 {
+    double a = *dst;
     switch (op) {
     case 0: *dst = *dst + src; break;
     case 1: *dst = *dst * src; break;
@@ -706,6 +724,7 @@ static void fpu_arith(double *dst, double src, int op)
     case 6: *dst = *dst / src; break;
     case 7: *dst = src / *dst; break;
     }
+    *dst = nanfix(*dst, a, src);
 }
 static void fxam(x86cpu *c)
 {
@@ -723,7 +742,7 @@ static void fxam(x86cpu *c)
 static int trig_range(x86cpu *c)
 {
     double v = ST(0);
-    if (isinf(v)) { ST(0) = -NAN; fset_cc(c, 0, 0, 0, 0); return 1; }
+    if (isinf(v)) { ST(0) = bits2d(X87_INDEFINITE); fset_cc(c, 0, 0, 0, 0); return 1; }
     if (fabs(v) >= 9223372036854775808.0) { fset_cc(c, 0, 1, 0, 0); return 1; }
     return 0;
 }
@@ -852,7 +871,7 @@ static void fpu_exec(x86cpu *c, const prefix_t *p, uint8_t op)
             case 0xF6: c->top = (c->top - 1) & 7; return;
             case 0xF7: c->top = (c->top + 1) & 7; return;
             case 0xF9: ST(1) = ST(1) * (log(ST(0) + 1.0) / 0.693147180559945309417); fpop(c); return;
-            case 0xFA: ST(0) = sqrt(ST(0)); return;
+            case 0xFA: { double a = ST(0); ST(0) = nanfix(a < 0 ? bits2d(X87_INDEFINITE) : __builtin_sqrt(a), a, a); return; }
             case 0xFB: { double v = ST(0); if (trig_range(c)) return; ST(0) = sin(v); fpush(c, cos(v)); fset_cc(c, 0, 0, 0, 0); return; }
             case 0xFC: ST(0) = fround(c, ST(0)); return;
             case 0xFD: { double s = ST(1); s = s < 0 ? ceil(s) : floor(s); ST(0) = ldexp(ST(0), (int)s); return; }

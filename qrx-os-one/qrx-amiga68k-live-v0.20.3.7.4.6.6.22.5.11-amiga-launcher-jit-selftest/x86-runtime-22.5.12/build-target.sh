@@ -27,5 +27,10 @@ PY
   [[ "$(od -An -tx1 -N4 "$OUT/hunk/$name" | tr -d ' \n')" == 000003f3 ]] || { echo "HUNK gate failed: $name" >&2; exit 1; }
   echo "HUNK-PROOF $name size=$(stat -c %s "$OUT/hunk/$name") sha256=$(sha256sum "$OUT/hunk/$name" | awk '{print $1}')"
 }
-build qrx-i386 "$HERE/core/qrx86core.c" "$HERE/linux/qrx86linux.c" "$HERE/linux/qrx_i386_main.c"
-build qrx-win32 "$HERE/core/qrx86core.c" "$HERE"/win32/{hle,pe,kernel,user,gdi,backend_headless,backend_aros,qrx_win32_main}.c -lcybergraphics
+# deterministic math (musl subset + exact decimal conversion): the AROS m68k libm/printf
+# return wrong or imprecise results for several functions (see X86-RUNTIME-22.5.12.txt)
+AR="${QRX_AROS_AR:-$(dirname "$CC")/m68k-aros-ar}"
+bash "$HERE/qmath/build-qmath.sh" "$CC" "$AR" "$OUT" -m68040 -fno-pic -fno-PIC -fno-optimize-sibling-calls "${EXTRA[@]}"
+QM="$OUT/libqmath.a"
+build qrx-i386 "$HERE/core/qrx86core.c" "$HERE/linux/qrx86linux.c" "$HERE/linux/qrx_i386_main.c" "$QM"
+build qrx-win32 "$HERE/core/qrx86core.c" "$HERE"/win32/{hle,pe,kernel,user,gdi,backend_headless,backend_aros,qrx_win32_main}.c "$QM" -lcybergraphics

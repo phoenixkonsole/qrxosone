@@ -1,0 +1,57 @@
+QRX OS One 0.20.3.7.4.6.6.22.5.12 - x86 runtime (Linux i386 + Win32) and Amiga applications
+==========================================================================================
+
+All files of 22.5.11 (and earlier) are kept.  The release directory name still
+carries "22.5.11" so that every existing path, gate and validator keeps working;
+the release string in diagnostics-v6.6/deploy.sh is 22.5.12.
+
+New
+---
+* x86-runtime-22.5.12/ (see X86-RUNTIME-22.5.12.txt)
+  - qrx86core: new portable IA-32 interpreter with x87, lazy flags, page table,
+    translation cache, TLS segments, nested guest calls.  Pure interpreter - no
+    native code generation; the 22.5.x QRX86 JIT stays quarantined as before.
+  - qrx-i386: Linux i386 personality (ELF static + PT_INTERP, ~150 int 0x80
+    system calls, fork/pipes via a cooperative in-process scheduler, AmigaDOS
+    path mapping "/VOL/dir" <-> "VOL:dir" on AROS).
+  - qrx-win32: Win32 HLE subsystem (PE loader, kernel32/user32/gdi32/msvcrt/
+    advapi32/... implemented on the host, dialogs, controls, menus, timers,
+    software GDI with AROS bitmap fonts, headless test backend, AROS Intuition
+    backend with own windows on the Workbench/RTG screen).
+  - QRXClock: open-source Win32 clock built with MinGW (ReactOS 0.4.15 has no
+    stand-alone clock program).
+  - Differential tests against native i386 execution (integer + x87), host
+    suite run-host-tests.sh, m68k build script with HUNK gate.
+* Programs verified: ReactOS 0.4.15 calc.exe and winmine.exe (unmodified, from
+  the stored ReactOS live image), QRXClock, BusyBox 1.36.1 i386, static glibc
+  programs.
+* QRXDesktop terminal: i386 <prog>, win32 <prog.exe>, rechner, minesweeper, uhr.
+* LiveCD (deploy): qrx-i386, qrx-win32 in QRX:C, QRXClock in QRX:Windows/QRX,
+  BusyBox in QRX:Linux/bin (GPL source in upstream/busybox), Directory Opus
+  5.104 in SYS:Apps/DOpus5 and HippoPlayer 2.67 in SYS:Apps/HippoPlayer
+  (sources in upstream/amiga-apps).
+* apps-22.5.12/: FS-UAE scenarios for DOpus5 / HippoPlayer / AmigaGPT and for
+  the x86 programs; generic emulator harness amiga-runtime-22.5.11/emulator/
+  run-fsuae-scenario.sh.
+
+Fixed
+-----
+* amigacheck/QRXAmigaRun library scan: an RTS opcode (0x4E75 = "Nu") directly
+  before a library name was reported as part of the name ("Nugraphics.library").
+* QRXScreenGrab reports why it fails (no screen / file / memory).
+
+Changed (documented SHA changes, see SHA-GATE-REPORT-22.5.12.txt)
+------------------------------------------------------------------
+* base-v5.9/tools/qrx_desktop.canonical-6.6.20.c (+ .sha256 sidecar): new
+  terminal commands; nothing removed.
+* validate-22.5.11.py: accepts any 22.5.1x release string (wiring checks kept).
+* deploy.sh / diagnostics-v6.6/deploy.sh: 22.5.12 build + install block.
+
+Known limits
+------------
+* x87 uses IEEE double precision (not 80-bit extended).  No MMX/SSE.
+* Linux: no threads, no signal delivery, no sockets.  Win32: no threads, COM,
+  common controls, printing, sound, context menus, persistent registry.
+* AmigaGPT 3.4.0 does not start on AROS (needs MUI custom classes, AmiSSL).
+* Aminet was not reachable from the build environment; GitHub releases of the
+  open-source programs were used instead.

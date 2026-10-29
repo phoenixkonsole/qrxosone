@@ -31,6 +31,10 @@ static struct timerequest *g_treq;
 static int g_topen;
 static uint32_t *g_tmp;            /* conversion buffer (ARGB, big endian) */
 static size_t g_tmpn;
+static int g_truecolor;            /* screen bitmap is a >8 bit CyberGraphX bitmap */
+static UBYTE *g_chunky;            /* CLUT screens: pen-mapped chunky buffer */
+static size_t g_chunkyn;
+static LONG g_pen[4096];           /* 4-4-4 RGB -> obtained pen (-1 = not yet) */
 
 typedef struct bew {
     struct Window *win;
@@ -42,10 +46,13 @@ typedef struct bew {
 
 static int ar_init(qwin *w)
 {
-    (void)w;
     CyberGfxBase = OpenLibrary((CONST_STRPTR)"cybergraphics.library", 40);
     g_scr = LockPubScreen(NULL);
     if (!g_scr) return 0;
+    g_truecolor = CyberGfxBase && GetCyberMapAttr(g_scr->RastPort.BitMap, CYBRMATTR_ISCYBERGFX) &&
+                  GetCyberMapAttr(g_scr->RastPort.BitMap, CYBRMATTR_DEPTH) > 8;
+    { int i; for (i = 0; i < 4096; i++) g_pen[i] = -1; }
+    if (w->verbose) qw_log(w, "AROS backend: screen %dx%d, %s output", g_scr->Width, g_scr->Height, g_truecolor ? "truecolor WritePixelArray" : "pen-mapped WriteChunkyPixels");
     g_port = CreateMsgPort();
     g_tport = CreateMsgPort();
     if (!g_port || !g_tport) return 0;
@@ -84,6 +91,7 @@ static void ar_create(qwin *w, qwnd *t)
     ModifyIDCMP(b->win, IDCMP_CLOSEWINDOW | IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_ACTIVEWINDOW | IDCMP_REFRESHWINDOW | IDCMP_CHANGEWINDOW);
     t->be = b;
     t->present = 1;
+    if (w->verbose) qw_log(w, "AROS backend: window %08x opened at %d,%d inner %dx%d (+%d menu bar)", t->h, t->x, t->y, t->cw, t->ch, b->mbh);
 }
 
 static void strip_close(struct Window *win)
@@ -113,10 +121,30 @@ static void ar_destroy(qwin *w, qwnd *t)
     t->be = NULL;
 }
 
+static LONG pen_for(uint32_t rgb)
+{
+    unsigned k = ((rgb >> 12) & 0xF00) | ((rgb >> 8) & 0xF0) | ((rgb >> 4) & 0xF);
+    if (g_pen[k] < 0) {
+        ULONG r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+        g_pen[k] = ObtainBestPen(g_scr->ViewPort.ColorMap, r * 0x01010101u, g * 0x01010101u, b * 0x01010101u, OBP_Precision, PRECISION_IMAGE, TAG_DONE);
+        if (g_pen[k] < 0) g_pen[k] = 1;
+    }
+    return g_pen[k];
+}
+
 static void blit(struct Window *win, uint32_t *pix, int sw, int x, int y, int cw, int ch)
 {
     size_t n = (size_t)sw * (size_t)ch;
     int i;
+    if (!g_truecolor) {               /* CLUT (8 bit RTG or native planar) screen */
+        size_t m = (size_t)cw * (size_t)ch;
+        int yy, xx;
+        if (m > g_chunkyn) { free(g_chunky); g_chunky = (UBYTE *)malloc(m); g_chunkyn = g_chunky ? m : 0; }
+        if (!g_chunky) return;
+        for (yy = 0; yy < ch; yy++) for (xx = 0; xx < cw; xx++) g_chunky[(size_t)yy * (size_t)cw + (size_t)xx] = (UBYTE)pen_for(pix[(size_t)yy * (size_t)sw + (size_t)xx]);
+        WriteChunkyPixels(win->RPort, (ULONG)x, (ULONG)y, (ULONG)(x + cw - 1), (ULONG)(y + ch - 1), g_chunky, (LONG)cw);
+        return;
+    }
     if (n > g_tmpn) { free(g_tmp); g_tmp = (uint32_t *)malloc(n * 4); g_tmpn = g_tmp ? n : 0; }
     if (!g_tmp) return;
     /* surface pixels are 0x00RRGGBB host words: on big-endian m68k that already is ARGB */
@@ -130,6 +158,10 @@ static void ar_present(qwin *w, qwnd *t)
     int mbh;
     if (!b || !b->win || !t->surf.pix) return;
     mbh = user_menubar_height(w, t);
+    {
+        static int npres;
+        if (w->verbose && npres++ < 8) qw_log(w, "AROS backend: present %08x %dx%d", t->h, t->cw, t->ch);
+    }
     if (mbh != b->mbh) {             /* menu appeared/disappeared: reopen with the new inner size */
         ar_destroy(w, t);
         ar_create(w, t);
@@ -280,7 +312,12 @@ static void ar_shutdown(qwin *w)
     if (g_treq) DeleteIORequest((struct IORequest *)g_treq);
     if (g_tport) DeleteMsgPort(g_tport);
     if (g_port) DeleteMsgPort(g_port);
-    if (g_scr) UnlockPubScreen(NULL, g_scr);
+    if (g_scr) {
+        int i;
+        for (i = 0; i < 4096; i++) if (g_pen[i] >= 0) ReleasePen(g_scr->ViewPort.ColorMap, (ULONG)g_pen[i]);
+        UnlockPubScreen(NULL, g_scr);
+    }
+    free(g_chunky);
     if (CyberGfxBase) CloseLibrary(CyberGfxBase);
     free(g_tmp);
 }

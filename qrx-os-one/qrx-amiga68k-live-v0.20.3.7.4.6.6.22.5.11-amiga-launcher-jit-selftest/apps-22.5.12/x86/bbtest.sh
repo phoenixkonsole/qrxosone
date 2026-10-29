@@ -1,0 +1,25 @@
+# QRX 22.5.12: BusyBox command lines (same as x86-runtime-22.5.12/tests/busybox-cmds.txt)
+echo hello world
+seq 1 20 | awk '{s+=$1} END {print s, s/3}'
+printf '%05d %x %s %.3f\n' 42 255 str 3.14159
+seq 1 300 | sort -rn | head -3
+seq 1 1000 | md5sum
+seq 1 1000 | sha256sum
+seq 1 1000 | sha1sum
+echo "The quick brown fox" | sed 's/quick/slow/;s/o/0/g'
+echo "a:b:c" | cut -d: -f2
+seq 1 50 | grep -c 5
+expr 7 \* 6 + 1
+echo 'scale' | tr a-z A-Z
+seq 1 3000 | gzip -c | gunzip -c | tail -1
+seq 1 2000 | gzip -9 | md5sum
+seq 1 200 | bzip2 -c | bunzip2 -c | wc -c
+echo '2 64 ^ p' | dc
+awk 'BEGIN{for(i=1;i<=5;i++) printf "%d %.6f %.6f\n", i, sin(i), exp(i)}'
+awk 'BEGIN{x=0.1+0.2; print x, int(1e9*x), 2^31, 2^53+1}'
+basename /a/b/c.txt .txt; dirname /a/b/c.txt
+x=0; while [ $x -lt 100 ]; do x=$((x+1)); done; echo $x
+f() { echo "arg:$1"; return 3; }; f hi; echo rc=$?
+echo $(echo nested $(echo deep))
+yes abc | head -5
+factor 600851475143
