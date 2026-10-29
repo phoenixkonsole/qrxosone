@@ -27,6 +27,8 @@ typedef uint16_t wchar16;
 #define QW_STACK_SIZE   0x00100000u
 #define QW_HEAP_BASE    0x10000000u
 #define QW_HEAP_LIMIT   0x30000000u
+#define QW_FB_BASE      0x30000000u   /* DirectDraw surfaces mapped onto display buffers (RTG direct) */
+#define QW_FB_STRIDE    0x01000000u
 #define QW_TEB          0x7FFDE000u
 #define QW_PEB          0x7FFD0000u
 
@@ -154,6 +156,15 @@ typedef struct qbackend {
     void (*present8)(struct qwin *w, qwnd *top, const uint8_t *pix, int pitch, const uint32_t *pal, int width, int height);
     /* optional: re-open TOP's backend window (fs_w/fs_h set = own full-screen display) */
     void (*reopen)(struct qwin *w, qwnd *top);
+    /* optional, RTG direct (DirectDraw exclusive 8-bit on TOP's own screen): the display
+     * buffers themselves.  fb_open returns how many of nbuf (1 or 2) buffers it provides,
+     * all with the same *pitch (0 = not available); they stay valid until fb_close or
+     * until the window is destroyed (the backend then calls w->fb_lost first).
+     * fb_show displays buffer i (page flip with 2 buffers), loads pal (256 x 0x00RRGGBB)
+     * when it changed and returns buffer i's address, which may have moved. */
+    int  (*fb_open)(struct qwin *w, qwnd *top, int nbuf, uint8_t **buf, int *pitch);
+    uint8_t *(*fb_show)(struct qwin *w, qwnd *top, int i, const uint32_t *pal);
+    void (*fb_close)(struct qwin *w, qwnd *top);
 } qbackend;
 
 /* ------------------------------------------------------------------ instance */
@@ -239,6 +250,7 @@ typedef struct qwin {
     int menu_open_index;              /* menu bar item whose popup is open (-1 none) */
     char grab_path[256];              /* -G: capture the display after grab_at DirectDraw frames */
     int grab_at, frames;
+    void (*fb_lost)(struct qwin *w, qwnd *top);   /* set by DirectDraw while it uses fb_open buffers */
 } qwin;
 
 /* hle.c */

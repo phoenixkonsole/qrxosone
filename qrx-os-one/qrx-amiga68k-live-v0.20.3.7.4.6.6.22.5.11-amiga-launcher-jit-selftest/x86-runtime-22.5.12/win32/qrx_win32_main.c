@@ -51,7 +51,7 @@ static int real_main(int argc, char **argv)
     if (getenv("QRX_WIN_BUDGET")) w->cpu.budget = strtoull(getenv("QRX_WIN_BUDGET"), NULL, 0);   /* profiling: stop after N instructions */
     rc = qw_run(w);
     if (w->be->shutdown) w->be->shutdown(w);
-    if (getenv("QRX_WIN_STATS")) fprintf(stderr, "qrx-win32: %llu guest instructions, %u HLE imports\n", (unsigned long long)w->cpu.icount, w->nthunk);
+    if (getenv("QRX_WIN_STATS")) fprintf(stderr, "qrx-win32: %llu guest instructions, %u HLE imports\n", (unsigned long long)x86_icount(&w->cpu), w->nthunk);
     if (w->expect_ok || w->expect_fail) printf("QRXWIN-RESULT expect_ok=%d expect_fail=%d exit=%d\n", w->expect_ok, w->expect_fail, rc);
     if (w->expect_fail) return 1;
     return rc;

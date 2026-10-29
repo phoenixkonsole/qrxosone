@@ -83,7 +83,13 @@ if command -v i686-w64-mingw32-gcc >/dev/null; then
   ./qrx-win32 -s "$HERE/../apps-22.5.12/x86/dx-test.txt" dxtest.exe 60 >/dev/null 2>&1
   grep -q "RESULT PASS" dxtest.log 2>/dev/null && [[ -s dx-frame.ppm ]] && ok "DirectX 3 test (DirectDraw 640x480x8 flip/palette/colour key/GetDC, DirectSound, DirectInput)" \
     || { ko "DirectX 3 test"; grep -E "FAIL|RESULT" dxtest.log 2>/dev/null; }
-else sk "DirectX test (no mingw)"; fi
+  # the run above drew straight into the (simulated, pitch 704) display buffers; the
+  # copying path must show exactly the same frame
+  mv dx-frame.ppm dx-frame-rtg.ppm; rm -f dxtest.log
+  QRX_DX_RTG=0 ./qrx-win32 -s "$HERE/../apps-22.5.12/x86/dx-test.txt" dxtest.exe 60 >/dev/null 2>&1
+  grep -q "RESULT PASS" dxtest.log 2>/dev/null && cmp -s dx-frame.ppm dx-frame-rtg.ppm \
+    && ok "DirectDraw RTG direct (surfaces mapped onto display buffers) == copying path" || ko "DirectDraw RTG direct vs copy"
+else sk "DirectX test (no mingw)"; sk "DirectDraw RTG direct (no mingw)"; fi
 
 echo "QRX-X86-HOST-TESTS pass=$pass fail=$fail skip=$skip"
 [[ $fail == 0 ]]

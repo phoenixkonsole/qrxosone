@@ -51,6 +51,7 @@ typedef int (*x86_hle_fn)(x86cpu *c, uint32_t index);  /* return 0 to fault */
 
 typedef struct x86page { uint8_t *mem; uint32_t flags; } x86page;
 #define X86_PG_W 1u
+#define X86_PG_EXT 2u      /* mem belongs to the host (frame buffer): never freed */
 
 struct x86cpu {
     uint32_t r[8];
@@ -78,8 +79,9 @@ struct x86cpu {
     uint32_t f_lo, f_lim;
     uint8_t *f_base;
     uint32_t left;                       /* instructions until the budget fault (32-bit: cheap on m68k) */
+    uint32_t lbase;                      /* value of left when icount was last brought up to date */
     /* control */
-    uint64_t icount, budget;            /* budget 0 = unlimited */
+    uint64_t icount, budget;            /* budget 0 = unlimited; read the count with x86_icount() */
     uint32_t hle_base, hle_count;
     x86_int_fn int_hook;
     x86_hle_fn hle_hook;
@@ -100,6 +102,9 @@ int      x86_map(x86cpu *c, uint32_t addr, uint32_t size, int writable);   /* ze
 int      x86_is_mapped(x86cpu *c, uint32_t addr);
 int      x86_protect(x86cpu *c, uint32_t addr, uint32_t size, int writable);
 void     x86_unmap(x86cpu *c, uint32_t addr, uint32_t size);
+/* map [addr, addr+size) (page aligned) onto host memory at host (e.g. a display
+ * frame buffer); replaces whatever was mapped there; the memory is not freed */
+int      x86_map_ext(x86cpu *c, uint32_t addr, uint32_t size, uint8_t *host, int writable);
 uint8_t *x86_host_ptr(x86cpu *c, uint32_t addr);       /* NULL if unmapped */
 int      x86_write_mem(x86cpu *c, uint32_t addr, const void *src, uint32_t n);
 int      x86_read_mem(x86cpu *c, uint32_t addr, void *dst, uint32_t n);
@@ -144,5 +149,8 @@ static inline int64_t x86_d2i64(double v)
 }
 
 #define X86_CALL_SENTINEL 0xFFFFFFF0u   /* return address used by x86_call */
+
+/* executed instructions: the run loop only decrements left, icount is caught up lazily */
+static inline uint64_t x86_icount(const x86cpu *c) { return c->icount + (uint32_t)(c->lbase - c->left); }
 
 #endif

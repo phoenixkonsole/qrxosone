@@ -85,7 +85,7 @@ void x86_free(x86cpu *c)
     tlb_flush(c);
     for (i = 0; i < 1024; i++) {
         if (!c->dir[i]) continue;
-        for (j = 0; j < 1024; j++) free(c->dir[i][j].mem);
+        for (j = 0; j < 1024; j++) if (!(c->dir[i][j].flags & X86_PG_EXT)) free(c->dir[i][j].mem);
         free(c->dir[i]);
         c->dir[i] = NULL;
     }
@@ -116,8 +116,30 @@ int x86_map(x86cpu *c, uint32_t addr, uint32_t size, int writable)
             t->mem = (uint8_t *)calloc(1, X86_PAGE_SIZE);
             if (!t->mem) return 0;
         }
-        t->flags = writable ? X86_PG_W : 0;
+        t->flags = (t->flags & X86_PG_EXT) | (writable ? X86_PG_W : 0);
         if (a + X86_PAGE_SIZE < a) break;
+    }
+    return 1;
+}
+
+int x86_map_ext(x86cpu *c, uint32_t addr, uint32_t size, uint8_t *host, int writable)
+{
+    uint32_t a, off;
+    if ((addr | size) & X86_PAGE_MASK) return 0;
+    tlb_flush(c);
+    for (off = 0; off < size; off += X86_PAGE_SIZE) {
+        x86page *t;
+        a = addr + off;
+        t = c->dir[a >> 22];
+        if (!t) {
+            t = (x86page *)calloc(1024, sizeof(x86page));
+            if (!t) return 0;
+            c->dir[a >> 22] = t;
+        }
+        t += (a >> 12) & 1023u;
+        if (t->mem && !(t->flags & X86_PG_EXT)) free(t->mem);
+        t->mem = host + off;
+        t->flags = X86_PG_EXT | (writable ? X86_PG_W : 0);
     }
     return 1;
 }
@@ -129,7 +151,7 @@ int x86_protect(x86cpu *c, uint32_t addr, uint32_t size, int writable)
     tlb_flush(c);
     for (; (uint64_t)a < end; a += X86_PAGE_SIZE) {
         x86page *p = pg(c, a);
-        if (p) p->flags = writable ? X86_PG_W : 0;
+        if (p) p->flags = (p->flags & X86_PG_EXT) | (writable ? X86_PG_W : 0);
         if (a + X86_PAGE_SIZE < a) break;
     }
     return 1;
@@ -142,7 +164,7 @@ void x86_unmap(x86cpu *c, uint32_t addr, uint32_t size)
     tlb_flush(c);
     for (; (uint64_t)a < end; a += X86_PAGE_SIZE) {
         x86page *p = pg(c, a);
-        if (p) { free(p->mem); p->mem = NULL; p->flags = 0; }
+        if (p) { if (!(p->flags & X86_PG_EXT)) free(p->mem); p->mem = NULL; p->flags = 0; }
         if (a + X86_PAGE_SIZE < a) break;
     }
 }
@@ -433,11 +455,11 @@ static void set_arith(x86cpu *c, uint32_t mask, uint32_t val)
 }
 
 /* ======================================================================= decode */
-typedef struct {
-    int osz;        /* 16 or 32 */
-    int asz;        /* 16 or 32 */
-    int rep;        /* 0, 0xF2, 0xF3 */
-    int seg;        /* -1 or segment index */
+typedef struct {    /* bytes: the four initial stores merge into one */
+    uint8_t osz;    /* 16 or 32 */
+    uint8_t asz;    /* 16 or 32 */
+    uint8_t rep;    /* 0, 0xF2, 0xF3 */
+    int8_t seg;     /* -1 or segment index */
 } prefix_t;
 
 typedef struct { int mod, reg, rm, isreg; uint32_t addr; } modrm_t;
@@ -566,6 +588,22 @@ static uint32_t alu(x86cpu *c, int op, uint32_t a, uint32_t b, int sz)
     default: r = a ^ b; lf_set(c, LF_LOGIC, sz, r, a, b); break;
     }
     return r & m;
+}
+
+/* 32-bit operands: no size masks; ADC/SBB keep the generic path */
+X86_INLINE uint32_t alu32(x86cpu *c, int op, uint32_t a, uint32_t b)
+{
+    uint32_t r;
+    switch (op) {
+    case 0: r = a + b; c->lf_op = LF_ADD; break;
+    case 1: r = a | b; c->lf_op = LF_LOGIC; break;
+    case 4: r = a & b; c->lf_op = LF_LOGIC; break;
+    case 5: case 7: r = a - b; c->lf_op = LF_SUB; break;
+    case 6: r = a ^ b; c->lf_op = LF_LOGIC; break;
+    default: return alu(c, op, a, b, 32);
+    }
+    c->lf_sz = 32; c->lf_res = r; c->lf_a = a; c->lf_b = b;
+    return r;
 }
 
 static uint32_t incdec(x86cpu *c, uint32_t a, int sz, int dec)
@@ -1013,8 +1051,8 @@ static void string_op(x86cpu *c, const prefix_t *p, uint8_t op, uint32_t start_e
         }
         if (++iter >= 4096) {
             if (str_should_continue(c, p)) c->eip = start_eip;    /* resume later */
-            c->icount += (uint64_t)iter;
-            c->left = c->left > (uint32_t)iter ? c->left - (uint32_t)iter : 0;
+            if (c->left >= (uint32_t)iter) c->left -= (uint32_t)iter;
+            else { c->icount += (uint32_t)iter - c->left; c->left = 0; }
             return;
         }
     }
@@ -1038,10 +1076,11 @@ X86_INLINE void exec_one(x86cpu *c)
     int sz;
 
     c->cur_eip = start;
-    if (c->hle_count && start - c->hle_base < c->hle_count) {
+    if (start - c->hle_base < c->hle_count) {     /* hle_count 0: never */
         if (!c->hle_hook || !c->hle_hook(c, start - c->hle_base)) {
             if (!c->fault) FAULT(c, X86_FAULT_HOST, start, "HLE hook failed");
         }
+        if (c->fault || c->stop) longjmp(*c->jb, 1);     /* the run loop tests neither */
         return;
     }
     p.osz = 32; p.asz = 32; p.rep = 0; p.seg = -1;
@@ -1069,6 +1108,15 @@ X86_INLINE void exec_one(x86cpu *c)
     case 0x20 ... 0x25: case 0x28 ... 0x2D: case 0x30 ... 0x35: case 0x38 ... 0x3D: {   /* ALU group */
         int aop = op >> 3, form = op & 7;
         uint32_t r;
+        if (sz == 32 && (form == 1 || form == 3)) {
+            uint32_t v;
+            decode_modrm(c, &p, &m);
+            v = m.isreg ? c->r[m.rm] : m_r32(c, m.addr);
+            if (form == 3) { r = alu32(c, aop, c->r[m.reg], v); if (aop != 7) c->r[m.reg] = r; return; }
+            r = alu32(c, aop, v, c->r[m.reg]);
+            if (aop != 7) { if (m.isreg) c->r[m.rm] = r; else m_w32(c, m.addr, r); }
+            return;
+        }
         switch (form) {
         case 0: case 1: { int s = form ? sz : 8; decode_modrm(c, &p, &m);
             r = alu(c, aop, rm_get(c, &m, s), reg_get(c, m.reg, s), s); if (aop != 7) rm_set(c, &m, s, r); return; }
@@ -1101,8 +1149,8 @@ X86_INLINE void exec_one(x86cpu *c)
         } else f &= ~(X86_AF | X86_CF);
         reg_set(c, X86_EAX, 16, ax & 0xFF0F); c->eflags = f; return; }
     case 0x40 ... 0x4F: { int r = op & 7; reg_set(c, r, sz, incdec(c, reg_get(c, r, sz), sz, op >= 0x48)); return; }
-    case 0x50 ... 0x57: push(c, reg_get(c, op & 7, sz), sz); return;
-    case 0x58 ... 0x5F: { uint32_t v = pop(c, sz); reg_set(c, op & 7, sz, v); return; }
+    case 0x50 ... 0x57: if (sz == 32) push(c, c->r[op & 7], 32); else push(c, reg_get(c, op & 7, 16), 16); return;
+    case 0x58 ... 0x5F: { uint32_t v; if (sz == 32) { v = pop(c, 32); c->r[op & 7] = v; } else { v = pop(c, 16); reg_set(c, op & 7, 16, v); } return; }
     case 0x70 ... 0x7F: { int8_t d = (int8_t)fetch8(c); if (cond(c, op & 15)) c->eip += (uint32_t)(int32_t)d; return; }
     case 0x91 ... 0x97: { uint32_t t = reg_get(c, X86_EAX, sz); reg_set(c, X86_EAX, sz, reg_get(c, op & 7, sz)); reg_set(c, op & 7, sz, t); return; }
     case 0xB0 ... 0xB7: reg_set(c, op & 7, 8, fetch8(c)); return;
@@ -1128,14 +1176,32 @@ X86_INLINE void exec_one(x86cpu *c)
         uint32_t imm, r;
         decode_modrm(c, &p, &m);
         imm = op == 0x81 ? fetchimm(c, s) : (op == 0x83 ? (uint32_t)(int32_t)(int8_t)fetch8(c) : fetch8(c));
+        if (s == 32) {
+            r = alu32(c, m.reg, m.isreg ? c->r[m.rm] : m_r32(c, m.addr), imm);
+            if (m.reg != 7) { if (m.isreg) c->r[m.rm] = r; else m_w32(c, m.addr, r); }
+            return;
+        }
         r = alu(c, m.reg, rm_get(c, &m, s), imm, s);
         if (m.reg != 7) rm_set(c, &m, s, r);
         return; }
-    case 0x84: case 0x85: { int s = op & 1 ? sz : 8; decode_modrm(c, &p, &m); alu(c, 4, rm_get(c, &m, s), reg_get(c, m.reg, s), s); return; }
+    case 0x84: decode_modrm(c, &p, &m); alu(c, 4, rm_get(c, &m, 8), reg_get(c, m.reg, 8), 8); return;
+    case 0x85: decode_modrm(c, &p, &m);
+        if (sz == 32) alu32(c, 4, m.isreg ? c->r[m.rm] : m_r32(c, m.addr), c->r[m.reg]);
+        else alu(c, 4, rm_get(c, &m, 16), reg_get(c, m.reg, 16), 16);
+        return;
     case 0x86: case 0x87: { int s = op & 1 ? sz : 8; uint32_t t; decode_modrm(c, &p, &m);
         t = rm_get(c, &m, s); rm_set(c, &m, s, reg_get(c, m.reg, s)); reg_set(c, m.reg, s, t); return; }
-    case 0x88: case 0x89: { int s = op & 1 ? sz : 8; decode_modrm(c, &p, &m); rm_set(c, &m, s, reg_get(c, m.reg, s)); return; }
-    case 0x8A: case 0x8B: { int s = op & 1 ? sz : 8; decode_modrm(c, &p, &m); reg_set(c, m.reg, s, rm_get(c, &m, s)); return; }
+    case 0x88: decode_modrm(c, &p, &m); rm_set(c, &m, 8, reg_get(c, m.reg, 8)); return;
+    case 0x8A: decode_modrm(c, &p, &m); reg_set(c, m.reg, 8, rm_get(c, &m, 8)); return;
+    case 0x89: decode_modrm(c, &p, &m);
+        if (sz != 32) rm_set(c, &m, 16, reg_get(c, m.reg, 16));
+        else if (m.isreg) c->r[m.rm] = c->r[m.reg];
+        else m_w32(c, m.addr, c->r[m.reg]);
+        return;
+    case 0x8B: decode_modrm(c, &p, &m);
+        if (sz != 32) reg_set(c, m.reg, 16, rm_get(c, &m, 16));
+        else c->r[m.reg] = m.isreg ? c->r[m.rm] : m_r32(c, m.addr);
+        return;
     case 0x8C: decode_modrm(c, &p, &m); if (m.reg > 5) bad(c, "bad sreg"); rm_set(c, &m, m.isreg ? sz : 16, c->sreg[m.reg]); return;
     case 0x8D: { prefix_t q = p; q.seg = X86_DS; decode_modrm(c, &q, &m); if (m.isreg) bad(c, "LEA reg"); reg_set(c, m.reg, sz, m.addr - c->sbase[X86_DS]); return; }
     case 0x8E: {
@@ -1185,6 +1251,7 @@ X86_INLINE void exec_one(x86cpu *c)
     case 0xCC: FAULT(c, X86_FAULT_INT3, start, "INT3");
     case 0xCD: { uint8_t v = fetch8(c);
         if (!c->int_hook || !c->int_hook(c, v)) { if (!c->fault) FAULT(c, X86_FAULT_GP, start, "unhandled software interrupt"); }
+        if (c->fault || c->stop) longjmp(*c->jb, 1);
         return; }
     case 0xD4: { uint8_t b = fetch8(c), al = (uint8_t)c->r[X86_EAX]; if (!b) FAULT(c, X86_FAULT_DE, start, "AAM 0");
         reg_set(c, X86_EAX, 16, ((al / b) << 8) | (al % b)); lf_set(c, LF_LOGIC, 8, al % b, 0, 0); return; }
@@ -1290,7 +1357,7 @@ X86_INLINE void exec_one(x86cpu *c)
     switch (op) {
     case 0x0B: FAULT(c, X86_FAULT_UD, start, "UD2");
     case 0x0D: case 0x18: case 0x19: case 0x1A: case 0x1B: case 0x1C: case 0x1D: case 0x1E: case 0x1F: decode_modrm(c, &p, &m); return;  /* prefetch / hint NOP */
-    case 0x31: c->r[X86_EAX] = (uint32_t)(c->icount * 4); c->r[X86_EDX] = (uint32_t)((c->icount * 4) >> 32); return;
+    case 0x31: { uint64_t t = x86_icount(c) * 4; c->r[X86_EAX] = (uint32_t)t; c->r[X86_EDX] = (uint32_t)(t >> 32); return; }
     case 0xA2: {
         uint32_t leaf = c->r[X86_EAX];
         if (leaf == 0) { c->r[X86_EAX] = 1; c->r[X86_EBX] = 0x756E6547u; c->r[X86_EDX] = 0x49656E69u; c->r[X86_ECX] = 0x6C65746Eu; }
@@ -1377,33 +1444,40 @@ X86_INLINE void exec_one(x86cpu *c)
 }
 
 
-/* instructions until the budget is reached, capped to 32 bits (refreshed when it runs out) */
-static uint32_t budget_left(const x86cpu *c)
+/* bring icount up to date, then reload left with the instructions until the budget is
+ * reached, capped to 32 bits (refreshed when it runs out) */
+static uint32_t budget_refill(x86cpu *c)
 {
     uint64_t n;
-    if (!c->budget) return 0xFFFFFFFFu;
-    if (c->icount >= c->budget) return 0;
-    n = c->budget - c->icount;
-    return n > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)n;
+    c->icount = x86_icount(c);
+    if (!c->budget) n = 0xFFFFFFFFu;
+    else if (c->icount >= c->budget) n = 0;
+    else { n = c->budget - c->icount; if (n > 0xFFFFFFFFu) n = 0xFFFFFFFFu; }
+    c->left = c->lbase = (uint32_t)n;
+    return c->left;
 }
 
 /* single = 1: exactly one instruction, no budget accounting (x86_step).  exec_one is
- * inlined here exactly once. */
+ * inlined here exactly once.  The loop tests only eip: faults longjmp out, and the
+ * hook call sites in exec_one longjmp out when a hook set fault or stop. */
 static int run_loop(x86cpu *c, uint32_t stop_eip, int single)
 {
     jmp_buf jb, *old = c->jb;
+    if (c->fault || c->stop) return c->fault;
     c->jb = &jb;
     if (setjmp(jb)) { c->jb = old; return c->fault; }
-    if (!single) c->left = budget_left(c);  /* nested runs share and decrement the same counter */
-    while (!c->fault && !c->stop && c->eip != stop_eip) {
-        if (!single) {
-            if (!c->left && !(c->left = budget_left(c)))
-                FAULT(c, X86_FAULT_BUDGET, c->eip, "instruction budget exhausted");
-            c->left--;                        /* before exec_one: never wraps, even after nested runs */
-        }
+    if (single) {
         exec_one(c);
         c->icount++;
-        if (single) { if (c->left) c->left--; break; }
+        if (c->left) { c->left--; c->lbase--; }
+    } else {
+        budget_refill(c);                     /* nested runs share and decrement the same counter */
+        while (c->eip != stop_eip) {
+            if (!c->left && !budget_refill(c))
+                FAULT(c, X86_FAULT_BUDGET, c->eip, "instruction budget exhausted");
+            c->left--;                        /* counts the instruction: before exec_one, never wraps */
+            exec_one(c);
+        }
     }
     c->jb = old;
     return c->fault;

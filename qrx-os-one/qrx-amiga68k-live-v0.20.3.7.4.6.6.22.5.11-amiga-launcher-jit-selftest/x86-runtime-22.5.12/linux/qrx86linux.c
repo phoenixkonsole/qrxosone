@@ -390,7 +390,7 @@ static const char *exec_image(lxproc *p, const char *gpath, int argc, char **arg
     /* destroy the old image */
     {
         /* execve runs inside x86_run: keep the run-loop context (jmp_buf, counters) */
-        x86_int_fn ih = p->cpu.int_hook; void *u = p->cpu.user; uint64_t bud = p->cpu.budget, ic = p->cpu.icount;
+        x86_int_fn ih = p->cpu.int_hook; void *u = p->cpu.user; uint64_t bud = p->cpu.budget, ic = x86_icount(&p->cpu);
         jmp_buf *jb = p->cpu.jb; int dep = p->cpu.depth;
         x86_free(&p->cpu);
         x86_init(&p->cpu);
@@ -928,7 +928,7 @@ static uint32_t syscall_dispatch(lxproc *p, uint32_t nr, uint32_t a1, uint32_t a
         x86_wr32(c, a1, (uint32_t)fr); x86_wr32(c, a1 + 4, (uint32_t)fw);
         if (nr == 331 && (a2 & 02000000u)) p->cloexec[fr] = p->cloexec[fw] = 1;
         return 0; }
-    case 43: { uint32_t t = (uint32_t)(c->icount / 1000000u); if (a1) { x86_wr32(c, a1, t); x86_wr32(c, a1 + 4, 0); x86_wr32(c, a1 + 8, 0); x86_wr32(c, a1 + 12, 0); } return t; }
+    case 43: { uint32_t t = (uint32_t)(x86_icount(c) / 1000000u); if (a1) { x86_wr32(c, a1, t); x86_wr32(c, a1 + 4, 0); x86_wr32(c, a1 + 8, 0); x86_wr32(c, a1 + 12, 0); } return t; }
     case 45: {
         uint32_t want = a1;
         if (!want || want < p->brk_start) return p->brk_cur;
@@ -1172,13 +1172,13 @@ static int run_slice(lxproc *p)
 {
     x86cpu *c = &p->cpu;
     int f;
-    uint64_t lim = c->icount + LX_SLICE;
+    uint64_t lim = x86_icount(c) + LX_SLICE;
     if (p->o->budget && lim > p->o->budget) lim = p->o->budget;
     c->stop = 0;
     c->budget = lim;
     p->blocked = 0;
     f = x86_run(c, 0xFFFFFFFFu);
-    if (f == X86_FAULT_BUDGET && !(p->o->budget && c->icount >= p->o->budget)) { c->fault = X86_OK; return 1; }  /* preempted */
+    if (f == X86_FAULT_BUDGET && !(p->o->budget && x86_icount(c) >= p->o->budget)) { c->fault = X86_OK; return 1; }  /* preempted */
     if (f && !p->exited) {
         char d[400];
         x86_describe_fault(c, d, sizeof(d));
@@ -1222,7 +1222,7 @@ int lx_run(const lxopts *o, const char *path, int argc, char **argv, char **envp
             g_deadlock = 1;        /* one round in which blocking calls fail instead of waiting */
         } else g_deadlock = 0;
     }
-    if (getenv("QRX_I386_STATS")) fprintf(stderr, "qrx-i386: pid %d executed %llu guest instructions\n", p->pid, (unsigned long long)p->cpu.icount);
+    if (getenv("QRX_I386_STATS")) fprintf(stderr, "qrx-i386: pid %d executed %llu guest instructions\n", p->pid, (unsigned long long)x86_icount(&p->cpu));
     st = p->exited ? p->status : 9;
     for (q = g_procs; q; ) { lxproc *n = q->next; if (q != p) { proc_exit(q, 9); proc_free(q); } q = n; }
     g_procs = NULL;

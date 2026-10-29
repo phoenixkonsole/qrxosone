@@ -44,6 +44,7 @@ typedef struct dxobj {
     int pal;                         /* palette object index or -1 */
     int ck_on; uint32_t ck_lo, ck_hi;
     uint32_t ownmem;                 /* SetSurfaceDesc: the program's memory replaced ours (keep ours to free) */
+    int rtg, fb;                     /* RTG direct: mem is display buffer fb (QW_FB_BASE + fb * QW_FB_STRIDE) */
     uint32_t dc;                     /* GetDC: memory DC, its bitmap and the original pixels */
     uint32_t dcbm, *dcorig;
     int dd;                          /* owning DirectDraw object */
@@ -91,6 +92,100 @@ static dxobj *ob(qwin *w, uint32_t guest, int type)
 }
 static int idx_of(const dxobj *o) { return (int)(o - g_o); }
 
+/* ------------------------------------------------------------------ RTG direct */
+/* In exclusive 8-bit mode the primary surface (and its back buffer) are the display
+ * buffers of the own screen: their guest pages are mapped onto the frame buffer memory
+ * the backend hands out (on AROS: the RTG card's screen bitmaps), so the program's
+ * Lock/Blt writes land in video memory without any copy, and Flip is a page flip.
+ * Whole pages are mapped; the last, partial page of a buffer is an ordinary guest
+ * page copied into the frame buffer when the buffer is shown. */
+static struct {
+    qwnd *t;
+    int n, pitch, sh;
+    uint32_t bytes, full;            /* buffer size, part of it in whole pages */
+    uint8_t *host[2];
+} g_fb;
+static uint32_t fb_guest(int i) { return QW_FB_BASE + (uint32_t)i * QW_FB_STRIDE; }
+static int fb_map(qwin *w, int i)
+{
+    uint32_t g = fb_guest(i);
+    if (g_fb.full && !x86_map_ext(C, g, g_fb.full, g_fb.host[i], 1)) return 0;
+    if (g_fb.bytes > g_fb.full && !x86_is_mapped(C, g + g_fb.full) && !x86_map(C, g + g_fb.full, X86_PAGE_SIZE, 1)) return 0;
+    return 1;
+}
+static void fb_detach(qwin *w, int close)
+{
+    int i, k;
+    qwnd *t = g_fb.t;
+    if (!g_fb.n) return;
+    for (k = 0; k < DX_MAX; k++) {                   /* surfaces keep their pixels in ordinary memory */
+        dxobj *s = &g_o[k];
+        uint32_t m;
+        uint8_t *tmp;
+        if (s->type != OB_SURF || !s->rtg) continue;
+        m = qw_alloc(w, g_fb.bytes + 16u);
+        tmp = (uint8_t *)malloc(g_fb.bytes);
+        if (m && tmp && x86_read_mem(C, s->mem, tmp, g_fb.bytes)) x86_write_mem(C, m, tmp, g_fb.bytes);
+        free(tmp);
+        s->mem = m; s->rtg = 0;
+    }
+    for (i = 0; i < g_fb.n; i++) x86_unmap(C, fb_guest(i), g_fb.full + X86_PAGE_SIZE);
+    g_fb.n = 0; g_fb.t = NULL;
+    w->fb_lost = NULL;
+    if (close && t && w->be->fb_close) w->be->fb_close(w, t);
+    if (w->verbose) qw_log(w, "DirectDraw: RTG direct buffers released");
+}
+static void fb_lost(qwin *w, qwnd *t) { (void)t; fb_detach(w, 0); }
+static qwnd *dd_top(qwin *w, dxobj *dd)
+{
+    qwnd *t = dd && dd->hwnd ? W(w, dd->hwnd) : NULL;
+    return t ? win_top(w, t) : NULL;
+}
+static void fb_attach(qwin *w, dxobj *dd, dxobj *prim)
+{
+    qwnd *t = dd_top(w, dd);
+    const char *e = getenv("QRX_DX_RTG");
+    uint8_t *buf[2];
+    int need = prim->attached >= 0 ? 2 : 1, pitch = 0, n, i;
+    if (e && e[0] == '0') return;
+    if (g_fb.n || !t || !t->be || !w->be->fb_open || !dd->exclusive || prim->bpp != 8 ||
+        t->fs_w != prim->sw || t->fs_h != prim->sh) return;
+    n = w->be->fb_open(w, t, need, buf, &pitch);
+    if (n != need || pitch < prim->sw) {
+        if (n > 0) w->be->fb_close(w, t);
+        if (w->verbose) qw_log(w, "DirectDraw: no RTG direct display buffers, frames are copied");
+        return;
+    }
+    g_fb.t = t; g_fb.n = n; g_fb.pitch = pitch; g_fb.sh = prim->sh;
+    g_fb.bytes = (uint32_t)pitch * (uint32_t)prim->sh;
+    g_fb.full = g_fb.bytes & ~X86_PAGE_MASK;
+    for (i = 0; i < n; i++) {
+        dxobj *s = i ? &g_o[prim->attached] : prim;
+        g_fb.host[i] = buf[i];
+        memset(buf[i], 0, g_fb.bytes);
+        if (!fb_map(w, i)) { qw_log(w, "DirectDraw: mapping the display buffers failed"); fb_detach(w, 1); return; }
+        qw_free(w, s->mem);
+        s->mem = fb_guest(i); s->pitch = pitch; s->rtg = 1; s->fb = i;
+    }
+    w->fb_lost = fb_lost;
+    if (w->verbose) qw_log(w, "DirectDraw: RTG direct, %d display buffer(s) %dx%d pitch %d mapped at %08x", n, prim->sw, prim->sh, pitch, fb_guest(0));
+}
+/* show the primary's display buffer: tail page, palette, page flip */
+static void fb_show(qwin *w, dxobj *prim, const uint32_t *pal)
+{
+    static uint32_t grey[256];
+    int i = prim->fb;
+    uint8_t *a, *tail;
+    if (g_fb.bytes > g_fb.full && (tail = x86_host_ptr(C, fb_guest(i) + g_fb.full)) != NULL)
+        memcpy(g_fb.host[i] + g_fb.full, tail, g_fb.bytes - g_fb.full);
+    if (!pal) { int k; for (k = 0; k < 256; k++) grey[k] = (uint32_t)k * 0x010101u; pal = grey; }
+    a = w->be->fb_show(w, g_fb.t, i, pal);
+    if (a && a != g_fb.host[i]) {                   /* the backend moved the buffer: follow it */
+        g_fb.host[i] = a;
+        if (!fb_map(w, i)) { qw_log(w, "DirectDraw: remapping a moved display buffer failed"); fb_detach(w, 1); }
+    }
+}
+
 /* ------------------------------------------------------------------ presentation */
 /* show the primary surface in the cooperative window */
 static void present(qwin *w, dxobj *prim)
@@ -109,6 +204,7 @@ static void present(qwin *w, dxobj *prim)
         b[0] = t->h; b[1] = 0; b[2] = 0; b[3] = (uint32_t)(prim->sw + t->nl + t->nr); b[4] = (uint32_t)(prim->sh + t->nt + t->nb); b[5] = 1;
         if (mv) mv->fn(w, b);
     }
+    if (prim->rtg && g_fb.n) { fb_show(w, prim, pal); return; }
     if (prim->bpp == 8 && w->be->present8 && t->be) {      /* fast path: 8-bit frame straight to the backend */
         static uint8_t *frame;
         static size_t framen;
@@ -154,6 +250,7 @@ static void present(qwin *w, dxobj *prim)
 static uint32_t addref(dxobj *o) { if (!o) return 0; return (uint32_t)++o->refs; }
 static void obj_free(qwin *w, dxobj *o)
 {
+    if (o->rtg) fb_detach(w, 1);                      /* back to ordinary memory first */
     free(o->dcorig);
     if (o->ownmem) { qw_free(w, o->ownmem); o->ownmem = 0; }
     else if (o->mem) qw_free(w, o->mem);              /* each surface/buffer owns exactly one block (Flip swaps them) */
@@ -252,6 +349,7 @@ FN(dd_CreateSurface) {                  /* (this, desc, pp, outer) */
             if (RD32(d + 20) > 1 && w->verbose) qw_log(w, "DirectDraw: %u back buffers requested, 1 provided", RD32(d + 20));
         }
         if (w->verbose) qw_log(w, "DirectDraw: primary %dx%dx%d%s", dd->mw, dd->mh, dd->mbpp, s->attached >= 0 ? " + back buffer" : "");
+        fb_attach(w, dd, s);
     } else {
         sw = (flags & 4) ? (int)RD32(d + 12) : dd->mw;
         sh = (flags & 2) ? (int)RD32(d + 8) : dd->mh;
@@ -320,6 +418,7 @@ static void fullscreen(qwin *w, dxobj *dd, int on)
     qwnd *t = dd->hwnd ? W(w, dd->hwnd) : NULL;
     if (t) t = win_top(w, t);
     if (!t || !w->be->reopen) return;
+    fb_detach(w, 1);                                  /* mode change: display buffers go away */
     if (on && (!dd->exclusive || dd->mbpp != 8)) return;
     if (on) {
         const qhle *mv = qw_find_hle("user32", "MoveWindow");
@@ -482,6 +581,7 @@ FN(s_Flip) {
     if (p->attached < 0) { present(w, p); return DD_OK; }
     b = &g_o[p->attached];
     t = p->mem; p->mem = b->mem; b->mem = t;           /* swap front and back buffer memory */
+    if (p->rtg) { int f = p->fb; p->fb = b->fb; b->fb = f; }   /* RTG direct: the page flip itself */
     present(w, p);
     return DD_OK;
 }
@@ -616,6 +716,7 @@ FN(s_SetSurfaceDesc) {
     if (!s || !d) return DDERR_INVALIDPARAMS;
     fl = RD32(d + 4);
     if (!(fl & 0x800) || !RD32(d + 36)) return DDERR_INVALIDPARAMS;
+    if (s->rtg) fb_detach(w, 1);
     if (!s->ownmem) s->ownmem = s->mem;
     s->mem = RD32(d + 36);
     if (fl & 4) s->sw = (int)RD32(d + 12);

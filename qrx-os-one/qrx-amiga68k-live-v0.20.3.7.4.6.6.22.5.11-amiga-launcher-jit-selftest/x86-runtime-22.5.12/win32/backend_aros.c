@@ -44,6 +44,11 @@ typedef struct bew {
     struct Screen *scr;             /* own full-screen display (DirectDraw exclusive mode) */
     int scr8;                       /* that screen is 8-bit CLUT: palette loaded with LoadRGB32 */
     uint32_t pal[256];              /* palette currently loaded into scr */
+    struct ScreenBuffer *sb[2];     /* RTG direct: display buffers of scr, kept locked */
+    APTR lock[2];
+    UBYTE *fbaddr[2];
+    int fbn, fbshown;
+    ULONG fbpitch;
     char title[260];
     qsurf mb;
 } bew;
@@ -151,11 +156,12 @@ static void strip_close(struct Window *win)
     CloseWindow(win);
 }
 
+static void ar_fb_close(qwin *w, qwnd *t);
 static void ar_destroy(qwin *w, qwnd *t)
 {
     bew *b = (bew *)t->be;
-    (void)w;
     if (!b) return;
+    if (b->fbn) { if (w->fb_lost) w->fb_lost(w, t); ar_fb_close(w, t); }
     if (b->win) strip_close(b->win);
     if (b->scr) CloseScreen(b->scr);
     free(b->mb.pix);
@@ -461,5 +467,93 @@ static void ar_reopen(qwin *w, qwnd *t)
     ar_create(w, t);
 }
 
-const qbackend qw_aros = { "aros", ar_init, ar_create, ar_destroy, ar_present, ar_title, ar_menu, ar_wait, ar_now, ar_shutdown, ar_present8, ar_reopen };
+/* RTG direct: the own screen's bitmap (plus a second screen buffer for page flips)
+ * stays locked with LockBitMapTags while DirectDraw uses it.  The lock gives the
+ * frame buffer address and keeps the RTG driver from moving the bitmap between
+ * video and fast memory; the program then draws straight into it. */
+static void ar_fb_close(qwin *w, qwnd *t)
+{
+    bew *b = (bew *)t->be;
+    int i;
+    if (!b || !b->fbn) return;
+    for (i = 0; i < 2; i++) if (b->lock[i]) { UnLockBitMap(b->lock[i]); b->lock[i] = NULL; }
+    if (b->sb[1]) {
+        if (b->fbshown == 1) { int k; for (k = 0; k < 50 && !ChangeScreenBuffer(b->scr, b->sb[0]); k++) WaitTOF(); WaitTOF(); }
+        FreeScreenBuffer(b->scr, b->sb[1]);
+    }
+    if (b->sb[0]) FreeScreenBuffer(b->scr, b->sb[0]);
+    b->sb[0] = b->sb[1] = NULL;
+    b->fbn = 0;
+    if (w->verbose) qw_log(w, "AROS backend: RTG display buffers unlocked");
+}
+static int ar_fb_open(qwin *w, qwnd *t, int nbuf, uint8_t **buf, int *pitch)
+{
+    bew *b = (bew *)t->be;
+    int i;
+    if (!b || !b->scr || !b->scr8 || !CyberGfxBase || b->fbn || nbuf < 1 || nbuf > 2) return 0;
+    b->fbshown = 0;
+    for (i = 0; i < nbuf; i++) {
+        IPTR addr = 0;
+        ULONG bpr = 0, fmt = 0;
+        b->sb[i] = AllocScreenBuffer(b->scr, NULL, i ? 0 : SB_SCREEN_BITMAP);
+        if (!b->sb[i]) { qw_log(w, "AROS: AllocScreenBuffer %d failed", i); break; }
+        b->lock[i] = LockBitMapTags(b->sb[i]->sb_BitMap, LBMI_BASEADDRESS, (IPTR)&addr, LBMI_BYTESPERROW, (IPTR)&bpr, LBMI_PIXFMT, (IPTR)&fmt, TAG_DONE);
+        if (!b->lock[i]) { qw_log(w, "AROS: LockBitMapTags on screen buffer %d failed (no direct RTG access)", i); break; }
+        if (fmt != PIXFMT_LUT8 || !addr || (i && bpr != b->fbpitch)) { qw_log(w, "AROS: screen buffer %d: pixel format %lu, %lu bytes per row - not usable", i, (unsigned long)fmt, (unsigned long)bpr); break; }
+        b->fbaddr[i] = (UBYTE *)addr; b->fbpitch = bpr;
+        buf[i] = (uint8_t *)addr;
+        if (w->verbose) qw_log(w, "AROS backend: screen buffer %d at %08lx, %lu bytes per row", i, (unsigned long)addr, (unsigned long)bpr);
+    }
+    b->fbn = nbuf;                                   /* lets ar_fb_close clean up after a failure */
+    if (i < nbuf) { ar_fb_close(w, t); return 0; }
+    *pitch = (int)b->fbpitch;
+    return nbuf;
+}
+/* -G: in RTG direct mode the capture comes from the shown buffer itself */
+static void grab_fb(qwin *w, const UBYTE *p, ULONG pitch, const uint32_t *pal, int pw, int ph)
+{
+    FILE *f = fopen(w->grab_path, "wb");
+    int x, y;
+    if (!f) return;
+    fprintf(f, "P6\n%d %d\n255\n", pw, ph);
+    for (y = 0; y < ph; y++) for (x = 0; x < pw; x++) {
+        uint32_t c = pal[p[(size_t)y * pitch + (size_t)x]];
+        fputc((int)(c >> 16) & 0xFF, f); fputc((int)(c >> 8) & 0xFF, f); fputc((int)c & 0xFF, f);
+    }
+    fclose(f);
+    qw_log(w, "AROS backend: display buffer captured after %d frames -> %s", w->frames, w->grab_path);
+}
+static uint8_t *ar_fb_show(qwin *w, qwnd *t, int i, const uint32_t *pal)
+{
+    bew *b = (bew *)t->be;
+    if (!b || i < 0 || i >= b->fbn) return NULL;
+    if (memcmp(b->pal, pal, sizeof(b->pal))) {
+        static ULONG tab[256 * 3 + 2];
+        int k;
+        tab[0] = (256UL << 16) | 0;
+        for (k = 0; k < 256; k++) {
+            tab[1 + k * 3] = ((pal[k] >> 16) & 0xFF) * 0x01010101u;
+            tab[2 + k * 3] = ((pal[k] >> 8) & 0xFF) * 0x01010101u;
+            tab[3 + k * 3] = (pal[k] & 0xFF) * 0x01010101u;
+        }
+        tab[1 + 256 * 3] = 0;
+        LoadRGB32(&b->scr->ViewPort, tab);
+        memcpy(b->pal, pal, sizeof(b->pal));
+    }
+    if (b->fbn > 1 && i != b->fbshown) {             /* page flip */
+        int k;
+        for (k = 0; k < 50 && !ChangeScreenBuffer(b->scr, b->sb[i]); k++) WaitTOF();
+        b->fbshown = i;
+        {   /* the driver may have moved the bitmap into video memory to show it */
+            IPTR addr = 0;
+            APTR l = LockBitMapTags(b->sb[i]->sb_BitMap, LBMI_BASEADDRESS, (IPTR)&addr, TAG_DONE);
+            if (l) { UnLockBitMap(l); if (addr) b->fbaddr[i] = (UBYTE *)addr; }
+        }
+    }
+    if (w->grab_path[0] && ++w->frames == w->grab_at) grab_fb(w, b->fbaddr[i], b->fbpitch, pal, t->fs_w, t->fs_h);
+    return b->fbaddr[i];
+}
+
+const qbackend qw_aros = { "aros", ar_init, ar_create, ar_destroy, ar_present, ar_title, ar_menu, ar_wait, ar_now, ar_shutdown, ar_present8, ar_reopen,
+                           ar_fb_open, ar_fb_show, ar_fb_close };
 #endif

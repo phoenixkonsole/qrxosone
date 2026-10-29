@@ -30,6 +30,8 @@ typedef struct hl {
     int line;
     char typebuf[256];
     int typepos, typeup;
+    uint8_t *fb[2];                       /* RTG-direct test double: display buffers */
+    int fbn, fbpitch, fbw, fbh;
 } hl;
 
 static hl g_hl;
@@ -44,7 +46,51 @@ int headless_set_script(qwin *w, const char *path)
 
 static int hl_init(qwin *w) { (void)w; g_hl.now = 1000; return 1; }
 static void hl_create(qwin *w, qwnd *t) { (void)w; t->be = (void *)1; }
-static void hl_destroy(qwin *w, qwnd *t) { (void)w; t->be = NULL; }
+static void hl_fb_close(qwin *w, qwnd *t);
+static void hl_destroy(qwin *w, qwnd *t) { if (g_hl.fbn) { if (w->fb_lost) w->fb_lost(w, t); hl_fb_close(w, t); } t->be = NULL; }
+static void hl_reopen(qwin *w, qwnd *t) { (void)w; (void)t; }   /* the "own screen" is the window itself */
+
+/* display buffers like an RTG card's: pitch wider than the visible line, not page aligned */
+static int hl_fb_open(qwin *w, qwnd *t, int nbuf, uint8_t **buf, int *pitch)
+{
+    int i;
+    (void)w;
+    if (g_hl.fbn || nbuf < 1 || nbuf > 2 || t->fs_bpp != 8) return 0;
+    g_hl.fbw = t->fs_w; g_hl.fbh = t->fs_h;
+    g_hl.fbpitch = (t->fs_w + 64) & ~63;      /* always wider than the line */
+    for (i = 0; i < nbuf; i++) {
+        uint8_t *m = (uint8_t *)calloc(1, (size_t)g_hl.fbpitch * (size_t)g_hl.fbh + 4096u + 100u);
+        if (!m) { while (i--) free(g_hl.fb[i]); return 0; }
+        g_hl.fb[i] = m;
+        buf[i] = m + 100;
+    }
+    g_hl.fbn = nbuf;
+    *pitch = g_hl.fbpitch;
+    return nbuf;
+}
+/* "displaying" = converting the buffer into the window surface that snapshots read */
+static uint8_t *hl_fb_show(qwin *w, qwnd *t, int i, const uint32_t *pal)
+{
+    int x, y, ww, hh;
+    const uint8_t *b;
+    if (i < 0 || i >= g_hl.fbn) return NULL;
+    b = g_hl.fb[i] + 100;
+    surf_resize(&t->surf, t->cw, t->ch);
+    ww = g_hl.fbw < t->surf.w ? g_hl.fbw : t->surf.w;
+    hh = g_hl.fbh < t->surf.h ? g_hl.fbh : t->surf.h;
+    for (y = 0; y < hh; y++)
+        for (x = 0; x < ww; x++) t->surf.pix[(size_t)y * (size_t)t->surf.w + (size_t)x] = pal[b[(size_t)y * (size_t)g_hl.fbpitch + (size_t)x]];
+    t->present = 1;
+    (void)w;
+    return g_hl.fb[i] + 100;
+}
+static void hl_fb_close(qwin *w, qwnd *t)
+{
+    int i;
+    (void)w; (void)t;
+    for (i = 0; i < g_hl.fbn; i++) { free(g_hl.fb[i]); g_hl.fb[i] = NULL; }
+    g_hl.fbn = 0;
+}
 static void hl_present(qwin *w, qwnd *t) { (void)w; (void)t; }
 static void hl_title(qwin *w, qwnd *t) { (void)w; (void)t; }
 static void hl_menu(qwin *w, qwnd *t) { (void)w; (void)t; }
@@ -54,7 +100,7 @@ static void hl_menu(qwin *w, qwnd *t) { (void)w; (void)t; }
 #define HL_IPMS 10000u
 static void hl_tick(qwin *w)
 {
-    uint64_t d = (w->cpu.icount - g_hl.ic) / HL_IPMS;
+    uint64_t d = (x86_icount(&w->cpu) - g_hl.ic) / HL_IPMS;
     if (!d) return;
     g_hl.ic += d * HL_IPMS;
     g_hl.now += d;
@@ -174,4 +220,5 @@ static int hl_wait_outer(qwin *w, uint32_t timeout, qevent *ev)
 
 static void hl_shutdown(qwin *w) { (void)w; if (g_hl.script) fclose(g_hl.script); g_hl.script = NULL; }
 
-const qbackend qw_headless = { "headless", hl_init, hl_create, hl_destroy, hl_present, hl_title, hl_menu, hl_wait_outer, hl_now, hl_shutdown, NULL, NULL };
+const qbackend qw_headless = { "headless", hl_init, hl_create, hl_destroy, hl_present, hl_title, hl_menu, hl_wait_outer, hl_now, hl_shutdown, NULL, hl_reopen,
+                                  hl_fb_open, hl_fb_show, hl_fb_close };
