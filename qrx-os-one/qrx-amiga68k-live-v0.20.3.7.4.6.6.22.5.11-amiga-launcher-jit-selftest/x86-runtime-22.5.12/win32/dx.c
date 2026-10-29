@@ -106,6 +106,19 @@ static void present(qwin *w, dxobj *prim)
         b[0] = t->h; b[1] = 0; b[2] = 0; b[3] = (uint32_t)(prim->sw + t->nl + t->nr); b[4] = (uint32_t)(prim->sh + t->nt + t->nb); b[5] = 1;
         if (mv) mv->fn(w, b);
     }
+    if (prim->bpp == 8 && w->be->present8 && t->be) {      /* fast path: 8-bit frame straight to the backend */
+        static uint8_t *frame;
+        static size_t framen;
+        size_t n = (size_t)prim->pitch * (size_t)prim->sh;
+        static uint32_t grey[256];
+        if (n > framen) { free(frame); frame = (uint8_t *)malloc(n); framen = frame ? n : 0; }
+        if (frame) {
+            if (!pal) { int i; for (i = 0; i < 256; i++) grey[i] = (uint32_t)i * 0x010101u; pal = grey; }
+            x86_read_mem(C, prim->mem, frame, (uint32_t)n);
+            w->be->present8(w, t, frame, prim->pitch, pal, prim->sw, prim->sh);
+            return;
+        }
+    }
     surf_resize(&t->surf, t->cw, t->ch);
     ww = prim->sw < t->surf.w ? prim->sw : t->surf.w;
     hh = prim->sh < t->surf.h ? prim->sh : t->surf.h;
@@ -297,6 +310,28 @@ FN(dd_SetCooperativeLevel) {
     if (w->verbose) qw_log(w, "DirectDraw: cooperative level %08x window %08x", a[2], a[1]);
     return DD_OK;
 }
+/* exclusive 8-bit modes: ask the backend for an own screen of that size (AROS) */
+static void fullscreen(qwin *w, dxobj *dd, int on)
+{
+    qwnd *t = dd->hwnd ? W(w, dd->hwnd) : NULL;
+    if (t) t = win_top(w, t);
+    if (!t || !w->be->reopen) return;
+    if (on && (!dd->exclusive || dd->mbpp != 8)) return;
+    if (on) {
+        const qhle *mv = qw_find_hle("user32", "MoveWindow");
+        uint32_t b[16];
+        memset(b, 0, sizeof(b));
+        if (mv && (t->cw != dd->mw || t->ch != dd->mh)) {
+            b[0] = t->h; b[3] = (uint32_t)(dd->mw + t->nl + t->nr); b[4] = (uint32_t)(dd->mh + t->nt + t->nb); b[5] = 1;
+            mv->fn(w, b);
+        }
+        t->fs_w = dd->mw; t->fs_h = dd->mh; t->fs_bpp = 8;
+    } else {
+        if (!t->fs_w) return;
+        t->fs_w = t->fs_h = t->fs_bpp = 0;
+    }
+    if (t->be) w->be->reopen(w, t);
+}
 static uint32_t set_mode(qwin *w, uint32_t self, uint32_t mw, uint32_t mh, uint32_t bpp)
 {
     dxobj *dd = ob(w, self, OB_DD);
@@ -307,8 +342,10 @@ static uint32_t set_mode(qwin *w, uint32_t self, uint32_t mw, uint32_t mh, uint3
     }
     dd->mw = (int)mw; dd->mh = (int)mh; dd->mbpp = (int)bpp;
     if (w->verbose) qw_log(w, "DirectDraw: display mode %ux%ux%u", mw, mh, bpp);
+    fullscreen(w, dd, 1);
     return DD_OK;
 }
+FN(dd_RestoreDisplayMode) { dxobj *dd = ob(w, a[0], OB_DD); if (dd) fullscreen(w, dd, 0); return DD_OK; }
 FN(dd_SetDisplayMode) { return set_mode(w, a[0], a[1], a[2], a[3]); }
 FN(dd2_SetDisplayMode) { return set_mode(w, a[0], a[1], a[2], a[3]); }
 FN(dd2_GetAvailableVidMem) { UNUSED; if (a[2]) WR32(a[2], 8u << 20); if (a[3]) WR32(a[3], 8u << 20); return DD_OK; }
@@ -825,7 +862,7 @@ static const vslot vt_dd[] = {
     V("FlipToGDISurface", dd_ok, 1), V("GetCaps", dd_GetCaps, 3), V("GetDisplayMode", dd_GetDisplayMode, 2),
     V("GetFourCCCodes", dd_GetFourCCCodes, 3), V("GetGDISurface", NULL, 2), V("GetMonitorFrequency", dd_GetMonitorFrequency, 2),
     V("GetScanLine", dd_GetScanLine, 2), V("GetVerticalBlankStatus", dd_GetVerticalBlankStatus, 2), V("Initialize", dd_ok, 2),
-    V("RestoreDisplayMode", dd_ok, 1), V("SetCooperativeLevel", dd_SetCooperativeLevel, 3), V("SetDisplayMode", dd_SetDisplayMode, 4),
+    V("RestoreDisplayMode", dd_RestoreDisplayMode, 1), V("SetCooperativeLevel", dd_SetCooperativeLevel, 3), V("SetDisplayMode", dd_SetDisplayMode, 4),
     V("WaitForVerticalBlank", dd_ok, 3), { NULL, NULL, 0 }
 };
 static const vslot vt_dd2[] = {
@@ -835,7 +872,7 @@ static const vslot vt_dd2[] = {
     V("FlipToGDISurface", dd_ok, 1), V("GetCaps", dd_GetCaps, 3), V("GetDisplayMode", dd_GetDisplayMode, 2),
     V("GetFourCCCodes", dd_GetFourCCCodes, 3), V("GetGDISurface", NULL, 2), V("GetMonitorFrequency", dd_GetMonitorFrequency, 2),
     V("GetScanLine", dd_GetScanLine, 2), V("GetVerticalBlankStatus", dd_GetVerticalBlankStatus, 2), V("Initialize", dd_ok, 2),
-    V("RestoreDisplayMode", dd_ok, 1), V("SetCooperativeLevel", dd_SetCooperativeLevel, 3), V("SetDisplayMode", dd2_SetDisplayMode, 6),
+    V("RestoreDisplayMode", dd_RestoreDisplayMode, 1), V("SetCooperativeLevel", dd_SetCooperativeLevel, 3), V("SetDisplayMode", dd2_SetDisplayMode, 6),
     V("WaitForVerticalBlank", dd_ok, 3), V("GetAvailableVidMem", dd2_GetAvailableVidMem, 4), { NULL, NULL, 0 }
 };
 static const vslot vt_surf[] = {           /* IDirectDrawSurface + Surface2 + Surface3 tail */

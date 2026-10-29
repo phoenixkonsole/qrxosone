@@ -33,6 +33,7 @@ static int real_main(int argc, char **argv)
         else if (!strcmp(argv[i], "-v")) w->verbose = 1;
         else if (!strcmp(argv[i], "-vv")) w->verbose = 2;
         else if (!strcmp(argv[i], "-L") && i + 1 < argc) { FILE *lf = fopen(argv[++i], "w"); if (lf) w->log = lf; }
+        else if (!strcmp(argv[i], "-G") && i + 2 < argc) { snprintf(w->grab_path, sizeof(w->grab_path), "%s", argv[i + 1]); w->grab_at = atoi(argv[i + 2]); i += 2; }
         else if (!strcmp(argv[i], "-T")) w->trace = 1;
         else { usage(); return 2; }
         i++;

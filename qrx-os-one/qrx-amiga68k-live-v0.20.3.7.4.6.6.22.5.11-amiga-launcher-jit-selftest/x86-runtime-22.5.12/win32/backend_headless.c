@@ -174,4 +174,4 @@ static int hl_wait_outer(qwin *w, uint32_t timeout, qevent *ev)
 
 static void hl_shutdown(qwin *w) { (void)w; if (g_hl.script) fclose(g_hl.script); g_hl.script = NULL; }
 
-const qbackend qw_headless = { "headless", hl_init, hl_create, hl_destroy, hl_present, hl_title, hl_menu, hl_wait_outer, hl_now, hl_shutdown };
+const qbackend qw_headless = { "headless", hl_init, hl_create, hl_destroy, hl_present, hl_title, hl_menu, hl_wait_outer, hl_now, hl_shutdown, NULL, NULL };

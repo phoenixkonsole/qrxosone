@@ -2,8 +2,9 @@
 ; real input events (QRXInput -> input.device), screenshots via QRXScreenGrab.
 FailAt 1000
 Assign QRX: SYS:QRX >NIL:
-Run <NIL: >NIL: WANDERER:Wanderer
-Wait 15
+; no Wanderer: it sporadically hangs AROS m68k in FS-UAE right after its start
+; (seen in several runs before any QRX program ran); windows open on the Workbench screen anyway
+Wait 5
 CD SYS:X86
 Run >NIL: QRX:C/qrx-win32 -v -L QRXOUT:live-calc.log calc.exe
 Wait 30

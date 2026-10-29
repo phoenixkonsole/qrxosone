@@ -1,0 +1,9 @@
+qrx-win32: AROS backend: screen 640x480, pen-mapped WriteChunkyPixels output
+qrx-win32: GetProcAddress(msvcrt, _set_invalid_parameter_handler): not implemented
+qrx-win32: LoadLibrary(HHCTRL.OCX): not available in QRX (program continues without it)
+qrx-win32: LoadLibrary(UXTHEME): not available in QRX (program continues without it)
+qrx-win32: text 1074: 0,
+qrx-win32: text 1076: 
+qrx-win32: text 1047: ,
+qrx-win32: AROS backend: window 00010004 opened at 0,41 inner 253x208 (+19 menu bar)
+qrx-win32: AROS backend: present 00010004 253x208

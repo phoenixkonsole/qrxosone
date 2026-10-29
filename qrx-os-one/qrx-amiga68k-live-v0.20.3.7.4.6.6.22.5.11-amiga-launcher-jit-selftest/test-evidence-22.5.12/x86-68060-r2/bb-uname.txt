@@ -1,0 +1,1 @@
+Linux qrx 5.15.0-qrx86 #1 QRX OS One 22.5.12 qrx86core i686 GNU/Linux

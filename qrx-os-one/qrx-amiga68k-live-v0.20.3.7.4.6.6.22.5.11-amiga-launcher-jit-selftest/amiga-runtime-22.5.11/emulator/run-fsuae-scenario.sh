@@ -8,7 +8,8 @@
 # opened (the display stays one flat grey colour).  The harness prepends
 # "Echo >QRXOUT:BOOTED" to User-Startup and samples the X display every 10 s:
 # when BOOTED is missing after QRX_BOOT_TMO s (default 240) or the display shows
-# at most 2 colours for QRX_HANG_TMO s (default 120), the emulator is restarted,
+# at most 3 colours while nothing is written to the output directory for
+# QRX_HANG_TMO s (default 120), the emulator is restarted,
 # at most QRX_BOOT_RETRIES times (default 2).  Each restart is logged.
 # QRX_FSUAE_JIT=1 enables the FS-UAE 68k JIT (host-side emulator setting; the
 # QRX86 x86 JIT inside QRX stays quarantined).  QRX_FSUAE_EXTRA adds raw lines.
@@ -68,8 +69,12 @@ while (( t < TMO )); do
   [[ -f "$OUT/DONE" ]] && break; kill -0 $fp 2>/dev/null || break
   (( t >= BT )) && [[ ! -f "$OUT/BOOTED" ]] && { hung=1; break; }
   if (( t % 10 == 0 && t >= 30 )); then
-    nc=$(DISPLAY=":$d" import -window root -resize 25% ppm:- 2>/dev/null | identify -format %k - 2>/dev/null || echo 99)
-    if (( nc <= 2 )); then flat=$((flat+10)); else flat=0; fi
+    nc=$(DISPLAY=":$d" import -window root ppm:- 2>/dev/null | convert ppm:- -sample 25% ppm:- 2>/dev/null | identify -format %k ppm:- 2>/dev/null || echo 99)
+    # a flat display alone is normal when no screen is open: also require that
+    # nothing was written to the output directory meanwhile
+    sig=$(ls -l --time-style=+%s "$OUT" 2>/dev/null | md5sum)
+    if (( nc <= 3 )) && [[ "$sig" == "${lastsig:-}" ]]; then flat=$((flat+10)); else flat=0; fi
+    lastsig=$sig
     (( flat >= HT )) && { hung=1; break; }
   fi
   sleep 2; t=$((t+2))

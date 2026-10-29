@@ -27,6 +27,14 @@ New
     stand-alone clock program).
   - Differential tests against native i386 execution (integer + x87), host
     suite run-host-tests.sh, m68k build script with HUNK gate.
+* Windows games and DirectX: ReactOS Solitaire and Spider Solitaire run with
+  the program-supplied cards.dll (new PE DLL loader); ANSI API entry points;
+  pattern/monochrome brushes, ExcludeClipRect, SaveDC/RestoreDC, palettes,
+  WM_GETMINMAXINFO clamping, status bar; mutex/semaphore/event objects; a file
+  layer for kernel32 and msvcrt (drive C:/D: = program directory); DirectX 3 HLE
+  (DirectDraw, DirectSound without audio output, DirectInput) verified with the
+  own MinGW test program dxtest.exe.  The headless test clock now also advances
+  with executed instructions and PeekMessage polls input, so game loops work.
 * Programs verified: ReactOS 0.4.15 calc.exe and winmine.exe (unmodified, from
   the stored ReactOS live image), QRXClock, BusyBox 1.36.1 i386, static glibc
   programs.
@@ -74,5 +82,10 @@ Known limits
 * Linux: no threads, no signal delivery, no sockets.  Win32: no threads, COM,
   common controls, printing, sound, context menus, persistent registry.
 * AmigaGPT 3.4.0 does not start on AROS (needs MUI custom classes, AmiSSL).
+* GTA 1 / other commercial game demos: not tested - the build environment's
+  network policy blocks the download sites (archive.org, moddb.com, ...).
+  Half-Life / Resident Evil need Direct3D or OpenGL and about 1000x the
+  interpreted speed; not attempted.
+* No audio output for DirectSound/winmm yet (buffers are emulated silently).
 * Aminet was not reachable from the build environment; GitHub releases of the
   open-source programs were used instead.

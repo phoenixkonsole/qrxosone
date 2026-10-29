@@ -1,0 +1,8 @@
+EXPECT 1074 == "12,": OK
+EXPECT 1074 == "46,": OK
+EXPECT 1074 == "92,": OK
+EXPECT 1074 == "9,": OK
+EXPECT 1074 == "3,5": OK
+EXPECT 1074 == "25,": OK
+EXPECT 1074 == "3,14159265358979": OK
+QRXWIN-RESULT expect_ok=7 expect_fail=0 exit=0

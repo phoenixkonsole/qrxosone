@@ -120,6 +120,7 @@ typedef struct qwnd {
     int caret;
     uint32_t tme;                     /* TrackMouseEvent flags */
     uint32_t icon;
+    int fs_w, fs_h, fs_bpp;           /* DirectDraw exclusive mode: show on an own screen (backend permitting) */
 } qwnd;
 
 typedef struct qmsg { uint32_t hwnd, msg, wp, lp, time; int x, y; } qmsg;
@@ -148,6 +149,11 @@ typedef struct qbackend {
     int  (*wait)(struct qwin *w, uint32_t timeout_ms, qevent *ev);
     uint64_t (*now)(struct qwin *w);  /* milliseconds */
     void (*shutdown)(struct qwin *w);
+    /* optional: show an 8-bit palettised frame (DirectDraw) directly, without the
+     * 32-bit surface; pal = 256 x 0x00RRGGBB.  NULL: the caller converts. */
+    void (*present8)(struct qwin *w, qwnd *top, const uint8_t *pix, int pitch, const uint32_t *pal, int width, int height);
+    /* optional: re-open TOP's backend window (fs_w/fs_h set = own full-screen display) */
+    void (*reopen)(struct qwin *w, qwnd *top);
 } qbackend;
 
 /* ------------------------------------------------------------------ instance */
@@ -231,6 +237,8 @@ typedef struct qwin {
     int draw_nc;                      /* headless: draw a caption/menu bar into snapshots */
     uint32_t menu_popup, menu_owner;  /* open popup menu window and its owner */
     int menu_open_index;              /* menu bar item whose popup is open (-1 none) */
+    char grab_path[256];              /* -G: capture the display after grab_at DirectDraw frames */
+    int grab_at, frames;
 } qwin;
 
 /* hle.c */

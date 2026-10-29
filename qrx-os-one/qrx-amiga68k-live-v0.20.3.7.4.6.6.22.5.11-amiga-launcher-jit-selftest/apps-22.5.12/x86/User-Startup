@@ -33,6 +33,9 @@ QRX:C/qrx-win32 -o QRXOUT: -s sol-test.txt sol.exe >QRXOUT:win-sol.txt
 Echo "QRXTEST WIN-SOL rc=$RC" >>QRXOUT:log.txt
 QRX:C/qrx-win32 -o QRXOUT: -s spider-test.txt spider.exe >QRXOUT:win-spider.txt
 Echo "QRXTEST WIN-SPIDER rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-win32 -o QRXOUT: -s dx-test.txt dxtest.exe 60 >QRXOUT:win-dx.txt
+Echo "QRXTEST WIN-DX rc=$RC" >>QRXOUT:log.txt
+Copy SYS:X86/dxtest.log QRXOUT:dxtest.log
 ; ---- Win32 live on the Workbench screen (AROS Intuition backend), one screenshot per program
 Run >NIL: QRX:C/qrx-win32 -v -L QRXOUT:live-calc.log calc.exe
 Wait 25

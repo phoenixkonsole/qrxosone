@@ -1,0 +1,38 @@
+FS-UAE 3.1.66 (Built for Linux x86-64)
+Copyright 1995-2002 Bernd Schmidt, 1999-2017 Toni Wilen,
+2003-2007 Richard Drummond, 2006-2011 Mustafa 'GnoStiC' Tufan,
+2011-2017 Frode Solheim, and contributors.
+
+This is free software; see the file COPYING for copying conditions. There
+is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR
+PURPOSE. See the README for more copyright info, and the source code for
+a full list of contributors
+
+UAE: Initializing core derived from WinUAE 3300b2
+LOG: /var/tmp/qrx-scn.HsNH1p/home/Cache/Logs/fs-uae.log.txt
+ALSA lib confmisc.c:855:(parse_card) cannot find card '0'
+ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_card_inum returned error: No such file or directory
+ALSA lib confmisc.c:422:(snd_func_concat) error evaluating strings
+ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_concat returned error: No such file or directory
+ALSA lib confmisc.c:1342:(snd_func_refer) error evaluating name
+ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_refer returned error: No such file or directory
+ALSA lib conf.c:5731:(snd_config_expand) Evaluate error: No such file or directory
+ALSA lib pcm.c:2721:(snd_pcm_open_noupdate) Unknown PCM default
+WARNING: No HW OpenGL driver: llvmpipe (LLVM 20.1.2, 256 bits)
+# Keyboards path: /var/tmp/qrx-scn.HsNH1p/home/Data/Devs/Keyboards
+WARNING: OPENAL: Could not open audio device
+WARNING: Unrecognized sound card
+UAE: KS ROM e473c186 (524288 bytes)
+UAE: KS ROM 9d7d0c57 (524288 bytes)
+ -- stub -- my_resolvesoftlink 
+ -- stub -- my_resolvesoftlink 
+res_initcode context = (nil)
+
+
+picasso96_alloc2
+
+
+monitor: 0
+setting gwwpagesize to something...
+UAE: Calling uae_quit
+UAE: Stopping

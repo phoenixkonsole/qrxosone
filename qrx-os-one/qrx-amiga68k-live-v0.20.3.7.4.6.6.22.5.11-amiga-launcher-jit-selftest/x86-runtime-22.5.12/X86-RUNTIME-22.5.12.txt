@@ -71,10 +71,32 @@ qrx-i386 (Linux i386)
 qrx-win32 (Win32 HLE)
 ---------------------
   qrx-win32 [-s SCRIPT] [-o OUTDIR] [-l LANGID] [-v] [-T] PROGRAM.EXE [ARGS...]
-* Loads PE32/i386 images, binds every import to a host-implemented function
-  (about 470 functions of kernel32, user32, gdi32, msvcrt, advapi32, comctl32,
-  shell32, winmm, ntdll).  No Microsoft or ReactOS DLL is loaded or needed.
-  An unimplemented import is reported by name when it is called.
+* Loads PE32/i386 images, binds every import of a system DLL to a host-implemented
+  function (about 650 functions of kernel32, user32, gdi32, msvcrt, advapi32,
+  comctl32, shell32, winmm, ntdll, ddraw, dsound, dinput).  No Microsoft or ReactOS
+  system DLL is loaded or needed.  An unimplemented import is reported by name
+  when it is called.
+* Program-supplied DLLs (e.g. ReactOS cards.dll next to sol.exe) are real PE
+  images: loaded next to the program (case-insensitive), base relocations,
+  exports by name/ordinal incl. forwarders, their own imports, DllMain, and
+  LoadLibrary/GetProcAddress/GetModuleHandle/FindResource on their handles.
+* ANSI entry points (CreateWindowExA, RegisterClassExA, MessageBoxA, TextOutA ...)
+  convert their strings and call the Unicode implementation (win32/ansi.c).
+* Files (win32/files.c): C: (and D:, reported as CD-ROM) is the program
+  directory; Windows paths are mapped below it with case-insensitive lookup.
+  kernel32 CreateFile/ReadFile/WriteFile/SetFilePointer/FindFirstFile/
+  directories/drives, msvcrt fopen/fread/fseek/fgets/_open/_read/_findfirst/_stat.
+* DirectX 3 (win32/dx.c): IDirectDraw/IDirectDraw2, surfaces (primary + back
+  buffer flip chain, off-screen, Lock, Blt colour fill / copy / stretch / source
+  colour key, BltFast, GetDC/ReleaseDC), palettes (incl. animation), clippers;
+  display modes 320x200 .. 800x600 in 8/16 bit.  IDirectSound buffers with a
+  play cursor driven by the clock (SILENT: no audio output yet).  IDirectInput
+  keyboard (state + buffered changes) and mouse.  Not implemented: Direct3D,
+  overlays, DirectDraw4/7, DirectPlay.  On AROS 8-bit frames go to the window
+  directly (WriteLUTPixelArray on truecolor screens, a per-palette pen table and
+  WriteChunkyPixels on CLUT screens).
+* Synchronisation objects (mutex, semaphore, event): one guest thread, so a wait
+  that could never end returns (reported in the log) instead of hanging.
 * USER: windows, classes, message queue, timers, paint/invalidate, focus,
   capture, keyboard translation, accelerators, dialogs from DIALOG/DIALOGEX
   templates (modal + modeless), standard controls Button (push, default,
@@ -105,6 +127,11 @@ Programs
                              scripted test 12+34, *2, sqrt, 7/2, keyboard 5*5,
                              pi -> 7/7 expectations pass.
   ReactOS 0.4.15 winmine.exe board, LEDs, face, menus, clicks.
+  ReactOS 0.4.15 sol.exe     Solitaire with cards.dll: deal, drag, pattern brushes.
+  ReactOS 0.4.15 spider.exe  Spider Solitaire: difficulty dialog, deal.
+  dxtest.exe                 own MinGW DirectX 3 test (win32/apps/dxtest.c):
+                             640x480x8 flip chain, palette, colour-keyed sprites,
+                             GetDC text, DirectSound buffer, DirectInput keyboard.
   QRXClock (qrxclock.exe)    ReactOS 0.4.15 contains NO stand-alone clock program
                              (its clock is part of timedate.cpl).  QRXClock is an
                              open-source Win32 clock written for QRX and compiled
@@ -129,3 +156,18 @@ Build
 Host tests
 ----------
   bash x86-runtime-22.5.12/tests/run-host-tests.sh WORKDIR [busybox-i386] [ReactOS-System32]
+
+Speed (FS-UAE, emulated 68040, BusyBox shell loop of 17.0 M x86 instructions)
+---------------------------------------------------------------------------
+  first 22.5.12 build, MMU emulation on      85 k x86 instructions/s
+  MMU emulation off (harness default)        130 k
+  + core changes (fetch window, byte-swapped
+    word loads, inline memory fast paths,
+    32-bit budget counter, one jump table)    236 k   (131 s -> 72 s)
+  Measured with qemu-m68k block logs: 159 -> 139 m68k instructions per x86
+  instruction.  Tried and NOT kept (measured slower or no gain on m68k):
+  a decode cache that records/replays prefixes, ModRM components and immediates
+  (155-174 m68k instructions per x86 instruction: replay costs as much as
+  decoding, plus lookup), and an inline ModRM fast path (-1 %).
+  FS-UAE's own 68k JIT crashes with the Deadwood AROS ROM on this host
+  ("JIT: Can't handle access", also on a plain 68020 without RTG/Z3 RAM).

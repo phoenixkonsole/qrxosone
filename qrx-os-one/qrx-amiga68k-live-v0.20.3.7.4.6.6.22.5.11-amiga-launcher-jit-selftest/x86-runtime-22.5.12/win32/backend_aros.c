@@ -41,6 +41,9 @@ typedef struct bew {
     uint32_t h;
     int mbh;
     int full;                       /* next presentation must cover the whole window */
+    struct Screen *scr;             /* own full-screen display (DirectDraw exclusive mode) */
+    int scr8;                       /* that screen is 8-bit CLUT: palette loaded with LoadRGB32 */
+    uint32_t pal[256];              /* palette currently loaded into scr */
     char title[260];
     qsurf mb;
 } bew;
@@ -69,11 +72,47 @@ static void latin1(char *d, const wchar16 *s, int max)
     d[i] = 0;
 }
 
+/* DirectDraw exclusive mode: an own 8-bit screen with a borderless backdrop window,
+ * like Amiga games; returns 0 if no such display mode/screen is available */
+static int open_fullscreen(qwin *w, qwnd *t, bew *b)
+{
+    ULONG id = INVALID_ID;
+    if (w->verbose) qw_log(w, "AROS backend: looking for a %dx%dx8 display mode", t->fs_w, t->fs_h);
+    if (CyberGfxBase) id = BestCModeIDTags(CYBRBIDTG_NominalWidth, (ULONG)t->fs_w, CYBRBIDTG_NominalHeight, (ULONG)t->fs_h, CYBRBIDTG_Depth, 8, TAG_DONE);
+    if (id == INVALID_ID) id = BestModeID(BIDTAG_NominalWidth, (ULONG)t->fs_w, BIDTAG_NominalHeight, (ULONG)t->fs_h, BIDTAG_Depth, 8, TAG_DONE);
+    if (id == INVALID_ID) { qw_log(w, "AROS: no %dx%d 8-bit display mode, staying in a window", t->fs_w, t->fs_h); return 0; }
+    if (w->verbose) qw_log(w, "AROS backend: mode %08lx, opening screen", (unsigned long)id);
+    b->scr = OpenScreenTags(NULL, SA_DisplayID, id, SA_Width, (ULONG)t->fs_w, SA_Height, (ULONG)t->fs_h, SA_Depth, 8,
+                            SA_Quiet, TRUE, SA_ShowTitle, FALSE, SA_Type, CUSTOMSCREEN, SA_Title, (IPTR)"QRX DirectDraw", TAG_DONE);
+    if (!b->scr) { qw_log(w, "AROS: OpenScreen %dx%dx8 failed, staying in a window", t->fs_w, t->fs_h); return 0; }
+    if (w->verbose) qw_log(w, "AROS backend: screen open, opening backdrop window");
+    b->scr8 = !(CyberGfxBase && GetCyberMapAttr(b->scr->RastPort.BitMap, CYBRMATTR_ISCYBERGFX) &&
+                GetCyberMapAttr(b->scr->RastPort.BitMap, CYBRMATTR_DEPTH) > 8);
+    b->win = OpenWindowTags(NULL, WA_CustomScreen, (IPTR)b->scr, WA_Left, 0, WA_Top, 0, WA_Width, (ULONG)t->fs_w, WA_Height, (ULONG)t->fs_h,
+                            WA_Borderless, TRUE, WA_Backdrop, TRUE, WA_Activate, TRUE, WA_RMBTrap, TRUE, WA_ReportMouse, TRUE,
+                            WA_SimpleRefresh, TRUE, WA_NoCareRefresh, TRUE, WA_IDCMP, 0, TAG_DONE);
+    if (!b->win) { CloseScreen(b->scr); b->scr = NULL; return 0; }
+    b->mbh = 0;
+    memset(b->pal, 0xFF, sizeof(b->pal));
+    if (w->verbose) qw_log(w, "AROS backend: own screen %dx%dx8 (mode %08lx, %s) for window %08x", t->fs_w, t->fs_h, (unsigned long)id, b->scr8 ? "CLUT" : "truecolor", t->h);
+    return 1;
+}
+
 static void ar_create(qwin *w, qwnd *t)
 {
     bew *b = (bew *)calloc(1, sizeof(bew));
     int popup = (t->style & WS_POPUP) && !(t->style & WS_CAPTION);
     if (!b) return;
+    if (t->fs_w > 0 && open_fullscreen(w, t, b)) {
+        b->h = t->h;
+        b->win->UserPort = g_port;
+        b->win->UserData = (APTR)b;
+        ModifyIDCMP(b->win, IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_ACTIVEWINDOW);
+        t->be = b;
+        t->present = 1;
+        b->full = 1;
+        return;
+    }
     b->h = t->h;
     b->mbh = user_menubar_height(w, t);
     latin1(b->title, t->text, sizeof(b->title));
@@ -118,6 +157,7 @@ static void ar_destroy(qwin *w, qwnd *t)
     (void)w;
     if (!b) return;
     if (b->win) strip_close(b->win);
+    if (b->scr) CloseScreen(b->scr);
     free(b->mb.pix);
     free(b);
     t->be = NULL;
@@ -159,6 +199,7 @@ static void ar_present(qwin *w, qwnd *t)
     bew *b = (bew *)t->be;
     int mbh;
     if (!b || !b->win || !t->surf.pix) return;
+    if (b->scr) return;                             /* own DirectDraw screen: frames arrive via present8 */
     mbh = user_menubar_height(w, t);
     {
         static int npres;
@@ -342,5 +383,83 @@ static void ar_shutdown(qwin *w)
     free(g_tmp);
 }
 
-const qbackend qw_aros = { "aros", ar_init, ar_create, ar_destroy, ar_present, ar_title, ar_menu, ar_wait, ar_now, ar_shutdown };
+/* DirectDraw 8-bit frames: truecolor screens take the palette directly
+ * (WriteLUTPixelArray); CLUT screens get a pen table computed once per palette */
+/* -G: read back what the display shows (the window's RastPort) into a PPM file */
+static void grab_window(qwin *w, struct Window *win, int x0, int y0, int pw, int ph)
+{
+    uint8_t *rgb = (uint8_t *)malloc((size_t)pw * (size_t)ph * 3u);
+    FILE *f;
+    if (!rgb) return;
+    ReadPixelArray(rgb, 0, 0, (UWORD)(pw * 3), win->RPort, (UWORD)x0, (UWORD)y0, (UWORD)pw, (UWORD)ph, RECTFMT_RGB);
+    f = fopen(w->grab_path, "wb");
+    if (f) { fprintf(f, "P6\n%d %d\n255\n", pw, ph); fwrite(rgb, 1, (size_t)pw * (size_t)ph * 3u, f); fclose(f); }
+    qw_log(w, "AROS backend: display captured after %d frames -> %s", w->frames, w->grab_path);
+    free(rgb);
+}
+
+static void ar_present8(qwin *w, qwnd *t, const uint8_t *pix, int pitch, const uint32_t *pal, int pw, int ph)
+{
+    static uint32_t lastpal[256];
+    static UBYTE pens[256];
+    static int havepens;
+    bew *b = (bew *)t->be;
+    int x0, y0, y, x;
+    (void)w;
+    if (!b || !b->win) return;
+    if (pw > t->cw) pw = t->cw;
+    if (ph > t->ch) ph = t->ch;
+    if (pw <= 0 || ph <= 0) return;
+    x0 = b->win->BorderLeft; y0 = b->win->BorderTop + b->mbh;
+    if (b->scr) {                                   /* own screen: exact colours, no remapping */
+        if (b->scr8) {
+            if (memcmp(b->pal, pal, sizeof(b->pal))) {
+                static ULONG tab[256 * 3 + 2];
+                int i;
+                tab[0] = (256UL << 16) | 0;
+                for (i = 0; i < 256; i++) {
+                    tab[1 + i * 3] = ((pal[i] >> 16) & 0xFF) * 0x01010101u;
+                    tab[2 + i * 3] = ((pal[i] >> 8) & 0xFF) * 0x01010101u;
+                    tab[3 + i * 3] = (pal[i] & 0xFF) * 0x01010101u;
+                }
+                tab[1 + 256 * 3] = 0;
+                LoadRGB32(&b->scr->ViewPort, tab);
+                memcpy(b->pal, pal, sizeof(b->pal));
+            }
+            WriteChunkyPixels(b->win->RPort, 0, 0, (ULONG)(pw - 1), (ULONG)(ph - 1), (UBYTE *)pix, (LONG)pitch);
+        } else WriteLUTPixelArray((APTR)pix, 0, 0, (UWORD)pitch, b->win->RPort, (APTR)pal, 0, 0, (UWORD)pw, (UWORD)ph, CTABFMT_XRGB8);
+        if (w->grab_path[0] && ++w->frames == w->grab_at) grab_window(w, b->win, 0, 0, pw, ph);
+        return;
+    }
+    if (g_truecolor) {
+        WriteLUTPixelArray((APTR)pix, 0, 0, (UWORD)pitch, b->win->RPort, (APTR)pal, (UWORD)x0, (UWORD)y0, (UWORD)pw, (UWORD)ph, CTABFMT_XRGB8);
+        return;
+    }
+    if (!havepens || memcmp(lastpal, pal, sizeof(lastpal))) {
+        for (x = 0; x < 256; x++) pens[x] = (UBYTE)pen_for(pal[x]);
+        memcpy(lastpal, pal, sizeof(lastpal));
+        havepens = 1;
+    }
+    {
+        size_t m = (size_t)pw * (size_t)ph;
+        if (m > g_chunkyn) { free(g_chunky); g_chunky = (UBYTE *)malloc(m); g_chunkyn = g_chunky ? m : 0; }
+        if (!g_chunky) return;
+        for (y = 0; y < ph; y++) {
+            const uint8_t *s = pix + (size_t)y * (size_t)pitch;
+            UBYTE *d = g_chunky + (size_t)y * (size_t)pw;
+            for (x = 0; x < pw; x++) d[x] = pens[s[x]];
+        }
+        WriteChunkyPixels(b->win->RPort, (ULONG)x0, (ULONG)y0, (ULONG)(x0 + pw - 1), (ULONG)(y0 + ph - 1), g_chunky, (LONG)pw);
+    }
+}
+
+static void ar_reopen(qwin *w, qwnd *t)
+{
+    if (w->verbose) qw_log(w, "AROS backend: reopening window %08x (%s)", t->h, t->fs_w ? "own screen" : "Workbench");
+    ar_destroy(w, t);
+    if (w->verbose) qw_log(w, "AROS backend: old window closed");
+    ar_create(w, t);
+}
+
+const qbackend qw_aros = { "aros", ar_init, ar_create, ar_destroy, ar_present, ar_title, ar_menu, ar_wait, ar_now, ar_shutdown, ar_present8, ar_reopen };
 #endif
