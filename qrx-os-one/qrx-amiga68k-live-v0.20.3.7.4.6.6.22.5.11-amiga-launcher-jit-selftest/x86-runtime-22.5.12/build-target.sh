@@ -12,7 +12,8 @@ E2H="${QRX_ELF2HUNK:?QRX_ELF2HUNK (Deadwood elf2hunk) required}"
 case "$CC" in *m68k-amigaos-gcc) echo "ERROR: legacy m68k-amigaos-gcc rejected" >&2; exit 2;; esac
 read -r -a EXTRA <<< "${QRX_AROS_CFLAGS:-}"
 # -m68040 code also runs on the 68060; the FPU is required for the x87 emulation (doubles).
-CFLAGS=(-O2 -m68040 -fno-pic -fno-PIC -std=gnu99 -Wall -Wno-unused-parameter -Wno-sign-compare -Wno-format-truncation "${EXTRA[@]}")
+# No sibling calls: elf2hunk can only express PC-relative relocations below 64 KiB.
+CFLAGS=(-O2 -m68040 -fno-pic -fno-PIC -fno-optimize-sibling-calls -std=gnu99 -Wall -Wno-unused-parameter -Wno-sign-compare -Wno-format-truncation "${EXTRA[@]}")
 mkdir -p "$OUT/elf" "$OUT/hunk"
 build(){ local name="$1"; shift
   "$CC" "${CFLAGS[@]}" -o "$OUT/elf/$name.elf" "$@" -lm

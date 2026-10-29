@@ -683,7 +683,7 @@ static void st80(x86cpu *c, uint32_t a, double v)
     else if (v != 0.0) {
         int ex;
         double fr = frexp(v, &ex);            /* v = fr * 2^ex, 0.5 <= fr < 1 */
-        man = (uint64_t)ldexp(fr, 64);
+        man = x86_d2u64(ldexp(fr, 64));
         e = ex - 1 + 16383;
     }
     m_w64(c, a, man);
@@ -694,7 +694,7 @@ static int64_t fto_int(x86cpu *c, double v, int bits, int trunc)
     double r = trunc ? (v < 0 ? ceil(v) : floor(v)) : fround(c, v);
     double lim = bits == 16 ? 32768.0 : bits == 32 ? 2147483648.0 : 9223372036854775808.0;
     if (r != r || r >= lim || r < -lim) return bits == 16 ? -32768 : bits == 32 ? (int64_t)INT32_MIN : INT64_MIN;
-    return (int64_t)r;
+    return x86_d2i64(r);
 }
 static void fpu_arith(double *dst, double src, int op)
 {
@@ -846,7 +846,7 @@ static void fpu_exec(x86cpu *c, const prefix_t *p, uint8_t op)
                 r = sub == 0xF8 ? fmod(a, b) : remainder(a, b);
                 q = (a - r) / b;
                 ST(0) = r;
-                { int64_t qi = (int64_t)fabs(q); fset_cc(c, (qi >> 1) & 1, 0, qi & 1, (qi >> 2) & 1); }
+                { int64_t qi = fabs(q) < 9.2e18 ? x86_d2i64(fabs(q)) : 0; fset_cc(c, (qi >> 1) & 1, 0, qi & 1, (qi >> 2) & 1); }
                 return;
             }
             case 0xF6: c->top = (c->top - 1) & 7; return;

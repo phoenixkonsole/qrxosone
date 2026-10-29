@@ -1,0 +1,120 @@
+QRX OS One 22.5.12 - x86 runtime: Linux i386 programs and Win32 programs on AROS m68k
+=====================================================================================
+
+Overview
+--------
+  core/qrx86core.[ch]   portable IA-32 user-mode interpreter (big-endian safe)
+  linux/                qrx-i386  : Linux i386 personality (ELF loader + int 0x80)
+  win32/                qrx-win32 : Win32 HLE subsystem (PE loader + USER/GDI/kernel32/msvcrt...)
+  win32/apps/qrxclock.c QRXClock  : Win32 clock (built with MinGW into a real PE)
+  tests/                differential tests against native i386 execution + host suite
+  build-target.sh       Deadwood m68k-aros-gcc build, elf2hunk, HUNK gate (000003f3)
+
+No native x86 code is ever executed on the Amiga side: every guest instruction
+is interpreted.  The old QRX86 interpreter (22.5.x QRX86GRTExec) and its
+quarantined JIT are unchanged and still shipped; qrx86core is a new, separate core.
+
+qrx86core
+---------
+* Complete integer ISA used by compilers (ALU, shifts/rotates incl. RCL/RCR,
+  SHLD/SHRD, MUL/IMUL/DIV/IDIV, BT*, BSF/BSR, SETcc, CMOVcc, string ops with REP,
+  XADD, CMPXCHG, CMPXCHG8B, BSWAP, BCD, ENTER/LEAVE, PUSHA/POPA, CPUID, RDTSC).
+* x87 FPU with host doubles (arithmetic, compares incl. FCOMI/FUCOMI, FCMOVcc,
+  conversions, FSIN/FCOS/FPTAN/FPATAN/F2XM1/FYL2X/FSCALE/FPREM, FSAVE/FRSTOR,
+  80-bit loads/stores).  Precision is IEEE double, not 80-bit extended.
+* No MMX/SSE: CPUID reports an i686 with FPU, TSC, CX8, CMOV only, so glibc,
+  BusyBox, MinGW and ReactOS code select their generic paths.
+* Lazy flags, 2-level page table with W bit, 64-entry translation cache,
+  FS/GS segment bases (Linux set_thread_area TLS, Win32 TEB), HLE thunk window,
+  int hook, nested guest calls (x86_call) for callbacks, instruction budget.
+* Faults (page, #UD, #DE, ...) stop the guest with a register dump; they never
+  crash the host.
+
+Verification (host, x86_64 with i386 support - NOT a proof for m68k):
+  tests/gen-diff-test.py + compare-diff.py : ~4,300 random instruction cases
+      per seed (regs, EFLAGS, memory) identical to the real CPU; undefined flags
+      (Intel SDM) masked.  A deliberately broken ADC carry is detected.
+  tests/fpu-diff.c + compare-fpu.py : 11,205 x87 results; + - * / sqrt and all
+      conversions bit-exact (precision control = double), transcendental <= 4 ulp.
+
+qrx-i386 (Linux i386)
+---------------------
+  qrx-i386 [-r ROOT] [-t] [-b BUDGET] [-e VAR=VALUE]... PROGRAM [ARGS...]
+* Static ELF executables and dynamic ones via their PT_INTERP (ld-linux.so.2)
+  found below ROOT.
+* ~150 system calls mapped to POSIX (AROS posixc on the target): files,
+  directories (getdents/getdents64), stat64/statx, mmap2 (anonymous + file),
+  brk, TLS, clocks, uname ("i686"), ioctl TCGETS/TIOCGWINSZ, pipes, dup/fcntl...
+* Processes: fork/vfork/clone(SIGCHLD) copy the guest address space; all
+  processes run under a cooperative scheduler in ONE host task (time slices via
+  the instruction budget).  Pipes are in-process 64 KiB buffers; blocking
+  read/write/wait4 re-execute their int 0x80 later.  SIGPIPE terminates writers
+  (`yes | head` works).  No host fork(), no host threads -> works on AROS.
+* Not supported: threads (clone with CLONE_VM -> ENOSYS), signals delivery
+  (handlers are accepted but never called), sockets, ptrace, real file mapping
+  write-back (MAP_SHARED is a private copy).
+* Tested on the host: a static glibc 2.39 program and 27 BusyBox 1.36.1
+  (Ubuntu busybox-static i386) command lines with pipelines, awk, sed, gzip,
+  bzip2, md5/sha1/sha256, dc, factor - output identical to native execution.
+
+qrx-win32 (Win32 HLE)
+---------------------
+  qrx-win32 [-s SCRIPT] [-o OUTDIR] [-l LANGID] [-v] [-T] PROGRAM.EXE [ARGS...]
+* Loads PE32/i386 images, binds every import to a host-implemented function
+  (about 450 functions of kernel32, user32, gdi32, msvcrt, advapi32, comctl32,
+  shell32, winmm, ntdll).  No Microsoft or ReactOS DLL is loaded or needed.
+  An unimplemented import is reported by name when it is called.
+* USER: windows, classes, message queue, timers, paint/invalidate, focus,
+  capture, keyboard translation, accelerators, dialogs from DIALOG/DIALOGEX
+  templates (modal + modeless), standard controls Button (push, default,
+  check, radio with WS_GROUP groups, group box, owner-draw), Static, Edit,
+  ListBox; menus from MENU/MENUEX resources with a drawn menu bar and popup
+  menus (check marks, grayed items, accelerator text), MessageBox, ShellAbout.
+* GDI: 32-bit software surfaces, DCs, pens/brushes/fonts/bitmaps, BitBlt/
+  StretchBlt with ROP3 subset, DIB resources (1/4/8/16/24/32 bpp), lines,
+  rectangles, ellipses, polygons, text (TextOut/ExtTextOut/DrawText/DrawState).
+  Fonts are the AROS bitmap fonts "arial" 11-25 and "fixed" 13 (AROS Public
+  License), converted at build time by win32/gen-font.py (qrxwin_fontdata.h).
+* Resources are selected by language: default German (0x0407), -l 0x409 for
+  English; calc/winmine contain both.
+* Registry: in memory only (settings are not persisted between runs).
+* Backends: headless (deterministic virtual clock + test script + PPM
+  snapshots, used by the tests) and AROS (one Intuition window per Win32
+  top-level window on the Workbench/RTG screen; WritePixelArray output;
+  mouse incl. right button for the program, keyboard via MapRawKey).
+  Program menus are drawn inside the window (not the Intuition menu strip)
+  so the right mouse button stays available to the program (Minesweeper flags).
+* Not supported: threads, COM/OLE, common controls beyond InitCommonControls,
+  printing, sound (PlaySound returns TRUE silently), clipboard exchange with
+  AROS, context menus (TrackPopupMenu returns 0), file dialogs.
+
+Programs
+--------
+  ReactOS 0.4.15 calc.exe    German UI, standard + scientific mode;
+                             scripted test 12+34, *2, sqrt, 7/2, keyboard 5*5,
+                             pi -> 7/7 expectations pass.
+  ReactOS 0.4.15 winmine.exe board, LEDs, face, menus, clicks.
+  QRXClock (qrxclock.exe)    ReactOS 0.4.15 contains NO stand-alone clock program
+                             (its clock is part of timedate.cpl).  QRXClock is an
+                             open-source Win32 clock written for QRX and compiled
+                             with i686-w64-mingw32-gcc into a normal PE; it is run
+                             unmodified like any other Windows program.
+
+Desktop terminal (QRXDesktop)
+-----------------------------
+  i386 <prog> [args]   run a Linux i386 program (output in the terminal)
+  win32 <prog.exe>     start a Windows program in its own window
+  rechner | minesweeper | uhr   shortcuts for calc / winmine / QRXClock
+
+Build
+-----
+  bash x86-runtime-22.5.12/build-target.sh OUTDIR    (needs QRX_AROS_CC, QRX_ELF2HUNK,
+                                                      QRX_AROS_CFLAGS as for 22.5.11)
+  -O2 -m68040 (also runs on 68060), -fno-optimize-sibling-calls, and no
+  double->int64 libgcc helpers (x86_d2i64): elf2hunk can only encode
+  PC-relative relocations below 64 KiB inside a code hunk.  The binaries switch
+  to a private 1 MiB stack (NewStackSwap) because guest callbacks nest.
+
+Host tests
+----------
+  bash x86-runtime-22.5.12/tests/run-host-tests.sh WORKDIR [busybox-i386] [ReactOS-System32]

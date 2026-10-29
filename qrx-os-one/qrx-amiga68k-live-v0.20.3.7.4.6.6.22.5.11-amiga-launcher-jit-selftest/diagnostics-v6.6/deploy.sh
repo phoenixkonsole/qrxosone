@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 IFS=$'\n\t'
-REL="0.20.3.7.4.6.6.22.5.11"
+REL="0.20.3.7.4.6.6.22.5.12"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="${QRX_DEADWOOD_WORKSPACE:-/opt/qrx-os-one/deadwood-aros-build}"
 AROS_REF="${QRX_DEADWOOD_REF:-29dfac42dd55cddf813c695ab603f19ce2108656}"
@@ -132,6 +132,47 @@ done
 if grep -rlsI 'qrx-jit-selftest' "$SYSROOT/S" "$SYSROOT/QRX/S" "$HUNKROOT/QRX/S" 2>/dev/null | grep -v '/TestAmigaRun$' | grep -q .; then
   die "qrx-jit-selftest referenced from a startup/runtime script; it must stay manual"
 fi
+# 22.5.12: x86 runtime - qrx-i386 (Linux i386 ELF) and qrx-win32 (Win32 HLE) on qrx86core.
+say "Building 22.5.12 qrx-i386 / qrx-win32 (qrx86core)"
+X862212="$ROOT/../x86-runtime-22.5.12"
+[[ -x "$X862212/build-target.sh" ]] || die "22.5.12 x86-runtime sources missing"
+QRX_AROS_CC="$AROS_CC" QRX_ELF2HUNK="$ELF2HUNK" QRX_AROS_CFLAGS="$(printf '%s ' "${CCARGS[@]:6}")" \
+  bash "$X862212/build-target.sh" "$STAGE/x862212" || die "22.5.12 target build failed"
+for n in qrx-i386 qrx-win32; do
+  convert_one "$STAGE/x862212/hunk/$n" "$HUNKROOT/QRX/C/$n"; cp -f "$HUNKROOT/QRX/C/$n" "$SYSROOT/QRX/C/$n"
+done
+mkdir -p "$SYSROOT/QRX/Windows/QRX" "$HUNKROOT/QRX/Windows/QRX"
+CLK="$X862212/win32/apps/prebuilt/qrxclock.exe"
+if command -v i686-w64-mingw32-gcc >/dev/null 2>&1; then
+  i686-w64-mingw32-gcc -O2 -mwindows -o "$STAGE/x862212/qrxclock.exe" "$X862212/win32/apps/qrxclock.c" -lgdi32 && CLK="$STAGE/x862212/qrxclock.exe"
+else
+  (cd "$(dirname "$CLK")" && sha256sum -c qrxclock.exe.sha256) || die "prebuilt QRXClock SHA-256 mismatch"
+fi
+cp -f "$CLK" "$SYSROOT/QRX/Windows/QRX/qrxclock.exe"; cp -f "$CLK" "$HUNKROOT/QRX/Windows/QRX/qrxclock.exe"
+cp -f "$X862212/X86-RUNTIME-22.5.12.txt" "$SYSROOT/QRX/Docs/"; cp -f "$X862212/X86-RUNTIME-22.5.12.txt" "$HUNKROOT/QRX/Docs/"
+# Linux i386 sample userland: BusyBox 1.36.1 (Ubuntu busybox-static, GPL-2; source in upstream/busybox)
+UP="$ROOT/../../../upstream"
+if [[ -f "$UP/busybox/busybox-static_1.36.1-6ubuntu3_i386.deb" ]]; then
+  (cd "$UP/busybox" && sha256sum -c --quiet SHA256SUMS) || die "upstream/busybox SHA-256 mismatch"
+  rm -rf "$STAGE/bb"; mkdir -p "$STAGE/bb"
+  (cd "$STAGE/bb" && dpkg-deb --fsys-tarfile "$UP/busybox/busybox-static_1.36.1-6ubuntu3_i386.deb" | tar xf - ./usr/bin/busybox) || die "busybox extraction failed (needs dpkg-deb)"
+  for r in "$SYSROOT" "$HUNKROOT"; do
+    mkdir -p "$r/QRX/Linux/bin"; cp -f "$STAGE/bb/usr/bin/busybox" "$r/QRX/Linux/bin/busybox"
+    printf 'BusyBox 1.36.1 (Ubuntu 1.36.1-6ubuntu3, i386 static) - GPL-2.0.\nComplete corresponding source: QRX OS One repository upstream/busybox/\n(busybox_1.36.1.orig.tar.bz2 + busybox_1.36.1-6ubuntu3.debian.tar.xz).\nRun: QRX:C/qrx-i386 QRX:Linux/bin/busybox <applet> [args]\n' > "$r/QRX/Linux/README-BUSYBOX.txt"
+  done
+else say "upstream/busybox missing: Linux sample userland not installed"; fi
+# Amiga 68k applications: Directory Opus 5.104 (APL) and HippoPlayer 2.67 (MIT)
+if [[ -f "$UP/amiga-apps/DOpus5_104_os3.lha" ]] && command -v lha >/dev/null 2>&1; then
+  (cd "$UP/amiga-apps" && sha256sum -c --quiet SHA256SUMS) || die "upstream/amiga-apps SHA-256 mismatch"
+  for r in "$SYSROOT" "$HUNKROOT"; do
+    mkdir -p "$r/Apps"; (cd "$r/Apps" && lha xq "$UP/amiga-apps/DOpus5_104_os3.lha" >/dev/null) || die "DOpus5 extraction failed"
+    rm -rf "$STAGE/hip"; mkdir -p "$STAGE/hip"; tar -xzf "$UP/amiga-apps/HippoPlayer-2.67-00200975.tar.gz" -C "$STAGE/hip"
+    mkdir -p "$r/Apps/HippoPlayer"; cp -f "$STAGE/hip/HippoPlayer-2.67/dist/"{HiP,HiP.info,playsid.library} "$r/Apps/HippoPlayer/"
+    cp -f "$STAGE/hip/HippoPlayer-2.67/LICENSE.md" "$r/Apps/HippoPlayer/LICENSE.md"
+  done
+  [[ "$(od -An -tx1 -N4 "$HUNKROOT/Apps/HippoPlayer/HiP" | tr -d ' \n')" == 000003f3 ]] || die "HippoPlayer HUNK proof failed"
+  [[ "$(od -An -tx1 -N4 "$HUNKROOT/Apps/DOpus5/DirectoryOpus" | tr -d ' \n')" == 000003f3 ]] || die "DOpus5 HUNK proof failed"
+else say "upstream/amiga-apps or lha missing: DOpus5/HippoPlayer not installed"; fi
 cat > "$SYSROOT/QRX/Diagnostics/ABI-PROOF-README.txt" <<EOF
 QRX $REL strict Deadwood native AROS ABI packaging proof
 Compiler: $AROS_CC

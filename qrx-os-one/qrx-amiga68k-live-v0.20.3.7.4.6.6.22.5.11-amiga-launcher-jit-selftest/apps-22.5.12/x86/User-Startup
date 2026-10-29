@@ -1,0 +1,39 @@
+; QRX 22.5.12 scenario: Linux i386 and Win32 programs on AROS m68k (qrx86core)
+FailAt 1000
+Assign QRX: SYS:QRX >NIL:
+Run <NIL: >NIL: WANDERER:Wanderer
+Wait 15
+CD SYS:X86
+Echo "QRXTEST START" >QRXOUT:log.txt
+; ---- Linux i386 (static glibc / BusyBox)
+QRX:C/qrx-i386 hello32 a b >QRXOUT:hello.txt
+Echo "QRXTEST HELLO rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-i386 difft >QRXOUT:diff-emu.bin
+Echo "QRXTEST DIFF rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-i386 fpu >QRXOUT:fpu-emu.txt
+Echo "QRXTEST FPU rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-i386 busybox uname -a >QRXOUT:bb-uname.txt
+Echo "QRXTEST BB-UNAME rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-i386 busybox sh -c "seq 1 200 | md5sum; echo $((6*7)); for i in 1 2 3; do echo n$i; done | wc -l" >QRXOUT:bb-sh.txt
+Echo "QRXTEST BB-SH rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-i386 busybox ls -la >QRXOUT:bb-ls.txt
+Echo "QRXTEST BB-LS rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-i386 busybox sh -c "yes qrx | head -3; echo pipe-ok" >QRXOUT:bb-yes.txt
+Echo "QRXTEST BB-YES rc=$RC" >>QRXOUT:log.txt
+; ---- Win32 (headless scripted functional tests, snapshots into QRXOUT:)
+QRX:C/qrx-win32 -o QRXOUT: -s calc-test.txt calc.exe >QRXOUT:win-calc.txt
+Echo "QRXTEST WIN-CALC rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-win32 -o QRXOUT: -s winmine-test.txt winmine.exe >QRXOUT:win-mine.txt
+Echo "QRXTEST WIN-MINE rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-win32 -o QRXOUT: -s clock-test.txt qrxclock.exe >QRXOUT:win-clock.txt
+Echo "QRXTEST WIN-CLOCK rc=$RC" >>QRXOUT:log.txt
+; ---- Win32 live on the Workbench screen (AROS Intuition backend)
+Run >QRXOUT:live-calc.txt QRX:C/qrx-win32 calc.exe
+Run >QRXOUT:live-mine.txt QRX:C/qrx-win32 winmine.exe
+Run >QRXOUT:live-clock.txt QRX:C/qrx-win32 qrxclock.exe
+Wait 40
+Avail >QRXOUT:avail.txt
+Status FULL >QRXOUT:tasks.txt
+QRX:C/QRXScreenGrab QRXOUT:live.ppm >QRXOUT:grab.txt
+Echo "QRXTEST END" >>QRXOUT:log.txt
+Echo "done" >QRXOUT:DONE

@@ -1,0 +1,42 @@
+# QRX 22.5.12 calc test: 12 + 34 = 46, then 46 * 2 = 92, sqrt(81) = 9, 7 / 2 = 3,5
+wait 300
+clickid 1036
+clickid 1041
+expect 1074 12,
+clickid 1052
+clickid 1046
+clickid 1035
+clickid 1057
+expect 1074 46,
+clickid 1050
+clickid 1041
+clickid 1057
+expect 1074 92,
+clickid 1071
+clickid 1039
+clickid 1036
+clickid 1085
+expect 1074 9,
+clickid 1071
+clickid 1034
+clickid 1049
+clickid 1041
+clickid 1057
+expect 1074 3,5
+wait 200
+snap calc-result.ppm
+# keyboard input: 5 * 5 Enter
+clickid 1071
+type 5*5
+key 0x0D
+wait 100
+expect 1074 25,
+menu 40005
+wait 300
+snap calc-scientific.ppm
+clickid 1071
+clickid 1033
+expect 1074 3,14159265358979
+wait 100
+snap calc-pi.ppm
+close

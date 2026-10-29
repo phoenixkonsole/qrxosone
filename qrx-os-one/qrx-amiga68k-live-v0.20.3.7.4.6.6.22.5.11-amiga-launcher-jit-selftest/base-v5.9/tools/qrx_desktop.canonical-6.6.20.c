@@ -284,7 +284,7 @@ static int line_count = 0;
 static char input[INPUT_LEN + 1];
 static int input_len = 0;
 static int qrx_term_scroll = 0;
-static void qrx_complete(void){static const char*cmds[]={"help","version","info","mem","clear","about","writer","sheet","presenter","hardware","files","htop","ai","compat","qrx86","x86run","winrun","wineboot","reactosnotepad","amigarun","amigacheck",0};int i,n=0,hit=-1;for(i=0;cmds[i];i++)if(!strncmp(cmds[i],input,input_len)){n++;hit=i;}if(n==1){strncpy(input,cmds[hit],INPUT_LEN);input[INPUT_LEN]=0;input_len=strlen(input);}}
+static void qrx_complete(void){static const char*cmds[]={"help","version","info","mem","clear","about","writer","sheet","presenter","hardware","files","htop","ai","compat","qrx86","x86run","winrun","wineboot","reactosnotepad","amigarun","amigacheck","i386","win32","rechner","minesweeper","uhr",0};int i,n=0,hit=-1;for(i=0;cmds[i];i++)if(!strncmp(cmds[i],input,input_len)){n++;hit=i;}if(n==1){strncpy(input,cmds[hit],INPUT_LEN);input[INPUT_LEN]=0;input_len=strlen(input);}}
 
 static ULONG rgb32(UBYTE v) {
     return ((ULONG)v << 24) | ((ULONG)v << 16) | ((ULONG)v << 8) | (ULONG)v;
@@ -2959,6 +2959,7 @@ static int execute_command(const char *cmd) {
         add_line("pwd ls cat cp mv rm mkdir uname socket mmap");
         add_line("windows focus <n> desktop open legacy takeover runmode ai chat color quit");
         add_line("amigacheck <prog>  amigarun [ASYNC] [STACK=n] <prog> [args]  (AmigaOS 1.x-3.x HUNK)");
+        add_line("i386 <prog> [args]  win32 <prog.exe>  rechner minesweeper uhr  (x86 via qrx86core)");
         add_line("welcome on|off  (Welcome dialog autostart)");
     } else if (!strcmp(cmd, "version") || !strcmp(cmd, "ver")) {
         add_line("QRX OS One Amiga 68K native desktop v0.20");
@@ -3334,6 +3335,20 @@ static int execute_command(const char *cmd) {
         save_preferences();
         add_line(g_welcome_autostart ? "Welcome dialog will open at desktop start." :
                                        "Welcome dialog autostart off (saves a process and a window).");
+    } else if (!strncmp(cmd, "i386 ", 5)) {
+        /* 22.5.12: Linux i386 ELF programs through qrx-i386 (qrx86core interpreter, no native x86). */
+        snprintf(doscmd, sizeof(doscmd), "QRX:C/qrx-i386 %s", cmd + 5);
+        execute_capture(doscmd);
+    } else if (!strncmp(cmd, "win32 ", 6)) {
+        /* 22.5.12: Win32 GUI programs through qrx-win32 (HLE subsystem, own Intuition windows). */
+        snprintf(doscmd, sizeof(doscmd), "QRX:C/qrx-win32 %s", cmd + 6);
+        launch_native(doscmd);
+    } else if (!strcmp(cmd, "rechner")) {
+        launch_native("QRX:C/qrx-win32 QRX:Windows/ReactOS/System32/calc.exe");
+    } else if (!strcmp(cmd, "minesweeper")) {
+        launch_native("QRX:C/qrx-win32 QRX:Windows/ReactOS/System32/winmine.exe");
+    } else if (!strcmp(cmd, "uhr")) {
+        launch_native("QRX:C/qrx-win32 QRX:Windows/QRX/qrxclock.exe");
     } else if (!strncmp(cmd, "amigacheck ", 11)) {
         /* 22.5.11: classic HUNK check through QRXAmigaRun (AROS LoadSeg + library probe). */
         snprintf(doscmd, sizeof(doscmd), "QRX:C/QRXAmigaRun CHECK %s", cmd + 11);

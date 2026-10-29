@@ -173,14 +173,61 @@ static void normalize(char *out, size_t n, const char *cwd, const char *path)
     if (!out[0]) strcpy(out, "/");
 }
 
-/* guest path -> host path; returns 0 for special names handled internally */
+/* join a host directory and a name (AmigaDOS: no '/' after "VOL:") */
+static void hjoin(char *out, size_t n, const char *dir, const char *name)
+{
+    size_t L = strlen(dir);
+    if (!L) snprintf(out, n, "%s", name);
+    else if (dir[L - 1] == '/' || dir[L - 1] == ':') snprintf(out, n, "%s%s", dir, name);
+    else snprintf(out, n, "%s/%s", dir, name);
+}
+
+/* absolute guest path -> host path.
+ * POSIX hosts: identical (or below ROOT).
+ * AROS: posixc uses AmigaDOS paths, so "/VOL/a/b" <-> "VOL:a/b"; with ROOT
+ * (an AmigaDOS directory) "/a/b" -> "ROOT/a/b". */
+static void guest_to_host(const lxopts *o, const char *ab, char *h, size_t n)
+{
+#ifdef __AROS__
+    if (o->root && o->root[0]) { if (!ab[1]) snprintf(h, n, "%s", o->root); else hjoin(h, n, o->root, ab + 1); return; }
+    {
+        const char *v = ab + 1, *sl = strchr(v, '/');
+        if (!*v) { snprintf(h, n, "SYS:"); return; }
+        if (!sl) snprintf(h, n, "%s:", v);
+        else snprintf(h, n, "%.*s:%s", (int)(sl - v), v, sl + 1);
+    }
+#else
+    if (o->root && o->root[0]) snprintf(h, n, "%s%s", o->root, strcmp(ab, "/") ? ab : "/");
+    else snprintf(h, n, "%s", ab);
+#endif
+}
+
+/* host path (as returned by getcwd or stored for directories) -> absolute guest path */
+static void host_to_guest(const lxopts *o, const char *h, char *g, size_t n)
+{
+#ifdef __AROS__
+    const char *c = strchr(h, ':');
+    if (o->root && o->root[0]) {
+        size_t L = strlen(o->root);
+        if (!strncmp(h, o->root, L)) { const char *r = h + L; while (*r == '/') r++; snprintf(g, n, "/%s", r); return; }
+        snprintf(g, n, "/");
+        return;
+    }
+    if (c) { if (c[1]) snprintf(g, n, "/%.*s/%s", (int)(c - h), h, c + 1); else snprintf(g, n, "/%.*s", (int)(c - h), h); }
+    else snprintf(g, n, "/%s", h);
+#else
+    if (o->root && o->root[0] && !strncmp(h, o->root, strlen(o->root))) snprintf(g, n, "%s", h[strlen(o->root)] ? h + strlen(o->root) : "/");
+    else snprintf(g, n, "%s", h);
+#endif
+}
+
+/* guest path -> host path */
 static void hostpath(lxproc *p, const char *g, char *h, size_t n)
 {
     char ab[1536];
     normalize(ab, sizeof(ab), p->cwd, g);
     if (!strcmp(ab, "/proc/self/exe")) normalize(ab, sizeof(ab), "/", p->exe);
-    if (p->o->root && p->o->root[0]) snprintf(h, n, "%s%s", p->o->root, strcmp(ab, "/") ? ab : "/");
-    else snprintf(h, n, "%s", ab);
+    guest_to_host(p->o, ab, h, n);
 }
 
 static lxfile *fnew(int kind)
@@ -363,7 +410,11 @@ static const char *exec_image(lxproc *p, const char *gpath, int argc, char **arg
         free(ib);
         if (err) return err;
     }
-    normalize(p->exe, sizeof(p->exe), p->cwd, gpath);
+    {   /* re-exec through /proc/self/exe keeps the image name (BusyBox standalone applets) */
+        char ab[1024];
+        normalize(ab, sizeof(ab), p->cwd, gpath);
+        if (strcmp(ab, "/proc/self/exe") || !p->exe[0]) snprintf(p->exe, sizeof(p->exe), "%s", ab);
+    }
     p->brk_start = p->brk_cur = (im.end + X86_PAGE_MASK) & ~X86_PAGE_MASK;
     /* stack */
     if (!x86_map(&p->cpu, LX_STACK_TOP - LX_STACK_SIZE, LX_STACK_SIZE, 1)) return "out of memory (stack)";
@@ -502,7 +553,7 @@ static uint32_t do_getdents(lxproc *p, lxfile *f, uint32_t buf, uint32_t cnt, in
         nl = (uint32_t)strlen(de->d_name);
         rl = is64 ? ((19 + nl + 1 + 7) & ~7u) : ((10 + nl + 2 + 3) & ~3u);
         if (used + rl > cnt) { f->pend = de; if (!used) return NEG(L_EINVAL); break; }
-        snprintf(full, sizeof(full), "%s/%s", f->path, de->d_name);
+        hjoin(full, sizeof(full), f->path, de->d_name);
         if (lstat(full, &st) == 0) {
             uint32_t m = lmode(&st) & 0170000u;
             dtype = (uint8_t)(m >> 12);
@@ -829,8 +880,7 @@ static uint32_t syscall_dispatch(lxproc *p, uint32_t nr, uint32_t a1, uint32_t a
         { char ab[1024]; normalize(ab, sizeof(ab), p->cwd, path); strcpy(p->cwd, ab); }
         return 0;
     case 133: f = fget(p, a1); if (!f || f->kind != F_DIR) return NEG(L_ENOTDIR);
-        if (p->o->root && p->o->root[0] && !strncmp(f->path, p->o->root, strlen(p->o->root))) snprintf(p->cwd, sizeof(p->cwd), "%s", f->path + strlen(p->o->root));
-        else snprintf(p->cwd, sizeof(p->cwd), "%s", f->path);
+        host_to_guest(p->o, f->path, p->cwd, sizeof(p->cwd));
         if (!p->cwd[0]) strcpy(p->cwd, "/");
         return 0;
     case 13: { uint32_t t = (uint32_t)time(NULL); if (a1) x86_wr32(c, a1, t); return t; }
@@ -1146,7 +1196,13 @@ int lx_run(const lxopts *o, const char *path, int argc, char **argv, char **envp
     int envc = 0, st, i;
     if (!p) return 127;
     /* without a root the guest sees the host file system: start in the host cwd */
-    if (!o->root || !o->root[0]) { char cw[1024]; if (getcwd(cw, sizeof(cw)) && cw[0] == '/') snprintf(p->cwd, sizeof(p->cwd), "%s", cw); }
+    if (!o->root || !o->root[0]) { char cw[1024]; if (getcwd(cw, sizeof(cw))) host_to_guest(o, cw, p->cwd, sizeof(p->cwd)); }
+#ifdef __AROS__
+    {   /* an AmigaDOS program path (VOL:dir/file) given on the command line */
+        static char gp[1100];
+        if (strchr(path, ':') && (!o->root || !o->root[0])) { host_to_guest(o, path, gp, sizeof(gp)); path = gp; }
+    }
+#endif
     for (i = 0; i < 3; i++) { lxfile *f = fnew(F_HOST); if (f) { f->hfd = i; p->fd[i] = f; } }
     while (envp && envp[envc]) envc++;
     err = exec_image(p, path, argc, argv, envc, envp);

@@ -63,7 +63,8 @@ need('diagnostics-v6.6/tools/qrx_theme.h', 'SetDrMd(r,JAM1)')
 need('diagnostics-v6.6/tools/qrx_unified_apps.c', 'defined(APP_WRITER)||defined(APP_SHEET)||defined(APP_PRESENTER)')
 
 # Deploy wiring
-dep = need('diagnostics-v6.6/deploy.sh', 'REL="0.20.3.7.4.6.6.22.5.11"', 'build-target.sh', 'QRXAmigaRun amigarun amigacheck qrx-jit-selftest',
+# 22.5.12: the release string moved on; 22.5.11 wiring must stay present in any 22.5.1x release
+dep = need('diagnostics-v6.6/deploy.sh', 'REL="0.20.3.7.4.6.6.22.5.1', 'build-target.sh', 'QRXAmigaRun amigarun amigacheck qrx-jit-selftest',
            'FINAL ISO GATE: QRX:Tests/Amiga/', 'qrx-jit-selftest referenced from a startup/runtime script')
 top = need('deploy.sh', 'validate-22.5.11.py')
 base = need('base-v5.9/deploy.sh', 'ADF_SECTORS="${QRX_EMERGENCY_ADF_SECTORS:-3520}"', 'EBFHUNKROM="${QRX_EBFHUNKROM:-no}"')

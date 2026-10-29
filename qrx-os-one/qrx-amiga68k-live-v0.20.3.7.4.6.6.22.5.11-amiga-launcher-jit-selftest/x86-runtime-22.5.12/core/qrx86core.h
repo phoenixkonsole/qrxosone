@@ -125,6 +125,19 @@ double   x86_fpu_pop(x86cpu *c);
 /* Disassemble-free description of where we stopped. */
 void     x86_describe_fault(x86cpu *c, char *buf, size_t n);
 
+/* double -> 64-bit integer (truncating) without libgcc __fixdfdi/__fixunsdfdi:
+ * the m68k libgcc versions use PC-relative calls that elf2hunk cannot relocate
+ * in code hunks larger than 64 KiB.  Caller guarantees |v| < 2^64 (2^63 signed). */
+static inline uint64_t x86_d2u64(double v)
+{
+    double hi = (double)(uint32_t)(v / 4294967296.0);
+    return ((uint64_t)(uint32_t)hi << 32) | (uint32_t)(v - hi * 4294967296.0);
+}
+static inline int64_t x86_d2i64(double v)
+{
+    return v < 0 ? -(int64_t)x86_d2u64(-v) : (int64_t)x86_d2u64(v);
+}
+
 #define X86_CALL_SENTINEL 0xFFFFFFF0u   /* return address used by x86_call */
 
 #endif

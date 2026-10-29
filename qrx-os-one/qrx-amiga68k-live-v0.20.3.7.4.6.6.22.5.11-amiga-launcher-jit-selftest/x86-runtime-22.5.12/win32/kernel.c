@@ -426,7 +426,7 @@ FN(m_modf) {
     memcpy(&u, &ip, 8); WR32(a[2], (uint32_t)u); WR32(a[2] + 4, (uint32_t)(u >> 32));
     return retd(w, fr);
 }
-FN(m_ftol) { double d = x86_fpu_pop(C); int64_t v = (int64_t)d; C->r[X86_EDX] = (uint32_t)((uint64_t)v >> 32); return (uint32_t)v; }
+FN(m_ftol) { double d = x86_fpu_pop(C); int64_t v = fabs(d) < 9.2e18 ? x86_d2i64(d) : INT64_MIN; C->r[X86_EDX] = (uint32_t)((uint64_t)v >> 32); return (uint32_t)v; }
 FN(m_CIpow) { double y = x86_fpu_pop(C), x = x86_fpu_pop(C); return retd(w, pow(x, y)); }
 FN(m_bsearch) {
     uint32_t lo = 0, hi = a[2];

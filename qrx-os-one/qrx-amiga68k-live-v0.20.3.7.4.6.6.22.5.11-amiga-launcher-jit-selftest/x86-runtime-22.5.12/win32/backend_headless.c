@@ -127,7 +127,14 @@ static int hl_wait(qwin *w, uint32_t timeout, qevent *ev)
         if (!strcmp(cmd, "snap")) {
             ev->type = QE_SNAP;
             if (rest[0] == '/') snprintf(ev->arg, sizeof(ev->arg), "%s", rest);
-            else snprintf(ev->arg, sizeof(ev->arg), "%s/%s", w->outdir[0] ? w->outdir : ".", rest);
+            else {
+                /* AmigaDOS: no '/' after "VOL:"; "" is the current directory */
+                const char *od = w->outdir;
+                size_t L = strlen(od);
+                if (!L || !strcmp(od, ".")) snprintf(ev->arg, sizeof(ev->arg), "%s", rest);
+                else if (od[L - 1] == '/' || od[L - 1] == ':') snprintf(ev->arg, sizeof(ev->arg), "%s%s", od, rest);
+                else snprintf(ev->arg, sizeof(ev->arg), "%s/%s", od, rest);
+            }
             return 1;
         }
         if (!strcmp(cmd, "text")) { ev->type = QE_TEXT; ev->id = atoi(rest); return 1; }
