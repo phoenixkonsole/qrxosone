@@ -150,6 +150,9 @@ static void scan_refs(struct qrx_hunk_report *r, const unsigned char *p, qrx_u32
             while (start < i && !((p[start] >= 'a' && p[start] <= 'z') || (p[start] >= 'A' && p[start] <= 'Z') ||
                                   (p[start] >= '0' && p[start] <= '9')))
                 start++;
+            /* a string placed right after an RTS (4E 75 = "Nu") in a CODE hunk must
+             * not absorb the opcode bytes: "\x4e\x75dos.library" is dos.library */
+            while (i - start > 2 && p[start] == 0x4E && p[start + 1] == 0x75) start += 2;
             if (start < i) add_ref(r, p + start, end - start, k == 1);
         }
     }

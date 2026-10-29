@@ -1,4 +1,4 @@
-/* QRX 22.5.11 test helper: dump the front Intuition screen as binary PPM.
+/* QRX 22.5.11/22.5.12 test helper: dump the front Intuition screen as binary PPM.
  *   QRXScreenGrab <file.ppm>    (uses cybergraphics ReadPixelArray: works on RTG and native) */
 #include <exec/types.h>
 #include <intuition/intuitionbase.h>
@@ -25,11 +25,11 @@ int main(int argc, char **argv)
     lock = LockIBase(0);
     s = IntuitionBase->FirstScreen;
     UnlockIBase(lock);
-    if (!s) return 20;
+    if (!s) { printf("QRXGRAB ERROR no front screen\n"); return 20; }
     w = s->Width; h = s->Height;
     line = AllocVec((ULONG)w * 3, MEMF_ANY);
     fh = Open((CONST_STRPTR)argv[1], MODE_NEWFILE);
-    if (!line || !fh) return 20;
+    if (!line || !fh) { printf("QRXGRAB ERROR %s\n", !line ? "out of memory" : "cannot open output file"); if (fh) Close(fh); if (line) FreeVec(line); return 20; }
     sprintf(hdr, "P6\n%d %d\n255\n", (int)w, (int)h);
     Write(fh, hdr, strlen(hdr));
     for (y = 0; y < h; y++) {

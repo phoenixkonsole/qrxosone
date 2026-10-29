@@ -42,7 +42,7 @@ def hunk_file(hunks, header_sizes=None, table=None, first=0, extra=b'', resident
 
 # 68k: moveq #0,d0 ; rts  + a string table referencing libraries
 CODE = bytes.fromhex('70004e75') + b'\0\0\0\0'
-LIBSTR = b'dos.library\0intuition.library\0qrxnonexistent.library\0timer.device\0LIBS:gadtools.library\0not..library\0'
+LIBSTR = b'\x4e\x75graphics.library\0dos.library\0intuition.library\0qrxnonexistent.library\0timer.device\0LIBS:gadtools.library\0not..library\0'
 
 def cases():
     c = {}
@@ -90,7 +90,7 @@ EXPECT = {
     # name: (exit, kind, valid, runnable, extra-checks)
     'minimal': (0, 2, 1, 1, ['HUNKS=1', 'HUNK0=CODE alloc=8']),
     'code_data_bss': (0, 2, 1, 1, ['HUNKS=3', 'RELOCS=1', 'HUNK2=BSS alloc=256',
-                                   'REFS=dos.library,intuition.library,qrxnonexistent.library,timer.device,gadtools.library']),
+                                   'REFS=graphics.library,dos.library,intuition.library,qrxnonexistent.library,timer.device,gadtools.library']),
     'chip': (0, 2, 1, 1, ['CHIP=16', 'WARN=requests Chip RAM']),
     'reloc32short': (0, 2, 1, 1, ['RELOCS=2']),
     'symbols_debug': (0, 2, 1, 1, ['SYMBOLS=1', 'DEBUG=1']),
