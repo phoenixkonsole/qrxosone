@@ -21,12 +21,17 @@ New components
 
 Programs
   Windows (ReactOS 0.4.15, unmodified): calc.exe (Rechner), winmine.exe
-  (Minesweeper).  ReactOS has no stand-alone clock -> QRXClock (own MinGW PE).
+  (Minesweeper), sol.exe (Solitaire) and spider.exe with cards.dll.  ReactOS has
+  no stand-alone clock -> QRXClock (own MinGW PE).
+  DirectX 3 (DirectDraw/DirectSound/DirectInput) HLE, verified with the own test
+  program dxtest.exe; exclusive 8-bit modes get an own AROS screen.
   Linux i386: BusyBox 1.36.1 (Debian/Ubuntu busybox-static), static glibc programs.
   Amiga 68k: Directory Opus 5.104 (open source), HippoPlayer 2.67 (open source);
   AmigaGPT tested but does not start on AROS (needs MUI classes + AmiSSL).
 
 Honest limits: everything x86 is interpreted (no JIT; the old QRX86 JIT stays
-quarantined); x87 is IEEE double; no threads/sockets/signal delivery; only
-emulator tests (FS-UAE), no real hardware.  Aminet was not reachable from the
+quarantined), about 236,000 x86 instructions/s in FS-UAE (a DirectDraw frame takes
+seconds); x87 is IEEE double; no threads/sockets/signal delivery/audio output;
+only emulator tests (FS-UAE), no real hardware.  No commercial game demo could
+be tested: the build environment cannot reach the download sites.  Aminet was not reachable from the
 build environment, the Amiga programs come from their GitHub releases.
