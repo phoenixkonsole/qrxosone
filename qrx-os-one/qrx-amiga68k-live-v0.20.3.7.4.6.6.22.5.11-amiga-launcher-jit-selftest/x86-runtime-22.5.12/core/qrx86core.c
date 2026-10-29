@@ -49,7 +49,26 @@ const char *x86_fault_name(int f)
 }
 
 /* ======================================================================= memory */
-static void tlb_flush(x86cpu *c) { memset(c->tlb_rtag, 0, sizeof(c->tlb_rtag)); memset(c->tlb_wtag, 0, sizeof(c->tlb_wtag)); }
+static void tlb_flush(x86cpu *c) { memset(c->tlb_rtag, 0, sizeof(c->tlb_rtag)); memset(c->tlb_wtag, 0, sizeof(c->tlb_wtag)); c->f_lim = 0; }
+
+/* little-endian guest words: on big-endian hosts one (unaligned) host load + byte swap;
+ * every CPU QRX targets (x86, 68020+, PPC) allows unaligned word/long accesses */
+#if defined(__GNUC__) && defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+X86_INLINE uint16_t ld16(const uint8_t *q) { uint16_t v; memcpy(&v, q, 2); return __builtin_bswap16(v); }
+X86_INLINE uint32_t ld32(const uint8_t *q) { uint32_t v; memcpy(&v, q, 4); return __builtin_bswap32(v); }
+X86_INLINE void st16(uint8_t *q, uint16_t v) { v = __builtin_bswap16(v); memcpy(q, &v, 2); }
+X86_INLINE void st32(uint8_t *q, uint32_t v) { v = __builtin_bswap32(v); memcpy(q, &v, 4); }
+#elif defined(__GNUC__) && defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+X86_INLINE uint16_t ld16(const uint8_t *q) { uint16_t v; memcpy(&v, q, 2); return v; }
+X86_INLINE uint32_t ld32(const uint8_t *q) { uint32_t v; memcpy(&v, q, 4); return v; }
+X86_INLINE void st16(uint8_t *q, uint16_t v) { memcpy(q, &v, 2); }
+X86_INLINE void st32(uint8_t *q, uint32_t v) { memcpy(q, &v, 4); }
+#else
+X86_INLINE uint16_t ld16(const uint8_t *q) { return (uint16_t)(q[0] | (q[1] << 8)); }
+X86_INLINE uint32_t ld32(const uint8_t *q) { return (uint32_t)q[0] | ((uint32_t)q[1] << 8) | ((uint32_t)q[2] << 16) | ((uint32_t)q[3] << 24); }
+X86_INLINE void st16(uint8_t *q, uint16_t v) { q[0] = (uint8_t)v; q[1] = (uint8_t)(v >> 8); }
+X86_INLINE void st32(uint8_t *q, uint32_t v) { q[0] = (uint8_t)v; q[1] = (uint8_t)(v >> 8); q[2] = (uint8_t)(v >> 16); q[3] = (uint8_t)(v >> 24); }
+#endif
 
 void x86_init(x86cpu *c)
 {
@@ -192,39 +211,47 @@ X86_INLINE uint8_t *wptr(x86cpu *c, uint32_t a)
 }
 X86_INLINE uint8_t m_r8(x86cpu *c, uint32_t a) { return *rptr(c, a); }
 X86_INLINE void m_w8(x86cpu *c, uint32_t a, uint8_t v) { *wptr(c, a) = v; }
-static uint16_t m_r16(x86cpu *c, uint32_t a)
+/* word/long accesses: inline fast path (same page, TLB hit), out-of-line rest */
+static uint16_t m_r16_slow(x86cpu *c, uint32_t a)
 {
-    if ((a & X86_PAGE_MASK) <= X86_PAGE_SIZE - 2) {
-        uint8_t *q = rptr(c, a);
-        return (uint16_t)(q[0] | (q[1] << 8));
-    }
+    if ((a & X86_PAGE_MASK) <= X86_PAGE_SIZE - 2) return ld16(rptr_slow(c, a));
     return (uint16_t)(m_r8(c, a) | (m_r8(c, a + 1) << 8));
 }
-static uint32_t m_r32(x86cpu *c, uint32_t a)
+static uint32_t m_r32_slow(x86cpu *c, uint32_t a)
 {
-    if ((a & X86_PAGE_MASK) <= X86_PAGE_SIZE - 4) {
-        uint8_t *q = rptr(c, a);
-        return (uint32_t)q[0] | ((uint32_t)q[1] << 8) | ((uint32_t)q[2] << 16) | ((uint32_t)q[3] << 24);
-    }
-    return (uint32_t)m_r16(c, a) | ((uint32_t)m_r16(c, a + 2) << 16);
+    if ((a & X86_PAGE_MASK) <= X86_PAGE_SIZE - 4) return ld32(rptr_slow(c, a));
+    return (uint32_t)m_r16_slow(c, a) | ((uint32_t)m_r16_slow(c, a + 2) << 16);
 }
-static void m_w16(x86cpu *c, uint32_t a, uint16_t v)
+static void m_w16_slow(x86cpu *c, uint32_t a, uint16_t v)
 {
-    if ((a & X86_PAGE_MASK) <= X86_PAGE_SIZE - 2) {
-        uint8_t *q = wptr(c, a);
-        q[0] = (uint8_t)v; q[1] = (uint8_t)(v >> 8);
-        return;
-    }
+    if ((a & X86_PAGE_MASK) <= X86_PAGE_SIZE - 2) { st16(wptr_slow(c, a), v); return; }
     m_w8(c, a, (uint8_t)v); m_w8(c, a + 1, (uint8_t)(v >> 8));
 }
-static void m_w32(x86cpu *c, uint32_t a, uint32_t v)
+static void m_w32_slow(x86cpu *c, uint32_t a, uint32_t v)
 {
-    if ((a & X86_PAGE_MASK) <= X86_PAGE_SIZE - 4) {
-        uint8_t *q = wptr(c, a);
-        q[0] = (uint8_t)v; q[1] = (uint8_t)(v >> 8); q[2] = (uint8_t)(v >> 16); q[3] = (uint8_t)(v >> 24);
-        return;
-    }
-    m_w16(c, a, (uint16_t)v); m_w16(c, a + 2, (uint16_t)(v >> 16));
+    if ((a & X86_PAGE_MASK) <= X86_PAGE_SIZE - 4) { st32(wptr_slow(c, a), v); return; }
+    m_w16_slow(c, a, (uint16_t)v); m_w16_slow(c, a + 2, (uint16_t)(v >> 16));
+}
+#define TLB_HIT(tag, a, room) (((a) & X86_PAGE_MASK) <= X86_PAGE_SIZE - (room) && (tag)[((a) >> 12) & 63u] == (((a) & ~X86_PAGE_MASK) | 1u))
+X86_INLINE uint16_t m_r16(x86cpu *c, uint32_t a)
+{
+    if (TLB_HIT(c->tlb_rtag, a, 2)) return ld16(c->tlb_rptr[(a >> 12) & 63u] + (a & X86_PAGE_MASK));
+    return m_r16_slow(c, a);
+}
+X86_INLINE uint32_t m_r32(x86cpu *c, uint32_t a)
+{
+    if (TLB_HIT(c->tlb_rtag, a, 4)) return ld32(c->tlb_rptr[(a >> 12) & 63u] + (a & X86_PAGE_MASK));
+    return m_r32_slow(c, a);
+}
+X86_INLINE void m_w16(x86cpu *c, uint32_t a, uint16_t v)
+{
+    if (TLB_HIT(c->tlb_wtag, a, 2)) { st16(c->tlb_wptr[(a >> 12) & 63u] + (a & X86_PAGE_MASK), v); return; }
+    m_w16_slow(c, a, v);
+}
+X86_INLINE void m_w32(x86cpu *c, uint32_t a, uint32_t v)
+{
+    if (TLB_HIT(c->tlb_wtag, a, 4)) { st32(c->tlb_wptr[(a >> 12) & 63u] + (a & X86_PAGE_MASK), v); return; }
+    m_w32_slow(c, a, v);
 }
 
 /* non-faulting public accessors (for hooks) */
@@ -250,10 +277,10 @@ static const uint8_t parity_tab[256] = {
 #undef P6
 };
 
-static uint32_t szmask(int sz) { return sz == 8 ? 0xFFu : sz == 16 ? 0xFFFFu : 0xFFFFFFFFu; }
-static uint32_t szsign(int sz) { return sz == 8 ? 0x80u : sz == 16 ? 0x8000u : 0x80000000u; }
+X86_INLINE uint32_t szmask(int sz) { return sz == 8 ? 0xFFu : sz == 16 ? 0xFFFFu : 0xFFFFFFFFu; }
+X86_INLINE uint32_t szsign(int sz) { return sz == 8 ? 0x80u : sz == 16 ? 0x8000u : 0x80000000u; }
 
-static void lf_set(x86cpu *c, int op, int sz, uint32_t res, uint32_t a, uint32_t b)
+X86_INLINE void lf_set(x86cpu *c, int op, int sz, uint32_t res, uint32_t a, uint32_t b)
 {
     c->lf_op = op; c->lf_sz = sz; c->lf_res = res & szmask(sz); c->lf_a = a; c->lf_b = b;
 }
@@ -415,17 +442,40 @@ typedef struct {
 
 typedef struct { int mod, reg, rm, isreg; uint32_t addr; } modrm_t;
 
+/* instruction fetch through the code-page window; the slow path refills it */
+static void fetch_refill(x86cpu *c)
+{
+    uint8_t *q = rptr(c, c->eip);                  /* faults if unmapped */
+    c->f_lo = c->eip & ~X86_PAGE_MASK;
+    c->f_base = q - (c->eip & X86_PAGE_MASK);
+    c->f_lim = X86_PAGE_SIZE;
+}
 X86_INLINE uint8_t fetch8(x86cpu *c)
 {
-    uint8_t v = m_r8(c, c->eip);
+    uint32_t o = c->eip - c->f_lo;
+    if (o >= c->f_lim) { fetch_refill(c); o = c->eip - c->f_lo; }
     c->eip++;
-    return v;
+    return c->f_base[o];
 }
-X86_INLINE uint16_t fetch16(x86cpu *c) { uint16_t v = m_r16(c, c->eip); c->eip += 2; return v; }
-X86_INLINE uint32_t fetch32(x86cpu *c) { uint32_t v = m_r32(c, c->eip); c->eip += 4; return v; }
+X86_INLINE uint16_t fetch16(x86cpu *c)
+{
+    uint32_t o = c->eip - c->f_lo;
+    uint16_t v;
+    if (o + 2 <= c->f_lim && o < c->f_lim) { c->eip += 2; return ld16(c->f_base + o); }
+    v = fetch8(c);
+    return (uint16_t)(v | (fetch8(c) << 8));
+}
+X86_INLINE uint32_t fetch32(x86cpu *c)
+{
+    uint32_t o = c->eip - c->f_lo;
+    uint32_t v;
+    if (o + 4 <= c->f_lim && o < c->f_lim) { c->eip += 4; return ld32(c->f_base + o); }
+    v = fetch16(c);
+    return v | ((uint32_t)fetch16(c) << 16);
+}
 static uint32_t fetchimm(x86cpu *c, int sz) { return sz == 8 ? fetch8(c) : sz == 16 ? fetch16(c) : fetch32(c); }
 
-static uint32_t seg_base(x86cpu *c, const prefix_t *p, int def) { return c->sbase[p->seg >= 0 ? p->seg : def]; }
+X86_INLINE uint32_t seg_base(x86cpu *c, const prefix_t *p, int def) { return c->sbase[p->seg >= 0 ? p->seg : def]; }
 
 static void decode_modrm(x86cpu *c, const prefix_t *p, modrm_t *m)
 {
@@ -467,33 +517,33 @@ static void decode_modrm(x86cpu *c, const prefix_t *p, modrm_t *m)
 }
 
 /* register helpers */
-static uint32_t reg_get(x86cpu *c, int r, int sz)
+X86_INLINE uint32_t reg_get(x86cpu *c, int r, int sz)
 {
     if (sz == 32) return c->r[r];
     if (sz == 16) return c->r[r] & 0xFFFF;
     return r < 4 ? c->r[r] & 0xFF : (c->r[r - 4] >> 8) & 0xFF;
 }
-static void reg_set(x86cpu *c, int r, int sz, uint32_t v)
+X86_INLINE void reg_set(x86cpu *c, int r, int sz, uint32_t v)
 {
     if (sz == 32) c->r[r] = v;
     else if (sz == 16) c->r[r] = (c->r[r] & 0xFFFF0000u) | (v & 0xFFFF);
     else if (r < 4) c->r[r] = (c->r[r] & 0xFFFFFF00u) | (v & 0xFF);
     else c->r[r - 4] = (c->r[r - 4] & 0xFFFF00FFu) | ((v & 0xFF) << 8);
 }
-static uint32_t mem_get(x86cpu *c, uint32_t a, int sz) { return sz == 32 ? m_r32(c, a) : sz == 16 ? m_r16(c, a) : m_r8(c, a); }
-static void mem_set(x86cpu *c, uint32_t a, int sz, uint32_t v)
+X86_INLINE uint32_t mem_get(x86cpu *c, uint32_t a, int sz) { return sz == 32 ? m_r32(c, a) : sz == 16 ? m_r16(c, a) : m_r8(c, a); }
+X86_INLINE void mem_set(x86cpu *c, uint32_t a, int sz, uint32_t v)
 {
     if (sz == 32) m_w32(c, a, v); else if (sz == 16) m_w16(c, a, (uint16_t)v); else m_w8(c, a, (uint8_t)v);
 }
-static uint32_t rm_get(x86cpu *c, const modrm_t *m, int sz) { return m->isreg ? reg_get(c, m->rm, sz) : mem_get(c, m->addr, sz); }
-static void rm_set(x86cpu *c, const modrm_t *m, int sz, uint32_t v) { if (m->isreg) reg_set(c, m->rm, sz, v); else mem_set(c, m->addr, sz, v); }
+X86_INLINE uint32_t rm_get(x86cpu *c, const modrm_t *m, int sz) { return m->isreg ? reg_get(c, m->rm, sz) : mem_get(c, m->addr, sz); }
+X86_INLINE void rm_set(x86cpu *c, const modrm_t *m, int sz, uint32_t v) { if (m->isreg) reg_set(c, m->rm, sz, v); else mem_set(c, m->addr, sz, v); }
 
-static void push(x86cpu *c, uint32_t v, int sz)
+X86_INLINE void push(x86cpu *c, uint32_t v, int sz)
 {
     if (sz == 16) { c->r[X86_ESP] -= 2; m_w16(c, c->r[X86_ESP], (uint16_t)v); }
     else { c->r[X86_ESP] -= 4; m_w32(c, c->r[X86_ESP], v); }
 }
-static uint32_t pop(x86cpu *c, int sz)
+X86_INLINE uint32_t pop(x86cpu *c, int sz)
 {
     uint32_t v;
     if (sz == 16) { v = m_r16(c, c->r[X86_ESP]); c->r[X86_ESP] += 2; }
@@ -964,6 +1014,7 @@ static void string_op(x86cpu *c, const prefix_t *p, uint8_t op, uint32_t start_e
         if (++iter >= 4096) {
             if (str_should_continue(c, p)) c->eip = start_eip;    /* resume later */
             c->icount += (uint64_t)iter;
+            c->left = c->left > (uint32_t)iter ? c->left - (uint32_t)iter : 0;
             return;
         }
     }
@@ -972,7 +1023,13 @@ static void string_op(x86cpu *c, const prefix_t *p, uint8_t op, uint32_t start_e
 /* ======================================================================= main step */
 static void bad(x86cpu *c, const char *msg) { FAULT(c, X86_FAULT_UD, c->cur_eip, msg); }
 
-static void exec_one(x86cpu *c)
+static const uint8_t prefix_tab[256] = {
+    [0x26] = 1, [0x2E] = 1, [0x36] = 1, [0x3E] = 1, [0x64] = 1, [0x65] = 1,
+    [0x66] = 1, [0x67] = 1, [0xF0] = 1, [0xF2] = 1, [0xF3] = 1
+};
+
+/* inlined into run_loop only: keeps the CPU pointer and the loop state in registers */
+X86_INLINE void exec_one(x86cpu *c)
 {
     prefix_t p;
     uint8_t op;
@@ -988,25 +1045,28 @@ static void exec_one(x86cpu *c)
         return;
     }
     p.osz = 32; p.asz = 32; p.rep = 0; p.seg = -1;
-    for (;;) {
-        op = fetch8(c);
+    op = fetch8(c);
+    while (prefix_tab[op]) {                /* one table test for the common no-prefix case */
         switch (op) {
-        case 0x66: p.osz = 16; continue;
-        case 0x67: p.asz = 16; continue;
-        case 0xF2: case 0xF3: p.rep = op; continue;
-        case 0xF0: continue;
-        case 0x26: p.seg = X86_ES; continue;
-        case 0x2E: p.seg = X86_CS; continue;
-        case 0x36: p.seg = X86_SS; continue;
-        case 0x3E: p.seg = X86_DS; continue;
-        case 0x64: p.seg = X86_FS; continue;
-        case 0x65: p.seg = X86_GS; continue;
+        case 0x66: p.osz = 16; break;
+        case 0x67: p.asz = 16; break;
+        case 0xF2: case 0xF3: p.rep = op; break;
+        case 0x26: p.seg = X86_ES; break;
+        case 0x2E: p.seg = X86_CS; break;
+        case 0x36: p.seg = X86_SS; break;
+        case 0x3E: p.seg = X86_DS; break;
+        case 0x64: p.seg = X86_FS; break;
+        case 0x65: p.seg = X86_GS; break;
+        default: break;                      /* 0xF0 LOCK */
         }
-        break;
+        op = fetch8(c);
     }
     sz = p.osz;
 
-    if (op < 0x40 && (op & 7) < 6) {      /* ALU group 00-3D */
+    /* one switch for every one-byte opcode: a single jump table instead of range tests */
+    switch (op) {
+    case 0x00 ... 0x05: case 0x08 ... 0x0D: case 0x10 ... 0x15: case 0x18 ... 0x1D:
+    case 0x20 ... 0x25: case 0x28 ... 0x2D: case 0x30 ... 0x35: case 0x38 ... 0x3D: {   /* ALU group */
         int aop = op >> 3, form = op & 7;
         uint32_t r;
         switch (form) {
@@ -1018,7 +1078,6 @@ static void exec_one(x86cpu *c)
         default: r = alu(c, aop, reg_get(c, X86_EAX, sz), fetchimm(c, sz), sz); if (aop != 7) reg_set(c, X86_EAX, sz, r); return;
         }
     }
-    switch (op) {
     case 0x06: push(c, c->sreg[X86_ES], sz); return;
     case 0x07: c->sreg[X86_ES] = (uint16_t)pop(c, sz); return;
     case 0x0E: push(c, c->sreg[X86_CS], sz); return;
@@ -1041,17 +1100,14 @@ static void exec_one(x86cpu *c)
             f |= X86_AF | X86_CF;
         } else f &= ~(X86_AF | X86_CF);
         reg_set(c, X86_EAX, 16, ax & 0xFF0F); c->eflags = f; return; }
-    }
-    if (op >= 0x40 && op <= 0x4F) { int r = op & 7; reg_set(c, r, sz, incdec(c, reg_get(c, r, sz), sz, op >= 0x48)); return; }
-    if (op >= 0x50 && op <= 0x57) { push(c, reg_get(c, op & 7, sz), sz); return; }
-    if (op >= 0x58 && op <= 0x5F) { uint32_t v = pop(c, sz); reg_set(c, op & 7, sz, v); return; }
-    if (op >= 0x70 && op <= 0x7F) { int8_t d = (int8_t)fetch8(c); if (cond(c, op & 15)) c->eip += (uint32_t)(int32_t)d; return; }
-    if (op >= 0x91 && op <= 0x97) { uint32_t t = reg_get(c, X86_EAX, sz); reg_set(c, X86_EAX, sz, reg_get(c, op & 7, sz)); reg_set(c, op & 7, sz, t); return; }
-    if (op >= 0xB0 && op <= 0xB7) { reg_set(c, op & 7, 8, fetch8(c)); return; }
-    if (op >= 0xB8 && op <= 0xBF) { reg_set(c, op & 7, sz, fetchimm(c, sz)); return; }
-    if (op >= 0xD8 && op <= 0xDF) { fpu_exec(c, &p, op); return; }
-
-    switch (op) {
+    case 0x40 ... 0x4F: { int r = op & 7; reg_set(c, r, sz, incdec(c, reg_get(c, r, sz), sz, op >= 0x48)); return; }
+    case 0x50 ... 0x57: push(c, reg_get(c, op & 7, sz), sz); return;
+    case 0x58 ... 0x5F: { uint32_t v = pop(c, sz); reg_set(c, op & 7, sz, v); return; }
+    case 0x70 ... 0x7F: { int8_t d = (int8_t)fetch8(c); if (cond(c, op & 15)) c->eip += (uint32_t)(int32_t)d; return; }
+    case 0x91 ... 0x97: { uint32_t t = reg_get(c, X86_EAX, sz); reg_set(c, X86_EAX, sz, reg_get(c, op & 7, sz)); reg_set(c, op & 7, sz, t); return; }
+    case 0xB0 ... 0xB7: reg_set(c, op & 7, 8, fetch8(c)); return;
+    case 0xB8 ... 0xBF: reg_set(c, op & 7, sz, fetchimm(c, sz)); return;
+    case 0xD8 ... 0xDF: fpu_exec(c, &p, op); return;
     case 0x60: { uint32_t sp = c->r[X86_ESP]; int i; for (i = 0; i < 8; i++) push(c, i == 4 ? sp : reg_get(c, i, sz), sz); return; }
     case 0x61: { int i; for (i = 7; i >= 0; i--) { uint32_t v = pop(c, sz); if (i != 4) reg_set(c, i, sz, v); } return; }
     case 0x68: push(c, fetchimm(c, sz), sz); return;
@@ -1320,30 +1376,41 @@ static void exec_one(x86cpu *c)
     bad(c, "unsupported 0F opcode");
 }
 
-int x86_step(x86cpu *c)
+
+/* instructions until the budget is reached, capped to 32 bits (refreshed when it runs out) */
+static uint32_t budget_left(const x86cpu *c)
 {
-    jmp_buf jb, *old = c->jb;
-    c->jb = &jb;
-    if (setjmp(jb)) { c->jb = old; return c->fault; }
-    exec_one(c);
-    c->icount++;
-    c->jb = old;
-    return c->fault;
+    uint64_t n;
+    if (!c->budget) return 0xFFFFFFFFu;
+    if (c->icount >= c->budget) return 0;
+    n = c->budget - c->icount;
+    return n > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)n;
 }
 
-int x86_run(x86cpu *c, uint32_t stop_eip)
+/* single = 1: exactly one instruction, no budget accounting (x86_step).  exec_one is
+ * inlined here exactly once. */
+static int run_loop(x86cpu *c, uint32_t stop_eip, int single)
 {
     jmp_buf jb, *old = c->jb;
     c->jb = &jb;
     if (setjmp(jb)) { c->jb = old; return c->fault; }
+    if (!single) c->left = budget_left(c);  /* nested runs share and decrement the same counter */
     while (!c->fault && !c->stop && c->eip != stop_eip) {
-        if (c->budget && c->icount >= c->budget) FAULT(c, X86_FAULT_BUDGET, c->eip, "instruction budget exhausted");
+        if (!single) {
+            if (!c->left && !(c->left = budget_left(c)))
+                FAULT(c, X86_FAULT_BUDGET, c->eip, "instruction budget exhausted");
+            c->left--;                        /* before exec_one: never wraps, even after nested runs */
+        }
         exec_one(c);
         c->icount++;
+        if (single) { if (c->left) c->left--; break; }
     }
     c->jb = old;
     return c->fault;
 }
+
+int x86_step(x86cpu *c) { c->fault = X86_OK; c->stop = 0; return run_loop(c, c->eip + 1u, 1); }
+int x86_run(x86cpu *c, uint32_t stop_eip) { return run_loop(c, stop_eip, 0); }
 
 uint32_t x86_call(x86cpu *c, uint32_t addr, int nargs, const uint32_t *args, int *ok)
 {

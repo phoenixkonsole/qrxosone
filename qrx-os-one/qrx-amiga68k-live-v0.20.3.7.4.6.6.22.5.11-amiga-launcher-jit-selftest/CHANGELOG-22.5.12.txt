@@ -39,6 +39,22 @@ New
   the x86 programs; generic emulator harness amiga-runtime-22.5.11/emulator/
   run-fsuae-scenario.sh.
 
+Speed (measured in FS-UAE, 68040, BusyBox shell loop = 17.0 M x86 instructions)
+-------------------------------------------------------------------------------
+* FS-UAE 68k JIT: tested (jit_compiler = 1 with direct/indirect memory, no FPU JIT,
+  hard flush, fault catching, without Z3 RAM, without RTG, plain 68020): FS-UAE
+  3.1.66 crashes on this host with the Deadwood AROS ROM ("JIT: Can't handle
+  access") or AROS does not boot.  The harness keeps it off (QRX_FSUAE_JIT=1 to try).
+* 68040/060 MMU emulation off by default in the harness (AROS does not use it):
+  85 k -> 130 k x86 instructions/s.
+* qrx86core for m68k: code-page fetch window, little-endian loads as one host
+  load + byte swap, inline memory fast paths, 32-bit budget counter, prefix
+  table, one jump table for all one-byte opcodes, interpreter loop with the
+  instruction body inlined.  Measured with qemu-m68k block logs: 159 -> 139 m68k
+  instructions per x86 instruction; in FS-UAE 131 s -> 72 s (236 k x86
+  instructions/s).  Same 37/37 host tests incl. the differential tests.
+* Total: 2.8x faster than the first 22.5.12 target run.
+
 Fixed
 -----
 * amigacheck/QRXAmigaRun library scan: an RTS opcode (0x4E75 = "Nu") directly

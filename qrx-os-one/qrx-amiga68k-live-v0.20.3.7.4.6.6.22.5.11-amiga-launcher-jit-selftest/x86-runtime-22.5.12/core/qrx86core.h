@@ -73,6 +73,11 @@ struct x86cpu {
      * map/unmap/protect so it never outlives a page */
     uint32_t tlb_rtag[64], tlb_wtag[64];
     uint8_t *tlb_rptr[64], *tlb_wptr[64];
+    /* instruction fetch window: host = f_base + (eip - f_lo) while eip - f_lo < f_lim
+     * (one code page; f_lim = 0 after a flush) */
+    uint32_t f_lo, f_lim;
+    uint8_t *f_base;
+    uint32_t left;                       /* instructions until the budget fault (32-bit: cheap on m68k) */
     /* control */
     uint64_t icount, budget;            /* budget 0 = unlimited */
     uint32_t hle_base, hle_count;
