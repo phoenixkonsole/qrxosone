@@ -1,0 +1,30 @@
+; QRX 22.5.12 live scenario: ReactOS calc.exe in its own Intuition window, operated with
+; real input events (QRXInput -> input.device), screenshots via QRXScreenGrab.
+FailAt 1000
+Run <NIL: >NIL: WANDERER:Wanderer
+Wait 15
+CD SYS:X86
+Run >NIL: QRX:C/qrx-win32 -v -L QRXOUT:live-calc.log calc.exe
+Wait 30
+QRX:C/QRXScreenGrab QRXOUT:live-1-start.ppm >QRXOUT:grab1.txt
+; mouse: 7 + 8 =
+QRX:C/QRXInput click 82 130
+QRX:C/QRXInput click 198 229
+QRX:C/QRXInput click 120 130
+QRX:C/QRXInput click 237 229
+Wait 10
+QRX:C/QRXScreenGrab QRXOUT:live-2-mouse.ppm >QRXOUT:grab2.txt
+; keyboard (raw keys): 2 * 3 Return  (keypad * = 0x5D, Return = 0x44)
+QRX:C/QRXInput key 0x02
+QRX:C/QRXInput key 0x5D
+QRX:C/QRXInput key 0x03
+QRX:C/QRXInput key 0x44
+Wait 10
+QRX:C/QRXScreenGrab QRXOUT:live-3-keys.ppm >QRXOUT:grab3.txt
+; start Minesweeper and the clock next to it
+Run >NIL: QRX:C/qrx-win32 -v -L QRXOUT:live-mine.log winmine.exe
+Wait 25
+Run >NIL: QRX:C/qrx-win32 -v -L QRXOUT:live-clock.log qrxclock.exe
+Wait 30
+QRX:C/QRXScreenGrab QRXOUT:live-4-all.ppm >QRXOUT:grab4.txt
+Echo "done" >QRXOUT:DONE

@@ -4,6 +4,8 @@ QRX OS One 22.5.12 - x86 runtime: Linux i386 programs and Win32 programs on AROS
 Overview
 --------
   core/qrx86core.[ch]   portable IA-32 user-mode interpreter (big-endian safe)
+  qmath/                deterministic double math: musl 1.2.5 subset (MIT, renamed qm_*)
+                        + qfloat.c exact double<->decimal conversion (printf/strtod)
   linux/                qrx-i386  : Linux i386 personality (ELF loader + int 0x80)
   win32/                qrx-win32 : Win32 HLE subsystem (PE loader + USER/GDI/kernel32/msvcrt...)
   win32/apps/qrxclock.c QRXClock  : Win32 clock (built with MinGW into a real PE)
@@ -30,6 +32,15 @@ qrx86core
 * Faults (page, #UD, #DE, ...) stop the guest with a register dump; they never
   crash the host.
 
+Why qmath: the x87 differential test, run on the emulated 68060, showed that the
+AROS m68k libm returns wrong values for floor, ceil, frexp, fmod, remainder and
+sqrt, that isinf() misreports -inf and that printf formats doubles imprecisely
+(calc.exe showed "0," instead of "46,").  The runtime therefore uses no host
+math or float formatting at all: musl's functions (renamed qm_*), bit-pattern
+classification, x87 NaN rules ("real indefinite" FFF8000000000000 instead of
+the 68k FPU's 7FFF...FFFF) and an exact big-integer decimal converter that is
+byte-identical to glibc for %f/%e/%g and strtod (600,000 random cases).
+
 Verification (host, x86_64 with i386 support - NOT a proof for m68k):
   tests/gen-diff-test.py + compare-diff.py : ~4,300 random instruction cases
       per seed (regs, EFLAGS, memory) identical to the real CPU; undefined flags
@@ -42,7 +53,7 @@ qrx-i386 (Linux i386)
   qrx-i386 [-r ROOT] [-t] [-b BUDGET] [-e VAR=VALUE]... PROGRAM [ARGS...]
 * Static ELF executables and dynamic ones via their PT_INTERP (ld-linux.so.2)
   found below ROOT.
-* ~150 system calls mapped to POSIX (AROS posixc on the target): files,
+* about 140 system calls mapped to POSIX (AROS posixc on the target): files,
   directories (getdents/getdents64), stat64/statx, mmap2 (anonymous + file),
   brk, TLS, clocks, uname ("i686"), ioctl TCGETS/TIOCGWINSZ, pipes, dup/fcntl...
 * Processes: fork/vfork/clone(SIGCHLD) copy the guest address space; all
@@ -61,7 +72,7 @@ qrx-win32 (Win32 HLE)
 ---------------------
   qrx-win32 [-s SCRIPT] [-o OUTDIR] [-l LANGID] [-v] [-T] PROGRAM.EXE [ARGS...]
 * Loads PE32/i386 images, binds every import to a host-implemented function
-  (about 450 functions of kernel32, user32, gdi32, msvcrt, advapi32, comctl32,
+  (about 470 functions of kernel32, user32, gdi32, msvcrt, advapi32, comctl32,
   shell32, winmm, ntdll).  No Microsoft or ReactOS DLL is loaded or needed.
   An unimplemented import is reported by name when it is called.
 * USER: windows, classes, message queue, timers, paint/invalidate, focus,

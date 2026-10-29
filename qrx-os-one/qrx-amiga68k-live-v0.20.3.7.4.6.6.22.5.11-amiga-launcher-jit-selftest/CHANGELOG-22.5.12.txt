@@ -11,13 +11,18 @@ New
   - qrx86core: new portable IA-32 interpreter with x87, lazy flags, page table,
     translation cache, TLS segments, nested guest calls.  Pure interpreter - no
     native code generation; the 22.5.x QRX86 JIT stays quarantined as before.
-  - qrx-i386: Linux i386 personality (ELF static + PT_INTERP, ~150 int 0x80
+  - qrx-i386: Linux i386 personality (ELF static + PT_INTERP, about 140 int 0x80
     system calls, fork/pipes via a cooperative in-process scheduler, AmigaDOS
     path mapping "/VOL/dir" <-> "VOL:dir" on AROS).
   - qrx-win32: Win32 HLE subsystem (PE loader, kernel32/user32/gdi32/msvcrt/
     advapi32/... implemented on the host, dialogs, controls, menus, timers,
     software GDI with AROS bitmap fonts, headless test backend, AROS Intuition
     backend with own windows on the Workbench/RTG screen).
+  - qmath: musl 1.2.5 math subset (MIT, renamed qm_*) + exact double<->decimal
+    conversion.  Added after the x87 differential test on the emulated 68060
+    showed wrong results from the AROS m68k libm (floor/ceil/frexp/fmod/
+    remainder/sqrt, isinf) and imprecise printf; results are now identical on
+    every host.  GDI lines/ellipses/polygons are clipped before rasterising.
   - QRXClock: open-source Win32 clock built with MinGW (ReactOS 0.4.15 has no
     stand-alone clock program).
   - Differential tests against native i386 execution (integer + x87), host

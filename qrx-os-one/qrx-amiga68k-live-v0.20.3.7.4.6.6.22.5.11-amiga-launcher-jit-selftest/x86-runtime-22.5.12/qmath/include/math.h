@@ -22,14 +22,18 @@ static inline int qm__fpclassify(double x)
     if (e == 0x7ff) return i << 12 ? FP_NAN : FP_INFINITE;
     return FP_NORMAL;
 }
+#undef fpclassify
+#undef isnan
+#undef isinf
+#undef isfinite
+#undef isnormal
+#undef signbit
 #define fpclassify(x) qm__fpclassify(x)
 #define isnan(x)      (qm__fpclassify(x) == FP_NAN)
 #define isinf(x)      (qm__fpclassify(x) == FP_INFINITE)
 #define isfinite(x)   (qm__fpclassify(x) > FP_INFINITE)
 #define isnormal(x)   (qm__fpclassify(x) == FP_NORMAL)
 #define signbit(x)    ((int)(qm__bits(x) >> 63))
-double sqrt(double);
 double fabs(double);
-#define sqrt(x) __builtin_sqrt(x)
 #define fabs(x) __builtin_fabs(x)
 #endif

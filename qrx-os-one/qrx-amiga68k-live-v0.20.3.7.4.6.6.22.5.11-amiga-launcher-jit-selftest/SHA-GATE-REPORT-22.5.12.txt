@@ -1,0 +1,30 @@
+QRX OS One 22.5.12 - SHA gate report
+====================================
+
+Policy (unchanged): SHA gates are never bypassed and never recomputed to hide a
+change.  Every changed pinned file is listed here with the reason.
+
+Changed pinned files
+--------------------
+1. base-v5.9/tools/qrx_desktop.canonical-6.6.20.c
+   old SHA-256 0a86e6baf62faa362bd86056f645e7222aa63dd8eb1cebc3d42813b1526e5bf3 (22.5.11)
+   new SHA-256 fc9a3095abb0b8b8e3ecb7833d317da26f4287753672c7787ff83a83433cc23d
+   Reason: new QRXDesktop terminal commands i386, win32, rechner, minesweeper,
+   uhr (+ tab completion and help line).  No existing command was changed or
+   removed.  The sidecar qrx_desktop.canonical-6.6.20.c.sha256 was updated
+   together with this report; SHA256SUMS-22.5.11 / SHA-GATE-REPORT-22.5.11.txt
+   keep documenting the 22.5.11 state and are not edited.
+
+2. validate-22.5.11.py (not hash-pinned, but a gate): the release-string check
+   'REL="0.20.3.7.4.6.6.22.5.11"' became 'REL="0.20.3.7.4.6.6.22.5.1' so that
+   the 22.5.11 wiring checks keep running for 22.5.12.  All other checks of the
+   22.5.11 validator are unchanged and still pass.
+
+New pinned files
+----------------
+* x86-runtime-22.5.12/win32/apps/prebuilt/qrxclock.exe (+ .sha256): fallback
+  for build hosts without MinGW; deploy verifies the hash before using it.
+* upstream/busybox/SHA256SUMS, upstream/amiga-apps/SHA256SUMS: verified by
+  diagnostics-v6.6/deploy.sh before BusyBox / DOpus5 / HippoPlayer are installed.
+
+Full list of 22.5.12 file hashes: SHA256SUMS-22.5.12.

@@ -82,7 +82,7 @@ static void ar_create(qwin *w, qwnd *t)
         WA_Title, (IPTR)(popup ? NULL : b->title),
         WA_DragBar, !popup, WA_DepthGadget, !popup, WA_CloseGadget, !popup && !(t->style & 0x00000080u) /* not DS_MODALFRAME-only */,
         WA_Borderless, popup, WA_Activate, TRUE, WA_RMBTrap, TRUE, WA_ReportMouse, TRUE,
-        WA_SimpleRefresh, TRUE, WA_NoCareRefresh, FALSE,
+        WA_SmartRefresh, TRUE, WA_NoCareRefresh, FALSE,
         WA_PubScreen, (IPTR)g_scr, WA_IDCMP, 0,
         TAG_DONE);
     if (!b->win) { free(b); qw_log(w, "AROS: OpenWindow failed"); return; }
@@ -235,7 +235,8 @@ static int translate(qwin *w, struct IntuiMessage *im, qevent *ev)
         qwnd *t = W(w, b->h);
         BeginRefresh(im->IDCMPWindow); EndRefresh(im->IDCMPWindow, TRUE);
         if (t) t->present = 1;
-        return 0; }
+        ev->type = QE_NONE;                 /* wake the pump so the window is presented again */
+        return 1; }
     case IDCMP_CHANGEWINDOW: {
         qwnd *t = W(w, b->h);
         if (t) { t->x = im->IDCMPWindow->LeftEdge + im->IDCMPWindow->BorderLeft; t->y = im->IDCMPWindow->TopEdge + im->IDCMPWindow->BorderTop + b->mbh; }

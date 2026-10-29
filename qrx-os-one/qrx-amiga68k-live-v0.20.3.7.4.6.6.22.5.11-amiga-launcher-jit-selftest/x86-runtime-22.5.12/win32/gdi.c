@@ -3,6 +3,7 @@
 #include <string.h>
 #include "qrxwin.h"
 #include "qrxwin_fontdata.h"
+#include "../qmath/qmath.h"
 
 #define FN(name) static uint32_t name(qwin *w, uint32_t *a)
 #define C (&w->cpu)
@@ -219,9 +220,42 @@ void gdi_frame3d(qdc *d, int x0, int y0, int x1, int y1, int sunken, int thick)
     }
 }
 
+/* Liang-Barsky: clip the segment to the (widened) clip rectangle so that
+ * absurd coordinates never turn into billions of plotted points */
+static int clip_line(qdc *d, int *x0, int *y0, int *x1, int *y1, int m)
+{
+    double t0 = 0.0, t1 = 1.0, dx = (double)*x1 - *x0, dy = (double)*y1 - *y0;
+    double p[4], q[4];
+    int i;
+    p[0] = -dx; q[0] = (double)*x0 - (d->cx0 - m);
+    p[1] = dx;  q[1] = (double)(d->cx1 + m) - *x0;
+    p[2] = -dy; q[2] = (double)*y0 - (d->cy0 - m);
+    p[3] = dy;  q[3] = (double)(d->cy1 + m) - *y0;
+    for (i = 0; i < 4; i++) {
+        if (p[i] == 0) { if (q[i] < 0) return 0; continue; }
+        {
+            double r = q[i] / p[i];
+            if (p[i] < 0) { if (r > t1) return 0; if (r > t0) t0 = r; }
+            else { if (r < t0) return 0; if (r < t1) t1 = r; }
+        }
+    }
+    {
+        double ax = *x0, ay = *y0;
+        *x0 = (int)(ax + t0 * dx + (ax + t0 * dx < 0 ? -0.5 : 0.5));
+        *y0 = (int)(ay + t0 * dy + (ay + t0 * dy < 0 ? -0.5 : 0.5));
+        *x1 = (int)(ax + t1 * dx + (ax + t1 * dx < 0 ? -0.5 : 0.5));
+        *y1 = (int)(ay + t1 * dy + (ay + t1 * dy < 0 ? -0.5 : 0.5));
+    }
+    return 1;
+}
+
 static void line_abs(qdc *d, int x0, int y0, int x1, int y1, uint32_t rgb, int width)
 {
-    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1, dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1, err = dx + dy, e2;
+    int dx, sx, dy, sy, err, e2;
+    if ((x0 < d->cx0 - 64 || x0 > d->cx1 + 64 || y0 < d->cy0 - 64 || y0 > d->cy1 + 64 ||
+         x1 < d->cx0 - 64 || x1 > d->cx1 + 64 || y1 < d->cy0 - 64 || y1 > d->cy1 + 64) &&
+        !clip_line(d, &x0, &y0, &x1, &y1, width + 2)) return;
+    dx = abs(x1 - x0); sx = x0 < x1 ? 1 : -1; dy = -abs(y1 - y0); sy = y0 < y1 ? 1 : -1; err = dx + dy;
     for (;;) {
         if (width <= 1) px(d, x0, y0, rgb);
         else { int r = width / 2, i, j; for (i = -r; i < width - r; i++) for (j = -r; j < width - r; j++) px(d, x0 + i, y0 + j, rgb); }
@@ -628,11 +662,16 @@ FN(g_Ellipse) {
     double cx = (x0 + x1) / 2.0, cy = (y0 + y1) / 2.0, rx = (x1 - x0) / 2.0, ry = (y1 - y0) / 2.0;
     if (!d || rx <= 0 || ry <= 0) return 0;
     p = cur_pen(w, d); b = cur_brush(w, d);
+    {   /* only the rows/columns inside the clip rectangle */
+        int ylo = d->cy0 - d->oy - d->voy - 2, yhi = d->cy1 - d->oy - d->voy + 2;
+        if (y0 < ylo) y0 = ylo;
+        if (y1 > yhi) y1 = yhi;
+    }
     for (y = y0; y <= y1; y++) {
         double dy = (y - cy) / ry, t = 1.0 - dy * dy, hx;
         int xa, xb;
         if (t < 0) continue;
-        hx = rx * __builtin_sqrt(t);
+        hx = rx * qm_sqrt(t);
         xa = (int)(cx - hx + 0.5); xb = (int)(cx + hx + 0.5);
         if (brush_visible(b)) hline(d, xa, xb + 1, y, b->color);
         if (pen_visible(p)) {
@@ -641,11 +680,13 @@ FN(g_Ellipse) {
         }
     }
     if (pen_visible(p)) {      /* close the outline at top/bottom with x-major sampling */
-        int x;
+        int x, xlo = d->cx0 - d->ox - d->vox - 2, xhi = d->cx1 - d->ox - d->vox + 2;
+        if (x0 < xlo) x0 = xlo;
+        if (x1 > xhi) x1 = xhi;
         for (x = x0; x <= x1; x++) {
             double dx = (x - cx) / rx, t = 1.0 - dx * dx, hy;
             if (t < 0) continue;
-            hy = ry * __builtin_sqrt(t);
+            hy = ry * qm_sqrt(t);
             px(d, TX(d, x), TY(d, (int)(cy - hy + 0.5)), p->color);
             px(d, TX(d, x), TY(d, (int)(cy + hy + 0.5)), p->color);
         }
@@ -660,6 +701,11 @@ FN(g_Polygon) {
     if (!d || n < 2 || n > 64) return 0;
     for (i = 0; i < n; i++) { xs[i] = (int32_t)RD32(a[1] + (uint32_t)i * 8); ys[i] = (int32_t)RD32(a[1] + (uint32_t)i * 8 + 4); if (ys[i] < ymin) ymin = ys[i]; if (ys[i] > ymax) ymax = ys[i]; }
     p = cur_pen(w, d); b = cur_brush(w, d);
+    {
+        int ylo = d->cy0 - d->oy - d->voy - 1, yhi = d->cy1 - d->oy - d->voy + 1;
+        if (ymin < ylo) ymin = ylo;
+        if (ymax > yhi) ymax = yhi;
+    }
     if (brush_visible(b)) {
         for (y = ymin; y <= ymax; y++) {
             int xi[64], k = 0, j;

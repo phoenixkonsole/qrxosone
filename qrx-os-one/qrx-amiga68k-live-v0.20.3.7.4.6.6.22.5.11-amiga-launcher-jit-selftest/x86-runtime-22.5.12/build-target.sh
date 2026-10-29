@@ -33,4 +33,6 @@ AR="${QRX_AROS_AR:-$(dirname "$CC")/m68k-aros-ar}"
 bash "$HERE/qmath/build-qmath.sh" "$CC" "$AR" "$OUT" -m68040 -fno-pic -fno-PIC -fno-optimize-sibling-calls "${EXTRA[@]}"
 QM="$OUT/libqmath.a"
 build qrx-i386 "$HERE/core/qrx86core.c" "$HERE/linux/qrx86linux.c" "$HERE/linux/qrx_i386_main.c" "$QM"
+# test helper (not installed on the LiveCD): real input events for the FS-UAE scenario
+build QRXInput "$HERE/tests/amiga/qrx_input.c"
 build qrx-win32 "$HERE/core/qrx86core.c" "$HERE"/win32/{hle,pe,kernel,user,gdi,backend_headless,backend_aros,qrx_win32_main}.c "$QM" -lcybergraphics

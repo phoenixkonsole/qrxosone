@@ -728,13 +728,16 @@ static void fpu_arith(double *dst, double src, int op)
 }
 static void fxam(x86cpu *c)
 {
-    double v = ST(0);
+    /* classify by bit pattern only (host FPU compares on NaN/inf are not trusted) */
+    uint64_t u = d2u(ST(0));
+    uint64_t ex = (u >> 52) & 0x7FF, mant = u & 0xFFFFFFFFFFFFFull;
     int empty = ((c->ftw >> (c->top * 2)) & 3) == 3;
-    int sign = signbit(v) ? 1 : 0;
+    int sign = (int)(u >> 63);
     if (empty) fset_cc(c, 1, 0, sign, 1);
-    else if (v != v) fset_cc(c, 0, 0, sign, 1);
-    else if (isinf(v)) fset_cc(c, 0, 1, sign, 1);
-    else if (v == 0.0) fset_cc(c, 1, 0, sign, 0);
+    else if (ex == 0x7FF && mant) fset_cc(c, 0, 0, sign, 1);          /* NaN */
+    else if (ex == 0x7FF) fset_cc(c, 0, 1, sign, 1);                  /* infinity */
+    else if (!ex && !mant) fset_cc(c, 1, 0, sign, 0);                 /* zero */
+    else if (!ex) fset_cc(c, 1, 1, sign, 0);                          /* denormal */
     else fset_cc(c, 0, 1, sign, 0);
 }
 
@@ -855,10 +858,10 @@ static void fpu_exec(x86cpu *c, const prefix_t *p, uint8_t op)
             case 0xEC: fpush(c, 0.301029995663981195214); return;     /* log10(2) */
             case 0xED: fpush(c, 0.693147180559945309417); return;     /* ln(2) */
             case 0xEE: fpush(c, 0.0); return;
-            case 0xF0: ST(0) = expm1(ST(0) * 0.693147180559945309417); return;
-            case 0xF1: ST(1) = ST(1) * (log(ST(0)) / 0.693147180559945309417); fpop(c); return;
-            case 0xF2: if (trig_range(c)) return; ST(0) = tan(ST(0)); fpush(c, 1.0); fset_cc(c, 0, 0, 0, 0); return;
-            case 0xF3: ST(1) = atan2(ST(1), ST(0)); fpop(c); return;
+            case 0xF0: { double a = ST(0); ST(0) = nanfix(expm1(a * 0.693147180559945309417), a, a); return; }
+            case 0xF1: { double a = ST(0), b = ST(1); ST(1) = nanfix(b * (log(a) / 0.693147180559945309417), a, b); fpop(c); return; }
+            case 0xF2: if (trig_range(c)) return; { double a = ST(0); ST(0) = nanfix(tan(a), a, a); } fpush(c, 1.0); fset_cc(c, 0, 0, 0, 0); return;
+            case 0xF3: { double a = ST(0), b = ST(1); ST(1) = nanfix(atan2(b, a), a, b); fpop(c); return; }
             case 0xF4: { int e; double fr = frexp(ST(0), &e); ST(0) = (double)(e - 1); fpush(c, fr * 2.0); return; }
             case 0xF5: case 0xF8: {
                 double a = ST(0), b = ST(1), r, q;
@@ -870,13 +873,13 @@ static void fpu_exec(x86cpu *c, const prefix_t *p, uint8_t op)
             }
             case 0xF6: c->top = (c->top - 1) & 7; return;
             case 0xF7: c->top = (c->top + 1) & 7; return;
-            case 0xF9: ST(1) = ST(1) * (log(ST(0) + 1.0) / 0.693147180559945309417); fpop(c); return;
-            case 0xFA: { double a = ST(0); ST(0) = nanfix(a < 0 ? bits2d(X87_INDEFINITE) : __builtin_sqrt(a), a, a); return; }
-            case 0xFB: { double v = ST(0); if (trig_range(c)) return; ST(0) = sin(v); fpush(c, cos(v)); fset_cc(c, 0, 0, 0, 0); return; }
+            case 0xF9: { double a = ST(0), b = ST(1); ST(1) = nanfix(b * (log1p(a) / 0.693147180559945309417), a, b); fpop(c); return; }
+            case 0xFA: { double a = ST(0); ST(0) = nanfix(a < 0 ? bits2d(X87_INDEFINITE) : qm_sqrt(a), a, a); return; }
+            case 0xFB: { double v = ST(0); if (trig_range(c)) return; ST(0) = nanfix(sin(v), v, v); fpush(c, nanfix(cos(v), v, v)); fset_cc(c, 0, 0, 0, 0); return; }
             case 0xFC: ST(0) = fround(c, ST(0)); return;
             case 0xFD: { double s = ST(1); s = s < 0 ? ceil(s) : floor(s); ST(0) = ldexp(ST(0), (int)s); return; }
-            case 0xFE: if (trig_range(c)) return; ST(0) = sin(ST(0)); fset_cc(c, 0, 0, 0, 0); return;
-            case 0xFF: if (trig_range(c)) return; ST(0) = cos(ST(0)); fset_cc(c, 0, 0, 0, 0); return;
+            case 0xFE: if (trig_range(c)) return; { double a = ST(0); ST(0) = nanfix(sin(a), a, a); } fset_cc(c, 0, 0, 0, 0); return;
+            case 0xFF: if (trig_range(c)) return; { double a = ST(0); ST(0) = nanfix(cos(a), a, a); } fset_cc(c, 0, 0, 0, 0); return;
             }
             break;
         case 0xDA:

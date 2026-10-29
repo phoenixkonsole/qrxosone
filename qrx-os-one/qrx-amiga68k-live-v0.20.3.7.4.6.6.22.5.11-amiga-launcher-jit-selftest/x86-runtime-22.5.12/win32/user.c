@@ -1366,6 +1366,9 @@ int user_pump(qwin *w, int block, qmsg *out, uint32_t filt)
             return 1;
         }
         if (w->quit_posted) { memset(out, 0, sizeof(*out)); out->msg = WM_QUIT; out->wp = (uint32_t)w->quit_code; return 1; }
+        /* present finished frames before serving timers: on a slow host a timer may be
+         * due again as soon as painting ends, which would otherwise starve the display */
+        if (!first_dirty(w, 0, 1)) user_render_all(w);
         /* timers */
         now = w->be->now(w);
         for (i = 0; i < QW_MAXTIMER; i++) {

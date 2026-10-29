@@ -431,7 +431,7 @@ FN(m_isnan) { double d = dbl(a, 0); UNUSED; return isnan(d) ? 1 : 0; }
 #define MATH1(nm, f) FN(nm) { return retd(w, f(dbl(a, 0))); }
 MATH1(m_sin, sin) MATH1(m_cos, cos) MATH1(m_tan, tan) MATH1(m_asin, asin) MATH1(m_acos, acos) MATH1(m_atan, atan)
 MATH1(m_sinh, sinh) MATH1(m_cosh, cosh) MATH1(m_tanh, tanh) MATH1(m_exp, exp) MATH1(m_log, log) MATH1(m_log10, log10)
-static double q_sqrt(double x) { return __builtin_sqrt(x); }
+static double q_sqrt(double x) { return qm_sqrt(x); }
 static double q_fabs(double x) { return __builtin_fabs(x); }
 MATH1(m_sqrt, q_sqrt) MATH1(m_floor, floor) MATH1(m_ceil, ceil) MATH1(m_fabs, q_fabs)
 FN(m_pow) { return retd(w, pow(dbl(a, 0), dbl(a, 2))); }
