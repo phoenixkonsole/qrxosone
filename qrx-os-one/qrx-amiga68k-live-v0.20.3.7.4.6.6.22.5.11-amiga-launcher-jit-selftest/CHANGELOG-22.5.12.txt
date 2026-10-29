@@ -63,6 +63,45 @@ Speed (measured in FS-UAE, 68040, BusyBox shell loop = 17.0 M x86 instructions)
   instructions/s).  Same 37/37 host tests incl. the differential tests.
 * Total: 2.8x faster than the first 22.5.12 target run.
 
+Windows game, DirectDraw on RTG, second speed round
+---------------------------------------------------
+* Game: PrBoom-plus 2.5.1.4 (Doom engine, GPL) built as a 32-bit Windows program
+  with SDL 1.2.15's DirectDraw driver (own compiler calls, apps/doom/), playing
+  the Freedoom 0.13 IWAD (BSD).  GTA/Half-Life/Resident Evil demos could not be
+  downloaded (blocked hosts) and need far more speed or Direct3D.  Sources and
+  licences: upstream/doom/.  New Win32/DirectX pieces it needed: winmm timers,
+  environment, msvcrt string functions, DIB sections, IDirectInputDevice2 with
+  buffered mouse data and event notification, IDirectDrawSurface::SetSurfaceDesc.
+* DirectDraw "RTG direct": in exclusive 8-bit mode the primary surface and its
+  back buffer are the display buffers of the own AROS screen.  The two screen
+  buffers (AllocScreenBuffer) stay locked with LockBitMapTags, which gives their
+  RTG memory address and keeps the p96gfx driver from moving them; the guest pages
+  of both surfaces are mapped onto that memory (new x86_map_ext, pages flagged
+  X86_PG_EXT), so the program's Lock/Blt writes go straight to the RTG card and
+  Flip is ChangeScreenBuffer - no frame copy at all.  The last partial page of a
+  buffer is an ordinary guest page copied on Flip.  Fallback to the copying path
+  when the screen is not a LUT8 RTG bitmap (QRX_DX_RTG=0 forces it).  The headless
+  backend has a test double (pitch wider than the line), and the host suite
+  checks that both paths produce identical frames.
+* Interpreter: instruction count kept lazily (the loop only decrements the budget
+  counter), the run loop tests only EIP (faults and stop requests leave by
+  longjmp), 32-bit fast paths for ALU r/m forms, MOV 89/8B, TEST, group-1
+  immediates, PUSH/POP; prefixes packed into one word; HLE range test without the
+  extra branch.  qemu-m68k block counts: 137.6 -> 113.2 m68k instructions per x86
+  instruction (-18 %); Doom on the host 204 s -> 167 s with identical game
+  results (same realtics).  In FS-UAE the gain is small (BusyBox loop 32 s ->
+  31 s without warp): FS-UAE's own 68k interpreter cost is dominated by other
+  instructions.
+* FS-UAE harness: warp mode is now off by default.  With warp the emulated clock
+  ran 54x ahead of the emulated CPU (AROS reported 28142 s for 520 s of host
+  time) - PrBoom-plus's screen melt, which does work proportional to elapsed
+  time, then used up the whole instruction budget (reproduced on the host with
+  QRX_HL_IPMS=5) - and the CPU was slower too: BusyBox loop 63-72 s -> 31 s,
+  Doom 282 k -> 498 k x86 instructions per second.
+* QRX_WIN_STATS prints instructions, elapsed backend time and DirectDraw frames;
+  QRX_HL_IPMS sets the headless clock ratio; the AROS clock is held monotonic
+  (defensive; no backwards step was observed).
+
 Fixed
 -----
 * amigacheck/QRXAmigaRun library scan: an RTS opcode (0x4E75 = "Nu") directly
@@ -85,7 +124,8 @@ Known limits
 * GTA 1 / other commercial game demos: not tested - the build environment's
   network policy blocks the download sites (archive.org, moddb.com, ...).
   Half-Life / Resident Evil need Direct3D or OpenGL and about 1000x the
-  interpreted speed; not attempted.
+  interpreted speed; not attempted.  Doom (PrBoom-plus) runs instead, as a
+  slide show on emulated 68k (about 6-7 s per frame in FS-UAE).
 * No audio output for DirectSound/winmm yet (buffers are emulated silently).
 * Aminet was not reachable from the build environment; GitHub releases of the
   open-source programs were used instead.

@@ -1,0 +1,24 @@
+qrx-win32: AROS backend: screen 640x480, pen-mapped WriteChunkyPixels output
+qrx-win32: fopen(C:\dxtest.log, w) -> AROS:X86/dxtest.log
+qrx-win32: AROS backend: window 00010004 opened at 0,0 inner 640x480 (+0 menu bar)
+qrx-win32: DirectDrawCreate -> 10000600
+qrx-win32: DirectDraw: cooperative level 00000011 window 00010004
+qrx-win32: DirectDraw: display mode 640x480x8
+qrx-win32: AROS backend: reopening window 00010004 (own screen)
+qrx-win32: AROS backend: old window closed
+qrx-win32: AROS backend: looking for a 640x480x8 display mode
+qrx-win32: AROS backend: mode 10031100, opening screen
+qrx-win32: AROS backend: screen open, opening backdrop window
+qrx-win32: AROS backend: own screen 640x480x8 (mode 10031100, CLUT) for window 00010004
+qrx-win32: DirectDraw: primary 640x480x8 + back buffer
+qrx-win32: AROS backend: screen buffer 0 at 8006e4a0, 640 bytes per row
+qrx-win32: AROS backend: screen buffer 1 at 800dc540, 640 bytes per row
+qrx-win32: DirectDraw: RTG direct, 2 display buffer(s) 640x480 pitch 640 mapped at 30000000
+qrx-win32: DirectSound: buffer 22050 bytes 22050 Hz (silent: no audio output)
+qrx-win32: AROS backend: display buffer captured after 10 frames -> QRXOUT:dx-screen.ppm
+qrx-win32: AROS backend: RTG display buffers unlocked
+qrx-win32: DirectDraw: RTG direct buffers released
+qrx-win32: AROS backend: reopening window 00010004 (Workbench)
+qrx-win32: AROS backend: old window closed
+qrx-win32: AROS backend: window 00010004 opened at 0,0 inner 640x480 (+0 menu bar)
+qrx-win32: 23026478 guest instructions in 5010865 ms (4595 per second), 13 DirectDraw frames, 254 HLE imports

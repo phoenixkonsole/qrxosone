@@ -17,6 +17,11 @@
 # it; 1.5x faster CPU emulation); QRX_FSUAE_MMU=1 restores it.  FS-UAE 3.1.66's JIT
 # crashes with the Deadwood AROS ROM on this host ("JIT: Can't handle access"), so
 # QRX_FSUAE_JIT stays 0 by default.
+# Warp mode is off by default since 22.5.12 (QRX_FSUAE_WARP=1 turns it on): with
+# warp the emulated clock (vblank, timer.device) ran 54x ahead of the emulated CPU
+# for qrx-win32, which breaks programs that pace work by time (PrBoom's screen
+# melt), and the CPU itself was slower (BusyBox loop 63-72 s with warp, 31 s
+# without; Doom 282 k -> 498 k x86 instructions/s).
 set -Eeuo pipefail
 # bash reads scripts while running: run from a private copy so edits cannot break active runs
 if [[ -z "${QRX_SCN_SELFCOPY:-}" ]]; then
@@ -53,7 +58,7 @@ floppy_drive_count = 0
 jit_compiler = ${QRX_FSUAE_JIT:-0}
 sound_card = none
 automatic_input_grab = 0
-warp_mode = 1
+warp_mode = ${QRX_FSUAE_WARP:-0}
 base_dir = $W/home
 log_flush = 1
 $( [[ "${QRX_FSUAE_MMU:-0}" == 1 ]] || echo "uae_mmu_model = 0" )

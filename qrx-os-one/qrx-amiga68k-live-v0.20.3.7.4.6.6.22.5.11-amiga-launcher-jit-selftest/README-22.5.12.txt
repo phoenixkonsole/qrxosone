@@ -15,7 +15,7 @@ New components
                                 (Linux i386), qrx-win32 (Win32 HLE), qmath,
                                 QRXClock, tests  -> X86-RUNTIME-22.5.12.txt
   apps-22.5.12/                 FS-UAE scenarios: x86 tests, live Win32 windows,
-                                Directory Opus 5, HippoPlayer, AmigaGPT
+                                Directory Opus 5, HippoPlayer, AmigaGPT, Doom
   test-evidence-22.5.12/        target logs and screenshots
   validate-22.5.12.py           source/integration gates (run by deploy.sh)
 
@@ -24,14 +24,18 @@ Programs
   (Minesweeper), sol.exe (Solitaire) and spider.exe with cards.dll.  ReactOS has
   no stand-alone clock -> QRXClock (own MinGW PE).
   DirectX 3 (DirectDraw/DirectSound/DirectInput) HLE, verified with the own test
-  program dxtest.exe; exclusive 8-bit modes get an own AROS screen.
+  program dxtest.exe; exclusive 8-bit modes get an own AROS screen whose RTG
+  screen buffers ARE the DirectDraw surfaces ("RTG direct": no frame copy, Flip =
+  ChangeScreenBuffer).
+  Windows game: Doom engine PrBoom-plus (GPL) with the Freedoom IWAD (BSD) via
+  SDL 1.2's DirectDraw driver - runs on emulated 68060 at about 6-7 s per frame.
   Linux i386: BusyBox 1.36.1 (Debian/Ubuntu busybox-static), static glibc programs.
   Amiga 68k: Directory Opus 5.104 (open source), HippoPlayer 2.67 (open source);
   AmigaGPT tested but does not start on AROS (needs MUI classes + AmiSSL).
 
 Honest limits: everything x86 is interpreted (no JIT; the old QRX86 JIT stays
-quarantined), about 236,000 x86 instructions/s in FS-UAE (a DirectDraw frame takes
-seconds); x87 is IEEE double; no threads/sockets/signal delivery/audio output;
+quarantined), about 500,000 x86 instructions/s in FS-UAE without warp mode (a
+Doom frame takes 6-7 s); x87 is IEEE double; no threads/sockets/signal delivery/audio output;
 only emulator tests (FS-UAE), no real hardware.  No commercial game demo could
 be tested: the build environment cannot reach the download sites.  Aminet was not reachable from the
 build environment, the Amiga programs come from their GitHub releases.

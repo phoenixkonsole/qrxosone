@@ -9,7 +9,7 @@ Two kinds of results are kept strictly apart:
           with the Deadwood m68k-aros-gcc and converted with elf2hunk (HUNK proofs
           in the build logs).  No real Amiga hardware was available.
 
-1. Host (x86-runtime-22.5.12/tests/run-host-tests.sh)        40 / 40 PASS
+1. Host (x86-runtime-22.5.12/tests/run-host-tests.sh)        41 / 41 PASS
 ---------------------------------------------------------------------------
   integer differential vs. real CPU (3 seeds)    2148/2148 cases each
   x87 differential                               11205/11205
@@ -18,6 +18,14 @@ Two kinds of results are kept strictly apart:
   ReactOS sol.exe (cards.dll) deal + drag, spider.exe dialog + deal
   dxtest.exe: DirectDraw 640x480x8 flip chain/palette/colour key/GetDC,
               DirectSound play cursor, DirectInput keyboard -> RESULT PASS
+  DirectDraw RTG direct: the dxtest frame drawn straight into the (simulated,
+              pitch 704) display buffers is identical to the copying path
+  Doom (PrBoom-plus + Freedoom, not part of the suite): timedemo demo1
+              "Timed 7117 gametics in 48889 realtics" before and after the
+              interpreter changes (13.99 G instructions, 204 s -> 167 s); 320x200
+              frames identical with and without RTG direct; with the warp-mode
+              clock ratio (QRX_HL_IPMS=5) the host reproduces the target's
+              9-frame run exactly; with 270 instructions per ms it renders 41 frames
   validate-22.5.12.py PASS, validate-22.5.11.py PASS
 
 2. Target: x86 scenario (apps-22.5.12/x86)          test-evidence-22.5.12/x86-*
@@ -53,10 +61,16 @@ Two kinds of results are kept strictly apart:
                          (needs MUI + AmiSSL, not part of AROS)
 
 5. Emulator speed (BusyBox loop, 17.0 M x86 instructions, 68040)
+   (test-evidence-22.5.12/doom-rtg-68060/bench7/8/9.log; host wall time, 1 s
+   resolution)
 ---------------------------------------------------------------------------
   first build, MMU emulation on        85 k x86 instr/s
   MMU emulation off (harness default)  130 k
   optimised core                       236 k  (131 s -> 72 s)
+  second interpreter round (warp on)   270 k  (72 s -> 63 s)
+  warp mode off (new harness default)  548 k  (31 s; the previous core: 32 s)
+  qemu-m68k block counts for the second round: 137.6 -> 113.2 m68k
+  instructions per x86 instruction
   FS-UAE 68k JIT: crashes with the Deadwood AROS ROM in 7 configurations
   (direct/indirect memory, no FPU JIT, hard flush, fault catching, no Z3 RAM,
   no RTG, plain 68020) - not usable here.
@@ -75,8 +89,27 @@ Two kinds of results are kept strictly apart:
   * The emulator harness restarts FS-UAE when BOOTED is missing or the display
     is one flat colour while no output is written (QRX_BOOT_TMO, QRX_HANG_TMO).
 
+6b. Target: Doom with DirectDraw RTG direct (FS-UAE 68060, uaegfx)
+---------------------------------------------------------------------------
+  test-evidence-22.5.12/doom-rtg-68060 (scenario apps-22.5.12/x86-doom-live)
+  dxtest.exe: both 640x480 screen buffers locked (LockBitMapTags), guest
+    surfaces mapped onto them, Flip = ChangeScreenBuffer: RESULT PASS,
+    dx-screen.png read from the shown buffer.
+  PrBoom-plus -timedemo demo1, 320x200x8 exclusive, two locked screen buffers
+    (320 bytes per row): 150 M x86 instructions in 302 s host wall time
+    (AROS clock 301 s): 498 k x86 instructions/s, 44 DirectDraw frames, i.e.
+    about 6-7 s per frame - a slide show.  doom-screen.png: frame 30, Freedoom
+    E1M1 demo, read back from the RTG buffer.  The AROS mouse pointer appears
+    inside the captured buffer (AROS draws it into the screen bitmap).
+  With warp mode (warp-mode-run/): 150 M instructions gave only 9 frames - the
+    emulated clock ran 54x ahead (28142 s reported), PrBoom's screen melt does
+    work per elapsed tic and used the whole budget.  Warp is now off by default.
+  No audio (sound_card = none, DirectSound silent), no input tested in Doom.
+
 7. Not tested / open
 ---------------------------------------------------------------------------
+  * Doom at playable speed: needs ~50x the interpreted speed (a JIT is not
+    planned: the QRX86 JIT stays quarantined).
   * GTA 1, Half-Life, Resident Evil or other commercial demos: the network
     policy of the build environment blocks archive.org, moddb.com and similar
     sites.  Half-Life/Resident Evil need Direct3D/OpenGL and ~1000x the speed.

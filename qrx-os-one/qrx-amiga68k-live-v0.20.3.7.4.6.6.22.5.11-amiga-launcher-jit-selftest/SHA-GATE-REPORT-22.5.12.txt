@@ -27,4 +27,12 @@ New pinned files
 * upstream/busybox/SHA256SUMS, upstream/amiga-apps/SHA256SUMS: verified by
   diagnostics-v6.6/deploy.sh before BusyBox / DOpus5 / HippoPlayer are installed.
 
+* upstream/doom/SHA256SUMS (Doom update): SDL 1.2.15, PrBoom-plus 2.5.1.4 and
+  Freedoom 0.13 archives as downloaded from archive.ubuntu.com.
+
+Doom / RTG direct update (later in 22.5.12): no pinned file changed.  The
+prebuilt dxtest.exe and qrxclock.exe and their .sha256 sidecars are unchanged.
+SHA256SUMS-22.5.12 is the full file list of this tree (not a gate on its own);
+it was regenerated after the update and checks clean (sha256sum -c).
+
 Full list of 22.5.12 file hashes: SHA256SUMS-22.5.12.
