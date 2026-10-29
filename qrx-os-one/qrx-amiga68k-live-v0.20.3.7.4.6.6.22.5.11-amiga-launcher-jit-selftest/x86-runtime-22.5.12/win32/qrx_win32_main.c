@@ -12,7 +12,7 @@ static qwin g_w;
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: qrx-win32 [-s SCRIPT] [-o OUTDIR] [-l LANGID] [-L LOGFILE] [-v] [-T] PROGRAM.EXE [ARGS...]\n"
+    fprintf(stderr, "usage: qrx-win32 [-s SCRIPT] [-o OUTDIR] [-l LANGID] [-L LOGFILE] [-e VAR=VALUE] [-G FILE N] [-v] [-T] PROGRAM.EXE [ARGS...]\n"
                     "  Runs a 32-bit Windows GUI program with the QRX Win32 HLE subsystem.\n"
                     "  No Windows/ReactOS DLLs are used; x86 code runs in the qrx86core interpreter.\n");
 }
@@ -33,6 +33,7 @@ static int real_main(int argc, char **argv)
         else if (!strcmp(argv[i], "-v")) w->verbose = 1;
         else if (!strcmp(argv[i], "-vv")) w->verbose = 2;
         else if (!strcmp(argv[i], "-L") && i + 1 < argc) { FILE *lf = fopen(argv[++i], "w"); if (lf) w->log = lf; }
+        else if (!strcmp(argv[i], "-e") && i + 1 < argc) { char kv[300], *eq; snprintf(kv, sizeof(kv), "%s", argv[++i]); eq = strchr(kv, '='); if (eq) { *eq = 0; qw_env_set(kv, eq + 1); } }
         else if (!strcmp(argv[i], "-G") && i + 2 < argc) { snprintf(w->grab_path, sizeof(w->grab_path), "%s", argv[i + 1]); w->grab_at = atoi(argv[i + 2]); i += 2; }
         else if (!strcmp(argv[i], "-T")) w->trace = 1;
         else { usage(); return 2; }
@@ -47,6 +48,7 @@ static int real_main(int argc, char **argv)
     if (script && !headless_set_script(w, script)) { fprintf(stderr, "qrx-win32: cannot open script %s\n", script); return 2; }
     if (!w->be->init(w)) { fprintf(stderr, "qrx-win32: backend %s unavailable\n", w->be->name); return 20; }
     if (!qw_load(w, argv[i], argc - i, argv + i)) return 127;
+    if (getenv("QRX_WIN_BUDGET")) w->cpu.budget = strtoull(getenv("QRX_WIN_BUDGET"), NULL, 0);   /* profiling: stop after N instructions */
     rc = qw_run(w);
     if (w->be->shutdown) w->be->shutdown(w);
     if (getenv("QRX_WIN_STATS")) fprintf(stderr, "qrx-win32: %llu guest instructions, %u HLE imports\n", (unsigned long long)w->cpu.icount, w->nthunk);

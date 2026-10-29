@@ -320,6 +320,12 @@ extern const qhle qw_misc[];
 extern const qhle qw_ansi[];   /* ansi.c */
 extern const qhle qw_files[];  /* files.c */
 extern const qhle qw_dx[];     /* dx.c: DirectDraw/DirectSound/DirectInput */
+extern const qhle qw_extra[];  /* extra.c */
+void qw_env_set(const char *name, const char *value);
+int qw_dinput_ready(qwin *w, uint32_t handles, uint32_t n);   /* dx.c */
+void user_input_event(qwin *w, qevent *ev);       /* feed one backend event into the window system */
+void qw_dib_register(qwin *w, uint32_t hbm, uint32_t mem, uint32_t bmi, int bw, int bh, int bpp, uint32_t stride);
+uint32_t qw_dib_colortable(qwin *w, uint32_t hdc, uint32_t start, uint32_t n, uint32_t rgbq);
 const qhle *qw_find_dx(const char *name);   /* COM method thunks "IDirectDraw::CreateSurface" */
 FILE *qw_stream_host(qwin *w, uint32_t gfile);    /* host FILE of a guest fopen() stream, NULL otherwise */
 int  qw_file_close(qwin *w, uint32_t h);          /* CloseHandle for file/find handles */

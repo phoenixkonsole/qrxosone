@@ -133,7 +133,7 @@ uint32_t qw_data(qwin *w, uint32_t n)
 }
 
 /* ---------------------------------------------------------------- thunks */
-static const qhle *tables[] = { qw_files, qw_kernel32, qw_user32, qw_gdi32, qw_misc, qw_ansi, qw_dx, NULL };
+static const qhle *tables[] = { qw_files, qw_extra, qw_kernel32, qw_user32, qw_gdi32, qw_misc, qw_ansi, qw_dx, NULL };
 
 static int dllcmp(const char *a, const char *b)
 {

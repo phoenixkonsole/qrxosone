@@ -1330,6 +1330,7 @@ static int script_event(qwin *w, qevent *ev)
     }
     return 0;
 }
+void user_input_event(qwin *w, qevent *ev) { script_event(w, ev); }
 
 static qwnd *first_dirty(qwin *w, uint32_t parent, int top)
 {

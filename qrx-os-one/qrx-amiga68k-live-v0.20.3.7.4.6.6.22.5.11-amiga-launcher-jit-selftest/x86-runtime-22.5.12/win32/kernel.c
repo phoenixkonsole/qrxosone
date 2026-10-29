@@ -16,7 +16,8 @@
 #define WR32(x, v) x86_wr32(C, (x), (v))
 #define UNUSED (void)w; (void)a
 
-static const char *known_dlls[] = { "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll", NULL };
+static const char *known_dlls[] = { "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll", "ddraw", "dsound", "dinput", NULL };
+#define QW_NKNOWN 12
 #define QW_MODBASE 0x7E000000u
 
 static double argd(qwin *w, uint32_t addr) { uint64_t u = (uint64_t)RD32(addr) | ((uint64_t)RD32(addr + 4) << 32); double d; memcpy(&d, &u, 8); return d; }
@@ -274,6 +275,7 @@ uint32_t qw_data_import(qwin *w, const char *dll, const char *name)
     }
     if (!strcmp(name, "__winitenv")) { if (!g_winitenv) { uint32_t arr = qw_data(w, 8); g_winitenv = qw_data(w, 4); WR32(g_winitenv, arr); } return g_winitenv; }
     if (!strcmp(name, "__initenv") || !strcmp(name, "_environ")) { if (!g_initenv) { uint32_t arr = qw_data(w, 8); g_initenv = qw_data(w, 4); WR32(g_initenv, arr); } return g_initenv; }
+    if (!strcmp(name, "__mb_cur_max")) { static uint32_t g_mbmax; if (!g_mbmax) { g_mbmax = qw_data(w, 4); WR32(g_mbmax, 1); } return g_mbmax; }
     if (!strcmp(name, "_fmode")) { if (!g_fmode) g_fmode = qw_data(w, 4); return g_fmode; }
     if (!strcmp(name, "_commode")) { if (!g_commode) g_commode = qw_data(w, 4); return g_commode; }
     return 0;
@@ -557,7 +559,7 @@ FN(k_GetProcAddress) {
         qw_rd_str(w, a[1], n, sizeof(n));
         return pe_export(w, m, n, 0);
     }
-    if (a[0] < QW_MODBASE || idx >= 9) return 0;
+    if (a[0] < QW_MODBASE || idx >= QW_NKNOWN) return 0;
     if (a[1] < 0x10000u) return 0;
     qw_rd_str(w, a[1], n, 64);
     e = qw_find_hle(known_dlls[idx], n);

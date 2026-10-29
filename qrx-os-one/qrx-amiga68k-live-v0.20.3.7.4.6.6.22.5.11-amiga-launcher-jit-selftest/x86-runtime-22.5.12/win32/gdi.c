@@ -683,10 +683,58 @@ static uint32_t rop3(uint32_t rop, uint32_t s, uint32_t dd, uint32_t p)
     default: return s;
     }
 }
+/* DIB sections: the program writes pixels into guest memory; the bitmap object is
+ * refreshed from it before it is used as a blit source */
+typedef struct { uint32_t h, mem, stride; int w, h_, bpp, topdown; uint32_t pal[256]; } qdib;
+static qdib g_dib[32];
+void qw_dib_register(qwin *w, uint32_t hbm, uint32_t mem, uint32_t bmi, int bw, int bh, int bpp, uint32_t stride)
+{
+    int i, k;
+    for (i = 0; i < 32; i++) if (!g_dib[i].h || !O(w, g_dib[i].h, GO_BITMAP)) break;
+    if (i == 32) return;
+    g_dib[i].h = hbm; g_dib[i].mem = mem; g_dib[i].stride = stride; g_dib[i].w = bw; g_dib[i].h_ = bh < 0 ? -bh : bh;
+    g_dib[i].bpp = bpp; g_dib[i].topdown = bh < 0;
+    for (k = 0; k < 256; k++) {
+        uint32_t q = bpp <= 8 ? RD32(bmi + 40 + (uint32_t)k * 4) : 0;   /* RGBQUAD b,g,r */
+        g_dib[i].pal[k] = q & 0xFFFFFF;
+    }
+}
+static qdib *dib_of(uint32_t h) { int i; for (i = 0; i < 32; i++) if (g_dib[i].h == h) return &g_dib[i]; return NULL; }
+uint32_t qw_dib_colortable(qwin *w, uint32_t hdc, uint32_t start, uint32_t n, uint32_t rgbq)
+{
+    qdc *d = DCP(w, hdc);
+    qdib *b = d ? dib_of(d->bitmap) : NULL;
+    uint32_t i;
+    if (!b) return 0;
+    for (i = 0; i < n && start + i < 256; i++) b->pal[start + i] = RD32(rgbq + i * 4) & 0xFFFFFF;
+    return n;
+}
+static void dib_sync(qwin *w, uint32_t hbm)
+{
+    qdib *b = dib_of(hbm);
+    qobj *o = b ? O(w, hbm, GO_BITMAP) : NULL;
+    uint8_t row[16384];
+    int y, x;
+    if (!o || !o->bmp.pix || b->stride > sizeof(row)) return;
+    for (y = 0; y < b->h_; y++) {
+        uint32_t *dst = o->bmp.pix + (size_t)y * (size_t)o->bmp.w;
+        x86_read_mem(C, b->mem + (uint32_t)(b->topdown ? y : b->h_ - 1 - y) * b->stride, row, b->stride);
+        for (x = 0; x < b->w && x < o->bmp.w; x++) {
+            switch (b->bpp) {
+            case 8: dst[x] = b->pal[row[x]]; break;
+            case 16: { uint32_t p = (uint32_t)(row[x * 2] | (row[x * 2 + 1] << 8)); dst[x] = ((p >> 10 & 31) << 19) | ((p >> 5 & 31) << 11) | ((p & 31) << 3); break; }
+            case 24: dst[x] = (uint32_t)row[x * 3] | ((uint32_t)row[x * 3 + 1] << 8) | ((uint32_t)row[x * 3 + 2] << 16); break;
+            case 32: dst[x] = (uint32_t)row[x * 4] | ((uint32_t)row[x * 4 + 1] << 8) | ((uint32_t)row[x * 4 + 2] << 16); break;
+            default: dst[x] = 0; break;
+            }
+        }
+    }
+}
 static int blt(qwin *w, qdc *d, int x, int y, int cw, int ch, qdc *s, int sx, int sy, int sw, int sh, uint32_t rop)
 {
     qobj *b = d ? cur_brush(w, d) : NULL;
     uint32_t pat = b ? b->color : 0;
+    if (s && s->bitmap) dib_sync(w, s->bitmap);
     int i, j, patb = is_pattern(b);
     qobj *sbm = s && s->bitmap ? O(w, s->bitmap, GO_BITMAP) : NULL, *dbm = d && d->bitmap ? O(w, d->bitmap, GO_BITMAP) : NULL;
     int smono = sbm && sbm->mono, dmono = dbm && dbm->mono;

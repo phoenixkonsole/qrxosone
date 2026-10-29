@@ -43,6 +43,7 @@ typedef struct dxobj {
     int attached;                    /* back buffer object index (primary) */
     int pal;                         /* palette object index or -1 */
     int ck_on; uint32_t ck_lo, ck_hi;
+    uint32_t ownmem;                 /* SetSurfaceDesc: the program's memory replaced ours (keep ours to free) */
     uint32_t dc;                     /* GetDC: memory DC, its bitmap and the original pixels */
     uint32_t dcbm, *dcorig;
     int dd;                          /* owning DirectDraw object */
@@ -58,6 +59,8 @@ typedef struct dxobj {
     int kind;                        /* 1 keyboard, 2 mouse */
     int lastx, lasty;
     uint8_t prevkeys[256];
+    uint32_t event;                  /* SetEventNotification handle */
+    uint8_t prevbtn[3];
 } dxobj;
 #define DX_MAX 128
 static dxobj g_o[DX_MAX];
@@ -152,7 +155,8 @@ static uint32_t addref(dxobj *o) { if (!o) return 0; return (uint32_t)++o->refs;
 static void obj_free(qwin *w, dxobj *o)
 {
     free(o->dcorig);
-    if (o->mem) qw_free(w, o->mem);                   /* each surface/buffer owns exactly one block (Flip swaps them) */
+    if (o->ownmem) { qw_free(w, o->ownmem); o->ownmem = 0; }
+    else if (o->mem) qw_free(w, o->mem);              /* each surface/buffer owns exactly one block (Flip swaps them) */
     qw_free(w, o->guest);
     o->type = OB_FREE;
 }
@@ -604,6 +608,22 @@ FN(s_ReleaseDC) {                        /* write back the pixels GDI changed */
     after_draw(w, s);
     return DD_OK;
 }
+/* IDirectDrawSurface3::SetSurfaceDesc (this, desc, flags): the surface now uses the
+ * program's memory (lpSurface) with the given size/pitch/pixel format */
+FN(s_SetSurfaceDesc) {
+    dxobj *s = sf(w, a[0]);
+    uint32_t d = a[1], fl;
+    if (!s || !d) return DDERR_INVALIDPARAMS;
+    fl = RD32(d + 4);
+    if (!(fl & 0x800) || !RD32(d + 36)) return DDERR_INVALIDPARAMS;
+    if (!s->ownmem) s->ownmem = s->mem;
+    s->mem = RD32(d + 36);
+    if (fl & 4) s->sw = (int)RD32(d + 12);
+    if (fl & 2) s->sh = (int)RD32(d + 8);
+    if (fl & 0x1000) { int b = (int)RD32(d + 84); if (b == 8 || b == 16 || b == 32) s->bpp = b; }
+    s->pitch = (fl & 8) ? (int)RD32(d + 16) : ((s->sw * s->bpp / 8) + 3) & ~3;
+    return DD_OK;
+}
 FN(s_GetDDInterface) { dxobj *s = sf(w, a[0]); if (!s || s->dd < 0) return DDERR_INVALIDPARAMS; addref(&g_o[s->dd]); WR32(a[1], g_o[s->dd].guest); return DD_OK; }
 
 /* ------------------------------------------------------------------ palettes, clippers */
@@ -786,6 +806,33 @@ static void kbd_state(qwin *w, uint8_t *k)
     for (vk = 1; vk < 256; vk++) if (w->keystate[vk] & 0x80) { uint8_t d = vk2dik(vk); if (d) k[d] = 0x80; }
 }
 FN(di_QueryInterface) { UNUSED; WR32(a[2], 0); return E_NOINTERFACE; }
+/* IDirectInputDevice2A extends IDirectInputDeviceA: the same object with the longer vtable */
+FN(dv_QueryInterface) {
+    dxobj *d = ob(w, a[0], OB_DID);
+    uint32_t d1 = a[1] ? RD32(a[1]) : 0;
+    if (d && (d1 == 0x5944E680u || d1 == 0x5944E682u)) { addref(d); WR32(a[2], a[0]); return DD_OK; }
+    WR32(a[2], 0);
+    return E_NOINTERFACE;
+}
+FN(dv_SetEventNotification) { dxobj *d = ob(w, a[0], OB_DID); if (d) d->event = a[1]; return DD_OK; }
+static int dev_pending(qwin *w, dxobj *d)
+{
+    if (d->kind == 1) { uint8_t k[256]; kbd_state(w, k); return memcmp(k, d->prevkeys, sizeof(k)) != 0; }
+    return w->mouse_x != d->lastx || w->mouse_y != d->lasty ||
+           (w->keystate[1] & 0x80) != d->prevbtn[0] || (w->keystate[2] & 0x80) != d->prevbtn[1] || (w->keystate[4] & 0x80) != d->prevbtn[2];
+}
+/* MsgWaitForMultipleObjects: index of the first handle that belongs to a DirectInput
+ * device with new data, -1 if none */
+int qw_dinput_ready(qwin *w, uint32_t handles, uint32_t n)
+{
+    uint32_t i;
+    int k;
+    for (i = 0; i < n && i < 64; i++) {
+        uint32_t h = RD32(handles + i * 4);
+        for (k = 0; k < DX_MAX; k++) if (g_o[k].type == OB_DID && g_o[k].event == h && h && dev_pending(w, &g_o[k])) return (int)i;
+    }
+    return -1;
+}
 FN(di_AddRef) { return addref(ob(w, a[0], OB_DI)); }
 FN(di_Release) { dxobj *o = ob(w, a[0], OB_DI); if (!o) return 0; if (--o->refs > 0) return (uint32_t)o->refs; obj_free(w, o); return 0; }
 FN(di_CreateDevice) {                    /* (this, guid, pp, outer) */
@@ -830,7 +877,22 @@ FN(dv_GetDeviceData) {                   /* (this, objsize, data, inout, flags):
     uint8_t k[256];
     int i;
     if (!d) return DDERR_INVALIDPARAMS;
-    if (d->kind != 1) { if (a[3]) WR32(a[3], 0); return DD_OK; }
+    if (d->kind != 1) {                              /* mouse: DIMOFS_X 0, _Y 4, _BUTTON0.. 12.. */
+        int dx = w->mouse_x - d->lastx, dy = w->mouse_y - d->lasty, b;
+        t = (uint32_t)now_ms(w);
+        if (dx && n < max) { if (a[2]) { uint32_t e = a[2] + n * sz; WR32(e, 0); WR32(e + 4, (uint32_t)dx); WR32(e + 8, t); WR32(e + 12, n); } n++; }
+        if (dy && n < max) { if (a[2]) { uint32_t e = a[2] + n * sz; WR32(e, 4); WR32(e + 4, (uint32_t)dy); WR32(e + 8, t); WR32(e + 12, n); } n++; }
+        for (b = 0; b < 3 && n < max; b++) {
+            uint8_t st = w->keystate[b == 0 ? 1 : b == 1 ? 2 : 4] & 0x80;
+            if (st == d->prevbtn[b]) continue;
+            if (a[2]) { uint32_t e = a[2] + n * sz; WR32(e, 12u + (uint32_t)b); WR32(e + 4, st); WR32(e + 8, t); WR32(e + 12, n); }
+            if (!(a[4] & 1)) d->prevbtn[b] = st;
+            n++;
+        }
+        if (!(a[4] & 1)) { d->lastx = w->mouse_x; d->lasty = w->mouse_y; }
+        if (a[3]) WR32(a[3], n);
+        return DD_OK;
+    }
     kbd_state(w, k);
     t = (uint32_t)now_ms(w);
     for (i = 0; i < 256 && n < max; i++) {
@@ -886,7 +948,7 @@ static const vslot vt_surf[] = {           /* IDirectDrawSurface + Surface2 + Su
     V("ReleaseDC", s_ReleaseDC, 2), V("Restore", dd_ok, 1), V("SetClipper", dd_ok, 2), V("SetColorKey", s_SetColorKey, 3),
     V("SetOverlayPosition", dd_ok, 3), V("SetPalette", s_SetPalette, 2), V("Unlock", s_Unlock, 2), V("UpdateOverlay", dd_ok, 6),
     V("UpdateOverlayDisplay", dd_ok, 2), V("UpdateOverlayZOrder", dd_ok, 3),
-    V("GetDDInterface", s_GetDDInterface, 2), V("PageLock", dd_ok, 2), V("PageUnlock", dd_ok, 2), V("SetSurfaceDesc", NULL, 3), { NULL, NULL, 0 }
+    V("GetDDInterface", s_GetDDInterface, 2), V("PageLock", dd_ok, 2), V("PageUnlock", dd_ok, 2), V("SetSurfaceDesc", s_SetSurfaceDesc, 3), { NULL, NULL, 0 }
 };
 static const vslot vt_pal[] = {
     V("QueryInterface", p_QueryInterface, 3), V("AddRef", p_AddRef, 1), V("Release", p_Release, 1), V("GetCaps", p_GetCaps, 2),
@@ -916,12 +978,15 @@ static const vslot vt_di[] = {
     V("CreateDevice", di_CreateDevice, 4), V("EnumDevices", di_EnumDevices, 5), V("GetDeviceStatus", di_GetDeviceStatus, 2),
     V("RunControlPanel", dd_ok, 3), V("Initialize", dd_ok, 3), { NULL, NULL, 0 }
 };
-static const vslot vt_did[] = {
-    V("QueryInterface", di_QueryInterface, 3), V("AddRef", dv_AddRef, 1), V("Release", dv_Release, 1),
+static const vslot vt_did[] = {             /* IDirectInputDevice2A (prefix: IDirectInputDeviceA) */
+    V("QueryInterface", dv_QueryInterface, 3), V("AddRef", dv_AddRef, 1), V("Release", dv_Release, 1),
     V("GetCapabilities", dv_GetCapabilities, 2), V("EnumObjects", dv_ok, 4), V("GetProperty", dv_ok, 3), V("SetProperty", dv_ok, 3),
     V("Acquire", dv_ok, 1), V("Unacquire", dv_ok, 1), V("GetDeviceState", dv_GetDeviceState, 3), V("GetDeviceData", dv_GetDeviceData, 5),
-    V("SetDataFormat", dv_ok, 2), V("SetEventNotification", dv_ok, 2), V("SetCooperativeLevel", dv_ok, 3),
-    V("GetObjectInfo", NULL, 4), V("GetDeviceInfo", NULL, 2), V("RunControlPanel", dv_ok, 3), V("Initialize", dv_ok, 4), { NULL, NULL, 0 }
+    V("SetDataFormat", dv_ok, 2), V("SetEventNotification", dv_SetEventNotification, 2), V("SetCooperativeLevel", dv_ok, 3),
+    V("GetObjectInfo", NULL, 4), V("GetDeviceInfo", NULL, 2), V("RunControlPanel", dv_ok, 3), V("Initialize", dv_ok, 4),
+    V("CreateEffect", NULL, 5), V("EnumEffects", dv_ok, 4), V("GetEffectInfo", NULL, 3), V("GetForceFeedbackState", NULL, 2),
+    V("SendForceFeedbackCommand", dv_ok, 2), V("EnumCreatedEffectObjects", dv_ok, 4), V("Escape", NULL, 2), V("Poll", dv_ok, 1),
+    V("SendDeviceData", dv_ok, 5), { NULL, NULL, 0 }
 };
 
 /* HLE table entries for the vtable slots ("ddraw", "IDirectDraw::CreateSurface" ...) */
