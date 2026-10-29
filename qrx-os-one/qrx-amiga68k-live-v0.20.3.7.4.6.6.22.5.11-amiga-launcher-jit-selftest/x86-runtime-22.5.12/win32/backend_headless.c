@@ -9,6 +9,8 @@
  *   key VK [CHAR]      key press (VK hex like 0x0D or decimal), optional character
  *   type TEXT          type characters (digits, letters, + - * / . = etc.)
  *   menu ID            WM_COMMAND ID to the active window (menu selection)
+ *   menubar X          click the menu bar of the active window at X (opens the popup;
+ *                      a following "click X Y" selects an item in the popup window)
  *   snap FILE.ppm      render all windows (relative to the output directory)
  *   text ID            print the text of control ID (0 = active window title)
  *   expect ID TEXT     compare the text of control ID, counted as OK / FAIL
@@ -120,6 +122,7 @@ static int hl_wait(qwin *w, uint32_t timeout, qevent *ev)
             return 1;
         }
         if (!strcmp(cmd, "type")) { snprintf(g_hl.typebuf, sizeof(g_hl.typebuf), "%s", rest); g_hl.typepos = 0; g_hl.typeup = 0; continue; }
+        if (!strcmp(cmd, "menubar")) { ev->type = QE_MENUBAR; ev->x = atoi(rest); return 1; }
         if (!strcmp(cmd, "menu")) { ev->type = QE_MENU; ev->id = (int)strtol(rest, NULL, 0); return 1; }
         if (!strcmp(cmd, "snap")) {
             ev->type = QE_SNAP;

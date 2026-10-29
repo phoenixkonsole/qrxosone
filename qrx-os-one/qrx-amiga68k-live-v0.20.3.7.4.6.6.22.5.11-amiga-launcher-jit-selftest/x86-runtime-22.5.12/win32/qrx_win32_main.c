@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../core/qrx_bigstack.h"
 #include "qrxwin.h"
 
 static qwin g_w;
@@ -16,7 +17,7 @@ static void usage(void)
                     "  No Windows/ReactOS DLLs are used; x86 code runs in the qrx86core interpreter.\n");
 }
 
-int main(int argc, char **argv)
+static int real_main(int argc, char **argv)
 {
     qwin *w = &g_w;
     const char *script = NULL;
@@ -50,3 +51,5 @@ int main(int argc, char **argv)
     if (w->expect_fail) return 1;
     return rc;
 }
+
+QRX_BIGSTACK_MAIN(real_main)

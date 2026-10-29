@@ -15,7 +15,7 @@
 #define BASEX 6
 #define BASEY 13
 
-enum { B_NONE = 0, B_BUTTON, B_STATIC, B_EDIT, B_DIALOG, B_LISTBOX, B_SCROLLBAR, B_COMBOBOX };
+enum { B_NONE = 0, B_BUTTON, B_STATIC, B_EDIT, B_DIALOG, B_LISTBOX, B_SCROLLBAR, B_COMBOBOX, B_MENU };
 
 static uint32_t def_window_proc(qwin *w, uint32_t h, uint32_t msg, uint32_t wp, uint32_t lp);
 static void win_destroy(qwin *w, qwnd *x);
@@ -928,6 +928,183 @@ static void menu_changed(qwin *w, uint32_t hm)
     }
 }
 
+/* ====================================================================== menu bar + popup menus */
+/* menu bar item text without '&' and the part after '\t' */
+static int menu_label(const wchar16 *src, wchar16 *out, int max, wchar16 *accel, int amax)
+{
+    int i, o = 0, a = 0, tab = 0;
+    for (i = 0; src[i]; i++) {
+        if (src[i] == '\t') { tab = 1; continue; }
+        if (src[i] == '&') { if (src[i + 1] == '&') { if (!tab && o < max - 1) out[o++] = '&'; i++; } continue; }
+        if (tab) { if (accel && a < amax - 1) accel[a++] = src[i]; }
+        else if (o < max - 1) out[o++] = src[i];
+    }
+    out[o] = 0;
+    if (accel) accel[a] = 0;
+    return o;
+}
+
+int user_menubar_height(qwin *w, qwnd *top) { return top && top->menu && M(w, top->menu) ? w->menu_bar_h : 0; }
+
+static int menubar_item_at(qwin *w, qwnd *top, int x, int *ix)
+{
+    qmenu *m = M(w, top->menu);
+    int i, cx = 6;
+    if (!m) return -1;
+    for (i = 0; i < m->n; i++) {
+        wchar16 t[64];
+        int n = menu_label(m->it[i].text, t, 64, NULL, 0), wd = gdi_text_width(0, t, n) + 12;
+        if (x >= cx - 6 && x < cx + wd - 6) { if (ix) *ix = cx - 6; return i; }
+        cx += wd;
+    }
+    return -1;
+}
+
+void user_render_menubar(qwin *w, qwnd *top, qsurf *s)
+{
+    qdc d;
+    qmenu *m = M(w, top->menu);
+    int i, cx = 6, y;
+    memset(&d, 0, sizeof(d));
+    d.w = w; d.s = s; d.cx1 = s->w; d.cy1 = s->h; d.font = 0; d.bkmode = 1;
+    for (i = 0; i < s->w * s->h; i++) s->pix[i] = sys_color(4);
+    for (y = 0; y < s->w; y++) s->pix[(size_t)(s->h - 1) * (size_t)s->w + (size_t)y] = 0xFFFFFF;
+    if (!m) return;
+    for (i = 0; i < m->n; i++) {
+        wchar16 t[64];
+        int n = menu_label(m->it[i].text, t, 64, NULL, 0), wd = gdi_text_width(0, t, n);
+        if (w->menu_popup && w->menu_owner == top->h && w->menu_open_index == i) {
+            gdi_fill(&d, cx - 6, 1, cx + wd + 6, s->h - 1, sys_color(13));
+            gdi_text(&d, cx, 3, t, n, 0xFFFFFF);
+        } else gdi_text(&d, cx, 3, t, n, (m->it[i].flags & 3) ? 0x808080 : 0);
+        cx += wd + 12;
+    }
+}
+
+#define MI_H 18
+#define MI_SEP 8
+static int popup_item_at(qwin *w, qmenu *m, int y)
+{
+    int i, cy = 2;
+    for (i = 0; i < m->n; i++) {
+        int h = (m->it[i].flags & 0x800) ? MI_SEP : MI_H;
+        if (y >= cy && y < cy + h) return i;
+        cy += h;
+    }
+    return -1;
+}
+
+static void close_popup(qwin *w)
+{
+    qwnd *p = W(w, w->menu_popup), *o = W(w, w->menu_owner);
+    w->menu_popup = 0;
+    w->menu_open_index = -1;
+    if (p) win_destroy(w, p);
+    if (o) { o->present = 1; w->active = o->h; }
+}
+
+static void open_popup(qwin *w, qwnd *owner, uint32_t hm, int index, int sx, int sy)
+{
+    static wchar16 cn[8];
+    qmenu *m;
+    qclass *c;
+    int i, wd = 80, ht = 4, aw = 0;
+    uint32_t h;
+    if (w->menu_popup) close_popup(w);
+    win_send(w, owner->h, WM_INITMENUPOPUP, hm, (uint32_t)index);
+    m = M(w, hm);
+    if (!m || !m->n) return;
+    for (i = 0; i < m->n; i++) {
+        wchar16 t[64], acc[32];
+        int n = menu_label(m->it[i].text, t, 64, acc, 32), tw = gdi_text_width(0, t, n) + 40, a = gdi_text_width(0, acc, wlen16(acc));
+        if (tw > wd) wd = tw;
+        if (a > aw) aw = a;
+        ht += (m->it[i].flags & 0x800) ? MI_SEP : MI_H;
+    }
+    wd += aw ? aw + 16 : 0;
+    a2w(cn, "#32768", 8);
+    c = find_class(w, 0, cn);
+    h = create_window(w, 0, c, NULL, WS_POPUP, sx, sy, wd, ht, owner->h, 0, 0, 0);
+    if (!h) return;
+    W(w, h)->userdata = hm;
+    W(w, h)->state = -1;
+    W(w, h)->visible = 1;
+    W(w, h)->style |= WS_VISIBLE;
+    w->menu_popup = h;
+    w->menu_owner = owner->h;
+    w->menu_open_index = index;
+    show_top(w, W(w, h));
+    win_invalidate(w, W(w, h), 1);
+    owner->present = 1;
+}
+
+static void menubar_click(qwin *w, qwnd *top, int x)
+{
+    qmenu *m = M(w, top->menu);
+    int ix = 0, i = m ? menubar_item_at(w, top, x, &ix) : -1;
+    if (i < 0) { if (w->menu_popup) close_popup(w); return; }
+    if (w->menu_popup && w->menu_open_index == i && w->menu_owner == top->h) { close_popup(w); return; }
+    if (m->it[i].flags & 3) return;
+    if (m->it[i].sub) open_popup(w, top, m->it[i].sub, i, top->x + ix, top->y);
+    else { if (w->menu_popup) close_popup(w); win_post(w, top->h, WM_COMMAND, m->it[i].id & 0xFFFF, 0); }
+}
+
+static uint32_t menu_popup_proc(qwin *w, uint32_t *a)
+{
+    qwnd *x = W(w, a[0]);
+    qmenu *m;
+    if (!x) return 0;
+    m = M(w, x->userdata);
+    switch (a[1]) {
+    case WM_PAINT: {
+        uint32_t ps = qw_alloc(w, 64), hdc = qw_call(w, qw_thunk(w, "user32", "BeginPaint"), 2, x->h, ps, 0, 0);
+        qdc *d = DCP(w, hdc);
+        if (d && m) {
+            int i, cy = 2;
+            gdi_fill(d, 0, 0, x->cw, x->ch, sys_color(4));
+            gdi_frame3d(d, 0, 0, x->cw, x->ch, 0, 1);
+            d->bkmode = 1;
+            for (i = 0; i < m->n; i++) {
+                qmenuitem *it = &m->it[i];
+                if (it->flags & 0x800) { gdi_fill(d, 3, cy + 3, x->cw - 3, cy + 4, 0x808080); gdi_fill(d, 3, cy + 4, x->cw - 3, cy + 5, 0xFFFFFF); cy += MI_SEP; continue; }
+                {
+                    wchar16 t[64], acc[32];
+                    int n = menu_label(it->text, t, 64, acc, 32), al = wlen16(acc);
+                    uint32_t col = (it->flags & 3) ? 0x808080 : 0;
+                    if (i == x->state && !(it->flags & 3)) { gdi_fill(d, 3, cy, x->cw - 3, cy + MI_H, sys_color(13)); col = 0xFFFFFF; }
+                    gdi_text(d, 20, cy + 2, t, n, col);
+                    if (al) gdi_text(d, x->cw - 10 - gdi_text_width(0, acc, al), cy + 2, acc, al, col);
+                    if (it->flags & 8) {               /* check mark */
+                        int k;
+                        for (k = 0; k < 7; k++) { int yy = k < 3 ? cy + 8 + k : cy + 10 - (k - 2); gdi_fill(d, 6 + k, yy, 7 + k, yy + 2, col); }
+                    }
+                    if (it->sub) { int k; for (k = 0; k < 4; k++) gdi_fill(d, x->cw - 10 + k, cy + 5 + k, x->cw - 9 + k, cy + 13 - k, col); }
+                }
+                cy += MI_H;
+            }
+        }
+        qw_call(w, qw_thunk(w, "user32", "EndPaint"), 2, x->h, ps, 0, 0);
+        qw_free(w, ps);
+        return 0; }
+    case WM_ERASEBKGND: return 1;
+    case WM_MOUSEMOVE: {
+        int i = m ? popup_item_at(w, m, (int16_t)(a[3] >> 16)) : -1;
+        if (i != x->state) { x->state = i; win_invalidate(w, x, 1); }
+        return 0; }
+    case WM_LBUTTONUP: case WM_RBUTTONUP: {
+        int i = m ? popup_item_at(w, m, (int16_t)(a[3] >> 16)) : -1;
+        uint32_t owner = w->menu_owner;
+        if (i < 0 || (m->it[i].flags & 0x803) || m->it[i].sub) return 0;
+        {
+            uint32_t id = m->it[i].id;
+            close_popup(w);
+            win_post(w, owner, WM_COMMAND, id & 0xFFFF, 0);
+        }
+        return 0; }
+    }
+    return def_window_proc(w, a[0], a[1], a[2], a[3]);
+}
+
 /* ====================================================================== focus / input */
 static void set_focus(qwin *w, uint32_t h)
 {
@@ -970,6 +1147,7 @@ static void mouse_event(qwin *w, qwnd *top, int type, int x, int y, int button)
     int lx, ly;
     uint32_t msg, mk = 0;
     if (!top || !top->enabled) return;
+    if (w->menu_popup && top->h != w->menu_popup && type == QE_MOUSEDOWN) { close_popup(w); return; }
     w->mouse_x = top->x + x; w->mouse_y = top->y + y;
     tgt = W(w, w->capture);
     if (!tgt) { tgt = child_at(w, top, x, y); if (!tgt) tgt = top; }
@@ -1078,16 +1256,17 @@ int user_snapshot(qwin *w, const char *path)
             for (y = cy0; y < cy1; y++) for (x = fx + w->frame_w; x < fx + fw - w->frame_w; x++) if (x >= 0 && y >= 0 && x < W0 && y < H0) desk.pix[y * W0 + x] = col;
             put_text_surf(&desk, fx + w->frame_w + 4, cy0 + 2, t->text, 0xFFFFFF, fx + fw - w->frame_w, w);
         }
-        if (t->menu && M(w, t->menu)) {
-            qmenu *m = M(w, t->menu);
-            int mx = fx + w->frame_w + 6, my = t->y - w->menu_bar_h + 3, k;
-            for (k = 0; k < m->n; k++) {
-                wchar16 tx[64]; int j, o = 0;
-                for (j = 0; m->it[k].text[j] && o < 63; j++) if (m->it[k].text[j] != '&') tx[o++] = m->it[k].text[j];
-                tx[o] = 0;
-                put_text_surf(&desk, mx, my, tx, 0, W0, w);
-                mx += gdi_text_width(0, tx, o) + 12;
+        if (user_menubar_height(w, t)) {
+            qsurf mb;
+            int mh = user_menubar_height(w, t);
+            memset(&mb, 0, sizeof(mb));
+            surf_resize(&mb, t->cw, mh);
+            user_render_menubar(w, t, &mb);
+            for (y = 0; y < mh; y++) for (x = 0; x < t->cw; x++) {
+                int dx = t->x + x, dy = t->y - mh + y;
+                if (dx >= 0 && dy >= 0 && dx < W0 && dy < H0) desk.pix[dy * W0 + dx] = mb.pix[y * t->cw + x];
             }
+            free(mb.pix);
         }
         for (y = 0; y < t->ch; y++) for (x = 0; x < t->cw; x++) {
             int dx = t->x + x, dy = t->y + y;
@@ -1133,7 +1312,12 @@ static int script_event(qwin *w, qevent *ev)
         }
         return 1; }
     case QE_MENU: if (top) win_post(w, top->h, WM_COMMAND, (uint32_t)ev->id & 0xFFFF, 0); return 1;
-    case QE_CLOSE: if (top) win_post(w, top->h, WM_CLOSE, 0, 0); return 1;
+    case QE_MENUBAR: {
+        qwnd *t = ev->win ? W(w, ev->win) : top;
+        if (t && w->menu_popup && t->h == w->menu_popup) t = W(w, w->menu_owner);
+        if (t) menubar_click(w, t, ev->x);
+        return 1; }
+    case QE_CLOSE: { qwnd *t = ev->win ? W(w, ev->win) : top; if (t) win_post(w, t->h, WM_CLOSE, 0, 0); return 1; }
     case QE_MOUSEDOWN: case QE_MOUSEUP: case QE_MOUSEMOVE: {
         qwnd *t = ev->win ? W(w, ev->win) : top;
         if (t && !ev->win && ev->arg[0] == 's') { /* screen coordinates */ }
@@ -1892,6 +2076,7 @@ static uint32_t h_EditProc(qwin *w, uint32_t *a) { return edit_proc(w, a); }
 static uint32_t h_DialogProc(qwin *w, uint32_t *a) { return dlg_proc(w, a); }
 static uint32_t h_ListBoxProc(qwin *w, uint32_t *a) { return listbox_proc(w, a); }
 static uint32_t h_ScrollBarProc(qwin *w, uint32_t *a) { return scrollbar_proc(w, a); }
+static uint32_t h_MenuProc(qwin *w, uint32_t *a) { return menu_popup_proc(w, a); }
 
 #define U(n, f, c) { "user32", n, c, f }
 const qhle qw_user32[] = {
@@ -1955,6 +2140,7 @@ const qhle qw_user32[] = {
     U("SetWindowsHookExW", u_zero, 4), U("UnhookWindowsHookEx", u_one, 1), U("CallNextHookEx", u_zero, 4),
     U("qrx_ButtonProc", h_ButtonProc, 4), U("qrx_StaticProc", h_StaticProc, 4), U("qrx_EditProc", h_EditProc, 4),
     U("qrx_DialogProc", h_DialogProc, 4), U("qrx_ListBoxProc", h_ListBoxProc, 4), U("qrx_ScrollBarProc", h_ScrollBarProc, 4),
+    U("qrx_MenuProc", h_MenuProc, 4),
     { NULL, NULL, 0, NULL }
 };
 
@@ -1963,10 +2149,11 @@ void user_init(qwin *w)
     static const struct { const char *name, *proc; int b; int extra; } bi[] = {
         { "Button", "qrx_ButtonProc", B_BUTTON, 0 }, { "Static", "qrx_StaticProc", B_STATIC, 0 }, { "Edit", "qrx_EditProc", B_EDIT, 0 },
         { "#32770", "qrx_DialogProc", B_DIALOG, 30 }, { "ListBox", "qrx_ListBoxProc", B_LISTBOX, 0 }, { "ScrollBar", "qrx_ScrollBarProc", B_SCROLLBAR, 0 },
-        { "ComboBox", "qrx_ListBoxProc", B_COMBOBOX, 0 },
+        { "ComboBox", "qrx_ListBoxProc", B_COMBOBOX, 0 }, { "#32768", "qrx_MenuProc", B_MENU, 0 },
     };
     unsigned i;
     w->caption_h = 19; w->frame_w = 3; w->menu_bar_h = 19;
+    w->menu_open_index = -1;
     for (i = 0; i < sizeof(bi) / sizeof(bi[0]); i++) {
         wchar16 n[32];
         qclass *c;

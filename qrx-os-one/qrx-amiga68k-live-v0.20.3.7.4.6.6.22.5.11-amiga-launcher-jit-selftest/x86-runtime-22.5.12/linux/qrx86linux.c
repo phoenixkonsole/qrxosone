@@ -813,7 +813,8 @@ static uint32_t syscall_dispatch(lxproc *p, uint32_t nr, uint32_t a1, uint32_t a
     case 4: return do_write(p, fget(p, a1), a2, a3);
     case 5: if (!gstr(p, a1, path, sizeof(path))) return NEG(L_EFAULT); return do_open(p, path, a2, a3);
     case 295: /* openat: dirfd other than AT_FDCWD only matters for relative paths (rare in practice) */
-        if (!gstr(p, a2, path, sizeof(path))) return NEG(L_EFAULT); return do_open(p, path, a3, a4);
+        if (!gstr(p, a2, path, sizeof(path))) return NEG(L_EFAULT);
+        return do_open(p, path, a3, a4);
     case 6: f = fget(p, a1); if (!f) return NEG(L_EBADF); fput(f); p->fd[a1] = NULL; return 0;
     case 7: return do_wait(p, (int32_t)a1, a2, a3);
     case 114: return do_wait(p, (int32_t)a1, a2, a3);
@@ -850,8 +851,11 @@ static uint32_t syscall_dispatch(lxproc *p, uint32_t nr, uint32_t a1, uint32_t a
         if ((md & 2) && access(hp, W_OK)) return HERR();
         return 0; }
     case 37: if ((int)a1 == p->pid || a1 == 0) { if (a2) proc_exit(p, (int)(a2 & 0x7F)); } return 0;
-    case 38: if (!gstr(p, a1, path, sizeof(path))) return NEG(L_EFAULT); hostpath(p, path, hp, sizeof(hp));
-        if (!gstr(p, a2, path, sizeof(path))) return NEG(L_EFAULT); hostpath(p, path, hp2, sizeof(hp2));
+    case 38:
+        if (!gstr(p, a1, path, sizeof(path))) return NEG(L_EFAULT);
+        hostpath(p, path, hp, sizeof(hp));
+        if (!gstr(p, a2, path, sizeof(path))) return NEG(L_EFAULT);
+        hostpath(p, path, hp2, sizeof(hp2));
         return rename(hp, hp2) ? HERR() : 0;
     case 39: case 296: if (!gstr(p, nr == 39 ? a1 : a2, path, sizeof(path))) return NEG(L_EFAULT); hostpath(p, path, hp, sizeof(hp));
         return mkdir(hp, (mode_t)((nr == 39 ? a2 : a3) & 0777u)) ? HERR() : 0;
@@ -1038,8 +1042,13 @@ static uint32_t syscall_dispatch(lxproc *p, uint32_t nr, uint32_t a1, uint32_t a
         x86_write_mem(c, a1, p->cwd, L);
         return L; }
     case 191: case 76: x86_wr32(c, a2, a1 == 3 ? 8u << 20 : 0xFFFFFFFFu); x86_wr32(c, a2 + 4, 0xFFFFFFFFu); if (a1 == 7) { x86_wr32(c, a2, 1024); x86_wr32(c, a2 + 4, 1024); } return 0;
-    case 340: if (a3) { x86_wr32(c, a3, 0); x86_wr32(c, a3 + 4, 0); x86_wr32(c, a3 + 8, 0xFFFFFFFFu); x86_wr32(c, a3 + 12, 0xFFFFFFFFu);
-                if (a2 == 3) x86_wr32(c, a3, 8u << 20); if (a2 == 7) { x86_wr32(c, a3, 1024); x86_wr32(c, a3 + 8, 1024); x86_wr32(c, a3 + 12, 0); } } return 0;
+    case 340:                                     /* prlimit64(pid, resource, new, old) */
+        if (a3) {
+            x86_wr32(c, a3, 0); x86_wr32(c, a3 + 4, 0); x86_wr32(c, a3 + 8, 0xFFFFFFFFu); x86_wr32(c, a3 + 12, 0xFFFFFFFFu);
+            if (a2 == 3) x86_wr32(c, a3, 8u << 20);
+            if (a2 == 7) { x86_wr32(c, a3, 1024); x86_wr32(c, a3 + 8, 1024); x86_wr32(c, a3 + 12, 0); }
+        }
+        return 0;
     case 243: {                                  /* set_thread_area */
         int32_t e = (int32_t)x86_rd32(c, a1);
         uint32_t base = x86_rd32(c, a1 + 4), lim = x86_rd32(c, a1 + 8);

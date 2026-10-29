@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../core/qrx_bigstack.h"
 #include "qrx86linux.h"
 
 static void usage(void)
@@ -13,7 +14,7 @@ static void usage(void)
                     "  QRX qrx86core interpreter.  No native x86 code is executed.\n");
 }
 
-int main(int argc, char **argv)
+static int real_main(int argc, char **argv)
 {
     lxopts o;
     char *env[64];
@@ -37,3 +38,5 @@ int main(int argc, char **argv)
     env[envc] = NULL;
     return lx_run(&o, argv[i], argc - i, argv + i, env);
 }
+
+QRX_BIGSTACK_MAIN(real_main)

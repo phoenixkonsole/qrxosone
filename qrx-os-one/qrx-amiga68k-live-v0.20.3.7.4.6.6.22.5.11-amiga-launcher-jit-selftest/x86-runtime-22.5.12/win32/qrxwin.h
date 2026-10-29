@@ -125,7 +125,7 @@ typedef struct qevent {
     char arg[256];
 } qevent;
 enum { QE_NONE = 0, QE_MOUSEDOWN, QE_MOUSEUP, QE_MOUSEMOVE, QE_KEYDOWN, QE_KEYUP, QE_CHAR, QE_MENU, QE_CLOSE,
-       QE_CLICKID, QE_SNAP, QE_TEXT, QE_EXPECT, QE_QUIT, QE_WAIT, QE_ACTIVATE };
+       QE_CLICKID, QE_SNAP, QE_TEXT, QE_EXPECT, QE_QUIT, QE_WAIT, QE_ACTIVATE, QE_MENUBAR };
 
 typedef struct qbackend {
     const char *name;
@@ -205,6 +205,8 @@ typedef struct qwin {
     char outdir[512];
     int menu_bar_h, caption_h, frame_w;
     int draw_nc;                      /* headless: draw a caption/menu bar into snapshots */
+    uint32_t menu_popup, menu_owner;  /* open popup menu window and its owner */
+    int menu_open_index;              /* menu bar item whose popup is open (-1 none) */
 } qwin;
 
 /* hle.c */
@@ -246,6 +248,8 @@ int  user_pump(qwin *w, int block, qmsg *out, uint32_t filt);
 void user_render_all(qwin *w);
 int  user_snapshot(qwin *w, const char *path);
 qmenu *M(qwin *w, uint32_t h);
+int  user_menubar_height(qwin *w, qwnd *top);
+void user_render_menubar(qwin *w, qwnd *top, qsurf *s);   /* s: cw x menubar height */
 uint32_t menu_load(qwin *w, uint32_t data);
 
 /* gdi.c */
