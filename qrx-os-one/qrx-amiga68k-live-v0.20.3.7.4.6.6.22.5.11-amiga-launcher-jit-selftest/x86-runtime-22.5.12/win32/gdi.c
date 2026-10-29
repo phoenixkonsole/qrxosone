@@ -160,6 +160,14 @@ uint32_t dc_for_window(qwin *w, qwnd *x, int client)
         clip_to(d, px, py, px + p->cw, py + p->ch);
     }
     if (x->font) d->font = x->font;
+    /* remember which part of the top-level surface may change (partial presentation) */
+    if (!t->present) { t->px0 = d->cx0; t->py0 = d->cy0; t->px1 = d->cx1; t->py1 = d->cy1; }
+    else {
+        if (d->cx0 < t->px0) t->px0 = d->cx0;
+        if (d->cy0 < t->py0) t->py0 = d->cy0;
+        if (d->cx1 > t->px1) t->px1 = d->cx1;
+        if (d->cy1 > t->py1) t->py1 = d->cy1;
+    }
     t->present = 1;
     return h;
 }

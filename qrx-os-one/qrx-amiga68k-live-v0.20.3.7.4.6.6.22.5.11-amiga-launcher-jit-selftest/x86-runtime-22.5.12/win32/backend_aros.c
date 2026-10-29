@@ -40,6 +40,7 @@ typedef struct bew {
     struct Window *win;
     uint32_t h;
     int mbh;
+    int full;                       /* next presentation must cover the whole window */
     char title[260];
     qsurf mb;
 } bew;
@@ -91,6 +92,7 @@ static void ar_create(qwin *w, qwnd *t)
     ModifyIDCMP(b->win, IDCMP_CLOSEWINDOW | IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_ACTIVEWINDOW | IDCMP_REFRESHWINDOW | IDCMP_CHANGEWINDOW);
     t->be = b;
     t->present = 1;
+    b->full = 1;
     if (w->verbose) qw_log(w, "AROS backend: window %08x opened at %d,%d inner %dx%d (+%d menu bar)", t->h, t->x, t->y, t->cw, t->ch, b->mbh);
 }
 
@@ -168,12 +170,29 @@ static void ar_present(qwin *w, qwnd *t)
         b = (bew *)t->be;
         if (!b) return;
     }
-    if (mbh) {
+    if (mbh && b->full) {           /* menu bar only when it can have changed */
         surf_resize(&b->mb, t->cw, mbh);
         user_render_menubar(w, t, &b->mb);
         blit(b->win, b->mb.pix, t->cw, b->win->BorderLeft, b->win->BorderTop, t->cw, mbh);
     }
-    blit(b->win, t->surf.pix, t->surf.w, b->win->BorderLeft, b->win->BorderTop + mbh, t->cw < t->surf.w ? t->cw : t->surf.w, t->ch < t->surf.h ? t->ch : t->surf.h);
+    {
+        int x0 = 0, y0 = 0, x1 = t->cw < t->surf.w ? t->cw : t->surf.w, y1 = t->ch < t->surf.h ? t->ch : t->surf.h;
+        if (!b->full && t->px1 > t->px0 && t->py1 > t->py0) {       /* only the changed area */
+            if (t->px0 > x0) x0 = t->px0;
+            if (t->py0 > y0) y0 = t->py0;
+            if (t->px1 < x1) x1 = t->px1;
+            if (t->py1 < y1) y1 = t->py1;
+        }
+        if (w->verbose > 1) {
+            static int nd;
+            if (nd++ < 60) qw_log(w, "AROS present %08x rect %d,%d-%d,%d full=%d pix0=%06x pen0=%ld", t->h, x0, y0, x1, y1, b->full,
+                                  (unsigned)t->surf.pix[(size_t)y0 * (size_t)t->surf.w + (size_t)x0], (long)(g_truecolor ? -2 : pen_for(t->surf.pix[(size_t)y0 * (size_t)t->surf.w + (size_t)x0])));
+        }
+        b->full = 0;
+        if (x1 > x0 && y1 > y0)
+            blit(b->win, t->surf.pix + (size_t)y0 * (size_t)t->surf.w + (size_t)x0, t->surf.w,
+                 b->win->BorderLeft + x0, b->win->BorderTop + mbh + y0, x1 - x0, y1 - y0);
+    }
 }
 
 static void ar_title(qwin *w, qwnd *t)
@@ -185,7 +204,7 @@ static void ar_title(qwin *w, qwnd *t)
     SetWindowTitles(b->win, (CONST_STRPTR)b->title, (CONST_STRPTR)~0);
 }
 
-static void ar_menu(qwin *w, qwnd *t) { t->present = 1; (void)w; }
+static void ar_menu(qwin *w, qwnd *t) { t->present = 1; if (t->be) ((bew *)t->be)->full = 1; (void)w; }
 
 static uint64_t ar_now(qwin *w)
 {
@@ -234,7 +253,7 @@ static int translate(qwin *w, struct IntuiMessage *im, qevent *ev)
     case IDCMP_REFRESHWINDOW: {
         qwnd *t = W(w, b->h);
         BeginRefresh(im->IDCMPWindow); EndRefresh(im->IDCMPWindow, TRUE);
-        if (t) t->present = 1;
+        if (t) { t->present = 1; ((bew *)t->be)->full = 1; }
         ev->type = QE_NONE;                 /* wake the pump so the window is presented again */
         return 1; }
     case IDCMP_CHANGEWINDOW: {

@@ -4,13 +4,17 @@
 # <scenario-dir>/overlay/   copied over the AROS system tree (programs, libs, data)
 # <scenario-dir>/User-Startup   executed at the end of boot; must write QRXOUT:DONE
 # The guest writes results/screens (QRXScreenGrab PPM) to QRXOUT: = <out-dir>.
+# Deadwood AROS occasionally hangs during boot in FS-UAE (grey screen before the
+# CLI).  The harness prepends "Echo >QRXOUT:BOOTED" to User-Startup; when that
+# file does not appear within QRX_BOOT_TMO seconds (default 240) the emulator is
+# restarted, at most QRX_BOOT_RETRIES times (default 2).  Each restart is logged.
 set -Eeuo pipefail
 SYS="$1"; ROM="$2"; EXT="$3"; SCN="$4"; OUT="$5"; CPU="${6:-68060}"; TMO="${7:-900}"
 W="$(mktemp -d /var/tmp/qrx-scn.XXXXXX)"; trap 'rm -rf "$W"' EXIT
 mkdir -p "$OUT" "$W/home"
 cp -a "$SYS" "$W/sys"
 [[ -d "$SCN/overlay" ]] && cp -a "$SCN/overlay/." "$W/sys/"
-cp "$SCN/User-Startup" "$W/sys/S/User-Startup"
+{ echo 'Echo "booted" >QRXOUT:BOOTED'; cat "$SCN/User-Startup"; } > "$W/sys/S/User-Startup"
 case "$CPU" in 68060|68040) model=A4000/040;; 68030) model=A4000;; *) model=A1200/020;; esac
 mb=16384; z3=1048576; [[ $CPU == 68020 ]] && { mb=0; z3=262144; }
 cat > "$W/cfg.fs-uae" <<CFG
@@ -39,10 +43,21 @@ warp_mode = 1
 base_dir = $W/home
 log_flush = 1
 CFG
+BT="${QRX_BOOT_TMO:-240}"; tries=$(( ${QRX_BOOT_RETRIES:-2} + 1 )); attempt=0
+while :; do
+attempt=$((attempt+1)); rm -f "$OUT/BOOTED" "$OUT/DONE"
 d=$(( 200 + RANDOM % 200 )); Xvfb ":$d" -screen 0 1280x1024x24 >/dev/null 2>&1 & xp=$!; sleep 2
 HOME="$W/home" DISPLAY=":$d" SDL_AUDIODRIVER=dummy fs-uae "$W/cfg.fs-uae" > "$OUT/fs-uae.stdout" 2>&1 & fp=$!
-t=0; while (( t < TMO )); do [[ -f "$OUT/DONE" ]] && break; kill -0 $fp 2>/dev/null || break; sleep 2; t=$((t+2)); done
+t=0; hung=0
+while (( t < TMO )); do
+  [[ -f "$OUT/DONE" ]] && break; kill -0 $fp 2>/dev/null || break
+  (( t >= BT )) && [[ ! -f "$OUT/BOOTED" ]] && { hung=1; break; }
+  sleep 2; t=$((t+2))
+done
 sleep 2; kill $fp 2>/dev/null || true; sleep 1; kill -9 $fp 2>/dev/null || true; kill $xp 2>/dev/null || true
+(( hung && attempt < tries )) || break
+echo "attempt $attempt: AROS did not finish booting within ${BT}s, restarting the emulator" | tee -a "$OUT/BOOT-RETRIES.txt"
+done
 find "$W/home" -name 'fs-uae.log*' -exec cp {} "$OUT/" \; 2>/dev/null || true
 for f in "$OUT"/*.ppm; do [[ -f "$f" ]] && convert "$f" "${f%.ppm}.png" && rm -f "$f"; done
 rm -f "$OUT"/*.uaem

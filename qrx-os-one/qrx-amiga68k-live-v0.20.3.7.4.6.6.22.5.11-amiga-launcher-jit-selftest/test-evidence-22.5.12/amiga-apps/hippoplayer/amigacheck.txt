@@ -1,0 +1,42 @@
+QRXAMIGARUN CHECK SYS:HippoPlayer/HiP
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 157684 bytes
+  hunks    : 6  relocs: 1594  chip: 3356  fast: 0  any: 164528 bytes
+    hunk 0 CODE 724 bytes
+    hunk 1 CODE 134452 bytes
+    hunk 2 DATA 13456 bytes
+    hunk 3 DATA 2440 bytes
+    hunk 4 BSS 916 bytes
+    hunk 5 BSS 15896 bytes
+  note     : requests Chip RAM (custom-chip DMA data: OCS/ECS/AGA hardware access likely)
+  library  : intuition.library -> ok (in memory)
+  library  : graphics.library -> ok (in memory)
+  library  : dos.library -> ok (in memory)
+  library  : reqtools.library -> ok (LIBS:reqtools.library)
+  library  : workbench.library -> ok (in memory)
+  library  : diskfont.library -> ok (in memory)
+  library  : rexxsyslib.library -> ok (in memory)
+  library  : screennotify.library -> MISSING
+  device   : input.device -> ok (in memory)
+  library  : layers.library -> ok (in memory)
+  library  : expansion.library -> ok (in memory)
+  library  : trinity.library -> MISSING
+  device   : timer.device -> ok (in memory)
+  device   : ahi.device -> ok (DEVS:ahi.device)
+  library  : octamixplayer.library -> MISSING
+  library  : playsid.library -> ok (LIBS:playsid.library)
+  library  : mline.library -> MISSING
+  library  : mpega.library -> MISSING
+  library  : xpkmaster.library -> MISSING
+  library  : powerpacker.library -> MISSING
+  device   : audio.device -> ok (ROM resident module)
+  library  : amigus.library -> MISSING
+  library  : medplayer.library -> MISSING
+  library  : octaplayer.library -> MISSING
+  library  : xfdmaster.library -> MISSING
+  library  : mathtrans.library -> ok (LIBS:mathtrans.library)
+  library  : mathffp.library -> ok (ROM resident module)
+  (library/device names are found by scanning the program image; optional or
+   version-specific requirements cannot be decided statically)
+  RESULT   : RUNNABLE WITH WARNINGS
+QRXTEST AMIGACHECK rc=5

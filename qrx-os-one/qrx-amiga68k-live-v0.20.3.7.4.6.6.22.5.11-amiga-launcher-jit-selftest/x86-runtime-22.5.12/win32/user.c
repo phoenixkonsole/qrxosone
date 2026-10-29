@@ -1000,7 +1000,7 @@ static void close_popup(qwin *w)
     w->menu_popup = 0;
     w->menu_open_index = -1;
     if (p) win_destroy(w, p);
-    if (o) { o->present = 1; w->active = o->h; }
+    if (o) { o->present = 1; w->active = o->h; if (w->be->menu) w->be->menu(w, o); }
 }
 
 static void open_popup(qwin *w, qwnd *owner, uint32_t hm, int index, int sx, int sy)
@@ -1036,6 +1036,7 @@ static void open_popup(qwin *w, qwnd *owner, uint32_t hm, int index, int sx, int
     show_top(w, W(w, h));
     win_invalidate(w, W(w, h), 1);
     owner->present = 1;
+    if (w->be->menu) w->be->menu(w, owner);
 }
 
 static void menubar_click(qwin *w, qwnd *top, int x)
@@ -1392,6 +1393,7 @@ int user_pump(qwin *w, int block, qmsg *out, uint32_t filt)
             int r;
             for (i = 0; i < QW_MAXTIMER; i++) if (w->timer[i].used && w->timer[i].next < next) next = w->timer[i].next;
             memset(&ev, 0, sizeof(ev));
+            if (w->verbose > 1) { static int nw; if (nw++ < 40) qw_log(w, "pump: wait %lu ms", (unsigned long)(next > now ? next - now : 0)); }
             r = w->be->wait(w, (uint32_t)(next > now ? next - now : 0), &ev);
             if (r < 0) {
                 /* backend finished (script end / window system gone): ask the program to close */
@@ -1429,6 +1431,7 @@ static uint32_t def_window_proc(qwin *w, uint32_t h, uint32_t msg, uint32_t wp, 
         return 0; }
     case WM_SETTEXT:
         qw_rd_wstr(w, lp, x->text, 256);
+        if (w->verbose && (x->style & WS_CHILD)) { char t[260]; w2a(t, x->text, 260); qw_log(w, "text %u: %s", x->id, t); }
         if (!(x->style & WS_CHILD) && x->be && w->be->title) w->be->title(w, x);
         return 1;
     case WM_GETTEXT: return (uint32_t)qw_wr_wstr(w, lp, x->text, (int)wp);

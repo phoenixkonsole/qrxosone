@@ -31,6 +31,7 @@ static int real_main(int argc, char **argv)
         else if (!strcmp(argv[i], "-o") && i + 1 < argc) snprintf(w->outdir, sizeof(w->outdir), "%s", argv[++i]);
         else if (!strcmp(argv[i], "-l") && i + 1 < argc) w->lang = (uint16_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(argv[i], "-v")) w->verbose = 1;
+        else if (!strcmp(argv[i], "-vv")) w->verbose = 2;
         else if (!strcmp(argv[i], "-L") && i + 1 < argc) { FILE *lf = fopen(argv[++i], "w"); if (lf) w->log = lf; }
         else if (!strcmp(argv[i], "-T")) w->trace = 1;
         else { usage(); return 2; }

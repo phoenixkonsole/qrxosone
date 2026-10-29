@@ -101,6 +101,7 @@ typedef struct qwnd {
     qsurf surf;
     void *be;                         /* backend window */
     int present;                      /* needs presentation */
+    int px0, py0, px1, py1;           /* area to present (surface coords), valid while present */
     /* controls */
     int state;                        /* button: checked/pushed bits */
     int hover;

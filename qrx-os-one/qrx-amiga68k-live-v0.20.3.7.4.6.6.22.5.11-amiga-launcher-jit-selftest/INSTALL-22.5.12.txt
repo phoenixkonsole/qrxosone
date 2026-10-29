@@ -1,0 +1,55 @@
+QRX OS One 0.20.3.7.4.6.6.22.5.12 - installation / build guide
+================================================================
+
+Everything in INSTALL-22.5.11.txt (build host, Deadwood workspace, LiveCD build,
+22.5.11 tools, emulator tests) still applies.  Additions for 22.5.12:
+
+A. Extra host packages
+----------------------
+  gcc-multilib (i386 host tests), gcc-mingw-w64-i686 (only to rebuild QRXClock;
+  a prebuilt qrxclock.exe + .sha256 is shipped), fs-uae xvfb imagemagick,
+  dpkg-deb (BusyBox package unpacking), lhasa (DOpus5 archive).
+
+B. LiveCD build
+---------------
+  sudo ./deploy.sh [--qrx-v020-root PATH] [--reactos-file ...]
+  deploy.sh now also runs validate-22.5.12.py; diagnostics-v6.6/deploy.sh (release
+  22.5.12) builds qrx-i386 / qrx-win32 with the Deadwood toolchain (HUNK proof)
+  and installs:
+    QRX:C/qrx-i386, QRX:C/qrx-win32
+    QRX:Windows/QRX/qrxclock.exe
+    QRX:Windows/ReactOS/System32/calc.exe, winmine.exe (already part of the
+                                                ReactOS System32 payload)
+    QRX:Linux/bin/busybox                        (upstream/busybox, GPL source next to it)
+    SYS:Apps/DOpus5, SYS:Apps/HippoPlayer         (upstream/amiga-apps)
+
+C. Only the x86 runtime (m68k)
+------------------------------
+  QRX_AROS_CC=... QRX_ELF2HUNK=... QRX_AROS_CFLAGS=... \
+  bash x86-runtime-22.5.12/build-target.sh /tmp/qrx-x86
+  -> /tmp/qrx-x86/hunk/{qrx-i386,qrx-win32,QRXInput}
+
+D. Host tests (x86_64 host - not a proof for m68k)
+--------------------------------------------------
+  python3 -B validate-22.5.12.py
+  bash x86-runtime-22.5.12/tests/run-host-tests.sh /tmp/qrx-host [busybox-i386] [ReactOS-System32]
+
+E. Emulator tests (FS-UAE, headless, Deadwood AROS m68k)
+--------------------------------------------------------
+  C=$WS/core-amiga-m68k/bin/amiga-m68k
+  H=amiga-runtime-22.5.11/emulator/run-fsuae-scenario.sh
+  bash apps-22.5.12/x86/prepare-overlay.sh /tmp/qrx-x86/hunk /tmp/qrx-rt2211/hunk BINDIR /tmp/scn
+  bash $H $C/AROS $C/gen/boot/aros-amiga-m68k-rom.bin $C/gen/boot/aros-amiga-m68k-ext.bin /tmp/scn /tmp/out 68060 3000
+  BINDIR holds the guest programs (calc.exe, winmine.exe, qrxclock.exe, busybox,
+  test binaries - see apps-22.5.12/x86/prepare-overlay.sh).  The live scenario
+  (apps-22.5.12/x86-live) and the Amiga program scenarios (apps-22.5.12/amiga,
+  prepare-overlays.sh) are run the same way.  The harness restarts the emulator
+  if AROS hangs during boot (QRX_BOOT_TMO, QRX_BOOT_RETRIES).
+
+F. On the LiveCD
+----------------
+  QRXDesktop terminal:  rechner | minesweeper | uhr
+                        win32 <prog.exe> [args]   i386 <prog> [args]
+  Shell:  QRX:C/qrx-win32 QRX:Windows/ReactOS/System32/calc.exe
+          QRX:C/qrx-i386 QRX:Linux/bin/busybox ls -l /SYS/C
+          SYS:Apps/DOpus5/DirectoryOpus   SYS:Apps/HippoPlayer/HiP
