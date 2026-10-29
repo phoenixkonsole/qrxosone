@@ -1,0 +1,22 @@
+; QRX 22.5.12 live scenario: DirectDraw "RTG direct" on the uaegfx RTG card.
+; dxtest.exe and PrBoom-plus (Doom engine, GPL) with the Freedoom IWAD (BSD) run in
+; DirectDraw exclusive 8-bit mode: their primary surface and back buffer ARE the
+; two screen buffers of an own AROS screen (locked bitmaps in RTG memory), Flip is
+; ChangeScreenBuffer.  Started synchronously (Run-started processes hang in
+; OpenScreen on this AROS build, see TESTREPORT).  -G captures the shown buffer.
+FailAt 1000
+Assign QRX: SYS:QRX >NIL:
+SetEnv QRX_WIN_STATS 1
+CD SYS:X86
+QRX:C/qrx-win32 -v -L QRXOUT:live-dx.log -G QRXOUT:dx-screen.ppm 10 dxtest.exe 12 >QRXOUT:live-dx.out
+Copy SYS:X86/dxtest.log QRXOUT:dxtest-live.log
+CD SYS:DOOM
+; the demo runs as fast as the emulated CPU allows; stop after 150 M x86 instructions
+; (t0/t2: host wall time from file mtimes - the AROS clock runs fast in FS-UAE warp mode)
+SetEnv QRX_WIN_BUDGET 150000000
+Echo "start" >QRXOUT:t0
+QRX:C/qrx-win32 -v -L QRXOUT:live-doom.log -e SDL_VIDEODRIVER=directx -G QRXOUT:doom-screen.ppm 30 prboom-plus.exe -iwad freedoom1.wad -width 320 -height 200 -fullscreen -nosound -timedemo demo1 >QRXOUT:live-doom.out
+Echo "end" >QRXOUT:t2
+UnSetEnv QRX_WIN_BUDGET
+QRX:C/QRXScreenGrab QRXOUT:after-doom.ppm >QRXOUT:grab.txt
+Echo "done" >QRXOUT:DONE

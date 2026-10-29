@@ -197,6 +197,7 @@ static void present(qwin *w, dxobj *prim)
     if (!t) return;
     t = win_top(w, t);
     if (!t) return;
+    w->frames++;
     if (t->cw != prim->sw || t->ch != prim->sh) {
         const qhle *mv = qw_find_hle("user32", "MoveWindow");
         uint32_t b[16];

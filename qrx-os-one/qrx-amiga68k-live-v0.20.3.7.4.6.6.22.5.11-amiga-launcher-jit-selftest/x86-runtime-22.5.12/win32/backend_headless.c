@@ -98,11 +98,17 @@ static void hl_menu(qwin *w, qwnd *t) { (void)w; (void)t; }
  * (HL_IPMS per millisecond), so busy game loops (PeekMessage + GetTickCount) see
  * time pass and scripted events still arrive */
 #define HL_IPMS 10000u
+static uint64_t hl_ipms(void)       /* QRX_HL_IPMS: other CPU/clock ratios (e.g. an emulator in warp mode) */
+{
+    static uint64_t v;
+    if (!v) { const char *e = getenv("QRX_HL_IPMS"); v = e && strtoul(e, NULL, 0) ? strtoul(e, NULL, 0) : HL_IPMS; }
+    return v;
+}
 static void hl_tick(qwin *w)
 {
-    uint64_t d = (x86_icount(&w->cpu) - g_hl.ic) / HL_IPMS;
+    uint64_t ipms = hl_ipms(), d = (x86_icount(&w->cpu) - g_hl.ic) / ipms;
     if (!d) return;
-    g_hl.ic += d * HL_IPMS;
+    g_hl.ic += d * ipms;
     g_hl.now += d;
     g_hl.pending = g_hl.pending > d ? g_hl.pending - d : 0;
 }

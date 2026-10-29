@@ -22,6 +22,7 @@ static int real_main(int argc, char **argv)
     qwin *w = &g_w;
     const char *script = NULL;
     int i = 1, rc;
+    uint64_t t0;
     memset(w, 0, sizeof(*w));
     w->lang = 0x0407;
     w->log = stderr;
@@ -49,9 +50,17 @@ static int real_main(int argc, char **argv)
     if (!w->be->init(w)) { fprintf(stderr, "qrx-win32: backend %s unavailable\n", w->be->name); return 20; }
     if (!qw_load(w, argv[i], argc - i, argv + i)) return 127;
     if (getenv("QRX_WIN_BUDGET")) w->cpu.budget = strtoull(getenv("QRX_WIN_BUDGET"), NULL, 0);   /* profiling: stop after N instructions */
+    t0 = w->be->now(w);
     rc = qw_run(w);
+    if (getenv("QRX_WIN_STATS")) {      /* backend clock: real time on AROS, virtual time headless */
+        uint64_t ms = w->be->now(w) - t0, n = x86_icount(&w->cpu);
+        char m[200];
+        snprintf(m, sizeof(m), "%llu guest instructions in %llu ms (%llu per second), %d DirectDraw frames, %u HLE imports",
+                 (unsigned long long)n, (unsigned long long)ms, (unsigned long long)(ms ? n * 1000u / ms : 0), w->frames, w->nthunk);
+        fprintf(stderr, "qrx-win32: %s\n", m);
+        qw_log(w, "%s", m);
+    }
     if (w->be->shutdown) w->be->shutdown(w);
-    if (getenv("QRX_WIN_STATS")) fprintf(stderr, "qrx-win32: %llu guest instructions, %u HLE imports\n", (unsigned long long)x86_icount(&w->cpu), w->nthunk);
     if (w->expect_ok || w->expect_fail) printf("QRXWIN-RESULT expect_ok=%d expect_fail=%d exit=%d\n", w->expect_ok, w->expect_fail, rc);
     if (w->expect_fail) return 1;
     return rc;

@@ -61,3 +61,10 @@ policy; ~60 file-name variants returned 404).  0.4.15 is therefore the newest
 ReactOS release archived here.  To add 0.4.16, download the x86 *live* ZIP,
 split it the same way (`split -b 45M -d -a 2 FILE FILE.part`) and add its
 SHA-256 to `SHA256SUMS.full`.
+
+## amiga-apps/, doom/
+
+68k Amiga programs tested on AROS (see `amiga-apps/README.md`) and the Windows
+game used for the DirectDraw demonstration: PrBoom-plus (Doom engine, GPL) with
+SDL 1.2 (LGPL) and the Freedoom IWAD (BSD) - sources, data and licences in
+`doom/README.md`.

@@ -253,12 +253,23 @@ static void ar_title(qwin *w, qwnd *t)
 
 static void ar_menu(qwin *w, qwnd *t) { t->present = 1; if (t->be) ((bew *)t->be)->full = 1; (void)w; }
 
+/* monotonic: programs compute tic deltas from this clock (a step backwards made
+ * PrBoom-plus's screen melt run with negative tics, i.e. ~2^32 iterations) */
+static uint64_t g_last_now, g_back_max;
+static unsigned g_back_n;
 static uint64_t ar_now(qwin *w)
 {
     struct timeval tv;
+    uint64_t t;
     (void)w;
     gettimeofday(&tv, NULL);
-    return (uint64_t)tv.tv_sec * 1000u + (uint64_t)tv.tv_usec / 1000u;
+    t = (uint64_t)tv.tv_sec * 1000u + (uint64_t)tv.tv_usec / 1000u;
+    if (t < g_last_now) {
+        if (g_last_now - t > g_back_max) g_back_max = g_last_now - t;
+        g_back_n++;
+        return g_last_now;
+    }
+    return g_last_now = t;
 }
 
 /* raw key -> Windows virtual key */
@@ -373,6 +384,7 @@ static int ar_wait(qwin *w, uint32_t timeout, qevent *ev)
 
 static void ar_shutdown(qwin *w)
 {
+    if (g_back_n) qw_log(w, "AROS backend: system clock stepped backwards %u times (up to %llu ms), held monotonic", g_back_n, (unsigned long long)g_back_max);
     int i;
     for (i = 0; i < QW_MAXWND; i++) if (w->wnd[i].used && w->wnd[i].be) ar_destroy(w, &w->wnd[i]);
     if (g_topen) CloseDevice((struct IORequest *)g_treq);
@@ -434,7 +446,7 @@ static void ar_present8(qwin *w, qwnd *t, const uint8_t *pix, int pitch, const u
             }
             WriteChunkyPixels(b->win->RPort, 0, 0, (ULONG)(pw - 1), (ULONG)(ph - 1), (UBYTE *)pix, (LONG)pitch);
         } else WriteLUTPixelArray((APTR)pix, 0, 0, (UWORD)pitch, b->win->RPort, (APTR)pal, 0, 0, (UWORD)pw, (UWORD)ph, CTABFMT_XRGB8);
-        if (w->grab_path[0] && ++w->frames == w->grab_at) grab_window(w, b->win, 0, 0, pw, ph);
+        if (w->grab_path[0] && w->frames == w->grab_at) grab_window(w, b->win, 0, 0, pw, ph);
         return;
     }
     if (g_truecolor) {
@@ -550,7 +562,7 @@ static uint8_t *ar_fb_show(qwin *w, qwnd *t, int i, const uint32_t *pal)
             if (l) { UnLockBitMap(l); if (addr) b->fbaddr[i] = (UBYTE *)addr; }
         }
     }
-    if (w->grab_path[0] && ++w->frames == w->grab_at) grab_fb(w, b->fbaddr[i], b->fbpitch, pal, t->fs_w, t->fs_h);
+    if (w->grab_path[0] && w->frames == w->grab_at) grab_fb(w, b->fbaddr[i], b->fbpitch, pal, t->fs_w, t->fs_h);
     return b->fbaddr[i];
 }
 
