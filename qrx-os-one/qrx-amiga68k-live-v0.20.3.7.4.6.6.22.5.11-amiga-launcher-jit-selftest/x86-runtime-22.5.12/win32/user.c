@@ -1619,12 +1619,30 @@ FN(u_RedrawWindow) {
 }
 FN(u_GetClientRect) { qwnd *x = W(w, a[0]); if (!x) return 0; wnd_rect(w, x, a[1], 1); return 1; }
 FN(u_GetWindowRect) { qwnd *x = W(w, a[0]); if (!x) return 0; wnd_rect(w, x, a[1], 0); return 1; }
+/* top-level windows: Windows clamps every size change to the WM_GETMINMAXINFO tracking limits */
+static void minmax_clamp(qwin *w, qwnd *x, int *ow, int *oh)
+{
+    uint32_t mm = qw_alloc(w, 40);
+    int mnw, mnh, mxw, mxh;
+    if (!mm) return;
+    WR32(mm + 8, 640); WR32(mm + 12, 480);           /* ptMaxSize */
+    WR32(mm + 24, 112); WR32(mm + 28, 27);           /* ptMinTrackSize (SM_CXMINTRACK/SM_CYMINTRACK) */
+    WR32(mm + 32, 4096); WR32(mm + 36, 4096);        /* ptMaxTrackSize */
+    win_send(w, x->h, WM_GETMINMAXINFO, 0, mm);
+    mnw = (int32_t)RD32(mm + 24); mnh = (int32_t)RD32(mm + 28); mxw = (int32_t)RD32(mm + 32); mxh = (int32_t)RD32(mm + 36);
+    qw_free(w, mm);
+    if (*ow < mnw) *ow = mnw;
+    if (*oh < mnh) *oh = mnh;
+    if (*ow > mxw) *ow = mxw;
+    if (*oh > mxh) *oh = mxh;
+}
 FN(u_MoveWindow) {
     qwnd *x = W(w, a[0]);
-    int ncw, nch;
+    int ncw, nch, ow = (int32_t)a[3], oh = (int32_t)a[4];
     if (!x) return 0;
     nc_metrics(w, x);
-    ncw = (int32_t)a[3] - x->nl - x->nr; nch = (int32_t)a[4] - x->nt - x->nb;
+    if (!(x->style & WS_CHILD)) minmax_clamp(w, x, &ow, &oh);
+    ncw = ow - x->nl - x->nr; nch = oh - x->nt - x->nb;
     if (ncw < 0) ncw = 0;
     if (nch < 0) nch = 0;
     x->x = (int32_t)a[1] + x->nl; x->y = (int32_t)a[2] + x->nt;
@@ -1805,7 +1823,7 @@ FN(u_FindWindowW) {
 }
 FN(u_LoadStringW) {
     uint32_t d, s, id = a[1], p, i;
-    if (!res_find_id(w, 6, (int)(id / 16 + 1), &d, &s)) { if (a[3]) x86_wr16(C, a[2], 0); return 0; }
+    if (!res_find_in(w, a[0], 6, id / 16 + 1, &d, &s)) { if (a[3]) x86_wr16(C, a[2], 0); return 0; }
     p = d;
     for (i = 0; i < (id & 15); i++) p += 2u + 2u * x86_rd16(C, p);
     {
@@ -1820,7 +1838,7 @@ FN(u_LoadIconW) { uint32_t h = gdi_new(w, GO_ICON); (void)a; return h; }
 FN(u_LoadCursorW) { uint32_t h = gdi_new(w, GO_CURSOR); (void)a; return h; }
 FN(u_LoadBitmapW) {
     uint32_t d, s;
-    if (!a[0] || !res_find(w, 2, a[1], &d, &s)) { qobj *o; uint32_t h = gdi_new(w, GO_BITMAP); o = O(w, h, GO_BITMAP); if (o) surf_resize(&o->bmp, 1, 1); return h; }
+    if (!a[0] || !res_find_in(w, a[0], 2, a[1], &d, &s)) { qobj *o; uint32_t h = gdi_new(w, GO_BITMAP); o = O(w, h, GO_BITMAP); if (o) surf_resize(&o->bmp, 1, 1); return h; }
     return qw_bitmap_from_dib(w, d, s);
 }
 FN(u_LoadImageW) {
@@ -1898,7 +1916,7 @@ FN(u_SystemParametersInfoW) {
     UNUSED; return 0;
 }
 /* accelerators: table in guest memory (resource) -> handle = resource address */
-FN(u_LoadAcceleratorsW) { uint32_t d, s; if (!res_find(w, 9, a[1], &d, &s)) return 0; return d; }
+FN(u_LoadAcceleratorsW) { uint32_t d, s; if (!res_find_in(w, a[0], 9, a[1], &d, &s)) return 0; return d; }
 FN(u_TranslateAcceleratorW) {
     uint32_t msg = RD32(a[2] + 4), vk = RD32(a[2] + 8), p;
     if (!a[1] || (msg != WM_KEYDOWN && msg != WM_SYSKEYDOWN)) return 0;
@@ -1991,7 +2009,7 @@ FN(u_MapDialogRect) {
 }
 FN(u_GetDialogBaseUnits) { UNUSED; return (BASEY << 16) | BASEX; }
 /* menus */
-FN(u_LoadMenuW) { uint32_t d, s; if (!res_find(w, 4, a[1], &d, &s)) return 0; return menu_load(w, d); }
+FN(u_LoadMenuW) { uint32_t d, s; if (!res_find_in(w, a[0], 4, a[1], &d, &s)) return 0; return menu_load(w, d); }
 FN(u_CreateMenu) { UNUSED; return menu_new(w); }
 FN(u_DestroyMenu) { qmenu *m = M(w, a[0]); if (m) m->used = 0; return m != NULL; }
 FN(u_GetMenu) { qwnd *x = W(w, a[0]); return x ? x->menu : 0; }
@@ -2130,6 +2148,14 @@ const qhle qw_user32[] = {
     U("SetTimer", u_SetTimer, 4), U("KillTimer", u_KillTimer, 2), U("GetMessageTime", u_GetMessageTime, 0), U("GetMessagePos", u_GetMessagePos, 0),
     U("RegisterWindowMessageW", u_RegisterWindowMessageW, 1),
     U("GetWindowLongW", u_GetWindowLongW, 2), U("SetWindowLongW", u_SetWindowLongW, 3),
+    /* ANSI forms without string arguments (string forms: ansi.c) */
+    U("GetWindowLongA", u_GetWindowLongW, 2), U("SetWindowLongA", u_SetWindowLongW, 3),
+    U("GetClassLongA", u_GetClassLongW, 2), U("SetClassLongA", u_SetClassLongW, 3),
+    U("GetMessageA", u_GetMessageW, 4), U("PeekMessageA", u_PeekMessageW, 5), U("DispatchMessageA", u_DispatchMessageW, 1),
+    U("PostMessageA", u_PostMessageW, 4), U("TranslateAcceleratorA", u_TranslateAcceleratorW, 3),
+    U("IsDialogMessageA", u_IsDialogMessageW, 2), U("DefDlgProcA", u_DefDlgProcW, 4),
+    U("SystemParametersInfoA", u_SystemParametersInfoW, 4), U("MapVirtualKeyA", u_MapVirtualKeyExW, 2),
+    U("GetWindowTextLengthA", u_GetWindowTextLengthW, 1), U("SetWindowsHookExA", u_zero, 4),
     U("GetWindowLongPtrW", u_GetWindowLongW, 2), U("SetWindowLongPtrW", u_SetWindowLongW, 3),
     U("GetClassLongW", u_GetClassLongW, 2), U("SetClassLongW", u_SetClassLongW, 3),
     U("TrackMouseEvent", u_TrackMouseEvent, 1),

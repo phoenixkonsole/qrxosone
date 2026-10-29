@@ -29,6 +29,10 @@ QRX:C/qrx-win32 -o QRXOUT: -s winmine-test.txt winmine.exe >QRXOUT:win-mine.txt
 Echo "QRXTEST WIN-MINE rc=$RC" >>QRXOUT:log.txt
 QRX:C/qrx-win32 -o QRXOUT: -s clock-test.txt qrxclock.exe >QRXOUT:win-clock.txt
 Echo "QRXTEST WIN-CLOCK rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-win32 -o QRXOUT: -s sol-test.txt sol.exe >QRXOUT:win-sol.txt
+Echo "QRXTEST WIN-SOL rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-win32 -o QRXOUT: -s spider-test.txt spider.exe >QRXOUT:win-spider.txt
+Echo "QRXTEST WIN-SPIDER rc=$RC" >>QRXOUT:log.txt
 ; ---- Win32 live on the Workbench screen (AROS Intuition backend), one screenshot per program
 Run >NIL: QRX:C/qrx-win32 -v -L QRXOUT:live-calc.log calc.exe
 Wait 25

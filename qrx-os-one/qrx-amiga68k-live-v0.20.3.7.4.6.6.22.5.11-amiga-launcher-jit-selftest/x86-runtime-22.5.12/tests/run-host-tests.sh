@@ -64,6 +64,15 @@ if [[ -n "$ROS" && -f "$ROS/calc.exe" ]]; then
   [[ $rc == 0 ]] && echo "$out" | grep -q "expect_fail=0" && ok "ReactOS calc.exe scripted test" || ko "ReactOS calc.exe scripted test"
   ./qrx-win32 -s "$HERE/../apps-22.5.12/x86/winmine-test.txt" winmine.exe >/dev/null 2>&1 && [[ -s winmine-game.ppm && -s winmine-menu.ppm ]] && ok "ReactOS winmine.exe (menu + game snapshots)" || ko "ReactOS winmine.exe"
 else sk "ReactOS calc/winmine (no System32 dir given)"; fi
+# card games: program-supplied DLL (cards.dll), ANSI APIs, pattern brushes, clip exclusion
+if [[ -n "$ROS" && -f "$ROS/sol.exe" && -f "$ROS/cards.dll" ]]; then
+  cp "$ROS/sol.exe" "$ROS/spider.exe" "$ROS/cards.dll" .
+  CK="python3 -B $HERE/tests/check-cards.py"
+  ./qrx-win32 -s "$HERE/../apps-22.5.12/x86/sol-test.txt" sol.exe >/dev/null 2>&1 && $CK felt sol-dealt.ppm && $CK differ sol-dealt.ppm sol-drag.ppm \
+    && ok "ReactOS sol.exe (cards.dll, deal + drag)" || ko "ReactOS sol.exe"
+  ./qrx-win32 -s "$HERE/../apps-22.5.12/x86/spider-test.txt" spider.exe >/dev/null 2>&1 && $CK felt spider-game.ppm && $CK differ spider-dialog.ppm spider-game.ppm \
+    && ok "ReactOS spider.exe (dialog + deal)" || ko "ReactOS spider.exe"
+else sk "ReactOS sol/spider (no System32 dir given)"; fi
 if command -v i686-w64-mingw32-gcc >/dev/null; then
   i686-w64-mingw32-gcc -O2 -mwindows -o qrxclock.exe "$HERE/win32/apps/qrxclock.c" -lgdi32
   ./qrx-win32 -s "$HERE/../apps-22.5.12/x86/clock-test.txt" qrxclock.exe >/dev/null 2>&1 && [[ -s clock-analog.ppm && -s clock-digital.ppm && -s clock-info.ppm ]] && ok "QRXClock (MinGW PE) analog/digital/info snapshots" || ko "QRXClock"

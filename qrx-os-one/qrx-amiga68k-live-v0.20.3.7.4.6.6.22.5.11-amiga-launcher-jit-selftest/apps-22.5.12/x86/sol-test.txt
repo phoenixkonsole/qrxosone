@@ -1,0 +1,16 @@
+# ReactOS sol.exe: deal from the deck, then drag the 3 of hearts and snapshot mid-drag
+wait 800
+click 60 75
+wait 400
+snap sol-dealt.ppm
+down 130 180
+wait 100
+move 200 230
+wait 100
+move 300 250
+wait 200
+snap sol-drag.ppm
+up 300 250
+wait 300
+snap sol-after.ppm
+quit

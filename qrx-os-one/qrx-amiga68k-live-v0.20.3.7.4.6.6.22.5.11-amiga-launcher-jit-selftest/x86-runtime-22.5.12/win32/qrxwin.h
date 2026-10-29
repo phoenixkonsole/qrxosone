@@ -36,7 +36,7 @@ typedef struct qsurf {               /* 32-bit 0x00RRGGBB pixels */
     int w, h;
 } qsurf;
 
-enum { GO_FREE = 0, GO_PEN, GO_BRUSH, GO_FONT, GO_BITMAP, GO_DC, GO_RGN, GO_ICON, GO_CURSOR, GO_MENU_UNUSED };
+enum { GO_FREE = 0, GO_PEN, GO_BRUSH, GO_FONT, GO_BITMAP, GO_DC, GO_RGN, GO_ICON, GO_CURSOR, GO_MENU_UNUSED, GO_PALETTE };
 
 typedef struct qobj {
     int type, stock;
@@ -44,10 +44,12 @@ typedef struct qobj {
     int style, width;                 /* pen style / brush style (0 solid, 1 null) */
     int font;                         /* index in qfont_table */
     qsurf bmp;                        /* bitmap pixels */
+    int mono;                         /* 1-bpp bitmap / brush: 0x000000 -> text colour, 0xFFFFFF -> background colour */
     int x, y, w, h;                   /* rect region / icon size */
     void *dc;                         /* GO_DC: struct qdc */
 } qobj;
 
+#define QW_MAXEXCL 128
 typedef struct qdc {
     struct qwin *w;                   /* owner HLE instance */
     uint32_t win;                     /* window handle (0 = memory DC) */
@@ -59,6 +61,12 @@ typedef struct qdc {
     int bkmode, rop2, ta;             /* bkmode 1 TRANSPARENT 2 OPAQUE */
     int px, py;                       /* current position */
     int vox, voy;                     /* SetViewportOrgEx */
+    int bx0, by0, bx1, by1;           /* clip without IntersectClipRect/SelectClipRgn (surface coords) */
+    int nex, ex[QW_MAXEXCL][4];       /* ExcludeClipRect rectangles (surface coords) */
+    int brx, bry;                     /* SetBrushOrgEx */
+    uint32_t pal;                     /* selected palette (32-bit surfaces: no effect) */
+    struct qdc *saved[8];             /* SaveDC stack (copies of this struct) */
+    int nsaved;
     qsurf membmp;                     /* default 1x1 bitmap of a memory DC */
 } qdc;
 
@@ -156,6 +164,16 @@ typedef struct qhle {
     uint32_t (*fn)(struct qwin *w, uint32_t *a);
 } qhle;
 
+/* a loaded PE image: the program (mod[0]) or a program-supplied DLL */
+#define QW_MAXMOD 16
+#define QW_DLL_BASE  0x40000000u      /* relocated DLLs go here */
+#define QW_DLL_LIMIT 0x7C000000u
+typedef struct qmod {
+    char name[64];                    /* lower-case file name, e.g. "cards.dll" */
+    uint32_t base, size, entry, res_rva, exp_rva, exp_size;
+    int is_dll, inited;
+} qmod;
+
 typedef struct qwin {
     x86cpu cpu;
     const qbackend *be;
@@ -166,6 +184,11 @@ typedef struct qwin {
     /* image */
     uint32_t image_base, image_size, entry, res_rva, res_size;
     char exe_path[1024];
+    qmod mod[QW_MAXMOD];
+    int nmod;
+    int init_order[QW_MAXMOD], ninit;   /* DLLs in dependency order (DllMain) */
+    uint32_t dll_next;
+    int started;                      /* entry point running: LoadLibrary calls DllMain at once */
     wchar16 cmdline[512];
     /* thunks */
     const qhle *thunk[QW_THUNK_MAX];
@@ -232,8 +255,16 @@ const qhle *qw_find_hle(const char *dll, const char *name);
 
 /* pe.c */
 int  pe_load(qwin *w, const uint8_t *b, size_t n);
+/* program-supplied DLLs (searched next to the program, case-insensitive) */
+qmod *pe_find_module(qwin *w, uint32_t hmod);            /* by handle (= base) */
+qmod *pe_module_by_name(qwin *w, const char *name);
+qmod *pe_load_dll(qwin *w, const char *name);            /* load or return loaded; NULL if absent */
+uint32_t pe_export(qwin *w, qmod *m, const char *name, uint32_t ordinal);   /* 0 if missing */
+void pe_init_dlls(qwin *w);                              /* DllMain(PROCESS_ATTACH) of pending DLLs */
+int  qw_is_hle_dll(const char *dll);
 /* find resource; type/name: id if < 0x10000 else guest pointer to string */
 int  res_find(qwin *w, uint32_t type, uint32_t name, uint32_t *data, uint32_t *size);
+int  res_find_in(qwin *w, uint32_t hmod, uint32_t type, uint32_t name, uint32_t *data, uint32_t *size);
 int  res_find_id(qwin *w, int type, int id, uint32_t *data, uint32_t *size);
 
 /* user.c */
@@ -278,6 +309,7 @@ int qw_format(qwin *w, uint32_t dst, int max, int dwide, uint32_t fmt, int fwide
 uint32_t qw_data_import(qwin *w, const char *dll, const char *name);
 uint32_t user_message_box(qwin *w, uint32_t owner, const wchar16 *text, const wchar16 *title, uint32_t type);
 extern const qhle qw_misc[];
+extern const qhle qw_ansi[];   /* ansi.c */
 
 /* backends */
 extern const qbackend qw_headless;

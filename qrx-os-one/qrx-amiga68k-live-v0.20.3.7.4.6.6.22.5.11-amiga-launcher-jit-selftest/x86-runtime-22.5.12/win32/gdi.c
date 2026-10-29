@@ -160,6 +160,7 @@ uint32_t dc_for_window(qwin *w, qwnd *x, int client)
         clip_to(d, px, py, px + p->cw, py + p->ch);
     }
     if (x->font) d->font = x->font;
+    d->bx0 = d->cx0; d->by0 = d->cy0; d->bx1 = d->cx1; d->by1 = d->cy1;
     /* remember which part of the top-level surface may change (partial presentation) */
     if (!t->present) { t->px0 = d->cx0; t->py0 = d->cy0; t->px1 = d->cx1; t->py1 = d->cy1; }
     else {
@@ -178,7 +179,7 @@ void dc_release(qwin *w, uint32_t hdc)
     qdc *d;
     if (!o) return;
     d = (qdc *)o->dc;
-    if (d) { free(d->membmp.pix); free(d); }
+    if (d) { while (d->nsaved) free(d->saved[--d->nsaved]); free(d->membmp.pix); free(d); }
     o->type = GO_FREE;
     o->dc = NULL;
 }
@@ -187,14 +188,42 @@ void dc_release(qwin *w, uint32_t hdc)
 #define TX(d, x) ((x) + (d)->ox + (d)->vox)
 #define TY(d, y) ((y) + (d)->oy + (d)->voy)
 
+static int excluded(const qdc *d, int x, int y)
+{
+    int i;
+    for (i = 0; i < d->nex; i++) if (x >= d->ex[i][0] && x < d->ex[i][2] && y >= d->ex[i][1] && y < d->ex[i][3]) return 1;
+    return 0;
+}
 static void px(qdc *d, int x, int y, uint32_t rgb)
 {
     if (x < d->cx0 || y < d->cy0 || x >= d->cx1 || y >= d->cy1) return;
+    if (d->nex && excluded(d, x, y)) return;
     if (d->rop2 == 7) d->s->pix[(size_t)y * (size_t)d->s->w + (size_t)x] ^= rgb;               /* R2_XORPEN */
     else if (d->rop2 == 6) d->s->pix[(size_t)y * (size_t)d->s->w + (size_t)x] ^= 0xFFFFFF;      /* R2_NOT */
     else d->s->pix[(size_t)y * (size_t)d->s->w + (size_t)x] = rgb;
 }
 
+/* fill minus the excluded rectangles k..: split around the first one that overlaps */
+static void fill_excl(qdc *d, int x0, int y0, int x1, int y1, uint32_t rgb, int k)
+{
+    int x, y;
+    if (x0 >= x1 || y0 >= y1) return;
+    for (; k < d->nex; k++) {
+        const int *e = d->ex[k];
+        if (e[0] < x1 && e[2] > x0 && e[1] < y1 && e[3] > y0) {
+            int iy0 = e[1] > y0 ? e[1] : y0, iy1 = e[3] < y1 ? e[3] : y1;
+            fill_excl(d, x0, y0, x1, iy0, rgb, k + 1);                         /* above */
+            fill_excl(d, x0, iy1, x1, y1, rgb, k + 1);                         /* below */
+            fill_excl(d, x0, iy0, e[0] > x0 ? e[0] : x0, iy1, rgb, k + 1);     /* left */
+            fill_excl(d, e[2] < x1 ? e[2] : x1, iy0, x1, iy1, rgb, k + 1);     /* right */
+            return;
+        }
+    }
+    for (y = y0; y < y1; y++) {
+        uint32_t *r = d->s->pix + (size_t)y * (size_t)d->s->w;
+        for (x = x0; x < x1; x++) r[x] = rgb;
+    }
+}
 static void fill_abs(qdc *d, int x0, int y0, int x1, int y1, uint32_t rgb)
 {
     int x, y;
@@ -202,9 +231,37 @@ static void fill_abs(qdc *d, int x0, int y0, int x1, int y1, uint32_t rgb)
     if (y0 < d->cy0) y0 = d->cy0;
     if (x1 > d->cx1) x1 = d->cx1;
     if (y1 > d->cy1) y1 = d->cy1;
+    if (d->nex) { fill_excl(d, x0, y0, x1, y1, rgb, 0); return; }
     for (y = y0; y < y1; y++) {
         uint32_t *r = d->s->pix + (size_t)y * (size_t)d->s->w;
         for (x = x0; x < x1; x++) r[x] = rgb;
+    }
+}
+
+/* brush fill in surface coordinates: solid colour or 8x8.. pattern bitmap (CreatePatternBrush) */
+static uint32_t pat_pix(const qdc *d, const qobj *b, int x, int y)
+{
+    int px_ = (x - d->ox - d->brx) % b->bmp.w, py_ = (y - d->oy - d->bry) % b->bmp.h;
+    if (px_ < 0) px_ += b->bmp.w;
+    if (py_ < 0) py_ += b->bmp.h;
+    {
+        uint32_t v = b->bmp.pix[(size_t)py_ * (size_t)b->bmp.w + (size_t)px_];
+        if (b->mono) return v ? rgb_of(d->bkcol) : rgb_of(d->textcol);
+        return v;
+    }
+}
+static int is_pattern(const qobj *b) { return b && b->style == 3 && b->bmp.pix && b->bmp.w > 0 && b->bmp.h > 0; }
+static void fill_brush_abs(qdc *d, int x0, int y0, int x1, int y1, const qobj *b)
+{
+    int x, y;
+    if (!is_pattern(b)) { fill_abs(d, x0, y0, x1, y1, b ? b->color : 0); return; }
+    if (x0 < d->cx0) x0 = d->cx0;
+    if (y0 < d->cy0) y0 = d->cy0;
+    if (x1 > d->cx1) x1 = d->cx1;
+    if (y1 > d->cy1) y1 = d->cy1;
+    for (y = y0; y < y1; y++) {
+        uint32_t *r = d->s->pix + (size_t)y * (size_t)d->s->w;
+        for (x = x0; x < x1; x++) if (!d->nex || !excluded(d, x, y)) r[x] = pat_pix(d, b, x, y);
     }
 }
 
@@ -504,10 +561,30 @@ FN(g_CreateCompatibleBitmap) {
     if (o) surf_resize(&o->bmp, (int)a[1], (int)a[2]);
     return h;
 }
-FN(g_CreateBitmap) {
+FN(g_CreateBitmap) {      /* (width, height, planes, bpp, bits): word-aligned rows, top-down */
     uint32_t h = gdi_new(w, GO_BITMAP);
     qobj *o = O(w, h, GO_BITMAP);
-    if (o) surf_resize(&o->bmp, (int)a[0], (int)a[1]);
+    int bw = (int32_t)a[0], bh = (int32_t)a[1], bpp = (int)(a[2] * a[3]), x, y;
+    if (!o) return h;
+    if (bw <= 0 || bh <= 0 || bw > 4096 || bh > 4096) { surf_resize(&o->bmp, 1, 1); return h; }
+    surf_resize(&o->bmp, bw, bh);
+    o->mono = bpp == 1;
+    if (o->mono) for (y = 0; y < bh; y++) for (x = 0; x < bw; x++) o->bmp.pix[(size_t)y * (size_t)bw + (size_t)x] = 0xFFFFFF;
+    if (!a[4]) return h;
+    {
+        uint32_t stride = (uint32_t)(((bw * bpp + 15) / 16) * 2);
+        for (y = 0; y < bh; y++) for (x = 0; x < bw; x++) {
+            uint32_t row = a[4] + (uint32_t)y * stride, v;
+            switch (bpp) {
+            case 1: v = (x86_rd8(C, row + (uint32_t)(x >> 3)) >> (7 - (x & 7))) & 1 ? 0xFFFFFF : 0; break;
+            case 24: v = (uint32_t)x86_rd8(C, row + (uint32_t)x * 3) | ((uint32_t)x86_rd8(C, row + (uint32_t)x * 3 + 1) << 8) | ((uint32_t)x86_rd8(C, row + (uint32_t)x * 3 + 2) << 16); break;
+            case 32: v = RD32(row + (uint32_t)x * 4) & 0xFFFFFF; break;
+            case 16: { uint32_t p = x86_rd16(C, row + (uint32_t)x * 2); v = ((p >> 10 & 31) << 19) | ((p >> 5 & 31) << 11) | ((p & 31) << 3); break; }
+            default: v = 0; break;
+            }
+            o->bmp.pix[(size_t)y * (size_t)bw + (size_t)x] = v;
+        }
+    }
     return h;
 }
 FN(g_CreatePen) {
@@ -559,6 +636,7 @@ FN(g_SelectObject) {
         d->bitmap = a[1];
         d->s = &o->bmp;
         d->cx0 = d->cy0 = 0; d->cx1 = o->bmp.w; d->cy1 = o->bmp.h;
+        d->bx0 = d->by0 = 0; d->bx1 = o->bmp.w; d->by1 = o->bmp.h; d->nex = 0;
         if (old == 1) old = I2H(31);    /* pseudo default bitmap */
         break;
     case GO_RGN: return 1;
@@ -580,7 +658,7 @@ FN(g_GetObjectW) {
         uint32_t i;
         for (i = 0; i < 24; i += 4) WR32(a[2] + i, 0);
         WR32(a[2] + 4, (uint32_t)o->bmp.w); WR32(a[2] + 8, (uint32_t)o->bmp.h); WR32(a[2] + 12, (uint32_t)o->bmp.w * 4);
-        x86_wr16(C, a[2] + 16, 1); x86_wr16(C, a[2] + 18, 32);
+        x86_wr16(C, a[2] + 16, 1); x86_wr16(C, a[2] + 18, o->mono ? 1 : 32); if (o->mono) WR32(a[2] + 12, (uint32_t)((o->bmp.w + 15) / 16 * 2));
         return 24;
     }
     return 0;
@@ -607,9 +685,12 @@ static uint32_t rop3(uint32_t rop, uint32_t s, uint32_t dd, uint32_t p)
 }
 static int blt(qwin *w, qdc *d, int x, int y, int cw, int ch, qdc *s, int sx, int sy, int sw, int sh, uint32_t rop)
 {
-    qobj *b = cur_brush(w, d);
+    qobj *b = d ? cur_brush(w, d) : NULL;
     uint32_t pat = b ? b->color : 0;
-    int i, j;
+    int i, j, patb = is_pattern(b);
+    qobj *sbm = s && s->bitmap ? O(w, s->bitmap, GO_BITMAP) : NULL, *dbm = d && d->bitmap ? O(w, d->bitmap, GO_BITMAP) : NULL;
+    int smono = sbm && sbm->mono, dmono = dbm && dbm->mono;
+    uint32_t mfg = d ? rgb_of(d->textcol) : 0, mbg = d ? rgb_of(d->bkcol) : 0, sbk = s ? rgb_of(s->bkcol) : 0;
     if (!d) return 0;
     if (cw < 0 || ch < 0) return 1;
     for (j = 0; j < ch; j++) {
@@ -620,10 +701,15 @@ static int blt(qwin *w, qdc *d, int x, int y, int cw, int ch, qdc *s, int sx, in
             int dx = TX(d, x + i);
             uint32_t sv = 0, *dp;
             if (dx < d->cx0 || dx >= d->cx1) continue;
+            if (d->nex && excluded(d, dx, dy)) continue;
+            if (patb) pat = pat_pix(d, b, dx, dy);
             if (s) {
                 int sxx = TX(s, sx + (sw == cw ? i : i * sw / (cw ? cw : 1)));
                 if (sxx < 0 || syy < 0 || sxx >= s->s->w || syy >= s->s->h) continue;
                 sv = s->s->pix[(size_t)syy * (size_t)s->s->w + (size_t)sxx];
+                /* colour conversion between 1-bpp and colour bitmaps (Windows rules) */
+                if (smono && !dmono) sv = sv ? mbg : mfg;
+                else if (dmono && !smono) sv = (sv & 0xFFFFFF) == sbk ? 0xFFFFFF : 0;
             }
             dp = &d->s->pix[(size_t)dy * (size_t)d->s->w + (size_t)dx];
             *dp = rop3(rop, sv, *dp, pat) & 0xFFFFFF;
@@ -659,7 +745,7 @@ FN(g_Rectangle) {
     int x0 = (int32_t)a[1], y0 = (int32_t)a[2], x1 = (int32_t)a[3], y1 = (int32_t)a[4];
     if (!d) return 0;
     p = cur_pen(w, d); b = cur_brush(w, d);
-    if (brush_visible(b)) gdi_fill(d, x0, y0, x1, y1, b->color);
+    if (brush_visible(b)) fill_brush_abs(d, TX(d, x0), TY(d, y0), TX(d, x1), TY(d, y1), b);
     if (pen_visible(p)) { hline(d, x0, x1, y0, p->color); hline(d, x0, x1, y1 - 1, p->color); vline(d, x0, y0, y1, p->color); vline(d, x1 - 1, y0, y1, p->color); }
     return 1;
 }
@@ -739,10 +825,72 @@ FN(g_GetDeviceCaps) {
     }
 }
 FN(g_SetViewportOrgEx) { qdc *d = DCP(w, a[0]); if (!d) return 0; if (a[3]) { WR32(a[3], (uint32_t)d->vox); WR32(a[3] + 4, (uint32_t)d->voy); } d->vox = (int32_t)a[1]; d->voy = (int32_t)a[2]; return 1; }
-FN(g_SaveDC) { UNUSED; return 1; }
-FN(g_RestoreDC) { UNUSED; return 1; }
+FN(g_CreatePatternBrush) {
+    qobj *bm = O(w, a[0], GO_BITMAP), *o;
+    uint32_t h = gdi_new(w, GO_BRUSH);
+    o = O(w, h, GO_BRUSH);
+    if (!o) return 0;
+    if (bm && bm->bmp.pix && bm->bmp.w > 0 && bm->bmp.h > 0) {
+        surf_resize(&o->bmp, bm->bmp.w, bm->bmp.h);
+        memcpy(o->bmp.pix, bm->bmp.pix, (size_t)bm->bmp.w * (size_t)bm->bmp.h * 4u);
+        o->style = 3;
+        o->mono = bm->mono;
+        o->color = bm->bmp.pix[0];
+    }
+    return h;
+}
+FN(g_SetBrushOrgEx) { qdc *d = DCP(w, a[0]); if (!d) return 0; if (a[3]) { WR32(a[3], (uint32_t)d->brx); WR32(a[3] + 4, (uint32_t)d->bry); } d->brx = (int32_t)a[1]; d->bry = (int32_t)a[2]; return 1; }
+FN(g_ExcludeClipRect) {
+    qdc *d = DCP(w, a[0]);
+    if (!d) return 0;
+    if (d->nex < QW_MAXEXCL) {
+        int *r = d->ex[d->nex++];
+        r[0] = TX(d, (int32_t)a[1]); r[1] = TY(d, (int32_t)a[2]); r[2] = TX(d, (int32_t)a[3]); r[3] = TY(d, (int32_t)a[4]);
+    } else qw_log(w, "ExcludeClipRect: more than %d rectangles, ignored", QW_MAXEXCL);
+    return 3;                                   /* COMPLEXREGION */
+}
+/* palettes: surfaces are 32-bit true colour, palettes only need to exist */
+FN(g_CreatePalette) { UNUSED; return gdi_new(w, GO_PALETTE); }
+FN(g_SelectPalette) { qdc *d = DCP(w, a[0]); uint32_t o; if (!d) return 0; o = d->pal ? d->pal : STOCK(15); d->pal = a[1]; return o; }
+FN(g_RealizePalette) { UNUSED; return 0; }
+/* SaveDC/RestoreDC: drawing state incl. clip; the surface/membmp stay owned by the DC */
+FN(g_SaveDC) {
+    qdc *d = DCP(w, a[0]), *c;
+    if (!d || d->nsaved >= 8) return 0;
+    c = (qdc *)malloc(sizeof(qdc));
+    if (!c) return 0;
+    *c = *d;
+    d->saved[d->nsaved++] = c;
+    return (uint32_t)d->nsaved;
+}
+FN(g_RestoreDC) {
+    qdc *d = DCP(w, a[0]);
+    int want = (int32_t)a[1];
+    if (!d || !d->nsaved) return 0;
+    if (want < 0) want = d->nsaved + 1 + want;
+    if (want < 1 || want > d->nsaved) return 0;
+    while (d->nsaved >= want) {
+        qdc *c = d->saved[--d->nsaved];
+        if (d->nsaved + 1 == want) {
+            qsurf *s = d->s; qsurf mb = d->membmp; uint32_t bm = d->bitmap; int n = d->nsaved; qdc *sv[8];
+            memcpy(sv, d->saved, sizeof(sv));
+            *d = *c;
+            d->membmp = mb; d->nsaved = n; memcpy(d->saved, sv, sizeof(sv));
+            if (d->bitmap != bm) { d->bitmap = bm; d->s = s; }
+        }
+        free(c);
+    }
+    return 1;
+}
 FN(g_CreateRectRgn) { uint32_t h = gdi_new(w, GO_RGN); qobj *o = O(w, h, GO_RGN); if (o) { o->x = (int32_t)a[0]; o->y = (int32_t)a[1]; o->w = (int32_t)a[2]; o->h = (int32_t)a[3]; } return h; }
-FN(g_SelectClipRgn) { UNUSED; return 1; }
+FN(g_SelectClipRgn) {
+    qdc *d = DCP(w, a[0]);
+    qobj *r = O(w, a[1], GO_RGN);
+    if (!d) return 0;
+    d->cx0 = d->bx0; d->cy0 = d->by0; d->cx1 = d->bx1; d->cy1 = d->by1; d->nex = 0;
+    if (r) clip_to(d, TX(d, r->x), TY(d, r->y), TX(d, r->w), TY(d, r->h));
+    return r ? 2 : 1;
+}
 FN(g_IntersectClipRect) {
     qdc *d = DCP(w, a[0]);
     if (!d) return 0;
@@ -767,7 +915,11 @@ FN(u_FillRect) {
     uint32_t col = brush_color(w, a[2], &ok);
     if (!d) return 0;
     rect_of(w, a[1], r);
-    if (ok) gdi_fill(d, r[0], r[1], r[2], r[3], col);
+    if (ok) {
+        qobj *bo = a[2] > 31 ? O(w, a[2], GO_BRUSH) : NULL;
+        if (is_pattern(bo)) fill_brush_abs(d, TX(d, r[0]), TY(d, r[1]), TX(d, r[2]), TY(d, r[3]), bo);
+        else gdi_fill(d, r[0], r[1], r[2], r[3], col);
+    }
     return 1;
 }
 FN(u_FrameRect) {
@@ -882,6 +1034,8 @@ const qhle qw_gdi32[] = {
     G("Polygon", g_Polygon, 3), G("GetDeviceCaps", g_GetDeviceCaps, 2), G("SetViewportOrgEx", g_SetViewportOrgEx, 4),
     G("SaveDC", g_SaveDC, 1), G("RestoreDC", g_RestoreDC, 2), G("CreateRectRgn", g_CreateRectRgn, 4),
     G("SelectClipRgn", g_SelectClipRgn, 2), G("IntersectClipRect", g_IntersectClipRect, 5),
+    G("CreatePatternBrush", g_CreatePatternBrush, 1), G("SetBrushOrgEx", g_SetBrushOrgEx, 4), G("ExcludeClipRect", g_ExcludeClipRect, 5),
+    G("CreatePalette", g_CreatePalette, 1), G("SelectPalette", g_SelectPalette, 3), G("RealizePalette", g_RealizePalette, 1),
     U("FillRect", u_FillRect, 3), U("FrameRect", u_FrameRect, 3), U("InvertRect", u_InvertRect, 2), U("DrawFocusRect", u_DrawFocusRect, 2),
     U("DrawEdge", u_DrawEdge, 4), U("DrawFrameControl", u_DrawFrameControl, 4), U("DrawStateW", u_DrawStateW, 10),
     U("DrawTextW", u_DrawTextW, 5), U("GetSysColor", u_GetSysColor, 1), U("GetSysColorBrush", u_GetSysColorBrush, 1),

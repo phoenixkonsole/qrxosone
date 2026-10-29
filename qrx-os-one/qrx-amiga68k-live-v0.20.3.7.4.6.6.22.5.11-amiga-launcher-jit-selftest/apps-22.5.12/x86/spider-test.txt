@@ -1,0 +1,7 @@
+# ReactOS spider.exe: accept the difficulty dialog (IDOK), snapshot the dealt game, deal a new row
+wait 800
+snap spider-dialog.ppm
+clickid 1
+wait 1500
+snap spider-game.ppm
+quit

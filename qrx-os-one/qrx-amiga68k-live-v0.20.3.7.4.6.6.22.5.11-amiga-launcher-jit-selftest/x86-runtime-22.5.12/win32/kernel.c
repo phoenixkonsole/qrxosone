@@ -530,24 +530,31 @@ static uint32_t modhandle_for(const char *name)
     }
     return 0;
 }
-FN(k_GetModuleHandleA) { char n[64]; if (!a[0]) return w->image_base; qw_rd_str(w, a[0], n, 64); return modhandle_for(n); }
-FN(k_GetModuleHandleW) { wchar16 t[64]; char n[64]; if (!a[0]) return w->image_base; qw_rd_wstr(w, a[0], t, 64); w2a(n, t, 64); return modhandle_for(n); }
-FN(k_LoadLibraryA) {
-    char n[128]; uint32_t h;
-    qw_rd_str(w, a[0], n, 128); h = modhandle_for(n);
-    if (!h) { qw_log(w, "LoadLibrary(%s): not available in QRX (program continues without it)", n); w->last_error = 126; }
-    return h;
+/* module handles: HLE DLLs -> QW_MODBASE + i*0x10000; program and its own DLLs -> image base */
+static uint32_t module_handle(qwin *w, const char *n, int load)
+{
+    uint32_t h = modhandle_for(n);
+    qmod *m;
+    if (h) return h;
+    m = load ? pe_load_dll(w, n) : pe_module_by_name(w, n);
+    if (m) return m->base;
+    if (load) { qw_log(w, "LoadLibrary(%s): not available in QRX (program continues without it)", n); w->last_error = 126; }
+    return 0;
 }
-FN(k_LoadLibraryW) {
-    wchar16 t[128]; char n[128]; uint32_t h;
-    qw_rd_wstr(w, a[0], t, 128); w2a(n, t, 128); h = modhandle_for(n);
-    if (!h) { qw_log(w, "LoadLibrary(%s): not available in QRX (program continues without it)", n); w->last_error = 126; }
-    return h;
-}
+FN(k_GetModuleHandleA) { char n[64]; if (!a[0]) return w->image_base; qw_rd_str(w, a[0], n, 64); return module_handle(w, n, 0); }
+FN(k_GetModuleHandleW) { wchar16 t[64]; char n[64]; if (!a[0]) return w->image_base; qw_rd_wstr(w, a[0], t, 64); w2a(n, t, 64); return module_handle(w, n, 0); }
+FN(k_LoadLibraryA) { char n[128]; qw_rd_str(w, a[0], n, 128); return module_handle(w, n, 1); }
+FN(k_LoadLibraryW) { wchar16 t[128]; char n[128]; qw_rd_wstr(w, a[0], t, 128); w2a(n, t, 128); return module_handle(w, n, 1); }
 FN(k_GetProcAddress) {
-    char n[64];
+    char n[96];
     uint32_t idx = (a[0] - QW_MODBASE) / 0x10000u;
     const qhle *e;
+    qmod *m = pe_find_module(w, a[0]);
+    if (m) {
+        if (a[1] < 0x10000u) return pe_export(w, m, NULL, a[1]);
+        qw_rd_str(w, a[1], n, sizeof(n));
+        return pe_export(w, m, n, 0);
+    }
     if (a[0] < QW_MODBASE || idx >= 9) return 0;
     if (a[1] < 0x10000u) return 0;
     qw_rd_str(w, a[1], n, 64);
@@ -677,7 +684,7 @@ FN(k_GetSystemInfo) {
 FN(k_RaiseException) { qw_log(w, "RaiseException(%08x): structured exceptions are not supported", a[0]); w->exit_code = a[0]; w->exiting = 1; return 0; }
 FN(k_FreeLibrary) { UNUSED; return 1; }
 FN(k_IsBadReadPtr) { UNUSED; return !x86_is_mapped(C, a[0]); }
-FN(k_FindResourceW) { uint32_t d, s; if (!res_find(w, a[2], a[1], &d, &s)) return 0; { uint32_t h = qw_alloc(w, 8); WR32(h, d); WR32(h + 4, s); return h; } }
+FN(k_FindResourceW) { uint32_t d, s; if (!res_find_in(w, a[0], a[2], a[1], &d, &s)) return 0; { uint32_t h = qw_alloc(w, 8); WR32(h, d); WR32(h + 4, s); return h; } }
 FN(k_LoadResource) { UNUSED; return a[1] ? RD32(a[1]) : 0; }
 FN(k_LockResource) { UNUSED; return a[0]; }
 FN(k_SizeofResource) { UNUSED; return a[1] ? RD32(a[1] + 4) : 0; }
@@ -686,7 +693,66 @@ FN(k_InterlockedDecrement) { uint32_t v = RD32(a[0]) - 1; WR32(a[0], v); return 
 FN(k_InterlockedExchange) { uint32_t v = RD32(a[0]); WR32(a[0], a[1]); return v; }
 FN(k_InterlockedCompareExchange) { uint32_t v = RD32(a[0]); if (v == a[2]) WR32(a[0], a[1]); return v; }
 FN(k_GetTimeZoneInformation) { uint32_t i; for (i = 0; i < 172; i += 4) WR32(a[0] + i, 0); UNUSED; return 0; }
-FN(k_CloseHandle) { UNUSED; return 1; }
+/* synchronisation objects.  qrx-win32 runs one guest thread, so nothing can ever
+ * release an object while the thread waits: a wait that cannot be satisfied
+ * returns WAIT_TIMEOUT for a finite timeout and is reported (and treated as
+ * signalled) for INFINITE instead of hanging. */
+#define QW_SYNC_BASE 0x00005000u
+#define QW_MAXSYNC 64
+enum { SY_FREE, SY_MUTEX, SY_SEM, SY_EVENT };
+static struct { int type; int32_t count, max; int manual; } g_sync[QW_MAXSYNC];
+static uint32_t sync_new(int type, int32_t count, int32_t max, int manual)
+{
+    int i;
+    for (i = 0; i < QW_MAXSYNC; i++) if (g_sync[i].type == SY_FREE) {
+        g_sync[i].type = type; g_sync[i].count = count; g_sync[i].max = max; g_sync[i].manual = manual;
+        return QW_SYNC_BASE + (uint32_t)i * 4u;
+    }
+    return 0;
+}
+static int sync_idx(uint32_t h) { uint32_t i = (h - QW_SYNC_BASE) / 4u; return (h >= QW_SYNC_BASE && i < QW_MAXSYNC && g_sync[i].type != SY_FREE && !(h & 3)) ? (int)i : -1; }
+FN(k_CreateMutex) { UNUSED; return sync_new(SY_MUTEX, a[1] ? 0 : 1, 1, 0); }          /* count 1 = free */
+FN(k_CreateSemaphore) { UNUSED; return sync_new(SY_SEM, (int32_t)a[1], (int32_t)a[2], 0); }
+FN(k_CreateEvent) { UNUSED; return sync_new(SY_EVENT, a[2] ? 1 : 0, 1, a[1] != 0); }
+FN(k_ReleaseMutex) { int i = sync_idx(a[0]); UNUSED; if (i < 0 || g_sync[i].type != SY_MUTEX) return 0; g_sync[i].count = 1; return 1; }
+FN(k_ReleaseSemaphore) {
+    int i = sync_idx(a[0]);
+    if (i < 0 || g_sync[i].type != SY_SEM) return 0;
+    if (a[2]) WR32(a[2], (uint32_t)g_sync[i].count);
+    if (g_sync[i].count + (int32_t)a[1] > g_sync[i].max) return 0;
+    g_sync[i].count += (int32_t)a[1];
+    return 1;
+}
+FN(k_SetEvent) { int i = sync_idx(a[0]); UNUSED; if (i < 0) return 0; g_sync[i].count = 1; return 1; }
+FN(k_ResetEvent) { int i = sync_idx(a[0]); UNUSED; if (i < 0) return 0; g_sync[i].count = 0; return 1; }
+FN(k_PulseEvent) { int i = sync_idx(a[0]); UNUSED; if (i < 0) return 0; g_sync[i].count = 0; return 1; }
+static uint32_t sync_wait(qwin *w, uint32_t h, uint32_t ms)
+{
+    int i = sync_idx(h);
+    if (i < 0) return 0;                                /* unknown handles (threads, processes...): signalled */
+    if (g_sync[i].count > 0) {
+        if (g_sync[i].type != SY_EVENT || !g_sync[i].manual) g_sync[i].count--;
+        if (g_sync[i].type == SY_MUTEX) g_sync[i].count = 0;
+        return 0;                                       /* WAIT_OBJECT_0 */
+    }
+    if (g_sync[i].type == SY_MUTEX) return 0;           /* recursive acquire by the only thread */
+    if (ms != 0xFFFFFFFFu) return 0x102;                /* WAIT_TIMEOUT */
+    qw_log(w, "WaitForSingleObject(%08x, INFINITE) on an unsignalled object: single-threaded, treated as signalled", h);
+    return 0;
+}
+FN(k_WaitForSingleObject) { return sync_wait(w, a[0], a[1]); }
+FN(k_WaitForMultipleObjects) {
+    uint32_t i;
+    for (i = 0; i < a[0] && i < 64; i++) {
+        int k = sync_idx(RD32(a[1] + i * 4));
+        if (k < 0 || g_sync[k].count > 0 || g_sync[k].type == SY_MUTEX) {
+            if (!a[2]) return sync_wait(w, RD32(a[1] + i * 4), a[3]) == 0 ? i : 0x102;
+        } else if (a[2]) return a[3] != 0xFFFFFFFFu ? 0x102 : 0;
+    }
+    if (a[2]) { for (i = 0; i < a[0] && i < 64; i++) sync_wait(w, RD32(a[1] + i * 4), 0); return 0; }
+    return a[3] != 0xFFFFFFFFu ? 0x102 : 0;
+}
+FN(k_CloseHandle) { int i = sync_idx(a[0]); UNUSED; if (i >= 0) g_sync[i].type = SY_FREE; return 1; }
 
 /* ====================================================================== advapi32: in-memory registry */
 typedef struct qreg { char path[200]; char name[64]; uint32_t type, size; uint8_t data[512]; struct qreg *next; } qreg;
@@ -799,6 +865,10 @@ const qhle qw_kernel32[] = {
     K("GetEnvironmentVariableA", k_GetEnvironmentVariableA, 3), K("GetEnvironmentVariableW", k_GetEnvironmentVariableW, 3),
     K("SetUnhandledExceptionFilter", k_SetUnhandledExceptionFilter, 1), K("UnhandledExceptionFilter", k_UnhandledExceptionFilter, 1),
     K("TlsAlloc", k_TlsAlloc, 0), K("TlsGetValue", k_TlsGetValue, 1), K("TlsSetValue", k_TlsSetValue, 2), K("TlsFree", k_one, 1),
+    K("CreateMutexA", k_CreateMutex, 3), K("CreateMutexW", k_CreateMutex, 3), K("ReleaseMutex", k_ReleaseMutex, 1),
+    K("CreateSemaphoreA", k_CreateSemaphore, 4), K("CreateSemaphoreW", k_CreateSemaphore, 4), K("ReleaseSemaphore", k_ReleaseSemaphore, 3),
+    K("CreateEventA", k_CreateEvent, 4), K("CreateEventW", k_CreateEvent, 4), K("SetEvent", k_SetEvent, 1), K("ResetEvent", k_ResetEvent, 1),
+    K("PulseEvent", k_PulseEvent, 1), K("WaitForSingleObject", k_WaitForSingleObject, 2), K("WaitForMultipleObjects", k_WaitForMultipleObjects, 4),
     K("GetStdHandle", k_GetStdHandle, 1), K("WriteFile", k_WriteFile, 5), K("CloseHandle", k_CloseHandle, 1),
     K("OutputDebugStringA", k_OutputDebugStringA, 1), K("OutputDebugStringW", k_OutputDebugStringW, 1), K("IsDebuggerPresent", k_IsDebuggerPresent, 0),
     K("GetSystemInfo", k_GetSystemInfo, 1), K("RaiseException", k_RaiseException, 4), K("IsBadReadPtr", k_IsBadReadPtr, 2),
@@ -813,6 +883,34 @@ const qhle qw_kernel32[] = {
 #define AD(n, f, c) { "advapi32", n, c, f }
 static uint32_t c_InitCommonControls(qwin *w, uint32_t *a) { UNUSED; return 0; }
 static uint32_t c_InitCommonControlsEx(qwin *w, uint32_t *a) { UNUSED; return 1; }
+/* status bar: a STATIC child along the bottom of the parent (SB_* messages are not interpreted) */
+static uint32_t status_window(qwin *w, uint32_t style, uint32_t wtext, uint32_t parent, uint32_t id)
+{
+    const qhle *cw = qw_find_hle("user32", "CreateWindowExW"), *gr = qw_find_hle("user32", "GetClientRect");
+    uint32_t cls = qw_alloc(w, 16), rc = qw_alloc(w, 16), b[16], h;
+    static const wchar16 st[] = { 'S', 'T', 'A', 'T', 'I', 'C', 0 };
+    int pw = 300, ph = 200;
+    memset(b, 0, sizeof(b));
+    qw_wr_wstr(w, cls, st, 8);
+    b[0] = parent; b[1] = rc;
+    if (gr && gr->fn(w, b)) { pw = (int32_t)RD32(rc + 8); ph = (int32_t)RD32(rc + 12); }
+    memset(b, 0, sizeof(b));
+    b[0] = 0x00020000u;                               /* WS_EX_STATICEDGE */
+    b[1] = cls; b[2] = wtext; b[3] = (style | 0x40000000u | 0x10000000u) & ~0x00C00000u;   /* WS_CHILD|WS_VISIBLE */
+    b[4] = 0; b[5] = (uint32_t)(ph - 20); b[6] = (uint32_t)pw; b[7] = 20; b[8] = parent; b[9] = id; b[10] = w->image_base;
+    h = cw ? cw->fn(w, b) : 0;
+    qw_free(w, cls); qw_free(w, rc);
+    return h;
+}
+static uint32_t c_CreateStatusWindowW(qwin *w, uint32_t *a) { return status_window(w, a[0], a[1], a[2], a[3]); }
+static uint32_t c_CreateStatusWindowA(qwin *w, uint32_t *a)
+{
+    char t[256]; wchar16 u[256]; uint32_t g = qw_alloc(w, 520), h;
+    qw_rd_str(w, a[1], t, 256); a2w(u, t, 256); qw_wr_wstr(w, g, u, 256);
+    h = status_window(w, a[0], g, a[2], a[3]);
+    qw_free(w, g);
+    return h;
+}
 static uint32_t s_ShellAboutW(qwin *w, uint32_t *a);
 static uint32_t mm_PlaySound(qwin *w, uint32_t *a) { UNUSED; return 1; }
 static uint32_t nt_DbgPrint(qwin *w, uint32_t *a) { UNUSED; return 0; }
@@ -861,6 +959,7 @@ const qhle qw_misc[] = {
     MS("__p__fmode", m_p_fmode), MS("__p__acmdln", m_p_acmdln), MS("__p__wcmdln", m_p_wcmdln), MS("_ismbblead", m_ismbblead), MS("__p__commode", m_p_commode), MS("__iob_func", m_iob_func),
     AD("RegOpenKeyExW", a_RegOpenKeyExW, 5), AD("RegCreateKeyExW", a_RegCreateKeyExW, 9), AD("RegCloseKey", a_RegCloseKey, 1),
     AD("RegQueryValueExW", a_RegQueryValueExW, 6), AD("RegSetValueExW", a_RegSetValueExW, 6),
+    { "comctl32", "CreateStatusWindowW", 4, c_CreateStatusWindowW }, { "comctl32", "CreateStatusWindowA", 4, c_CreateStatusWindowA },
     { "comctl32", "InitCommonControls", 0, c_InitCommonControls }, { "comctl32", "InitCommonControlsEx", 1, c_InitCommonControlsEx },
     { "shell32", "ShellAboutW", 4, s_ShellAboutW },
     { "winmm", "PlaySoundW", 3, mm_PlaySound }, { "winmm", "PlaySoundA", 3, mm_PlaySound },

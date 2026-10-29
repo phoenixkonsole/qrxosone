@@ -133,7 +133,7 @@ uint32_t qw_data(qwin *w, uint32_t n)
 }
 
 /* ---------------------------------------------------------------- thunks */
-static const qhle *tables[] = { qw_kernel32, qw_user32, qw_gdi32, qw_misc, NULL };
+static const qhle *tables[] = { qw_kernel32, qw_user32, qw_gdi32, qw_misc, qw_ansi, NULL };
 
 static int dllcmp(const char *a, const char *b)
 {
@@ -184,7 +184,7 @@ static int hle_hook(x86cpu *c, uint32_t idx)
     }
     ret = x86_rd32(c, sp);
     for (i = 0; i < 16; i++) a[i] = x86_rd32(c, sp + 4 + (uint32_t)i * 4);
-    if (w->trace) qw_log(w, "-> %s(%08x, %08x, %08x, %08x) ret=%08x", e->name, a[0], a[1], a[2], a[3], ret);
+    if (w->trace) qw_log(w, "-> %s(%08x, %08x, %08x, %08x, %08x, %08x, %08x) ret=%08x", e->name, a[0], a[1], a[2], a[3], a[4], a[5], a[6], ret);
     r = e->fn(w, a);
     if (w->trace) qw_log(w, "<- %s = %08x", e->name, r);
     if (c->fault) return 1;
@@ -283,8 +283,10 @@ int qw_run(qwin *w)
     x86_wr32(c, c->r[X86_ESP], 0);              /* argument slot for ExitProcess */
     c->r[X86_ESP] -= 4;
     x86_wr32(c, c->r[X86_ESP], exit_thunk);
+    w->started = 1;
+    pe_init_dlls(w);                              /* DllMain of DLLs loaded with the program */
     c->eip = w->image_base + w->entry;
-    f = x86_run(c, 0xFFFFFFFFu);
+    f = w->cpu.fault ? w->cpu.fault : x86_run(c, 0xFFFFFFFFu);
     if (f && !w->exiting) {
         char d[400];
         x86_describe_fault(c, d, sizeof(d));
