@@ -15,4 +15,8 @@ Avail >QRXOUT:avail-running.txt
 Status >QRXOUT:status.txt
 Status FULL >QRXOUT:tasks.txt
 QRX:C/QRXScreenGrab QRXOUT:screen.ppm >QRXOUT:grab.txt
+; second look after another 3 emulated minutes (DOpus initialises slowly without JIT)
+Wait 180
+QRX:C/QRXScreenGrab QRXOUT:screen2.ppm >QRXOUT:grab2.txt
+Status FULL >QRXOUT:tasks2.txt
 Echo "done" >QRXOUT:DONE

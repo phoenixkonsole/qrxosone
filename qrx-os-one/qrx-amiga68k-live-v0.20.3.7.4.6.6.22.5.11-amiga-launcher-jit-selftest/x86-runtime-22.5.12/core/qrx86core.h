@@ -115,10 +115,13 @@ void     x86_set_flags(x86cpu *c, uint32_t f);
 /* Run until a hook sets c->stop, a fault happens or eip == stop_eip. Returns c->fault. */
 int      x86_run(x86cpu *c, uint32_t stop_eip);
 int      x86_step(x86cpu *c);
-/* Call guest function addr(args...) with cdecl/stdcall-compatible stack layout
- * from inside a hook.  Returns EAX; *ok = 0 on fault. */
+/* Call guest function addr(args...) from inside a hook.  ESP is restored
+ * afterwards, so both cdecl and stdcall callees work.  Returns EAX; *ok = 0 on fault. */
 uint32_t x86_call(x86cpu *c, uint32_t addr, int nargs, const uint32_t *args, int *ok);
 const char *x86_fault_name(int f);
+/* x87 access for HLE functions returning/consuming doubles (ST(0)) */
+void     x86_fpu_push(x86cpu *c, double v);
+double   x86_fpu_pop(x86cpu *c);
 /* Disassemble-free description of where we stopped. */
 void     x86_describe_fault(x86cpu *c, char *buf, size_t n);
 

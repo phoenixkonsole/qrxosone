@@ -7,7 +7,9 @@ Wait 20
 Avail >QRXOUT:avail-before.txt
 QRX:C/amigacheck SYS:AmigaGPT/AmigaGPT/AmigaGPT_OS3 >QRXOUT:amigacheck.txt
 Echo "QRXTEST AMIGACHECK rc=$RC" >>QRXOUT:amigacheck.txt
-CD SYS:AmigaGPT/AmigaGPT
+; AmigaGPT locates its data through the AMIGAGPT: assign (its installer creates it)
+Assign AMIGAGPT: SYS:AmigaGPT/AmigaGPT
+CD AMIGAGPT:
 QRX:C/amigarun ASYNC SYS:AmigaGPT/AmigaGPT/AmigaGPT_OS3 >QRXOUT:amigarun.txt
 Echo "QRXTEST AMIGARUN rc=$RC" >>QRXOUT:amigarun.txt
 Wait 90

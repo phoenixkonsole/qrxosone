@@ -1325,21 +1325,23 @@ int x86_run(x86cpu *c, uint32_t stop_eip)
 
 uint32_t x86_call(x86cpu *c, uint32_t addr, int nargs, const uint32_t *args, int *ok)
 {
-    uint32_t saved_eip = c->eip, saved_cur = c->cur_eip, sp_before;
+    uint32_t saved_eip = c->eip, saved_cur = c->cur_eip, saved_sp = c->r[X86_ESP];
     int i, f;
     for (i = nargs - 1; i >= 0; i--) x86_push(c, args[i]);
     x86_push(c, X86_CALL_SENTINEL);
-    sp_before = c->r[X86_ESP];
     c->eip = addr;
     c->depth++;
     f = x86_run(c, X86_CALL_SENTINEL);
     c->depth--;
-    (void)sp_before;
+    c->r[X86_ESP] = saved_sp;
     if (ok) *ok = (f == X86_OK && !c->stop);
     c->eip = saved_eip;
     c->cur_eip = saved_cur;
     return c->r[X86_EAX];
 }
+
+void x86_fpu_push(x86cpu *c, double v) { fpush(c, v); }
+double x86_fpu_pop(x86cpu *c) { double v = ST(0); fpop(c); return v; }
 
 void x86_describe_fault(x86cpu *c, char *buf, size_t n)
 {
