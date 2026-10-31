@@ -1,0 +1,38 @@
+{
+  "control": {
+    "runs": 3,
+    "window_fps": [
+      2.1306517974786825,
+      2.265887715788004,
+      2.243591639453053
+    ],
+    "median_window_fps": 2.243591639453053,
+    "median_total_fps": 2.1627557537730455,
+    "runtime_sha256": "bd1e87aac64c86a4b78347f554d5914d3ea8f8f60a0e3d3f0ceda145bcc35a2f"
+  },
+  "loop": {
+    "runs": 3,
+    "window_fps": [
+      2.7738288743964894,
+      2.5997582140118665,
+      2.59068784820902
+    ],
+    "median_window_fps": 2.5997582140118665,
+    "median_total_fps": 2.4661318841780098,
+    "runtime_sha256": "37b8674f3541f11bf4f8457fa68b3c57b4de68f33091cb529004c9406c52735f"
+  },
+  "frame_window": [
+    20,
+    70
+  ],
+  "capture_frame": 70,
+  "frame_sha256": "f58c3aa77a2a7b8fbb22bc5f3ded40260e4f66eeb16b0a834071c3c988abddbf",
+  "instructions": 300000000,
+  "frames": 94,
+  "fps_increase_percent": 15.87483962302696,
+  "target_fps": 25,
+  "target_reached": false,
+  "native_instructions": 78814159,
+  "fallback_instructions": 221185841,
+  "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3"
+}

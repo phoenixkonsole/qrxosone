@@ -255,6 +255,8 @@ typedef struct qwin {
     uint64_t prof_api_ms[QW_THUNK_MAX]; /* inclusive diagnostic timing */
 #endif
     int grab_at, frames;
+    unsigned bench_frame_start,bench_frame_end;
+    char bench_marker_dir[256]; /* Optional host-monotonic benchmark markers. */
     void (*fb_lost)(struct qwin *w, qwnd *top);   /* set by DirectDraw while it uses fb_open buffers */
 } qwin;
 

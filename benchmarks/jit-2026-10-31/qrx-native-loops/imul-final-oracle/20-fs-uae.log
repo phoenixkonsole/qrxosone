@@ -1,0 +1,136 @@
+fs_data_init fs-uae fs-uae.dat
+checking dat file: /workspace/qrx-fsuae-jit/install/bin/fs-uae
+no dat file: /workspace/qrx-fsuae-jit/install/bin/fs-uae
+checking dat file: /workspace/qrx-fsuae-jit/install/bin/fs-uae.dat
+checking dat file: /workspace/qrx-fsuae-jit/install/bin/../share/fs-uae/fs-uae.dat
+FS-UAE 3.2.35 (Built for Linux x86-64)
+Copyright 1995-2002 Bernd Schmidt, 1999-2017 Toni Wilen,
+2003-2007 Richard Drummond, 2006-2011 Mustafa 'GnoStiC' Tufan,
+2011-2017 Frode Solheim, and contributors.
+
+This is free software; see the file COPYING for copying conditions. There
+is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR
+PURPOSE. See the README for more copyright info, and the source code for
+a full list of contributors
+
+current directory is /workspace/qrxosone
+UAE: Initializing core derived from WinUAE 3300b2
+
+----------------------------------------------------------------------------
+libfsemu init
+----------------------------------------------------------------------------
+
+[FSE] Init (early)
+current time() is: 1793462328
+localtime+timegm:  1793462328
+localtime+mktime:  1793462328
+time of day:       1793462328 + (310620 / 1000000)
+localtime offset:  0
+[FSE] Calling fs_ml_init
+fs_ml_init (operating system: linux)
+load config file
+loading config from /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/cfg.fs-uae
+
+----------------------------------------------------------------------------
+config (/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/cfg.fs-uae)
+----------------------------------------------------------------------------
+
+amiga_model = A1200/020
+audio_driver = dummy
+automatic_input_grab = 0
+base_dir = /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home
+chip_memory = 2048
+cpu = 68020
+floppy_drive_count = 0
+graphics_card = uaegfx
+graphics_memory = 262144
+hard_drive_0 = /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/sys
+hard_drive_0_label = AROS
+hard_drive_0_priority = 6
+hard_drive_1 = /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/m68020
+hard_drive_1_label = QRXOUT
+hard_drive_1_priority = -128
+jit_compiler = 1
+kickstart_ext_file = /workspace/qrxosone/upstream/aros-deadwood/m68k-build-5b5fd4c/aros-amiga-m68k-ext.bin
+kickstart_file = /workspace/qrxosone/upstream/aros-deadwood/m68k-build-5b5fd4c/aros-amiga-m68k-rom.bin
+log_flush = 1
+motherboard_ram = 0
+sound_card = none
+uae_blitter_cycle_exact = false
+uae_comp_trustnaddr = indirect
+uae_compfpu = false
+uae_cpu_cycle_exact = false
+uae_cpu_speed = max
+uae_gfxcard_size = 256
+uae_mmu_model = 0
+warp_mode = 1
+zorro_iii_memory = 262144
+- checking /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/.config/fs-uae/configurations-dir
+base specified via base_dir option
+- using base ($BASE / $FSUAE) directory "/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home"
+resolve_path /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Configurations (absolute)
+- using "Configurations" directory "/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Configurations"
+checking config file /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Configurations/Host.fs-uae
+- checking /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/.config/fs-uae/data-dir
+resolve_path /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Data (absolute)
+- using "Data" directory "/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Data"
+[I18N] Locale is set to C.UTF-8
+[I18N] Checking locale dir "/workspace/qrx-fsuae-jit/install/bin/../../Locale"
+[I18N] Using data dir "/workspace/qrx-fsuae-jit/install/bin/../share/fs-uae/share-dir"
+[I18N] Using locale dir "/workspace/qrx-fsuae-jit/install/bin/../share/locale"
+GameMode: Request failed: dlopen failed - libgamemode.so: cannot open shared object file: No such file or directory
+
+----------------------------------------------------------------------------
+fs-uae init
+----------------------------------------------------------------------------
+
+configure logging: none
+[GLIB] Version 2.84.4 (Compiled against 2.84.4)
+- checking /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/.config/fs-uae/kickstarts-dir
+resolve_path /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Kickstarts (absolute)
+- using "Kickstarts" directory "/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Kickstarts"
+- checking /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/.config/fs-uae/floppies-dir
+resolve_path /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Floppies (absolute)
+- using "Floppies" directory "/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Floppies"
+- checking /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/.config/fs-uae/cdroms-dir
+resolve_path /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/CD-ROMs (absolute)
+- using "CD-ROMs" directory "/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/CD-ROMs"
+- checking /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/.config/fs-uae/hard-drives-dir
+resolve_path /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Hard Drives (absolute)
+- using "Hard Drives" directory "/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Hard Drives"
+[PLUGINS] Initializing
+- checking /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/.config/fs-uae/system-dir
+resolve_path /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/System (absolute)
+- using "System" directory "/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/System"
+[PLUGINS] Loading plugins from /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/System
+[PLUGINS] Could not open plugins dir /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/System
+- checking /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/.config/fs-uae/plugins-dir
+resolve_path /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Plugins (absolute)
+- using "Plugins" directory "/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Plugins"
+[PLUGINS] Loading plugins from /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Plugins
+[PLUGINS] Could not open plugins dir /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Plugins
+[PLUGINS] Test /workspace/qrx-fsuae-jit/install/bin/../../Plugin.ini
+[PLUGINS] Is plugin: 0
+fs_uae_configure_amiga_model
+using PAL mode (50Hz)
+[VIDEO] fs_emu_set_video_frame_rate: 50.00 (50)
+[DISPLAY] Sync: g_fs_emu_video_sync_to_vblank = 0
+config match for "A1200/020"
+fs_uae_state_dir:
+- checking /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/.config/fs-uae/save-states-dir
+resolve_path /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Save States (absolute)
+- using "Save States" directory "/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Save States"
+save_states_dir: /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Save States
+save_dir_name not set, using cfg
+- using state dir /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Save States/cfg
+final state dir path: /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Save States/cfg
+- checking /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/.config/fs-uae/controllers-dir
+resolve_path /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Controllers (absolute)
+- using "Controllers" directory "/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Controllers"
+- checking /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/.config/fs-uae/logs-dir
+- checking /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/.config/fs-uae/cache-dir
+resolve_path /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Cache (absolute)
+- using "Cache" directory "/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Cache"
+resolve_path /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Cache/Logs (absolute)
+- using "Logs" directory "/workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Cache/Logs"
+switch to log file /workspace/qrx-fsuae-jit/optimization-32/imul-final-oracle/tmp/qrx-scn.esM8Yt/home/Cache/Logs/fs-uae.log.txt

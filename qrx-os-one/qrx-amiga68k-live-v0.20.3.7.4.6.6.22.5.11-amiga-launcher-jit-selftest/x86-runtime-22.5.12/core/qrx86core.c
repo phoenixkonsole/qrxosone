@@ -292,7 +292,7 @@ int x86_push(x86cpu *c, uint32_t v) { c->r[X86_ESP] -= 4; return x86_wr32(c, c->
 uint32_t x86_pop(x86cpu *c) { uint32_t v = x86_rd32(c, c->r[X86_ESP]); c->r[X86_ESP] += 4; return v; }
 
 /* ======================================================================= flags */
-enum { LF_NONE = 0, LF_ADD, LF_ADC, LF_SUB, LF_SBB, LF_LOGIC, LF_INC, LF_DEC, LF_NEG, LF_SHL, LF_SHR, LF_SAR };
+enum { LF_NONE = 0, LF_ADD, LF_ADC, LF_SUB, LF_SBB, LF_LOGIC, LF_INC, LF_DEC, LF_NEG, LF_SHL, LF_SHR, LF_SAR, LF_IMUL };
 
 static const uint8_t parity_tab[256] = {
 #define P2(n) n, n ^ 1, n ^ 1, n
@@ -341,6 +341,11 @@ static uint32_t flags_compute(x86cpu *c)
         if ((a ^ b) & (a ^ r) & s) f |= X86_OF;
         f |= (a ^ b ^ r) & X86_AF;
         break;
+#if QRX_JIT_NATIVE_IMUL
+    case LF_IMUL:
+        if(b)f |= X86_CF|X86_OF;
+        break;
+#endif
     case LF_LOGIC:
         break;
     case LF_INC:
@@ -1098,7 +1103,7 @@ X86_INLINE void exec_one_mode(x86cpu *c,uint32_t stop_eip,int jit,int *did_nativ
 #if XJ_NATIVE && QRX_JIT_FUSED_FETCH
     /* Reuse the already charged/fetched opcode. A failed probe leaves the
      * original decoder immediately after its opcode, with no state rollback. */
-    if(jit && c->jit && !prefix_tab[op] && xj_candidate_op(c,start,op) && xj_try(c,stop_eip,start,1)) {
+    if(jit && c->jit && (!QRX_JIT_BACKEDGE_DISCOVERY || !c->jit->backedge_only || c->jit->loop_header==start) && !prefix_tab[op] && xj_candidate_op(c,start,op) && xj_try(c,stop_eip,start,1)) {
         if(did_native)*did_native=1;
         return;
     }
@@ -1180,7 +1185,7 @@ X86_INLINE void exec_one_mode(x86cpu *c,uint32_t stop_eip,int jit,int *did_nativ
     case 0x40 ... 0x4F: { int r = op & 7; reg_set(c, r, sz, incdec(c, reg_get(c, r, sz), sz, op >= 0x48)); return; }
     case 0x50 ... 0x57: if (sz == 32) push(c, c->r[op & 7], 32); else push(c, reg_get(c, op & 7, 16), 16); return;
     case 0x58 ... 0x5F: { uint32_t v; if (sz == 32) { v = pop(c, 32); c->r[op & 7] = v; } else { v = pop(c, 16); reg_set(c, op & 7, 16, v); } return; }
-    case 0x70 ... 0x7F: { int8_t d = (int8_t)fetch8(c); if (cond(c, op & 15)) c->eip += (uint32_t)(int32_t)d; return; }
+    case 0x70 ... 0x7F: { int8_t d = (int8_t)fetch8(c); if (cond(c, op & 15)) {c->eip += (uint32_t)(int32_t)d;xj_note_backedge(c,start);} return; }
     case 0x91 ... 0x97: { uint32_t t = reg_get(c, X86_EAX, sz); reg_set(c, X86_EAX, sz, reg_get(c, op & 7, sz)); reg_set(c, op & 7, sz, t); return; }
     case 0xB0 ... 0xB7: reg_set(c, op & 7, 8, fetch8(c)); return;
     case 0xB8 ... 0xBF: reg_set(c, op & 7, sz, fetchimm(c, sz)); return;
@@ -1382,7 +1387,7 @@ X86_INLINE void exec_one_mode(x86cpu *c,uint32_t stop_eip,int jit,int *did_nativ
 #ifdef QRX_EXEC_PROFILE
     c->prof_ops[256u + op]++;c->prof_active_op=256u+op;
 #endif
-    if (op >= 0x80 && op <= 0x8F) { uint32_t d = fetchimm(c, sz); if (cond(c, op & 15)) { c->eip += d; if (sz == 16) c->eip &= 0xFFFF; } return; }
+    if (op >= 0x80 && op <= 0x8F) { uint32_t d = fetchimm(c, sz); if (cond(c, op & 15)) { c->eip += d; if (sz == 16) c->eip &= 0xFFFF; xj_note_backedge(c,start); } return; }
     if (op >= 0x90 && op <= 0x9F) { decode_modrm(c, &p, &m); rm_set(c, &m, 8, (uint32_t)cond(c, op & 15)); return; }
     if (op >= 0x40 && op <= 0x4F) { uint32_t v; decode_modrm(c, &p, &m); v = rm_get(c, &m, sz); if (cond(c, op & 15)) reg_set(c, m.reg, sz, v); else if (sz == 32) reg_set(c, m.reg, 32, c->r[m.reg]); return; }
     if (op >= 0xC8 && op <= 0xCF) { uint32_t v = c->r[op & 7]; c->r[op & 7] = (v >> 24) | ((v >> 8) & 0xFF00u) | ((v << 8) & 0xFF0000u) | (v << 24); return; }

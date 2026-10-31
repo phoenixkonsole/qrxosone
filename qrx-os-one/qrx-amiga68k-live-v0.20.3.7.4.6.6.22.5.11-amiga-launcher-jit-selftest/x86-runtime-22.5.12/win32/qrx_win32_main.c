@@ -42,6 +42,16 @@ static int real_main(int argc, char **argv)
         i++;
     }
     if (i >= argc) { usage(); return 2; }
+    if(getenv("QRX_WIN_FRAME_MARKERS")){
+        const char *first=getenv("QRX_WIN_FRAME_START"),*last=getenv("QRX_WIN_FRAME_END");
+        char *aend,*bend;unsigned long a,b;
+        if(!first||!last){fprintf(stderr,"frame markers require start/end frame numbers\n");return 2;}
+        a=strtoul(first,&aend,10);b=strtoul(last,&bend,10);
+        if(*aend||*bend||!a||a>=b||b>0x7fffffffu){fprintf(stderr,"invalid frame marker interval\n");return 2;}
+        w->bench_frame_start=(unsigned)a;w->bench_frame_end=(unsigned)b;
+        snprintf(w->bench_marker_dir,sizeof w->bench_marker_dir,"%s",getenv("QRX_WIN_FRAME_MARKERS"));
+    }
+
 #ifdef __AROS__
     w->be = script ? &qw_headless : &qw_aros;
 #else
@@ -91,7 +101,7 @@ static int real_main(int argc, char **argv)
 #endif
     if (w->cpu.jit) {
         x86jit_stats s; x86_jit_snapshot(&w->cpu, &s);
-        qw_log(w,"QRX86-JIT-FEATURES mask=%u (memory=1 write_continue=2 flag_liveness=4 keep_positive=8 compact_deopt=16 memory_cmp=32 compiled_loads=64 enabled_loads=128 carry_chain=256 persist_cc=512 loop_batch=1024 page_cache=2048)",s.features);
+        qw_log(w,"QRX86-JIT-FEATURES mask=%u max_ops=%u code_cap=%u (memory=1 write_continue=2 flag_liveness=4 keep_positive=8 compact_deopt=16 memory_cmp=32 compiled_loads=64 enabled_loads=128 carry_chain=256 persist_cc=512 loop_batch=1024 page_cache=2048 gp_cache=4096 range_cache=8192 loops_only=16384 native_imul=32768 hoist_alias=65536 immediate_alu=131072 compiled_backedges=262144 backedge_only=524288 cf_liveness=1048576 loop_carry=2097152)",s.features,s.max_ops,s.code_cap);
         char line[768];
         snprintf(line, sizeof(line), "QRX86-JIT profile=680%u native_blocks=%llu native_insns=%llu fallback=%llu compile=%llu hits=%llu misses=%llu invalidations=%llu evictions=%llu code_bytes=%llu live_code_bytes=%llu peak_code_bytes=%llu compile_ticks=%llu native_ticks=%llu interpreter_ticks=%llu ticks_per_second=%lu timing=%d cache_profile=%d clock_invalid=%llu\n",
             s.profile, (unsigned long long)s.native_blocks, (unsigned long long)s.native_instructions,

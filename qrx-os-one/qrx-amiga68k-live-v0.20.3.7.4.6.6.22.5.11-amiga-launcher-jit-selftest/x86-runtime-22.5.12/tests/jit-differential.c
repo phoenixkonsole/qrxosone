@@ -3,6 +3,15 @@
  * This is not a claim of real-hardware or AROS ABI validation. */
 #include "../core/qrx86core.c"
 #include <assert.h>
+/* AROS libc abort opens a modal requester. Keep every assertion active, report
+ * its expression in the captured log, and fail with an explicit exit status. */
+static void qrx_test_assert_fail(const char *file,int line,const char *expression)
+{
+    fprintf(stdout,"ASSERTION FAILED %s:%d: %s\n",file,line,expression);
+    fflush(stdout);exit(1);
+}
+#undef assert
+#define assert(expression) ((expression)?(void)0:qrx_test_assert_fail(__FILE__,__LINE__,#expression))
 #ifdef QRX_JIT_ORACLE
 extern int oracle_x86_run(x86cpu *,uint32_t);
 extern int oracle_x86_step(x86cpu *);
@@ -44,8 +53,8 @@ static void check(const uint8_t *p, unsigned n, const uint32_t *regs, uint32_t f
         fa=reference_run(&a,CODE+n);fb=x86_run(&b,CODE+n);
         if(fa!=fb||memcmp(a.r,b.r,32)||a.eip!=b.eip||x86_get_flags(&a)!=x86_get_flags(&b)||
            x86_icount(&a)-ai!=x86_icount(&b)-bi){
-            fprintf(stderr,"DIFFERENTIAL FAIL rng=%08x repeat=%u len=%u eip=%x/%x faults=%d/%d\n",rng,repeat,n,a.eip,b.eip,fa,fb);
-            for(unsigned i=0;i<n;i++)fprintf(stderr,"%02x",p[i]);fprintf(stderr,"\n");exit(1);
+            fprintf(stdout,"DIFFERENTIAL FAIL rng=%08x repeat=%u len=%u eip=%x/%x faults=%d/%d\n",rng,repeat,n,a.eip,b.eip,fa,fb);
+            for(unsigned i=0;i<n;i++)fprintf(stdout,"%02x",p[i]);fprintf(stdout,"\n");fflush(stdout);exit(1);
         }
         assert(!fa);
     }
@@ -556,9 +565,28 @@ static void native_loop_batches(void)
     uint32_t regs[8]={0};regs[X86_EBX]=DATA;regs[X86_EDI]=DATA+4096;
     regs[X86_ECX]=3;regs[X86_EBP]=300;
     assert(x86_map(&a,DATA,8192,1)&&x86_map(&b,DATA,8192,1));
-    check(p,sizeof p,regs,0x202);
+    check_watchdog=10000;puts("LOOP-BATCH starting checked warmup");
+    check(p,sizeof p,regs,0x202);puts("LOOP-BATCH checked warmup passed");
     xj_block *block=b.jit->slots[(CODE^(CODE>>7))&(XJ_SLOTS-1)].block;
     assert(block&&block->eip==CODE&&block->loop_batch&&block->count==6);
+    {int saved=b.jit->loops_only;b.jit->loops_only=1;
+     xj_block accepted={0};accepted.eip=CODE;assert(xj_compile_body(&b,&accepted));
+     assert(accepted.loop_batch);b.jit->stats.live_code_bytes-=accepted.code_size;
+     xj_code_free(accepted.code,accepted.code_size);
+     uint8_t linear[]={0x90,0x90,0xb8,1,0,0,0,0x90,0xcc};
+     assert(x86_write_mem(&b,CODE,linear,sizeof linear));
+     xj_block rejected={0};rejected.eip=CODE;assert(!xj_compile_body(&b,&rejected));
+     assert(x86_write_mem(&b,CODE,p,sizeof p));b.jit->loops_only=saved;}
+
+#if QRX_JIT_GP_CACHE
+    assert(block->gp_cache);
+    {extern int qrx_test_callee_saved(void (*fn)(x86cpu *),x86cpu *);
+     reset(&b,regs,0x202);b.jit->loop_done=0;b.jit->loop_limit=1;
+     assert(qrx_test_callee_saved((void (*)(x86cpu *))block->code,&b));
+     tlb_flush(&b);b.jit->loop_done=0;
+     assert(qrx_test_callee_saved((void (*)(x86cpu *))block->code,&b));}
+#endif
+    puts("LOOP-BATCH ABI/policy passed, checking budgets");
     for(unsigned budget=1;budget<=6*260;budget++){
         reset(&a,regs,0x202);reset(&b,regs,0x202);
         uint64_t ai=x86_icount(&a),bi=x86_icount(&b);
@@ -578,6 +606,7 @@ static void native_loop_batches(void)
     assert(fa==X86_FAULT_PAGE&&fa==fb&&!memcmp(a.r,b.r,32)&&a.eip==b.eip);
     assert(a.fault_eip==b.fault_eip&&a.fault_addr==b.fault_addr);
     assert(x86_get_flags(&a)==x86_get_flags(&b)&&x86_icount(&a)-ai==x86_icount(&b)-bi);
+    check_watchdog=0;
     puts("PASS native loop batching: exact budgets 1..1560, batch cap, guarded memory, partial-loop fault state");
 }
 #endif
@@ -601,6 +630,183 @@ static void native_page_remapping(void)
     assert(x86_wr32(&a,DATA,0x12345678)&&x86_wr32(&b,DATA,0x12345678));
     check(p,sizeof p,regs,0x202);assert(a.r[0]==0x1234567b&&b.r[0]==a.r[0]);
     puts("PASS native page cache: warmed host remap, external pages, raw data edits, unmap/reallocation");
+}
+#endif
+
+#if QRX_JIT_NATIVE_MEMORY && QRX_JIT_GP_CACHE && XJ_NATIVE
+static void native_gp_aliases(void)
+{
+    uint8_t loop[]={0x8b,0x04,0x93,0x01,0xc8,0x89,0x04,0x97,0x42,0x39,0xea,0x75,0xf3};
+    uint8_t bytes[]={0x0f,0xb6,0xc4,0x8a,0x23,0x88,0x27,0x0f,0xbe,0xcc,0x31,0xf6,0x42,0x39,0xea,0x75,0xef};
+    uint32_t regs[8]={0};regs[X86_EAX]=0x1234ab78;regs[X86_EBX]=DATA;
+    regs[X86_EDI]=DATA+4096;regs[X86_EBP]=3;regs[X86_ECX]=3;
+    assert(x86_map(&a,DATA,8192,1)&&x86_map(&b,DATA,8192,1));
+    check(bytes,sizeof bytes,regs,0x202);
+    {xj_block *block=b.jit->slots[(CODE^(CODE>>7))&(XJ_SLOTS-1)].block;assert(block&&block->gp_cache);}
+    assert(!memcmp(x86_host_ptr(&a,DATA+4096),x86_host_ptr(&b,DATA+4096),4096));
+    /* External guest pages may alias CPU register storage. Such accesses
+     * must spill and deopt before observing or changing cached registers. */
+    assert(x86_map_ext(&a,DATA+8192,4096,(uint8_t*)a.r,1));
+    assert(x86_map_ext(&b,DATA+8192,4096,(uint8_t*)b.r,1));
+    regs[X86_EBP]=1;check(loop,sizeof loop,regs,0x202);
+    regs[X86_EBX]=DATA+8192;check(loop,sizeof loop,regs,0x202);
+    regs[X86_EBX]=DATA;regs[X86_EDI]=DATA+8192;check(loop,sizeof loop,regs,0x202);
+    x86_unmap(&a,DATA+8192,4096);x86_unmap(&b,DATA+8192,4096);
+    puts("PASS native GP cache: high-byte aliases, extensions, CPU-storage read/write aliases, exact spills");
+}
+#endif
+
+#if QRX_JIT_NATIVE_IMUL && XJ_NATIVE
+static void native_multiply_tests(void)
+{
+    static const uint32_t edge[]={0,1,0xffffffffu,0x7fffffffu,0x80000000u,0x10000,0xffff0000u,0x55aa55aa};
+    uint32_t regs[8]={0};uint8_t p[48];uint64_t native=b.jit->stats.native_instructions;
+    for(unsigned x=0;x<8;x++)for(unsigned y=0;y<8;y++)for(unsigned alias=0;alias<2;alias++)for(unsigned cc=0;cc<16;cc++){
+        unsigned n=0;regs[0]=edge[x];regs[1]=edge[y];
+        p[n++]=0x90;p[n++]=0x90;p[n++]=0x0f;p[n++]=0xaf;p[n++]=alias?0xc0:0xc1;
+        p[n++]=0x70+cc;p[n++]=5;p[n++]=0xba;put32(p+n,0x12345678);n+=4;p[n++]=0x90;
+        check(p,n,regs,0xad7);
+        /* Carry is overflow, rather than the m68k MUL's cleared C flag. */
+        n=0;p[n++]=0x90;p[n++]=0x90;p[n++]=0x0f;p[n++]=0xaf;p[n++]=alias?0xc0:0xc1;
+        p[n++]=0x42;p[n++]=0x11;p[n++]=0xc0;p[n++]=0x90;
+        check(p,n,regs,0x202);
+    }
+    /* A following guard must expose the multiply's exact flags on fault. */
+    {uint8_t q[]={0x90,0x90,0x0f,0xaf,0xc1,0x8b,0x13};
+     regs[X86_EBX]=DATA;regs[0]=0x7fffffff;regs[1]=3;check(q,sizeof q,regs,0x202);
+     x86_unmap(&a,DATA+8192,4096);x86_unmap(&b,DATA+8192,4096);
+     regs[X86_EBX]=DATA+8192;
+     reset(&a,regs,0x202);reset(&b,regs,0x202);
+     uint64_t ai=x86_icount(&a),bi=x86_icount(&b);
+     int fa=reference_run(&a,CODE+sizeof q),fb=x86_run(&b,CODE+sizeof q);
+     assert(fa==X86_FAULT_PAGE&&fa==fb&&!memcmp(a.r,b.r,32)&&a.eip==b.eip);
+     assert(x86_get_flags(&a)==x86_get_flags(&b)&&a.fault_eip==b.fault_eip&&a.fault_addr==b.fault_addr);
+     assert(x86_icount(&a)-ai==x86_icount(&b)-bi);}
+    {uint8_t q[]={0x8b,0x04,0x93,0x0f,0xaf,0xc1,0x89,0x04,0x97,0x42,0x39,0xea,0x75,0xf2};
+     assert(x86_map(&a,DATA,8192,1)&&x86_map(&b,DATA,8192,1));
+     regs[X86_EBX]=DATA;regs[X86_EDI]=DATA+4096;regs[X86_EDX]=0;regs[X86_EBP]=5;
+     check(q,sizeof q,regs,0x202);
+     assert(!memcmp(x86_host_ptr(&a,DATA+4096),x86_host_ptr(&b,DATA+4096),4096));
+#if QRX_JIT_GP_CACHE
+     xj_block *block=b.jit->slots[(CODE^(CODE>>7))&(XJ_SLOTS-1)].block;
+     assert(block&&block->gp_cache&&block->loop_batch);
+#endif
+    }
+    assert(b.jit->stats.native_instructions>native+10000);
+    puts("PASS native 020/030/040/060 low-32 IMUL: signed overflow edges, aliases, all Jcc, carry chains");
+}
+#endif
+
+#if QRX_JIT_NATIVE_MEMORY && XJ_MAX_OPS>24 && XJ_NATIVE
+static void native_wide_blocks(void)
+{
+    uint8_t p[256];unsigned n=0;uint32_t regs[8]={0};
+    for(unsigned i=0;i<48;i++){p[n++]=0x83;p[n++]=0xc0;p[n++]=1;}
+    p[n++]=0x8b;p[n++]=0x0b;p[n++]=0x42;p[n++]=0x39;p[n++]=0xea;
+    p[n++]=0x0f;p[n++]=0x85;put32(p+n,(uint32_t)-(int32_t)(n+4));n+=4;
+    regs[X86_EAX]=0xffffffe0;regs[X86_EBX]=DATA;regs[X86_EBP]=3;
+    assert(x86_map(&a,DATA,4096,1)&&x86_map(&b,DATA,4096,1));
+    check(p,n,regs,0x202);
+    xj_block *block=b.jit->slots[(CODE^(CODE>>7))&(XJ_SLOTS-1)].block;
+    assert(block&&block->count==52&&block->loop_batch);
+    for(unsigned budget=1;budget<=156;budget++){
+        reset(&a,regs,0x202);reset(&b,regs,0x202);tlb_flush(&b);
+        uint64_t ai=x86_icount(&a),bi=x86_icount(&b);a.budget=ai+budget;b.budget=bi+budget;
+        int fa=reference_run(&a,CODE+n),fb=x86_run(&b,CODE+n);
+        assert(fa==fb&&!memcmp(a.r,b.r,32)&&a.eip==b.eip&&a.cur_eip==b.cur_eip);
+        assert(x86_get_flags(&a)==x86_get_flags(&b));
+        assert(x86_icount(&a)-ai==budget&&x86_icount(&b)-bi==budget);
+    }
+    x86_unmap(&a,DATA+8192,4096);x86_unmap(&b,DATA+8192,4096);
+    regs[X86_EBX]=DATA+8192;reset(&a,regs,0x202);reset(&b,regs,0x202);
+    uint64_t ai=x86_icount(&a),bi=x86_icount(&b);
+    int fa=reference_run(&a,CODE+n),fb=x86_run(&b,CODE+n);
+    assert(fa==X86_FAULT_PAGE&&fa==fb&&!memcmp(a.r,b.r,32)&&a.eip==b.eip);
+    assert(a.fault_eip==b.fault_eip&&a.fault_addr==b.fault_addr&&x86_get_flags(&a)==x86_get_flags(&b));
+    assert(x86_icount(&a)-ai==x86_icount(&b)-bi);
+    puts("PASS wide native block: 52 instructions, all budgets 1..156, late guard flags/progress");
+}
+#endif
+
+#if QRX_JIT_BACKEDGE_DISCOVERY && QRX_JIT_LOOP_BATCH && XJ_NATIVE
+static void native_backedge_discovery(void)
+{
+    uint8_t p[]={0x8b,0x04,0x93,0x01,0xc8,0x89,0x04,0x97,0x42,0x39,0xea,0x75,0xf3};
+    uint32_t regs[8]={0};regs[X86_EBX]=DATA;regs[X86_EDI]=DATA+4096;
+    regs[X86_ECX]=3;regs[X86_EBP]=300;
+    unsigned profile=b.jit->stats.profile;
+    x86_jit_disable(&b);assert(x86_jit_enable(&b,profile,0));
+    b.jit->threshold=2;b.jit->min_ops=3;b.jit->loops_only=1;b.jit->backedge_only=1;
+    assert(x86_map(&a,DATA,8192,1)&&x86_map(&b,DATA,8192,1));
+    check(p,sizeof p,regs,0x202);
+    assert(b.jit->loop_header==CODE&&b.jit->stats.native_instructions);
+    assert(!xj_candidate_op(&b,CODE+3,0x01));
+    for(unsigned budget=1;budget<=18;budget++){
+        b.jit->loop_header=0xffffffffu;
+        reset(&a,regs,0x202);reset(&b,regs,0x202);
+        uint64_t ai=x86_icount(&a),bi=x86_icount(&b);a.budget=ai+budget;b.budget=bi+budget;
+        int fa=reference_run(&a,CODE+sizeof p),fb=x86_run(&b,CODE+sizeof p);
+        assert(fa==fb&&!memcmp(a.r,b.r,32)&&a.eip==b.eip);
+        assert(x86_get_flags(&a)==x86_get_flags(&b));
+        assert(x86_icount(&a)-ai==budget&&x86_icount(&b)-bi==budget);
+    }
+    b.jit->loops_only=0;b.jit->backedge_only=0;
+    puts("PASS backedge JIT discovery: actual native execution, ordinary PCs bypassed, initial-loop budgets exact");
+}
+#endif
+
+#if QRX_JIT_CF_LIVENESS && XJ_NATIVE
+static void native_dead_carry_loops(void)
+{
+    uint8_t p[]={0x42,0x39,0xea,0x75,0xfb};uint32_t regs[8]={0};regs[X86_EBP]=300;
+    check(p,sizeof p,regs,0x202);check(p,sizeof p,regs,0x203);
+    xj_block *block=b.jit->slots[(CODE^(CODE>>7))&(XJ_SLOTS-1)].block;
+    assert(block&&block->count==3&&!block->cf_input&&block->loop_batch);
+    for(unsigned cf=0;cf<2;cf++)for(unsigned budget=1;budget<=9;budget++){
+        reset(&a,regs,0x202|cf);reset(&b,regs,0x202|cf);
+        uint64_t ai=x86_icount(&a),bi=x86_icount(&b);a.budget=ai+budget;b.budget=bi+budget;
+        int fa=reference_run(&a,CODE+sizeof p),fb=x86_run(&b,CODE+sizeof p);
+        assert(fa==fb&&!memcmp(a.r,b.r,32)&&a.eip==b.eip&&x86_get_flags(&a)==x86_get_flags(&b));
+        assert(x86_icount(&a)-ai==budget&&x86_icount(&b)-bi==budget);
+    }
+    puts("PASS dead carry elimination: tiny INC/CMP loops batch, incoming CF and partial budgets exact");
+}
+#endif
+
+#if QRX_JIT_LOOP_CARRY && XJ_NATIVE
+static void native_loop_carried_flags(void)
+{
+    uint8_t pure[]={0x90,0x42,0x75,0xfc};
+    uint8_t copy[]={0x90,0x8b,0x04,0x93,0x42,0x89,0x44,0x97,0xfc,0x39,0xea,0x75,0xf3};
+    uint32_t regs[8]={0};
+    for(unsigned cf=0;cf<2;cf++){
+        regs[X86_EDX]=0xfffffffdu;check(pure,sizeof pure,regs,0x202|cf);
+        xj_block *block=b.jit->slots[(CODE^(CODE>>7))&(XJ_SLOTS-1)].block;
+        assert(block&&block->cf_input&&block->loop_batch&&block->native_cc);
+        for(unsigned budget=1;budget<=9;budget++){
+            reset(&a,regs,0x202|cf);reset(&b,regs,0x202|cf);
+            uint64_t ai=x86_icount(&a),bi=x86_icount(&b);a.budget=ai+budget;b.budget=bi+budget;
+            int fa=reference_run(&a,CODE+sizeof pure),fb=x86_run(&b,CODE+sizeof pure);
+            assert(fa==fb&&!memcmp(a.r,b.r,32)&&a.eip==b.eip&&x86_get_flags(&a)==x86_get_flags(&b));
+            assert(x86_icount(&a)-ai==budget&&x86_icount(&b)-bi==budget);
+        }
+    }
+    assert(x86_map(&a,DATA,8192,1)&&x86_map(&b,DATA,8192,1));
+    memset(regs,0,sizeof regs);regs[X86_EBX]=DATA;regs[X86_EDI]=DATA+4096;regs[X86_EBP]=20;
+    check(copy,sizeof copy,regs,0x202);check(copy,sizeof copy,regs,0x203);
+    xj_block *block=b.jit->slots[(CODE^(CODE>>7))&(XJ_SLOTS-1)].block;
+    assert(block&&block->cf_input&&block->loop_batch);
+    /* The fifth store faults after INC. The preceding iteration's CMP set CF,
+     * so this INC must preserve CF=1 even when the initial input was CF=0. */
+    x86_unmap(&a,DATA+8192,4096);x86_unmap(&b,DATA+8192,4096);
+    regs[X86_EDI]=DATA+8192-16;reset(&a,regs,0x202);reset(&b,regs,0x202);
+    uint64_t ai=x86_icount(&a),bi=x86_icount(&b);
+    int fa=reference_run(&a,CODE+sizeof copy),fb=x86_run(&b,CODE+sizeof copy);
+    assert(fa==X86_FAULT_PAGE&&fa==fb&&!memcmp(a.r,b.r,32)&&a.eip==b.eip);
+    assert(a.fault_eip==b.fault_eip&&a.fault_addr==b.fault_addr);
+    assert((x86_get_flags(&a)&X86_CF)&&x86_get_flags(&a)==x86_get_flags(&b));
+    assert(x86_icount(&a)-ai==x86_icount(&b)-bi);
+    puts("PASS loop-carried CF: INC conditions, initial CF=0/1, every partial budget, later-iteration guard flags");
 }
 #endif
 
@@ -661,6 +867,24 @@ static int jit_test_main(int argc,char **argv)
 #endif
 #if QRX_JIT_NATIVE_MEMORY && QRX_JIT_PAGE_CACHE
     native_page_remapping();
+#endif
+#if QRX_JIT_NATIVE_MEMORY && QRX_JIT_GP_CACHE
+    native_gp_aliases();
+#endif
+#if QRX_JIT_NATIVE_IMUL
+    native_multiply_tests();
+#endif
+#if QRX_JIT_NATIVE_MEMORY && XJ_MAX_OPS>24
+    native_wide_blocks();
+#endif
+#if QRX_JIT_BACKEDGE_DISCOVERY && QRX_JIT_LOOP_BATCH
+    native_backedge_discovery();
+#endif
+#if QRX_JIT_CF_LIVENESS
+    native_dead_carry_loops();
+#endif
+#if QRX_JIT_LOOP_CARRY
+    native_loop_carried_flags();
 #endif
     /* Restore the second code page after boundary tests. */
     assert(x86_map(&a,CODE+4096,4096,1)&&x86_map(&b,CODE+4096,4096,1));

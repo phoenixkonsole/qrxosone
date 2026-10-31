@@ -16,6 +16,14 @@
 #include <stddef.h>
 #include <setjmp.h>
 
+#ifndef QRX_JIT_BACKEDGE_DISCOVERY
+#define QRX_JIT_BACKEDGE_DISCOVERY 0
+#endif
+
+#ifndef QRX_JIT_NATIVE_IMUL
+#define QRX_JIT_NATIVE_IMUL 0
+#endif
+
 #ifndef QRX_JIT_PAGE_CACHE
 #define QRX_JIT_PAGE_CACHE 0
 #endif
@@ -56,7 +64,7 @@ typedef struct x86jit_stats {
     uint64_t native_blocks, native_instructions, fallback_instructions, code_bytes;
     uint64_t live_code_bytes, peak_code_bytes;
     uint64_t compile_ticks, native_ticks, interpreter_ticks,clock_invalid;
-    uint32_t profile,features;
+    uint32_t profile,features,max_ops,code_cap;
     int timing,cache_profile;
 #ifdef QRX_JIT_PROFILE_DEOPT
     uint32_t deopts,zero_deopts;
