@@ -1,0 +1,2 @@
+/workspace/qrx-jit-work/pe-aros/tmp/qrx-scn-harness.FIi9kc: line 92: 22469 Killed                  HOME="$W/home" DISPLAY=":$d" SDL_AUDIODRIVER=dummy fs-uae "$W/cfg.fs-uae" > "$OUT/fs-uae.stdout" 2>&1
+scenario scenario on 68060: COMPLETED after 30s

@@ -1,0 +1,4 @@
+QRX OS One 6.6.22.2 Unified Theme Runtime
+Root cause fixed: standalone QRX apps used palette indices 0..3 while QRXDesktop installs the shared theme palette at 224..244. On the public screen this produced black/incorrect chrome despite selecting macOS/Windows/Amiga/QRX.
+All shared chrome now uses the exact QRXDesktop palette indices. Writer/Spreadsheet/Presenter/Hardware/Settings/Welcome, QRX Web, QRX AI and ARES use the shared theme primitives. A build gate rejects direct low-palette SetAPen usage in these custom-border apps.
+This package does not claim ReactOS GUI execution is fixed: current runtime still reports unresolved Win32 imports. System32 packaging is present; recursive guest DLL execution remains a separate QRXWinRun implementation task.

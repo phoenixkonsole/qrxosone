@@ -1,0 +1,6 @@
+6.6.22.5.6 fixes the remaining Deadwood AROS libc declaration failure seen in 22.5.4.
+
+- qrx_win_guest_runtime.c: supplies AROS declarations for fseek/ftell and SEEK_SET/SEEK_END.
+- qrx_win_guest_loader.c: supplies the missing AROS puts declaration.
+- qrx_net.c: supplies the missing AROS atoi declaration and includes socket structure headers before proto/bsdsocket.h to reduce incomplete sockaddr/msghdr diagnostics.
+- No QRX86 execution/JIT feature was removed or weakened.

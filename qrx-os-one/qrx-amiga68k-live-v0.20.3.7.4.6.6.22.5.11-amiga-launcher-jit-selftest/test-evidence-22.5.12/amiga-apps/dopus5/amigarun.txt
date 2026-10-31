@@ -1,0 +1,40 @@
+QRXAMIGARUN CHECK SYS:DOpus5/DirectoryOpus
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 551212 bytes
+  hunks    : 3  relocs: 13766  chip: 0  fast: 0  any: 498180 bytes
+    hunk 0 CODE 475184 bytes
+    hunk 1 DATA 20832 bytes
+    hunk 2 BSS 2164 bytes
+  library  : rtg.library -> MISSING
+  library  : cgxsystem.library -> MISSING
+  library  : cyberintuition.library -> MISSING
+  library  : icon.library -> ok (in memory)
+  library  : SysInfo.library -> MISSING
+  library  : multiuser.library -> MISSING
+  library  : dopus5.library -> ok (LIBS:dopus5.library)
+  library  : intuition.library -> ok (in memory)
+  library  : graphics.library -> ok (in memory)
+  library  : layers.library -> ok (in memory)
+  library  : diskfont.library -> ok (in memory)
+  library  : workbench.library -> ok (in memory)
+  library  : commodities.library -> ok (in memory)
+  library  : utility.library -> ok (in memory)
+  library  : gadtools.library -> ok (in memory)
+  library  : rexxsyslib.library -> ok (in memory)
+  library  : asl.library -> ok (in memory)
+  library  : datatypes.library -> ok (in memory)
+  library  : amigaguide.library -> ok (LIBS:amigaguide.library)
+  library  : newicon.library -> MISSING
+  library  : Picasso96API.library -> MISSING
+  library  : cybergraphics.library -> ok (in memory)
+  device   : input.device -> ok (in memory)
+  device   : timer.device -> ok (in memory)
+  device   : console.device -> ok (in memory)
+  library  : version.library -> ok (LIBS:version.library)
+  library  : locale.library -> ok (in memory)
+  library  : dos.library -> ok (in memory)
+  (library/device names are found by scanning the program image; optional or
+   version-specific requirements cannot be decided statically)
+  RESULT   : RUNNABLE WITH WARNINGS
+QRXAMIGARUN: started asynchronously: SYS:DOpus5/DirectoryOpus
+QRXTEST AMIGARUN rc=0

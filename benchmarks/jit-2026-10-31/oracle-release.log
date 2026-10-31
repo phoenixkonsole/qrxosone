@@ -1,0 +1,85 @@
+PASS random register/flags programs: 2000 x 3 interpreter/JIT comparisons
+PASS fallback flags/widths/ADC/SBB/shifts/rotates/LAHF/SAHF + all 16 Jcc: 960 x 3
+PASS MUL/IMUL/DIV/IDIV interpreter fallback surrounded by native blocks: 128 x 3
+PASS memory store/load fallback and native successor preserve little-endian data
+PASS native LEA all ModRM/SIB forms + shifts all immediate counts + near Jcc
+PASS native INC/DEC/ADC/SBB: carry chains, signed/unsigned edges and all Jcc
+PASS native arithmetic conditions (all Jcc, parity fallback, post-flag clobbers) and single-step oracle
+PASS ModRM memory decoder: 16/32-bit addressing and operands, SIB, DS/SS/FS, loads and writes
+PASS leading native loads: LE conversion, unaligned/SIB/aliases, remap, read-only, page faults and instruction charge
+PASS profiling clock wrap and regressing sample rejection
+PASS generated entry preserves D2-D7/A2-A6 and the C stack ABI
+PASS SMC: raw-host-pointer code mutation invalidates compiled block
+PASS exact watchdog at every instruction inside a warmed block
+PASS stop EIP inside a warmed translation block
+PASS unmap/remap rejects stale cached instructions
+PASS negative cache re-probes modified/newly eligible code without global flush
+PASS stop EIP inside a block spanning the 32-bit address wrap
+PASS page-boundary decode faults remain interpreted and precise
+BENCH interpreter_ticks=165604 jit_ticks=28205 warm_ticks=28392 ticks_per_second=1000000 guest_instructions=1200002 
+STATS profile=20 native_insns=3599910 fallback=96 compilations=1 hits=600059 misses=7 invalidations=0 evictions=0 code_bytes=108 compile_ticks=62 peak_code_bytes=108 
+PASS native m68k JIT differential/safety suite
+PASS random register/flags programs: 2000 x 3 interpreter/JIT comparisons
+PASS fallback flags/widths/ADC/SBB/shifts/rotates/LAHF/SAHF + all 16 Jcc: 960 x 3
+PASS MUL/IMUL/DIV/IDIV interpreter fallback surrounded by native blocks: 128 x 3
+PASS memory store/load fallback and native successor preserve little-endian data
+PASS native LEA all ModRM/SIB forms + shifts all immediate counts + near Jcc
+PASS native INC/DEC/ADC/SBB: carry chains, signed/unsigned edges and all Jcc
+PASS native arithmetic conditions (all Jcc, parity fallback, post-flag clobbers) and single-step oracle
+PASS ModRM memory decoder: 16/32-bit addressing and operands, SIB, DS/SS/FS, loads and writes
+PASS leading native loads: LE conversion, unaligned/SIB/aliases, remap, read-only, page faults and instruction charge
+PASS profiling clock wrap and regressing sample rejection
+PASS generated entry preserves D2-D7/A2-A6 and the C stack ABI
+PASS SMC: raw-host-pointer code mutation invalidates compiled block
+PASS exact watchdog at every instruction inside a warmed block
+PASS stop EIP inside a warmed translation block
+PASS unmap/remap rejects stale cached instructions
+PASS negative cache re-probes modified/newly eligible code without global flush
+PASS stop EIP inside a block spanning the 32-bit address wrap
+PASS page-boundary decode faults remain interpreted and precise
+BENCH interpreter_ticks=159852 jit_ticks=29059 warm_ticks=28934 ticks_per_second=1000000 guest_instructions=1200002 
+STATS profile=30 native_insns=3599910 fallback=96 compilations=1 hits=600059 misses=7 invalidations=0 evictions=0 code_bytes=108 compile_ticks=56 peak_code_bytes=108 
+PASS native m68k JIT differential/safety suite
+PASS random register/flags programs: 2000 x 3 interpreter/JIT comparisons
+PASS fallback flags/widths/ADC/SBB/shifts/rotates/LAHF/SAHF + all 16 Jcc: 960 x 3
+PASS MUL/IMUL/DIV/IDIV interpreter fallback surrounded by native blocks: 128 x 3
+PASS memory store/load fallback and native successor preserve little-endian data
+PASS native LEA all ModRM/SIB forms + shifts all immediate counts + near Jcc
+PASS native INC/DEC/ADC/SBB: carry chains, signed/unsigned edges and all Jcc
+PASS native arithmetic conditions (all Jcc, parity fallback, post-flag clobbers) and single-step oracle
+PASS ModRM memory decoder: 16/32-bit addressing and operands, SIB, DS/SS/FS, loads and writes
+PASS leading native loads: LE conversion, unaligned/SIB/aliases, remap, read-only, page faults and instruction charge
+PASS profiling clock wrap and regressing sample rejection
+PASS generated entry preserves D2-D7/A2-A6 and the C stack ABI
+PASS SMC: raw-host-pointer code mutation invalidates compiled block
+PASS exact watchdog at every instruction inside a warmed block
+PASS stop EIP inside a warmed translation block
+PASS unmap/remap rejects stale cached instructions
+PASS negative cache re-probes modified/newly eligible code without global flush
+PASS stop EIP inside a block spanning the 32-bit address wrap
+PASS page-boundary decode faults remain interpreted and precise
+BENCH interpreter_ticks=161863 jit_ticks=29018 warm_ticks=29286 ticks_per_second=1000000 guest_instructions=1200002 
+STATS profile=40 native_insns=3599910 fallback=96 compilations=1 hits=600059 misses=7 invalidations=0 evictions=0 code_bytes=108 compile_ticks=47 peak_code_bytes=108 
+PASS native m68k JIT differential/safety suite
+PASS random register/flags programs: 2000 x 3 interpreter/JIT comparisons
+PASS fallback flags/widths/ADC/SBB/shifts/rotates/LAHF/SAHF + all 16 Jcc: 960 x 3
+PASS MUL/IMUL/DIV/IDIV interpreter fallback surrounded by native blocks: 128 x 3
+PASS memory store/load fallback and native successor preserve little-endian data
+PASS native LEA all ModRM/SIB forms + shifts all immediate counts + near Jcc
+PASS native INC/DEC/ADC/SBB: carry chains, signed/unsigned edges and all Jcc
+PASS native arithmetic conditions (all Jcc, parity fallback, post-flag clobbers) and single-step oracle
+PASS ModRM memory decoder: 16/32-bit addressing and operands, SIB, DS/SS/FS, loads and writes
+PASS leading native loads: LE conversion, unaligned/SIB/aliases, remap, read-only, page faults and instruction charge
+PASS profiling clock wrap and regressing sample rejection
+PASS generated entry preserves D2-D7/A2-A6 and the C stack ABI
+PASS SMC: raw-host-pointer code mutation invalidates compiled block
+PASS exact watchdog at every instruction inside a warmed block
+PASS stop EIP inside a warmed translation block
+PASS unmap/remap rejects stale cached instructions
+PASS negative cache re-probes modified/newly eligible code without global flush
+PASS stop EIP inside a block spanning the 32-bit address wrap
+PASS page-boundary decode faults remain interpreted and precise
+BENCH interpreter_ticks=189283 jit_ticks=28523 warm_ticks=26729 ticks_per_second=1000000 guest_instructions=1200002 
+STATS profile=60 native_insns=3599910 fallback=96 compilations=1 hits=600059 misses=7 invalidations=0 evictions=0 code_bytes=108 compile_ticks=64 peak_code_bytes=108 
+PASS native m68k JIT differential/safety suite
+PASS unchanged-baseline oracle on all four m68k CPU profiles

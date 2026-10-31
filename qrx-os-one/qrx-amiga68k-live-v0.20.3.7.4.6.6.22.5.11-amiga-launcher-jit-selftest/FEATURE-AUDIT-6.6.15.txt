@@ -1,0 +1,27 @@
+QRX OS One 68K v0.20.3.7.4.6.6.15 - QRX Web Functional Core
+
+IMPLEMENTED / SOURCE AUDITED
+- Native QRX Web remains JavaScript-free.
+- Up to 6 tabs.
+- Per-tab bounded Back/Forward history (12 entries).
+- Persistent bookmarks file in QRX:Prefs/qrxweb-bookmarks.txt.
+- Persistent parental configuration in QRX:Prefs/qrxweb-parent.cfg.
+- Parent PIN gate (first-run default 0000; FNV hash storage, intended as local child lock not cryptographic credential storage).
+- Safe mode cannot be disabled until parent session is unlocked.
+- Ad/tracker URL patterns are blocked independent of Safe Mode.
+- Adult/gambling URL patterns are blocked while Safe Mode is active.
+- Downloads remain disabled until parent unlock and are passed through QRX:C/ARESAntivirus; rejected files are removed.
+- Script/video/audio/iframe content remains non-executable/non-rendered and becomes lightweight placeholders.
+- Text wrapping and vertical scrolling retained.
+- Decoder boundary is isolated from HTML/network path for future 020/030/040/060 optimized PNG/JPEG/GIF implementations.
+
+COMMANDS IN ADDRESS FIELD
+- pin:0000      unlock parent session on first run
+- bookmark:     add current page to persistent bookmarks
+- download:     download current URL to RAM and pass through ARES
+
+IMPORTANT IMAGE DECODER AUDIT
+The current source does NOT yet contain a trustworthy full PNG/JPEG/GIF pixel decoder. 6.6.14 only emitted [IMAGE], and 6.6.15 deliberately does not falsely label that as decoded imagery. The architecture is prepared for decoder adapters, but actual pixel decode remains a hard open item until compiled/tested against the exact Deadwood AROS datatype/codec environment or a bundled 68K-safe decoder library.
+
+BUILD GATES
+QRXWeb and ARESAntivirus remain in the native AROS ABI -> HUNK conversion and final ISO critical executable list. Actual m68k compile/runtime test must run on qrx1.

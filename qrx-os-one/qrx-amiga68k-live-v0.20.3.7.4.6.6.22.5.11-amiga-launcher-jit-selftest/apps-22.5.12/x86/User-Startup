@@ -1,0 +1,53 @@
+; QRX 22.5.12 scenario: Linux i386 and Win32 programs on AROS m68k (qrx86core)
+FailAt 1000
+Assign QRX: SYS:QRX >NIL:
+Run <NIL: >NIL: WANDERER:Wanderer
+Wait 15
+CD SYS:X86
+Echo "QRXTEST START" >QRXOUT:log.txt
+; ---- Linux i386 (static glibc / BusyBox)
+QRX:C/qrx-i386 hello32 a b >QRXOUT:hello.txt
+Echo "QRXTEST HELLO rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-i386 difft >QRXOUT:diff-emu.bin
+Echo "QRXTEST DIFF rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-i386 fpu >QRXOUT:fpu-emu.txt
+Echo "QRXTEST FPU rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-i386 busybox uname -a >QRXOUT:bb-uname.txt
+Echo "QRXTEST BB-UNAME rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-i386 busybox sh -c "seq 1 200 | md5sum; expr 6 + 36; for i in 1 2 3; do echo n$i; done | wc -l" >QRXOUT:bb-sh.txt
+QRX:C/qrx-i386 busybox sh bbtest.sh >QRXOUT:bb-script.txt
+Echo "QRXTEST BB-SCRIPT rc=$RC" >>QRXOUT:log.txt
+Echo "QRXTEST BB-SH rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-i386 busybox ls -la >QRXOUT:bb-ls.txt
+Echo "QRXTEST BB-LS rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-i386 busybox sh -c "yes qrx | head -3; echo pipe-ok" >QRXOUT:bb-yes.txt
+Echo "QRXTEST BB-YES rc=$RC" >>QRXOUT:log.txt
+; ---- Win32 (headless scripted functional tests, snapshots into QRXOUT:)
+QRX:C/qrx-win32 -o QRXOUT: -s calc-test.txt calc.exe >QRXOUT:win-calc.txt
+Echo "QRXTEST WIN-CALC rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-win32 -o QRXOUT: -s winmine-test.txt winmine.exe >QRXOUT:win-mine.txt
+Echo "QRXTEST WIN-MINE rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-win32 -o QRXOUT: -s clock-test.txt qrxclock.exe >QRXOUT:win-clock.txt
+Echo "QRXTEST WIN-CLOCK rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-win32 -o QRXOUT: -s sol-test.txt sol.exe >QRXOUT:win-sol.txt
+Echo "QRXTEST WIN-SOL rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-win32 -o QRXOUT: -s spider-test.txt spider.exe >QRXOUT:win-spider.txt
+Echo "QRXTEST WIN-SPIDER rc=$RC" >>QRXOUT:log.txt
+QRX:C/qrx-win32 -o QRXOUT: -s dx-test.txt dxtest.exe 60 >QRXOUT:win-dx.txt
+Echo "QRXTEST WIN-DX rc=$RC" >>QRXOUT:log.txt
+Copy SYS:X86/dxtest.log QRXOUT:dxtest.log
+; ---- Win32 live on the Workbench screen (AROS Intuition backend), one screenshot per program
+Run >NIL: QRX:C/qrx-win32 -v -L QRXOUT:live-calc.log calc.exe
+Wait 25
+QRX:C/QRXScreenGrab QRXOUT:live-calc.ppm >QRXOUT:grab-calc.txt
+Run >NIL: QRX:C/qrx-win32 -v -L QRXOUT:live-mine.log winmine.exe
+Wait 25
+QRX:C/QRXScreenGrab QRXOUT:live-mine.ppm >QRXOUT:grab-mine.txt
+Run >NIL: QRX:C/qrx-win32 -v -L QRXOUT:live-clock.log qrxclock.exe
+Wait 25
+QRX:C/QRXScreenGrab QRXOUT:live.ppm >QRXOUT:grab.txt
+Avail >QRXOUT:avail.txt
+Status FULL >QRXOUT:tasks.txt
+QRX:C/QRXScreenGrab QRXOUT:live.ppm >QRXOUT:grab.txt
+Echo "QRXTEST END" >>QRXOUT:log.txt
+Echo "done" >QRXOUT:DONE

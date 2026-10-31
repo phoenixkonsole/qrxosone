@@ -1,0 +1,14 @@
+QRX OS One 6.6.22 - ReactOS guest runtime packaging and deterministic 3-app smoke tests
+
+Implemented in this source package:
+- fixes the 6.6.21 QRXDesktop forward-declaration/non-void-return compile regression
+- packages the complete top-level ReactOS System32 PE guest payload (.dll/.exe/.cpl) already imported by the base build into the final QRX ISO
+- copies calc.exe, notepad.exe and clock.exe without the old first-match/break bug
+- build-time recursive PE32 import/dependency audit starting from all three test applications
+- SHA256 manifest for packaged ReactOS System32 guest files
+- final-ISO gates for the three apps and core kernel32/ntdll/user32/gdi32/advapi32 DLLs
+- QRX terminal commands: reactoscalc, reactosnotepad, reactosclock, reactostest
+- TestReactOS3 executes all three programs in sequence
+
+Important architectural status:
+The existing QRXWinRun/QRX WinRT still needs deeper guest-DLL execution/host-bridge work for full ReactOS DLL semantics. This package deliberately does not claim that merely copying DLLs makes arbitrary Win32 applications execute. It ensures the dependency payload is present and auditable, so subsequent loader/runtime failures are real implementation gaps rather than missing packaging.

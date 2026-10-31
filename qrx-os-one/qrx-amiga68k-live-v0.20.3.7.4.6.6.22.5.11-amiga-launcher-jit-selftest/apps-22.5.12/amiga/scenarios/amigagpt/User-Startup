@@ -1,0 +1,20 @@
+; QRX 22.5.12 scenario: AmigaGPT 3.4.0 (m68k MUI application) on Deadwood AROS / Zune
+FailAt 100
+Assign QRX: SYS:QRX >NIL:
+; open the Workbench screen first (the scenario runs before Startup-Sequence starts Wanderer)
+Run <NIL: >NIL: WANDERER:Wanderer
+Wait 20
+Avail >QRXOUT:avail-before.txt
+QRX:C/amigacheck SYS:AmigaGPT/AmigaGPT/AmigaGPT_OS3 >QRXOUT:amigacheck.txt
+Echo "QRXTEST AMIGACHECK rc=$RC" >>QRXOUT:amigacheck.txt
+; AmigaGPT locates its data through the AMIGAGPT: assign (its installer creates it)
+Assign AMIGAGPT: SYS:AmigaGPT/AmigaGPT
+CD AMIGAGPT:
+QRX:C/amigarun ASYNC SYS:AmigaGPT/AmigaGPT/AmigaGPT_OS3 >QRXOUT:amigarun.txt
+Echo "QRXTEST AMIGARUN rc=$RC" >>QRXOUT:amigarun.txt
+Wait 90
+Avail >QRXOUT:avail-running.txt
+Status >QRXOUT:status.txt
+Status FULL >QRXOUT:tasks.txt
+QRX:C/QRXScreenGrab QRXOUT:screen.ppm >QRXOUT:grab.txt
+Echo "done" >QRXOUT:DONE

@@ -1,0 +1,10 @@
+QRX-JIT-SELFTEST 22.5.11 (opt-in; does NOT enable the QRX86 JIT)
+CPU: 68040 +FPU  AttnFlags=0x0000a07f  CACR(CacheControl)=0x80001111 copyback
+PASS S1 byte-emission
+PASS S2 alloc+alignment  addr=0x0756160c (longword aligned)
+PASS S3 copy+CacheClearE/U+readback
+NOTE native execution NOT performed (static stages only). Re-run with EXECUTE inside
+     an emulator snapshot to execute generated code.
+QRX-JIT-SELFTEST RESULT: PASS (static only)
+QRX86GRTExec native JIT remains quarantined regardless of this result.
+QRXTEST JIT-STATIC rc=0

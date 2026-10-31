@@ -1,0 +1,71 @@
+QRX OS One 0.20.3.7.4.6.6.22.5.11 - changelog (cumulative on 22.5.10)
+=======================================================================
+
+New
+---
+* amiga-runtime-22.5.11/  QRXAmigaRun with the names amigarun / amigacheck:
+  AROS-native launcher for classic AmigaOS 1.x-3.x HUNK programs
+  (bounds-checked HUNK parser, format classification with hints, library/device
+  probe without side effects, AROS LoadSeg proof, SystemTags DOS-process start,
+  return code + Fault() text, STACK/ASYNC/STRICT/FORCE/QUIET/NOLOAD, AmigaDOS
+  quoting, log in T:QRX-AmigaRun.log).  See AMIGA-LAUNCHER-22.5.11.txt.
+* QRXDesktop terminal commands  amigacheck <prog>  and  amigarun ... <prog> [args].
+* qrx-jit-selftest: separate opt-in binary (static stages by default; native
+  stages only with EXECUTE; crash marker file; LOGDIR=).  Never called by boot,
+  desktop autostart or ReactOS scripts (deploy gate).  See JIT-SELFTEST-22.5.11.txt.
+* Self-built m68k HUNK test programs QRXHunkTest / QRXHunkTestNeedLib, negative
+  fixtures and QRX:S/TestAmigaRun (machine-checkable QRXTEST lines).
+* FS-UAE harness (amiga-runtime-22.5.11/emulator/): maximally expanded A4000
+  (2 MB Chip, 16 MB motherboard Fast, 1 GB Z3 Fast, uaegfx RTG 256 MB) on
+  68020/030/040/060 with Deadwood AROS ROMs, result checker.
+* compatibility/PPC-ARCHITECTURE-PLAN-22.5.11.txt (plan only; separate
+  Linux/PPC32 and AmigaOS 4 personalities; no OS4 files bundled).
+* tests-22.5.11/test-qrx86-interpreter.sh, amiga-runtime host tests, GNU-as
+  cross-check of the JIT emitter, validate-22.5.11.py (wired into deploy.sh).
+* <repo>/upstream: Deadwood AROS sources (latest master 5b5fd4c + pinned
+  29dfac42), our Deadwood m68k build, ReactOS 0.4.15 live/boot CDs,
+  port prefetch script for blocked download hosts.
+
+Fixed
+-----
+* QRX86GRTExec kept its ~1.7 MB VM state on the AmigaDOS process stack
+  (stack overflow into foreign memory on m68k, no MMU guard) -> BSS.
+* QRXWinGuestLoader (~96 KB) and QRXWinGuestRuntime (~188 KB) kept their
+  loader state on the process stack -> BSS.
+* QRX86 interpreter: REP MOVS/STOS/LODS/CMPS/SCAS were silently truncated at
+  1,000,000 iterations and the iterations were not charged to the watchdog
+  (a REP-heavy endless guest could stall wintrace far beyond --max-steps).
+  REP now runs in resumable 64 Ki chunks, every iteration counts as a step.
+* QRX86 interpreter: MOV r8,imm8 (opcodes B0-B7, incl. AH/CH/DH/BH) was missing
+  and failed closed.
+
+* QRX86GRTExec / QRXWinGuestLoader / QRXWinGuestRuntime: the 22.5.3-22.5.6
+  opaque-FILE shim collided with a complete Deadwood SDK (posixc/stdc stdio.h:
+  "conflicting types for fopen", real compile error with the master build).
+  The shim is now used only when stdio.h did not declare FILE itself.
+* QRXDesktop: LAlt+F1..F4 (workspace switch) returned an undefined value from
+  the terminal handler; a 0 there ended the desktop.  Now returns 1.
+* QRXDesktop + all theme apps: text is drawn transparent (JAM1).  On a borrowed
+  Wanderer screen every string had a grey box (host BPen 0) behind it.
+* QRX apps: the "File Edit View Insert Format Help" strip is drawn only in
+  Writer/Spreadsheet/Presenter and after the title (it overlapped the Welcome,
+  Settings and Hardware titles).
+
+Resource-saving desktop (measured in FS-UAE, see TESTREPORT-22.5.11.txt)
+-----------------------------------------------------------------------
+* RTG wallpaper cache: the 640x512 RLE wallpaper is rendered once into an
+  off-screen friend bitmap and blitted on every later redraw (was ~21 000
+  RectFill calls per redraw on RTG).  Falls back to the old path if the bitmap
+  cannot be allocated; freed before CloseScreen.
+* `welcome on|off` terminal command / prefs key `welcome=`: the Welcome dialog
+  (separate process + window) can be kept from starting with the desktop.
+* ENV:QRXSCREEN=rtg|own opens QRX's own RTG screen; default stays "borrow the
+  existing public screen" (no extra display memory).
+
+Unchanged on purpose
+--------------------
+* QRX86 native JIT stays quarantined; --jit=on runs the interpreter.
+* wintrace stays interpreter-only (--jit=off --trace --max-steps 100000).
+* Proven boot path: Deadwood 29dfac42 default, EBFHUNKROM=no, 3520-sector
+  Emergency ADF, IPrefs deferred, QRX: assign, QRXDesktop manual.
+* No file from any earlier release was removed (validate-22.5.11.py gate).

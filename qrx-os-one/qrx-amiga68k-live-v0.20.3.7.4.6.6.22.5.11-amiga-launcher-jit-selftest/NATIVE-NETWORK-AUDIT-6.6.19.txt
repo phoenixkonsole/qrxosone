@@ -1,0 +1,29 @@
+QRX OS One 68K v0.20.3.7.4.6.6.19 - Native Network Foundation
+
+Implemented:
+- QRX Web page fetch no longer shells out to wget/curl.
+- Native bsdsocket.library DNS via gethostbyname().
+- Native TCP socket/connect/send/recv/CloseSocket.
+- Native HTTP/1.0 GET transport with Host/User-Agent headers.
+- HTTP response header/body separation.
+- about:network diagnostics page.
+- HTTPS is fail-closed: never silently downgraded to HTTP.
+- Default local QRX Test Suite remains unchanged.
+
+TLS audit:
+- Correct Amiga-family native TLS direction is AmiSSL, which wraps modern OpenSSL in Amiga shared libraries.
+- The current Deadwood build payload does not contain an AmiSSL SDK/runtime in this archive.
+- Therefore this revision does NOT claim HTTPS success. It establishes the native network transport boundary and explicit TLS backend boundary.
+- Next gate: install/package a compatible AmiSSL runtime + SDK, compile a minimal TLS probe against the same m68k AROS ABI, verify SNI, certificate chain validation, hostname verification, TLS 1.2/1.3 where supported, then route HTTPS through it.
+
+Validation required by deploy.sh:
+- QRXWeb and qrx_net compile with the exact Deadwood m68k AROS compiler/includes.
+- ELF machine must be m68k.
+- HUNK conversion must pass.
+- final ISO HUNK validation remains mandatory.
+
+Runtime smoke tests:
+1. about:network
+2. http://example.com
+3. https://google.de -> must report TLS backend unavailable, never plaintext downgrade
+4. local QRX test suite remains default

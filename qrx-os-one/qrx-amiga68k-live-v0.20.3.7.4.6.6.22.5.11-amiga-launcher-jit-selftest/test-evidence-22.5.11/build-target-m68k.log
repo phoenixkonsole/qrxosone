@@ -1,0 +1,10 @@
+ELF-PROOF QRXAmigaRun.elf machine=4 (m68k)
+HUNK-PROOF QRXAmigaRun size=20160 sha256=eea3c7bef644f3eb354f05b26421a7e1a2881806baafb4b5453ef99b9776e5a6
+ELF-PROOF qrx-jit-selftest.elf machine=4 (m68k)
+HUNK-PROOF qrx-jit-selftest size=8912 sha256=a6ac0daabd78c49649ca37fd98896758de5a807f51366ec09967e7f0e26adc9a
+ELF-PROOF QRXHunkTest.elf machine=4 (m68k)
+HUNK-PROOF QRXHunkTest size=4656 sha256=a94afcc4b66410c8696039f26b26f25c0d5ad9293740e4f4ffcd614ce83b316a
+ELF-PROOF QRXHunkTestNeedLib.elf machine=4 (m68k)
+HUNK-PROOF QRXHunkTestNeedLib size=5016 sha256=bbc156822a42f98d21fd52e876c85128a5cd3d59a99cae57603a6fbb8690ee81
+STACK-GATE OK: max frame 960 bytes
+FIXTURES: QRXHunkTestTruncated ppc-os4-elf.fixture x86-pe.fixture 

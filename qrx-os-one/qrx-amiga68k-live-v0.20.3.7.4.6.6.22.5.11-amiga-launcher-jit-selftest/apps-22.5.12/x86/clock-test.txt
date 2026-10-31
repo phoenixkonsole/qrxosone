@@ -1,0 +1,12 @@
+# QRX 22.5.12 QRXClock test: analog, digital, info box
+wait 1500
+snap clock-analog.ppm
+menu 102
+wait 1100
+snap clock-digital.ppm
+menu 104
+wait 200
+snap clock-info.ppm
+clickid 1
+wait 100
+close

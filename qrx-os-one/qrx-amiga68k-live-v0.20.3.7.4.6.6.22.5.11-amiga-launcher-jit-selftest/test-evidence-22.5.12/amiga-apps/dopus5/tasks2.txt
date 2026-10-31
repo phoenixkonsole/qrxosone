@@ -1,0 +1,8 @@
+Process 1 stk 262144, pri 0 Loaded as command: Status
+Process 2 stk 16384, pri 0 Loaded as command: « IPrefs »
+Process 3 stk 16384, pri 0 Loaded as command: ConClip
+Process 4 stk 16384, pri 0 Loaded as command: Decorator
+Process 5 stk 262144, pri 0 Loaded as command: WANDERER:Wanderer
+Process 6 stk 262144, pri 0 Loaded as command: WANDERER:Wanderer
+Process 7 stk 262144, pri 0 Loaded as command: SYS:DOpus5/DirectoryOpus
+Process 8 stk 16384, pri 0 Loaded as command: DO_LAUNCHER

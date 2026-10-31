@@ -1,0 +1,12 @@
+QRX v0.20.3.7.4.6.6.3 Diagnostics Gate Fix
+
+Fixes a false-positive in diagnostics-v6.6/deploy.sh.
+The old recursive scan searched all QRX source/text payloads for "USB0:" and
+therefore rejected QRX/SDK/POSIX/src/qrx_posix.c. That file legitimately maps
+the POSIX /usb0 namespace to an already-mounted AmigaDOS USB0: volume; it does
+not probe absent media.
+
+Requester-free enforcement remains in the v0.20.3.7.4.6.5.9 base deployer,
+where QRXDesktop and QRXHardware source are specifically checked after their
+requester-free patchers run. Diagnostics now trusts those targeted gates and
+requires the native ABI migration audit instead of rescanning unrelated SDK code.

@@ -1,0 +1,131 @@
+QRX OS One 0.20.3.7.4.6.6.22.5.12 - x86 runtime (Linux i386 + Win32) and Amiga applications
+==========================================================================================
+
+All files of 22.5.11 (and earlier) are kept.  The release directory name still
+carries "22.5.11" so that every existing path, gate and validator keeps working;
+the release string in diagnostics-v6.6/deploy.sh is 22.5.12.
+
+New
+---
+* x86-runtime-22.5.12/ (see X86-RUNTIME-22.5.12.txt)
+  - qrx86core: new portable IA-32 interpreter with x87, lazy flags, page table,
+    translation cache, TLS segments, nested guest calls.  Pure interpreter - no
+    native code generation; the 22.5.x QRX86 JIT stays quarantined as before.
+  - qrx-i386: Linux i386 personality (ELF static + PT_INTERP, about 140 int 0x80
+    system calls, fork/pipes via a cooperative in-process scheduler, AmigaDOS
+    path mapping "/VOL/dir" <-> "VOL:dir" on AROS).
+  - qrx-win32: Win32 HLE subsystem (PE loader, kernel32/user32/gdi32/msvcrt/
+    advapi32/... implemented on the host, dialogs, controls, menus, timers,
+    software GDI with AROS bitmap fonts, headless test backend, AROS Intuition
+    backend with own windows on the Workbench/RTG screen).
+  - qmath: musl 1.2.5 math subset (MIT, renamed qm_*) + exact double<->decimal
+    conversion.  Added after the x87 differential test on the emulated 68060
+    showed wrong results from the AROS m68k libm (floor/ceil/frexp/fmod/
+    remainder/sqrt, isinf) and imprecise printf; results are now identical on
+    every host.  GDI lines/ellipses/polygons are clipped before rasterising.
+  - QRXClock: open-source Win32 clock built with MinGW (ReactOS 0.4.15 has no
+    stand-alone clock program).
+  - Differential tests against native i386 execution (integer + x87), host
+    suite run-host-tests.sh, m68k build script with HUNK gate.
+* Windows games and DirectX: ReactOS Solitaire and Spider Solitaire run with
+  the program-supplied cards.dll (new PE DLL loader); ANSI API entry points;
+  pattern/monochrome brushes, ExcludeClipRect, SaveDC/RestoreDC, palettes,
+  WM_GETMINMAXINFO clamping, status bar; mutex/semaphore/event objects; a file
+  layer for kernel32 and msvcrt (drive C:/D: = program directory); DirectX 3 HLE
+  (DirectDraw, DirectSound without audio output, DirectInput) verified with the
+  own MinGW test program dxtest.exe.  The headless test clock now also advances
+  with executed instructions and PeekMessage polls input, so game loops work.
+* Programs verified: ReactOS 0.4.15 calc.exe and winmine.exe (unmodified, from
+  the stored ReactOS live image), QRXClock, BusyBox 1.36.1 i386, static glibc
+  programs.
+* QRXDesktop terminal: i386 <prog>, win32 <prog.exe>, rechner, minesweeper, uhr.
+* LiveCD (deploy): qrx-i386, qrx-win32 in QRX:C, QRXClock in QRX:Windows/QRX,
+  BusyBox in QRX:Linux/bin (GPL source in upstream/busybox), Directory Opus
+  5.104 in SYS:Apps/DOpus5 and HippoPlayer 2.67 in SYS:Apps/HippoPlayer
+  (sources in upstream/amiga-apps).
+* apps-22.5.12/: FS-UAE scenarios for DOpus5 / HippoPlayer / AmigaGPT and for
+  the x86 programs; generic emulator harness amiga-runtime-22.5.11/emulator/
+  run-fsuae-scenario.sh.
+
+Speed (measured in FS-UAE, 68040, BusyBox shell loop = 17.0 M x86 instructions)
+-------------------------------------------------------------------------------
+* FS-UAE 68k JIT: tested (jit_compiler = 1 with direct/indirect memory, no FPU JIT,
+  hard flush, fault catching, without Z3 RAM, without RTG, plain 68020): FS-UAE
+  3.1.66 crashes on this host with the Deadwood AROS ROM ("JIT: Can't handle
+  access") or AROS does not boot.  The harness keeps it off (QRX_FSUAE_JIT=1 to try).
+* 68040/060 MMU emulation off by default in the harness (AROS does not use it):
+  85 k -> 130 k x86 instructions/s.
+* qrx86core for m68k: code-page fetch window, little-endian loads as one host
+  load + byte swap, inline memory fast paths, 32-bit budget counter, prefix
+  table, one jump table for all one-byte opcodes, interpreter loop with the
+  instruction body inlined.  Measured with qemu-m68k block logs: 159 -> 139 m68k
+  instructions per x86 instruction; in FS-UAE 131 s -> 72 s (236 k x86
+  instructions/s).  Same 37/37 host tests incl. the differential tests.
+* Total: 2.8x faster than the first 22.5.12 target run.
+
+Windows game, DirectDraw on RTG, second speed round
+---------------------------------------------------
+* Game: PrBoom-plus 2.5.1.4 (Doom engine, GPL) built as a 32-bit Windows program
+  with SDL 1.2.15's DirectDraw driver (own compiler calls, apps/doom/), playing
+  the Freedoom 0.13 IWAD (BSD).  GTA/Half-Life/Resident Evil demos could not be
+  downloaded (blocked hosts) and need far more speed or Direct3D.  Sources and
+  licences: upstream/doom/.  New Win32/DirectX pieces it needed: winmm timers,
+  environment, msvcrt string functions, DIB sections, IDirectInputDevice2 with
+  buffered mouse data and event notification, IDirectDrawSurface::SetSurfaceDesc.
+* DirectDraw "RTG direct": in exclusive 8-bit mode the primary surface and its
+  back buffer are the display buffers of the own AROS screen.  The two screen
+  buffers (AllocScreenBuffer) stay locked with LockBitMapTags, which gives their
+  RTG memory address and keeps the p96gfx driver from moving them; the guest pages
+  of both surfaces are mapped onto that memory (new x86_map_ext, pages flagged
+  X86_PG_EXT), so the program's Lock/Blt writes go straight to the RTG card and
+  Flip is ChangeScreenBuffer - no frame copy at all.  The last partial page of a
+  buffer is an ordinary guest page copied on Flip.  Fallback to the copying path
+  when the screen is not a LUT8 RTG bitmap (QRX_DX_RTG=0 forces it).  The headless
+  backend has a test double (pitch wider than the line), and the host suite
+  checks that both paths produce identical frames.
+* Interpreter: instruction count kept lazily (the loop only decrements the budget
+  counter), the run loop tests only EIP (faults and stop requests leave by
+  longjmp), 32-bit fast paths for ALU r/m forms, MOV 89/8B, TEST, group-1
+  immediates, PUSH/POP; prefixes packed into one word; HLE range test without the
+  extra branch.  qemu-m68k block counts: 137.6 -> 113.2 m68k instructions per x86
+  instruction (-18 %); Doom on the host 204 s -> 167 s with identical game
+  results (same realtics).  In FS-UAE the gain is small (BusyBox loop 32 s ->
+  31 s without warp): FS-UAE's own 68k interpreter cost is dominated by other
+  instructions.
+* FS-UAE harness: warp mode is now off by default.  With warp the emulated clock
+  ran 54x ahead of the emulated CPU (AROS reported 28142 s for 520 s of host
+  time) - PrBoom-plus's screen melt, which does work proportional to elapsed
+  time, then used up the whole instruction budget (reproduced on the host with
+  QRX_HL_IPMS=5) - and the CPU was slower too: BusyBox loop 63-72 s -> 31 s,
+  Doom 282 k -> 498 k x86 instructions per second.
+* QRX_WIN_STATS prints instructions, elapsed backend time and DirectDraw frames;
+  QRX_HL_IPMS sets the headless clock ratio; the AROS clock is held monotonic
+  (defensive; no backwards step was observed).
+
+Fixed
+-----
+* amigacheck/QRXAmigaRun library scan: an RTS opcode (0x4E75 = "Nu") directly
+  before a library name was reported as part of the name ("Nugraphics.library").
+* QRXScreenGrab reports why it fails (no screen / file / memory).
+
+Changed (documented SHA changes, see SHA-GATE-REPORT-22.5.12.txt)
+------------------------------------------------------------------
+* base-v5.9/tools/qrx_desktop.canonical-6.6.20.c (+ .sha256 sidecar): new
+  terminal commands; nothing removed.
+* validate-22.5.11.py: accepts any 22.5.1x release string (wiring checks kept).
+* deploy.sh / diagnostics-v6.6/deploy.sh: 22.5.12 build + install block.
+
+Known limits
+------------
+* x87 uses IEEE double precision (not 80-bit extended).  No MMX/SSE.
+* Linux: no threads, no signal delivery, no sockets.  Win32: no threads, COM,
+  common controls, printing, sound, context menus, persistent registry.
+* AmigaGPT 3.4.0 does not start on AROS (needs MUI custom classes, AmiSSL).
+* GTA 1 / other commercial game demos: not tested - the build environment's
+  network policy blocks the download sites (archive.org, moddb.com, ...).
+  Half-Life / Resident Evil need Direct3D or OpenGL and about 1000x the
+  interpreted speed; not attempted.  Doom (PrBoom-plus) runs instead, as a
+  slide show on emulated 68k (about 6-7 s per frame in FS-UAE).
+* No audio output for DirectSound/winmm yet (buffers are emulated silently).
+* Aminet was not reachable from the build environment; GitHub releases of the
+  open-source programs were used instead.

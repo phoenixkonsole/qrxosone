@@ -1,0 +1,25 @@
+; QRX 22.5.12 live scenario: ReactOS Solitaire and the DirectDraw test program in
+; their own Intuition window / screen, operated with real input events
+; (QRXInput -> input.device).
+; No Wanderer: starting it sporadically hung AROS m68k in FS-UAE (grey display,
+; seen before any QRX program ran).  qrx-win32 opens the Workbench screen itself.
+FailAt 1000
+Assign QRX: SYS:QRX >NIL:
+CD SYS:X86
+Run >QRXOUT:live-sol.out QRX:C/qrx-win32 -v -L QRXOUT:live-sol.log sol.exe
+Wait 900
+QRX:C/QRXScreenGrab QRXOUT:sol-1-start.ppm >QRXOUT:grab1.txt
+; deal from the deck (top left of the card table)
+QRX:C/QRXInput click 80 135
+Wait 300
+QRX:C/QRXScreenGrab QRXOUT:sol-2-dealt.ppm >QRXOUT:grab2.txt
+QRX:C/QRXInput click 80 135
+Wait 60
+QRX:C/QRXScreenGrab QRXOUT:sol-3-dealt2.ppm >QRXOUT:grab3.txt
+; DirectDraw test program: 640x480x8 exclusive mode -> its own 8-bit screen.
+; Started synchronously: a Run-started process hangs in OpenScreen on this AROS
+; build (OpenScreen itself works, see TESTREPORT); -G captures the display.
+QRX:C/qrx-win32 -v -L QRXOUT:live-dx.log -G QRXOUT:dx-screen.ppm 10 dxtest.exe 12 >QRXOUT:live-dx.out
+QRX:C/QRXScreenGrab QRXOUT:after-dx.ppm >QRXOUT:grab4.txt
+Copy SYS:X86/dxtest.log QRXOUT:dxtest-live.log
+Echo "done" >QRXOUT:DONE

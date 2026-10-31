@@ -1,0 +1,55 @@
+{
+  "inputs": {
+    "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+    "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+    "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+    "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+  },
+  "runs": [
+    {
+      "jit": "experimental",
+      "runtime": "/workspace/qrx-jit-work/optimization-31/target-o2loop/hunk/qrx-win32",
+      "runtime_sha256": "c266c4cd1733befb4401184a31aa890a1b0b221e3c346066be1f5f2cc38956e8",
+      "repeat": 0,
+      "cpu": "68060",
+      "backend": "AROS RTG",
+      "instructions": 100000000,
+      "frames": 28,
+      "backend_ms": 244970,
+      "wall_seconds": 257.14126763900276,
+      "wall_fps": 0.1088895619792496,
+      "capture_frame": 10,
+      "frame_sha256": "24c5613f1d537287d5a9572a80d7ce7ebf9ad0ec266dfe207f2f88fd8af17caa"
+    },
+    {
+      "jit": "experimental",
+      "runtime": "/workspace/qrx-jit-work/optimization-31/target-linear/hunk/qrx-win32",
+      "runtime_sha256": "cbdc0dde4b7d82c8c018dd8029a3499f2dc268aaafdbceee544bd0fd7617dfb6",
+      "repeat": 0,
+      "cpu": "68060",
+      "backend": "AROS RTG",
+      "instructions": 100000000,
+      "frames": 28,
+      "backend_ms": 256519,
+      "wall_seconds": 269.51007954099987,
+      "wall_fps": 0.10389221823423651,
+      "capture_frame": 10,
+      "frame_sha256": "24c5613f1d537287d5a9572a80d7ce7ebf9ad0ec266dfe207f2f88fd8af17caa"
+    },
+    {
+      "jit": "experimental",
+      "runtime": "/workspace/qrx-jit-work/optimization-31/target-dirty/hunk/qrx-win32",
+      "runtime_sha256": "6cca93ad06e787952e1d5357d74a11f14db26ae375b3f0b32945897020adefdb",
+      "repeat": 0,
+      "cpu": "68060",
+      "backend": "AROS RTG",
+      "instructions": 100000000,
+      "frames": 28,
+      "backend_ms": 255066,
+      "wall_seconds": 263.86300674400263,
+      "wall_fps": 0.10611567095180316,
+      "capture_frame": 10,
+      "frame_sha256": "24c5613f1d537287d5a9572a80d7ce7ebf9ad0ec266dfe207f2f88fd8af17caa"
+    }
+  ]
+}

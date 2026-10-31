@@ -1,0 +1,11 @@
+6.6.22.5.4 completes the Deadwood AROS libc compatibility fix for the QRX86 runtime path.
+
+Observed real-build failure in 22.5.3:
+- qrx_win_guest_runtime.c included <stdio.h>/<stdlib.h>, but the selected Deadwood AROS SDK headers did not declare FILE, stderr, printf/fprintf/fwrite/snprintf or malloc/free for this translation unit.
+
+Fix:
+- qrx_win_guest_runtime.c now uses the same __AROS__ opaque-FILE ABI shim already proven necessary in qrx_win_guest_loader.c.
+- stderr/fprintf dependencies were removed from the runtime diagnostic path; errors use printf, avoiding an SDK-specific FILE object ABI.
+- qrx86_grt_exec.c receives the same compatibility layer proactively so the build does not simply fail at the next QRX86 source.
+- diagnostics preflight now gates loader + runtime + executor compatibility declarations before compiling.
+- No PE mapping, DllMain/TLS, bridge, interpreter or JIT semantics were changed.

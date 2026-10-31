@@ -1,0 +1,5 @@
+PASS unsupported host fails closed (no native m68k execution)
+PASS dormant native helper charges exact shared watchdog budget
+PASS terminal jump stops remaining threaded helper calls
+PASS stack allocation failure never enters large runtime on the DOS stack
+PASS 68060 test-runtime division vs native x86_64: 100000 cases

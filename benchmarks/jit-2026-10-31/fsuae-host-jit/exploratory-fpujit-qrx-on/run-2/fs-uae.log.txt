@@ -1,0 +1,1588 @@
+fs_data_init fs-uae fs-uae.dat
+checking dat file: /workspace/qrx-fsuae-jit/install/bin/fs-uae
+no dat file: /workspace/qrx-fsuae-jit/install/bin/fs-uae
+checking dat file: /workspace/qrx-fsuae-jit/install/bin/fs-uae.dat
+checking dat file: /workspace/qrx-fsuae-jit/install/bin/../share/fs-uae/fs-uae.dat
+FS-UAE 3.2.35 (Built for Linux x86-64)
+Copyright 1995-2002 Bernd Schmidt, 1999-2017 Toni Wilen,
+2003-2007 Richard Drummond, 2006-2011 Mustafa 'GnoStiC' Tufan,
+2011-2017 Frode Solheim, and contributors.
+
+This is free software; see the file COPYING for copying conditions. There
+is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR
+PURPOSE. See the README for more copyright info, and the source code for
+a full list of contributors
+
+current directory is /workspace/qrxosone
+UAE: Initializing core derived from WinUAE 3300b2
+
+----------------------------------------------------------------------------
+libfsemu init
+----------------------------------------------------------------------------
+
+[FSE] Init (early)
+current time() is: 1793440649
+localtime+timegm:  1793440649
+localtime+mktime:  1793440649
+time of day:       1793440649 + (798201 / 1000000)
+localtime offset:  0
+[FSE] Calling fs_ml_init
+fs_ml_init (operating system: linux)
+load config file
+loading config from /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/cfg.fs-uae
+
+----------------------------------------------------------------------------
+config (/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/cfg.fs-uae)
+----------------------------------------------------------------------------
+
+amiga_model = A4000/040
+audio_driver = dummy
+automatic_input_grab = 0
+base_dir = /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home
+chip_memory = 2048
+cpu = 68060
+floppy_drive_count = 0
+graphics_card = uaegfx
+graphics_memory = 262144
+hard_drive_0 = /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/sys
+hard_drive_0_label = AROS
+hard_drive_0_priority = 6
+hard_drive_1 = /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/0-2/output
+hard_drive_1_label = QRXOUT
+hard_drive_1_priority = -128
+jit_compiler = 1
+kickstart_ext_file = /workspace/qrxosone/upstream/aros-deadwood/m68k-build-5b5fd4c/aros-amiga-m68k-ext.bin
+kickstart_file = /workspace/qrxosone/upstream/aros-deadwood/m68k-build-5b5fd4c/aros-amiga-m68k-rom.bin
+log_flush = 1
+motherboard_ram = 16384
+sound_card = none
+uae_blitter_cycle_exact = false
+uae_comp_trustnaddr = indirect
+uae_cpu_cycle_exact = false
+uae_cpu_speed = max
+uae_gfxcard_size = 256
+uae_mmu_model = 0
+warp_mode = 0
+zorro_iii_memory = 1048576
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/configurations-dir
+base specified via base_dir option
+- using base ($BASE / $FSUAE) directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home"
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Configurations (absolute)
+- using "Configurations" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Configurations"
+checking config file /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Configurations/Host.fs-uae
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/data-dir
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Data (absolute)
+- using "Data" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Data"
+[I18N] Locale is set to C.UTF-8
+[I18N] Checking locale dir "/workspace/qrx-fsuae-jit/install/bin/../../Locale"
+[I18N] Using data dir "/workspace/qrx-fsuae-jit/install/bin/../share/fs-uae/share-dir"
+[I18N] Using locale dir "/workspace/qrx-fsuae-jit/install/bin/../share/locale"
+GameMode: Request failed: dlopen failed - libgamemode.so: cannot open shared object file: No such file or directory
+
+----------------------------------------------------------------------------
+fs-uae init
+----------------------------------------------------------------------------
+
+configure logging: none
+[GLIB] Version 2.84.4 (Compiled against 2.84.4)
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/kickstarts-dir
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Kickstarts (absolute)
+- using "Kickstarts" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Kickstarts"
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/floppies-dir
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Floppies (absolute)
+- using "Floppies" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Floppies"
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/cdroms-dir
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/CD-ROMs (absolute)
+- using "CD-ROMs" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/CD-ROMs"
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/hard-drives-dir
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Hard Drives (absolute)
+- using "Hard Drives" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Hard Drives"
+[PLUGINS] Initializing
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/system-dir
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/System (absolute)
+- using "System" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/System"
+[PLUGINS] Loading plugins from /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/System
+[PLUGINS] Could not open plugins dir /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/System
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/plugins-dir
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Plugins (absolute)
+- using "Plugins" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Plugins"
+[PLUGINS] Loading plugins from /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Plugins
+[PLUGINS] Could not open plugins dir /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Plugins
+[PLUGINS] Test /workspace/qrx-fsuae-jit/install/bin/../../Plugin.ini
+[PLUGINS] Is plugin: 0
+fs_uae_configure_amiga_model
+using PAL mode (50Hz)
+[VIDEO] fs_emu_set_video_frame_rate: 50.00 (50)
+[DISPLAY] Sync: g_fs_emu_video_sync_to_vblank = 0
+config match for "A4000/040"
+fs_uae_state_dir:
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/save-states-dir
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Save States (absolute)
+- using "Save States" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Save States"
+save_states_dir: /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Save States
+save_dir_name not set, using cfg
+- using state dir /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Save States/cfg
+final state dir path: /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Save States/cfg
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/controllers-dir
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Controllers (absolute)
+- using "Controllers" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Controllers"
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/logs-dir
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/cache-dir
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Cache (absolute)
+- using "Cache" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Cache"
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Cache/Logs (absolute)
+- using "Logs" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Cache/Logs"
+switch to log file /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Cache/Logs/fs-uae.log.txt
+flush_log: will flush log after each log line
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/themes-dir
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Themes (absolute)
+- using "Themes" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Themes"
+themes_dir = /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Themes
+[FSE] Init
+[FSE] Read config
+THEME: Init
+THEME: Loading ""
+[VIDEO] Initialize
+fs_emu_video_dummy_init
+[VIDEO] Initialize legacy video
+[FSE] fse_init_video_2
+[RENDER] Stretch mode = 2
+[RENDER] Scale mode = 1
+full-scene anti-aliasing is not requested
+checking video sync mode
+not specified: no video sync
+no video sync (using timers only)
+using default video format BGRA
+using default texture format
+[VIDEO] Using low latency vsync when full vsync is enabled
+[VIDEO] Creating window
+fs_ml_video_create_window
+keyboard input grab: 305419896
+[SDL] Version 2.32.4 (Compiled against 2.32.4)
+[DISPLAY] 0: 1280x1024+0+0 @0
+Monitor - j 0 pos 0
+Monitor - j 1 pos 0
+Monitor - j 2 pos 0
+Monitor - j 3 pos 0
+Monitor index 0 flags 15
+Monitor: found index 0 for flag 2
+Monitor "middle-left" (flag 2) => index 0
+[SDL] Defaulting to fullscreen_mode = desktop for SDL 2
+automatic input grab: 0
+using windowed mode
+setting (windowed) video mode 960 540
+[SDL] CreateWindow(x=805240832, y=805240832, w=960, h=540, flags=34)
+[DISPLAY] Host refresh rate: 0 Hz
+[X11] Requesting dark window manager theme
+[X11] Setting _NET_WM_ICON from icon images
+fs_image_destroy
+fs_image_destroy
+fs_image_destroy
+fs_image_destroy
+fs_image_destroy
+opengl vendor: Mesa
+opengl renderer: llvmpipe (LLVM 19.1.7, 256 bits)
+opengl version: 4.5 (Compatibility Profile) Mesa 25.0.7-2+deb13u1
+opengl shading language version: 4.50
+opengl extensions: GL_ARB_multisample GL_EXT_abgr GL_EXT_bgra GL_EXT_blend_color GL_EXT_blend_minmax GL_EXT_blend_subtract GL_EXT_copy_texture GL_EXT_subtexture GL_EXT_texture_object GL_EXT_vertex_array GL_EXT_compiled_vertex_array GL_EXT_texture GL_EXT_texture3D GL_IBM_rasterpos_clip GL_ARB_point_parameters GL_EXT_draw_range_elements GL_EXT_packed_pixels GL_EXT_point_parameters GL_EXT_rescale_normal GL_EXT_separate_specular_color GL_EXT_texture_edge_clamp GL_SGIS_generate_mipmap GL_SGIS_texture_border_clamp GL_SGIS_texture_edge_clamp GL_SGIS_texture_lod GL_ARB_framebuffer_sRGB GL_ARB_multitexture GL_EXT_framebuffer_sRGB GL_IBM_multimode_draw_arrays GL_IBM_texture_mirrored_repeat GL_3DFX_texture_compression_FXT1 GL_ARB_texture_cube_map GL_ARB_texture_env_add GL_ARB_transpose_matrix GL_EXT_blend_func_separate GL_EXT_fog_coord GL_EXT_multi_draw_arrays GL_EXT_secondary_color GL_EXT_texture_env_add GL_EXT_texture_filter_anisotropic GL_EXT_texture_lod_bias GL_INGR_blend_func_separate GL_NV_blend_square GL_NV_light_max_exponent GL_NV_texgen_reflection GL_NV_texture_env_combine4 GL_S3_s3tc GL_SUN_multi_draw_arrays GL_ARB_texture_border_clamp GL_ARB_texture_compression GL_EXT_framebuffer_object GL_EXT_texture_compression_s3tc GL_EXT_texture_env_combine GL_EXT_texture_env_dot3 GL_MESA_window_pos GL_NV_packed_depth_stencil GL_NV_texture_rectangle GL_ARB_depth_texture GL_ARB_occlusion_query GL_ARB_shadow GL_ARB_texture_env_combine GL_ARB_texture_env_crossbar GL_ARB_texture_env_dot3 GL_ARB_texture_mirrored_repeat GL_ARB_window_pos GL_ATI_fragment_shader GL_EXT_stencil_two_side GL_EXT_texture_cube_map GL_NV_copy_depth_to_color GL_NV_depth_clamp GL_NV_fog_distance GL_NV_half_float GL_APPLE_packed_pixels GL_ARB_draw_buffers GL_ARB_fragment_program GL_ARB_fragment_shader GL_ARB_shader_objects GL_ARB_vertex_program GL_ARB_vertex_shader GL_ATI_draw_buffers GL_ATI_texture_env_combine3 GL_ATI_texture_float GL_EXT_shadow_funcs GL_EXT_stencil_wrap GL_MESA_pack_invert GL_NV_primitive_restart GL_ARB_depth_clamp GL_ARB_fragment_program_shadow GL_ARB_half_float_pixel GL_ARB_occlusion_query2 GL_ARB_point_sprite GL_ARB_shading_language_100 GL_ARB_sync GL_ARB_texture_non_power_of_two GL_ARB_vertex_buffer_object GL_ATI_blend_equation_separate GL_EXT_blend_equation_separate GL_OES_read_format GL_ARB_color_buffer_float GL_ARB_pixel_buffer_object GL_ARB_texture_compression_rgtc GL_ARB_texture_float GL_ARB_texture_rectangle GL_ATI_texture_compression_3dc GL_EXT_packed_float GL_EXT_pixel_buffer_object GL_EXT_texture_compression_dxt1 GL_EXT_texture_compression_rgtc GL_EXT_texture_mirror_clamp GL_EXT_texture_rectangle GL_EXT_texture_sRGB GL_EXT_texture_shared_exponent GL_ARB_framebuffer_object GL_EXT_framebuffer_blit GL_EXT_framebuffer_multisample GL_EXT_packed_depth_stencil GL_ARB_vertex_array_object GL_ATI_separate_stencil GL_ATI_texture_mirror_once GL_EXT_draw_buffers2 GL_EXT_draw_instanced GL_EXT_gpu_program_parameters GL_EXT_gpu_shader4 GL_EXT_texture_array GL_EXT_texture_compression_latc GL_EXT_texture_integer GL_EXT_texture_sRGB_decode GL_EXT_timer_query GL_OES_EGL_image GL_EXT_texture_buffer_object GL_AMD_texture_texture4 GL_ARB_copy_buffer GL_ARB_depth_buffer_float GL_ARB_draw_instanced GL_ARB_half_float_vertex GL_ARB_instanced_arrays GL_ARB_map_buffer_range GL_ARB_texture_buffer_object GL_ARB_texture_rg GL_ARB_texture_swizzle GL_ARB_vertex_array_bgra GL_EXT_texture_swizzle GL_EXT_vertex_array_bgra GL_NV_conditional_render GL_AMD_conservative_depth GL_AMD_draw_buffers_blend GL_AMD_seamless_cubemap_per_texture GL_AMD_shader_stencil_export GL_ARB_ES2_compatibility GL_ARB_blend_func_extended GL_ARB_compatibility GL_ARB_debug_output GL_ARB_draw_buffers_blend GL_ARB_draw_elements_base_vertex GL_ARB_explicit_attrib_location GL_ARB_fragment_coord_conventions GL_ARB_provoking_vertex GL_ARB_sample_shading GL_ARB_sampler_objects GL_ARB_seamless_cube_map GL_ARB_shader_stencil_export GL_ARB_shader_texture_lod GL_ARB_tessellation_shader GL_ARB_texture_buffer_object_rgb32 GL_ARB_texture_cube_map_array GL_ARB_texture_gather GL_ARB_texture_multisample GL_ARB_texture_query_lod GL_ARB_texture_rgb10_a2ui GL_ARB_uniform_buffer_object GL_ARB_vertex_type_2_10_10_10_rev GL_ATI_meminfo GL_EXT_provoking_vertex GL_EXT_texture_snorm GL_EXT_texture_storage GL_MESA_texture_signed_rgba GL_NV_copy_image GL_NV_texture_barrier GL_ARB_draw_indirect GL_ARB_get_program_binary GL_ARB_gpu_shader5 GL_ARB_gpu_shader_fp64 GL_ARB_robustness GL_ARB_separate_shader_objects GL_ARB_shader_bit_encoding GL_ARB_shader_precision GL_ARB_shader_subroutine GL_ARB_texture_compression_bptc GL_ARB_timer_query GL_ARB_transform_feedback2 GL_ARB_transform_feedback3 GL_ARB_vertex_attrib_64bit GL_ARB_viewport_array GL_EXT_direct_state_access GL_EXT_vertex_attrib_64bit GL_AMD_multi_draw_indirect GL_ANGLE_texture_compression_dxt3 GL_ANGLE_texture_compression_dxt5 GL_ARB_base_instance GL_ARB_compressed_texture_pixel_storage GL_ARB_conservative_depth GL_ARB_internalformat_query GL_ARB_map_buffer_alignment GL_ARB_shader_atomic_counters GL_ARB_shader_image_load_store GL_ARB_shading_language_420pack GL_ARB_shading_language_packing GL_ARB_texture_storage GL_ARB_transform_feedback_instanced GL_EXT_framebuffer_multisample_blit_scaled GL_EXT_transform_feedback GL_AMD_query_buffer_object GL_AMD_shader_trinary_minmax GL_AMD_vertex_shader_layer GL_AMD_vertex_shader_viewport_index GL_ARB_ES3_compatibility GL_ARB_arrays_of_arrays GL_ARB_clear_buffer_object GL_ARB_compute_shader GL_ARB_copy_image GL_ARB_explicit_uniform_location GL_ARB_fragment_layer_viewport GL_ARB_framebuffer_no_attachments GL_ARB_invalidate_subdata GL_ARB_multi_draw_indirect GL_ARB_program_interface_query GL_ARB_robust_buffer_access_behavior GL_ARB_shader_image_size GL_ARB_shader_storage_buffer_object GL_ARB_stencil_texturing GL_ARB_texture_buffer_range GL_ARB_texture_query_levels GL_ARB_texture_storage_multisample GL_ARB_texture_view GL_ARB_vertex_attrib_binding GL_KHR_debug GL_KHR_robustness GL_KHR_texture_compression_astc_ldr GL_NV_shader_atomic_float GL_AMD_pinned_memory GL_ARB_buffer_storage GL_ARB_clear_texture GL_ARB_enhanced_layouts GL_ARB_indirect_parameters GL_ARB_internalformat_query2 GL_ARB_multi_bind GL_ARB_query_buffer_object GL_ARB_seamless_cubemap_per_texture GL_ARB_shader_draw_parameters GL_ARB_shader_group_vote GL_ARB_shading_language_include GL_ARB_texture_mirror_clamp_to_edge GL_ARB_texture_stencil8 GL_ARB_vertex_type_10f_11f_11f_rev GL_EXT_debug_label GL_EXT_shader_framebuffer_fetch GL_EXT_shader_integer_mix GL_NVX_gpu_memory_info GL_ARB_ES3_1_compatibility GL_ARB_clip_control GL_ARB_conditional_render_inverted GL_ARB_cull_distance GL_ARB_derivative_control GL_ARB_direct_state_access GL_ARB_get_texture_sub_image GL_ARB_pipeline_statistics_query GL_ARB_shader_texture_image_samples GL_ARB_texture_barrier GL_ARB_transform_feedback_overflow_query GL_ARM_shader_framebuffer_fetch_depth_stencil GL_EXT_polygon_offset_clamp GL_EXT_shader_image_load_formatted GL_KHR_blend_equation_advanced GL_KHR_blend_equation_advanced_coherent GL_KHR_context_flush_control GL_KHR_robust_buffer_access_behavior GL_ARB_ES3_2_compatibility GL_ARB_gpu_shader_int64 GL_ARB_parallel_shader_compile GL_ARB_post_depth_coverage GL_ARB_shader_atomic_counter_ops GL_ARB_shader_ballot GL_ARB_shader_clock GL_ARB_shader_viewport_layer_array GL_ARB_texture_filter_minmax GL_EXT_texture_filter_minmax GL_EXT_texture_sRGB_R8 GL_EXT_texture_sRGB_RG8 GL_KHR_no_error GL_KHR_texture_compression_astc_sliced_3d GL_ARB_gl_spirv GL_ARB_spirv_extensions GL_MESA_shader_integer_functions GL_ARB_polygon_offset_clamp GL_ARB_texture_filter_anisotropic GL_EXT_memory_object GL_EXT_memory_object_fd GL_KHR_parallel_shader_compile GL_NV_alpha_to_coverage_dither_control GL_EXT_EGL_image_storage GL_EXT_shader_framebuffer_fetch_non_coherent GL_EXT_texture_shadow_lod GL_INTEL_shader_atomic_float_minmax GL_MESA_framebuffer_flip_y GL_OVR_multiview GL_OVR_multiview2 GL_EXT_EGL_sync GL_EXT_EGL_image_storage_compression GL_NV_ES1_1_compatibility 
+opengl max texture size (estimate): 16384x16384
+WARNING: No HW OpenGL driver: llvmpipe (LLVM 19.1.7, 256 bits)
+*** Setting swap interval to 0 ***
+initial input grab: 0
+init_opengl
+fse_init_video_opengl
+setup_opengl
+loaded sub-texture "sidebar_edge.png"
+fs_image_destroy
+loaded sub-texture "sidebar.png"
+fs_image_destroy
+loaded sub-texture "gloss.png"
+fs_image_destroy
+loaded sub-texture "glow_left.png"
+fs_image_destroy
+loaded sub-texture "glow_top.png"
+fs_image_destroy
+loaded sub-texture "glow_top_left.png"
+fs_image_destroy
+loaded sub-texture "close.png"
+fs_image_destroy
+loaded sub-texture "volume.png"
+fs_image_destroy
+loaded sub-texture "volume_muted.png"
+fs_image_destroy
+loaded sub-texture "stretch-aspect.png"
+fs_image_destroy
+loaded sub-texture "stretch.png"
+fs_image_destroy
+loaded sub-texture "item_background.png"
+fs_image_destroy
+loaded sub-texture "top_item_background.png"
+fs_image_destroy
+loaded sub-texture "heading_strip.png"
+fs_image_destroy
+loaded sub-texture "pause_indicator.png"
+fs_image_destroy
+loaded sub-texture "logo-32.png"
+fs_image_destroy
+loaded sub-texture "top_background.png"
+fs_image_destroy
+loaded sub-texture "top_background_fade.png"
+fs_image_destroy
+loaded sub-texture "bezel/left.png"
+fs_image_destroy
+loaded sub-texture "bezel/right.png"
+fs_image_destroy
+loaded sub-texture "stretch-none.png"
+fs_image_destroy
+loaded sub-texture "bezel/left-overlay.png"
+fs_image_destroy
+loaded sub-texture "bezel/right-overlay.png"
+fs_image_destroy
+initializing menu
+load font from data 0x266346e0 size 26822
+font height: 32 pixels
+512 characters
+load font from data 0x2664b010 size 26832
+font height: 32 pixels
+512 characters
+[SHADERS] Initialize
+create windows is done
+fse_init_renderer
+scale: -1.00 -1.00 align: 0.50 0.50
+[FSE] Calling fs_ml_init_2
+[INPUT] fs_ml_input_init
+[INPUT] fs_ml_mouse_init
+[INPUT] Adding system mouse
+[MANYMOUSE] Copyright (c) 2005-2012 Ryan C. Gordon
+[MANYMOUSE] Thread running
+MANYMOUSE: Adding Mouse: Xvfb mouse (X11 XInput2 extension)
+[INPUT] Joystick device count: 0
+[INPUT] Initialize
+fs_emu_input_sdl_init
+[INPUT] fs_emu_input_init
+init_input_configs
+reading input device configs from /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Controllers
+reading input device configs from /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Data/Devs/Keyboards
+could not read directory /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Data/Devs/Keyboards
+reading input device configs from /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Controllers
+[INPUT] Using default modifier key LALT
+[INPUT] Initializing devices for "menu"
+0 Keyboard
+[INPUT] Config name "Keyboard"
+get system config for device: Keyboard
+checked data "input/Keyboard.conf" = 3
+config file for Keyboard was not found
+[INPUT] Did not find config for device "Keyboard"
+get system config for device: keyboard_0_0_0_0_linux
+checked data "input/keyboard_0_0_0_0_linux.conf" = 3
+config file for keyboard_0_0_0_0_linux was not found
+[INPUT] Did not find menu config for device "keyboard_0_0_0_0_linux"
+get system config for device: keyboard
+checked data "input/keyboard.conf" = 0
+read config for keyboard for menu (from data)
+checked data "input/default_keyboard.conf" = 0
+read config for default_keyboard for menu (from data)
+did not find action for "skip_right"
+key_down (274) => action "down" (4)
+key_backspace (8) => action "back" (6)
+did not find action for "skip_left"
+key_return (13) => action "primary" (5)
+did not find action for "default_keyboard"
+key_left (276) => action "left" (1)
+did not find action for "secondary"
+key_escape (27) => action "escape" (10)
+key_right (275) => action "right" (2)
+key_up (273) => action "up" (3)
+1 MOUSE
+[INPUT] Config name "MOUSE"
+get system config for device: MOUSE
+checked data "input/MOUSE.conf" = 3
+config file for MOUSE was not found
+[INPUT] Did not find config for device "MOUSE"
+get system config for device: mouse_0_0_0_0_linux
+checked data "input/mouse_0_0_0_0_linux.conf" = 3
+config file for mouse_0_0_0_0_linux was not found
+[INPUT] Did not find menu config for device "mouse_0_0_0_0_linux"
+get system config for device: mouse
+checked data "input/mouse.conf" = 0
+read config for mouse for menu (from data)
+no config for platform menu
+[INPUT] Did not find menu config for device"mouse"
+2 Mouse: Xvfb mouse
+[INPUT] Config name "Mouse: Xvfb mouse"
+get system config for device: Mouse: Xvfb mouse
+checked data "input/Mouse: Xvfb mouse.conf" = 3
+config file for Mouse: Xvfb mouse was not found
+[INPUT] Did not find config for device "Mouse: Xvfb mouse"
+get system config for device: mouse_xvfb_mouse_0_0_0_0_linux
+checked data "input/mouse_xvfb_mouse_0_0_0_0_linux.conf" = 3
+config file for mouse_xvfb_mouse_0_0_0_0_linux was not found
+[INPUT] Did not find menu config for device "mouse_xvfb_mouse_0_0_0_0_linux"
+get system config for device: mouse_xvfb_mouse
+checked data "input/mouse_xvfb_mouse.conf" = 3
+config file for mouse_xvfb_mouse was not found
+[INPUT] Did not find menu config for device"mouse_xvfb_mouse"
+[AUDIO] Initialize
+[AUDIO] fse_init_dummy_audio
+fs_uae_init_recording
+not running in record mode
+JIT: Enabling JIT compiler
+adding rtg resolution 672x540
+adding rtg resolution 960x540
+adding rtg resolution 1344x1080
+adding rtg resolution 960x540
+resolution already exists
+adding rtg resolution 1280x1024
+fs_uae_init_video
+fs_uae_configure_menu
+[FSE] fs_emu_run, main_function at 0x412390
+checking OpenGL capabilities
+GL_ARB_sync extension found
+[OPENGL] Deciding video sync method
+[OPENGL] Using default sync method
+- SYNC_FINISH_SWAP_FINISH
+[FSE] Emulation thread started
+[FSE] Run main function at 0x412390
+amiga_main
+KB: keyboard_settrans
+target_default_options p=0x3b045c0 type=0
+target_default_options: enabling floppy sounds
+ -- stub -- target_save_options zfile=0x7f0714000c00 p=0x3b045c0
+built_in_chipset_prefs, ignore = 0
+fixup_cpu
+built_in_chipset_prefs, ignore = 0
+ -- stub -- target_fixup_options 
+graphics_setup
+preinit_shm
+NATMEM: Total physical RAM 34087 MB, all RAM 34087 MB
+NATMEM: Attempting to reserve: 2048 MB
+NATMEM: jit compiler 1
+VM: Reserve  0x80000000 bytes, try address 0x80000000
+VM: Reserve  0x80000000 bytes, got address 0x80000000
+NATMEM: Reserved 0x80000000-0x100000000 (0x80000000 2048M)
+ -- stub -- target_cfgfile_load 
+built_in_chipset_prefs, ignore = 0
+fixup_cpu
+built_in_chipset_prefs, ignore = 0
+ -- stub -- target_fixup_options 
+set_device_rom path=(null) romtype=262144 devnum=0
+boardromconfig (nil)
+target_default_options p=0x3b045c0 type=1
+target_default_options: enabling floppy sounds
+built_in_chipset_prefs, ignore = 0
+
+----------------------------------------------------------------------------
+uae configuration
+----------------------------------------------------------------------------
+
+fs_uae_configure_amiga_hardware
+fs_uae_load_rom_files /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Kickstarts
+configuring "Amiga 4000 (68040)", accuracy=1
+amiga_quickstart model=6 config=1 compa=0 (accuracy 1)
+set_device_rom path=(null) romtype=262144 devnum=0
+boardromconfig (nil)
+target_default_options p=0x3b045c0 type=1
+target_default_options: enabling floppy sounds
+built_in_chipset_prefs, ignore = 0
+set option "cachesize" to "8192" (result: 1)
+resolve_path /workspace/qrxosone/upstream/aros-deadwood/m68k-build-5b5fd4c/aros-amiga-m68k-rom.bin (absolute)
+set option "kickstart_rom_file" to "/workspace/qrxosone/upstream/aros-deadwood/m68k-build-5b5fd4c/aros-amiga-m68k-rom.bin" (result: 1)
+resolve_path /workspace/qrxosone/upstream/aros-deadwood/m68k-build-5b5fd4c/aros-amiga-m68k-ext.bin (absolute)
+set option "kickstart_ext_rom_file" to "/workspace/qrxosone/upstream/aros-deadwood/m68k-build-5b5fd4c/aros-amiga-m68k-ext.bin" (result: 1)
+set option "cpu_model" to "68060" (result: 1)
+set option "fpu_model" to "68060" (result: 1)
+set option "mmu_model" to "68060" (result: 1)
+set option "cpu_24bit_addressing" to "false" (result: 1)
+set option "cpu_speed" to "max" (result: 1)
+set option "blitter_cycle_exact" to "false" (result: 1)
+set option "cpu_compatible" to "false" (result: 1)
+set option "cpu_cycle_exact" to "false" (result: 1)
+set option "waiting_blits" to "true" (result: 1)
+set option "immediate_blits" to "false" (result: 1)
+set option "chipmem_size" to "4" (result: 1)
+set option "z3mem_size" to "1024" (result: 1)
+set option "a3000mem_size" to "16" (result: 1)
+set option "gfxcard_type" to "ZorroIII" (result: 1)
+set option "gfxcard_size" to "16" (result: 1)
+WARNING: Unrecognized sound card
+set option "sound_stereo_separation" to "7" (result: 1)
+set option "sound_filter_type" to "enhanced" (result: 1)
+configure_floppies
+value for option floppy_drive_0: (null)
+set option "floppy0" to "" (result: 1)
+set option "floppy0type" to "1" (result: 1)
+value for option floppy_drive_1: (null)
+set option "floppy1" to "" (result: 1)
+set option "floppy1type" to "1" (result: 1)
+value for option floppy_drive_2: (null)
+set option "floppy2" to "" (result: 1)
+set option "floppy2type" to "1" (result: 1)
+value for option floppy_drive_3: (null)
+set option "floppy3" to "" (result: 1)
+set option "floppy3type" to "1" (result: 1)
+set option "nr_floppies" to "0" (result: 1)
+set option "floppy0" to "" (result: 1)
+set option "floppy0type" to "-1" (result: 1)
+set option "floppy1" to "" (result: 1)
+set option "floppy1type" to "-1" (result: 1)
+set option "floppy2" to "" (result: 1)
+set option "floppy2type" to "-1" (result: 1)
+set option "floppy3" to "" (result: 1)
+set option "floppy3type" to "-1" (result: 1)
+set option "floppy_volume" to "80" (result: 1)
+set option "diskimage0" to "" (result: 1)
+set option "diskimage1" to "" (result: 1)
+set option "diskimage2" to "" (result: 1)
+set option "diskimage3" to "" (result: 1)
+set option "diskimage4" to "" (result: 1)
+set option "diskimage5" to "" (result: 1)
+set option "diskimage6" to "" (result: 1)
+set option "diskimage7" to "" (result: 1)
+set option "diskimage8" to "" (result: 1)
+set option "diskimage9" to "" (result: 1)
+set option "diskimage10" to "" (result: 1)
+set option "diskimage11" to "" (result: 1)
+set option "diskimage12" to "" (result: 1)
+set option "diskimage13" to "" (result: 1)
+set option "diskimage14" to "" (result: 1)
+set option "diskimage15" to "" (result: 1)
+set option "diskimage16" to "" (result: 1)
+set option "diskimage17" to "" (result: 1)
+set option "diskimage18" to "" (result: 1)
+set option "diskimage19" to "" (result: 1)
+fs_uae_configure_hard_drives
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/sys (absolute)
+hard drive mount: /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/sys
+device: DH0
+mount name: AROS
+read only: 0
+boot priority: 6
+set option "filesystem2" to "rw,DH0:AROS:/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/sys,6" (result: 1)
+set option "uaehf0" to "dir,rw,DH0:AROS:/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/sys,6" (result: 1)
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/0-2/output (absolute)
+hard drive mount: /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/0-2/output
+device: DH1
+mount name: QRXOUT
+read only: 0
+boot priority: -128
+set option "filesystem2" to "rw,DH1:QRXOUT:/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/0-2/output,-128" (result: 1)
+set option "uaehf1" to "dir,rw,DH1:QRXOUT:/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/0-2/output,-128" (result: 1)
+configure_cdrom
+configuring joystick ports:
+set option "joyport0" to "none" (result: 1)
+set option "joyport1" to "none" (result: 1)
+fs_uae_configure_actions
+fs_uae_read_override_actions_for_port 0
+fs_uae_read_override_actions_for_port 1
+fs_uae_read_override_actions_for_port 2
+fs_uae_read_override_actions_for_port 3
+fs_uae_read_override_actions_for_port 4
+fs_uae_read_override_actions_for_port 5
+fs_uae_read_override_actions_for_port 6
+fs_uae_read_override_actions_for_port 7
+configuring joystick port 1 (auto)
+trying to auto-configure joystick in port 1
+configure joystick "JOYSTICK" for "amiga" (port index 1
+did not match device #0 (Keyboard)
+did not match device #1 (MOUSE)
+did not match device #2 (Mouse: Xvfb mouse)
+configure joystick "JOYSTICK #2" for "amiga" (port index 1
+did not match device #0 (Keyboard)
+did not match device #1 (MOUSE)
+did not match device #2 (Mouse: Xvfb mouse)
+could not auto-configure joystick,using keyboard emulation
+configuring joystick port 0 (auto)
+configuring joystick port 2 (nothing)
+nothing connected to port
+configuring joystick port 3 (nothing)
+nothing connected to port
+configuring joystick port 4 (nothing)
+nothing connected to port
+configuring joystick port 5 (nothing)
+nothing connected to port
+configuring joystick port 6 (nothing)
+nothing connected to port
+configuring joystick port 7 (nothing)
+nothing connected to port
+set option "statefile" to "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Save States/cfg/Saved State.uss" (result: 1)
+amiga_set_save_image_dir /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Save States/cfg
+- checking /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/.config/fs-uae/module-ripper-dir
+resolve_path /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Cache/Modules (absolute)
+- using "Modules" directory "/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Cache/Modules"
+amiga_set_module_ripper_dir /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Cache/Modules
+set option "sound_frequency" to "44100" (result: 1)
+amiga_set_audio_frequency: 44100
+fs_uae_set_uae_paths
+did not find "built-in" driveclick directory
+read_custom_uae_options
+WARNING: custom uae_* options used! Your warranty is now void! ;)
+(not that there was any warranty before...)
+set option "gfxcard_size" to "256" (result: 1)
+set option "mmu_model" to "0" (result: 1)
+set option "comp_trustnaddr" to "indirect" (result: 1)
+set option "cpu_speed" to "max" (result: 1)
+set option "cpu_cycle_exact" to "false" (result: 1)
+set option "blitter_cycle_exact" to "false" (result: 1)
+writing uae config to /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Cache/Logs/debug.uae
+ -- stub -- target_save_options zfile=0x7f071400be40 p=0x3b045c0
+
+----------------------------------------------------------------------------
+end of uae configuration
+----------------------------------------------------------------------------
+
+ -- stub -- init_joystick return 1
+ -- stub -- init_mouse return 1
+ -- stub -- init_kb return 1
+ -- stub -- gui_init 
+ -- stub -- logging_init 
+init_shm
+NATMEM: size            0x10000000
+NATMEM: z3size        + 0x40000000
+NATMEM: z3rtgmem_size + 0x10000000
+NATMEM: othersize     + 0x00000000
+NATMEM: totalsize     = 0x60000000
+Z3 UAE mapping (auto).
+NATMEM: JIT direct compatible: 1
+NATMEM: Our special area: 0x80000000-0xd0000000 (0x50000000 1280M)
+NATMEM: P96 special area: 0xd0000000-0xe0000000 (0x10000000 256M)
+built_in_chipset_prefs, ignore = 0
+fixup_cpu
+built_in_chipset_prefs, ignore = 0
+ -- stub -- target_fixup_options 
+ -- stub -- target_run 
+ -- stub -- get_mouse_num return 0
+[WARNING] Will not log further calls to get_mouse_num
+ -- stub -- get_joystick_num return 0
+[WARNING] Will not log further calls to get_joystick_num
+ -- stub -- get_kb_num return 0
+[WARNING] Will not log further calls to get_kb_num
+ -- stub -- input_get_default_keyboard num=0 return 0
+ -- stub -- input_get_default_keyboard num=1 return 0
+ -- stub -- input_get_default_keyboard num=2 return 0
+ -- stub -- input_get_default_keyboard num=3 return 0
+ -- stub -- input_get_default_keyboard num=4 return 0
+ -- stub -- input_get_default_keyboard num=5 return 0
+ -- stub -- input_get_default_keyboard num=6 return 0
+ -- stub -- input_get_default_keyboard num=7 return 0
+ -- stub -- input_get_default_keyboard num=8 return 0
+ -- stub -- input_get_default_keyboard num=9 return 0
+ -- stub -- input_get_default_keyboard num=10 return 0
+ -- stub -- input_get_default_keyboard num=11 return 0
+ -- stub -- input_get_default_keyboard num=12 return 0
+ -- stub -- input_get_default_keyboard num=13 return 0
+ -- stub -- input_get_default_keyboard num=14 return 0
+ -- stub -- input_get_default_keyboard num=15 return 0
+ -- stub -- input_get_default_keyboard num=16 return 0
+ -- stub -- input_get_default_keyboard num=17 return 0
+ -- stub -- input_get_default_keyboard num=18 return 0
+ -- stub -- input_get_default_keyboard num=19 return 0
+using text cache texture size 2048x2048
+RTAREA located at 00F00000
+MMAN: mapped_malloc 0x00010000 start=0x00000000 UAE Boot ROM (rtarea)
+MMAN: Flags: ROMIN
+shmget of size 65536 (64k) for rtarea
+uae_shmat shmid 0 shmaddr (nil), shmflg 0 natmem_offset = 0x80000000
+VM: Decommit 0x10000    bytes at 0x80f00000
+- VirtualAlloc addr=0x80f00000 size=65536 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x10000    bytes at 0x80f00000 (READ_WRITE)
+- VirtualAlloc addr=0x80f00000 size=65536 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x10000    bytes at 0x80f00000 (READ_WRITE)
+0x80f00000: VA 00F00000 - 00F10000 10000 (64k) ok (0x80f00000)
+uaegfx.card magic code: 00F03000-00F0313E ABI=00000000
+segtracker: install
+MMAN: mapped_malloc 0x40000000 start=0x10000000 Zorro III Fast RAM (z3)
+MMAN: Flags: RAM THREADSAFE
+shmget of size 1073741824 (1048576k) for z3
+uae_shmat shmid 1 shmaddr (nil), shmflg 0 natmem_offset = 0x80000000
+VM: Decommit 0x40000020 bytes at 0x90000000
+- VirtualAlloc addr=0x90000000 size=1073741856 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x40000020 bytes at 0x90000000 (READ_WRITE)
+- VirtualAlloc addr=0x90000000 size=1073741856 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x40000020 bytes at 0x90000000 (READ_WRITE)
+0x90000000: VA 10000000 - 50000020 40000020 (1048576k) ok (0x90000000)
+MMAN: mapped_malloc 0x10000000 start=0x00000000 RTG RAM (z3_gfx)
+MMAN: Flags: RAM RTG
+shmget of size 268435456 (262144k) for z3_gfx
+uae_shmat shmid 2 shmaddr (nil), shmflg 0 natmem_offset = 0x80000000
+VM: Decommit 0x10000020 bytes at 0xd0000000
+- VirtualAlloc addr=0xd0000000 size=268435488 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x10000020 bytes at 0xd0000000 (READ_WRITE)
+- VirtualAlloc addr=0xd0000000 size=268435488 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x10000020 bytes at 0xd0000000 (READ_WRITE)
+0xd0000000: VA 50000000 - 60000020 10000020 (262144k) ok (0xd0000000) P96
+MMAN: mapped_malloc 0x00010000 start=0x00000000 Filesystem autoconfig (filesys)
+MMAN: Flags: IO SAFE
+shmget of size 65536 (64k) for filesys
+uae_shmat shmid 3 shmaddr (nil), shmflg 0 natmem_offset = 0x80000000
+- VirtualAlloc addr=(nil) size=65536 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+NATMEM: Allocated non-reserved memory size 65536
+- VirtualAlloc addr=(nil) size=65536 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+NATMEM: Allocated non-reserved memory size 65536
+(nil): VA FFFFFFFF80000000 - FFFFFFFF80010000 10000 (64k) ok ((nil))
+bsdsocket.library installed
+MMAN: mapped_malloc 0x00080000 start=0x00000000 Kickstart ROM (kick)
+MMAN: Flags: ROM THREADSAFE
+shmget of size 524288 (512k) for kick
+uae_shmat shmid 4 shmaddr (nil), shmflg 0 natmem_offset = 0x80000000
+VM: Decommit 0x80020    bytes at 0x80f80000
+- VirtualAlloc addr=0x80f80000 size=524320 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x80020    bytes at 0x80f80000 (READ_WRITE)
+- VirtualAlloc addr=0x80f80000 size=524320 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x80020    bytes at 0x80f80000 (READ_WRITE)
+0x80f80000: VA 00F80000 - 01000020 80020 (512k) ok (0x80f80000)
+ -- stub -- my_issamepath 
+ -- stub -- my_issamepath 
+ -- stub -- my_issamepath 
+[WARNING] Will not log further calls to my_issamepath
+MMAN: mapped_malloc 0x00200000 start=0x00000000 Chip memory (chip)
+MMAN: Flags: RAM THREADSAFE
+shmget of size 2097152 (2048k) for chip
+uae_shmat shmid 5 shmaddr (nil), shmflg 0 natmem_offset = 0x80000000
+VM: Decommit 0x200020   bytes at 0x80000000
+- VirtualAlloc addr=0x80000000 size=2097184 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x200020   bytes at 0x80000000 (READ_WRITE)
+- VirtualAlloc addr=0x80000000 size=2097184 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x200020   bytes at 0x80000000 (READ_WRITE)
+0x80000000: VA 00000000 - 00200020 200020 (2048k) ok (0x80000000)
+MMAN: mapped_malloc 0x01000000 start=0x07000000 RAMSEY memory (low) (ramsey_low)
+MMAN: Flags: RAM THREADSAFE
+shmget of size 16777216 (16384k) for ramsey_low
+uae_shmat shmid 6 shmaddr (nil), shmflg 0 natmem_offset = 0x80000000
+VM: Decommit 0x1000020  bytes at 0x87000000
+- VirtualAlloc addr=0x87000000 size=16777248 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x1000020  bytes at 0x87000000 (READ_WRITE)
+- VirtualAlloc addr=0x87000000 size=16777248 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x1000020  bytes at 0x87000000 (READ_WRITE)
+0x87000000: VA 07000000 - 08000020 1000020 (16384k) ok (0x87000000)
+- VirtualProtect addr=0x80f00000 size=8192 prot=4
+  PAGE_READWRITE
+ROM VP 00F00000 - 00F10000 10000 (64k) UNPROT
+- VirtualProtect addr=0x80f80000 size=524288 prot=4
+  PAGE_READWRITE
+ROM VP 00F80000 - 01000000 80000 (512k) UNPROT
+ROM loader.. (<none>)
+read_rom_name /workspace/qrxosone/upstream/aros-deadwood/m68k-build-5b5fd4c/aros-amiga-m68k-ext.bin
+MMAN: mapped_malloc 0x00080000 start=0x00000000 Extended Kickstart ROM (rom_e0)
+MMAN: Flags: ROM THREADSAFE
+shmget of size 524288 (512k) for rom_e0
+uae_shmat shmid 7 shmaddr (nil), shmflg 0 natmem_offset = 0x80000000
+VM: Decommit 0x80000    bytes at 0x80e00000
+- VirtualAlloc addr=0x80e00000 size=524288 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x80000    bytes at 0x80e00000 (READ_WRITE)
+- VirtualAlloc addr=0x80e00000 size=524288 type=4096 prot=4
+  MEM_COMMIT
+  PAGE_READWRITE
+commit prot=3
+VM: Commit   0x80000    bytes at 0x80e00000 (READ_WRITE)
+0x80e00000: VA 00E00000 - 00E80000 80000 (512k) ok (0x80e00000)
+read_rom_name /workspace/qrxosone/upstream/aros-deadwood/m68k-build-5b5fd4c/aros-amiga-m68k-rom.bin
+Unknown ROM '/workspace/qrxosone/upstream/aros-deadwood/m68k-build-5b5fd4c/aros-amiga-m68k-rom.bin' loaded
+ROM loader end
+- VirtualProtect addr=0x80f00000 size=8192 prot=2
+  PAGE_READONLY
+ROM VP 00F00000 - 00F10000 10000 (64k) WPROT
+- VirtualProtect addr=0x80f80000 size=524288 prot=2
+  PAGE_READONLY
+ROM VP 00F80000 - 01000000 80000 (512k) WPROT
+- VirtualProtect addr=0x80e00000 size=524288 prot=2
+  PAGE_READONLY
+ROM VP 00E00000 - 00E80000 80000 (512k) WPROT
+uae_shmat shmid 6 shmaddr 0x87000000, shmflg 0 natmem_offset = 0x80000000
+cpuboard_map currprefs.cpuboard_type = 0
+uae_shmat shmid 4 shmaddr 0x80f80000, shmflg 0 natmem_offset = 0x80000000
+uae_shmat shmid 5 shmaddr 0x80000000, shmflg 0 natmem_offset = 0x80000000
+uae_shmat shmid 7 shmaddr 0x80e00000, shmflg 0 natmem_offset = 0x80000000
+uae_shmat shmid 0 shmaddr 0x80f00000, shmflg 0 natmem_offset = 0x80000000
+memory init end
+gfx_set_picasso_state 0
+drive_insert drv=0x1f99f60 dnum=3 fname= fake=0
+drive_insert drv=0x1f99f60 dnum=3 fname= fake=1
+gui_disk_image_change drive 3 <no disk>
+driveclick_insert drive=3 eject=1 click_initialized=0 wave_initialized=0 currprefs.floppyslots[drive].dfxclick=1
+gui_disk_image_change drive 3 <no disk>
+drive_insert drv=0x1f77940 dnum=2 fname= fake=0
+drive_insert drv=0x1f77940 dnum=2 fname= fake=1
+gui_disk_image_change drive 2 <no disk>
+driveclick_insert drive=2 eject=1 click_initialized=0 wave_initialized=0 currprefs.floppyslots[drive].dfxclick=1
+gui_disk_image_change drive 2 <no disk>
+drive_insert drv=0x1f55320 dnum=1 fname= fake=0
+drive_insert drv=0x1f55320 dnum=1 fname= fake=1
+gui_disk_image_change drive 1 <no disk>
+driveclick_insert drive=1 eject=1 click_initialized=0 wave_initialized=0 currprefs.floppyslots[drive].dfxclick=1
+gui_disk_image_change drive 1 <no disk>
+drive_insert drv=0x1f32d00 dnum=0 fname= fake=0
+drive_insert drv=0x1f32d00 dnum=0 fname= fake=1
+gui_disk_image_change drive 0 <no disk>
+driveclick_insert drive=0 eject=1 click_initialized=0 wave_initialized=0 currprefs.floppyslots[drive].dfxclick=1
+gui_disk_image_change drive 0 <no disk>
+No disk in drive 0.
+Resetting frame rate hack
+fixup_cpu
+1870 CPU functions
+Building CPU, 46224 opcodes (5 0 0)
+JIT: &countdown =  0x4758720
+JIT: &build_comp = 0x526cb0
+JIT: Max CPUID level=27 Processor is GenuineIntel [PentiumPro]
+JIT: Installing segfault handler
+JIT: Building compiler function tables
+JIT: Supposedly 42327 compileable opcodes!
+JIT: Actual translation cache size : 8192 KB at 0x40800000-0x41000000
+CPU=68060, FPU=68060, MMU=0, JIT=CPU/FPU=8192. fast
+graphics_init
+calling reset_drawing
+init_colors
+currprefs.m68k_speed is -1, not allowing full sync
+init_sound
+ -- stub -- input_get_default_keyboard num=0 return 0
+ -- stub -- input_get_default_keyboard num=1 return 0
+ -- stub -- input_get_default_keyboard num=2 return 0
+ -- stub -- input_get_default_keyboard num=3 return 0
+ -- stub -- input_get_default_keyboard num=4 return 0
+ -- stub -- input_get_default_keyboard num=5 return 0
+ -- stub -- input_get_default_keyboard num=6 return 0
+ -- stub -- input_get_default_keyboard num=7 return 0
+ -- stub -- input_get_default_keyboard num=8 return 0
+ -- stub -- input_get_default_keyboard num=9 return 0
+ -- stub -- input_get_default_keyboard num=10 return 0
+ -- stub -- input_get_default_keyboard num=11 return 0
+ -- stub -- input_get_default_keyboard num=12 return 0
+ -- stub -- input_get_default_keyboard num=13 return 0
+ -- stub -- input_get_default_keyboard num=14 return 0
+ -- stub -- input_get_default_keyboard num=15 return 0
+ -- stub -- input_get_default_keyboard num=16 return 0
+ -- stub -- input_get_default_keyboard num=17 return 0
+ -- stub -- input_get_default_keyboard num=18 return 0
+ -- stub -- input_get_default_keyboard num=19 return 0
+Resetting frame rate hack
+ -- stub -- target_reset 
+ -- stub -- my_resolvesoftlink 
+my_getvolumeinfo /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/sys
+ -- stub -- my_resolvesoftlink 
+my_getvolumeinfo /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/0-2/output
+ -- stub -- filesys_addexternals 
+Initializing mainboard IDE
+init_shm
+uae_shmat shmid 6 shmaddr 0x87000000, shmflg 0 natmem_offset = 0x80000000
+cpuboard_map currprefs.cpuboard_type = 0
+uae_shmat shmid 4 shmaddr 0x80f80000, shmflg 0 natmem_offset = 0x80000000
+uae_shmat shmid 5 shmaddr 0x80000000, shmflg 0 natmem_offset = 0x80000000
+uae_shmat shmid 7 shmaddr 0x80e00000, shmflg 0 natmem_offset = 0x80000000
+uae_shmat shmid 0 shmaddr 0x80f00000, shmflg 0 natmem_offset = 0x80000000
+memory init end
+uae_start_tread "filesys" function at 0x4caf80 arg 0x2db9a80
+uae_start_tread "filesys" function at 0x4caf80 arg 0x2dbd530
+initparallel
+Reset at 00000000. Chipset mask = 00000007
+00000000    2048K/1 =    2048K Chip memory
+00200000   10176K/0 =   10176K <none>
+00BF0000      64K/0 =      64K CIA
+00C00000    1024K/0 =    1024K Custom chipset
+00D00000     768K/0 =     768K <none>
+00DC0000      64K/0 =      64K Battery backed up clock (none)
+00DD0000      64K/0 =      64K Gayle (low)
+00DE0000      32K/0 =      32K Motherboard Resources
+00DE8000      32K/0 =      32K <none>
+00DF0000      64K/0 =      64K Custom chipset
+00E00000     512K/1 =     512K Extended Kickstart ROM (E473C186)
+00E80000      64K/0 =      64K Autoconfig Z2
+00E90000     448K/0 =     448K <none>
+00F00000      64K/1 =      64K UAE Boot ROM
+00F10000     448K/0 =     448K <none>
+00F80000     512K/1 =     512K Kickstart ROM (9D7D0C57)
+01000000      96M/0 =      96M <none>
+07000000      16M/1 =      16M RAMSEY memory (low)
+08000000    3968M/0 =    3968M <none>
+uae_start_tread "ide" function at 0x4ee740 arg 0x2e27c40
+drive_insert drv=0x1f99f60 dnum=3 fname= fake=0
+drive_insert drv=0x1f99f60 dnum=3 fname= fake=1
+gui_disk_image_change drive 3 <no disk>
+driveclick_insert drive=3 eject=1 click_initialized=0 wave_initialized=0 currprefs.floppyslots[drive].dfxclick=1
+gui_disk_image_change drive 3 <no disk>
+drive_insert drv=0x1f77940 dnum=2 fname= fake=0
+drive_insert drv=0x1f77940 dnum=2 fname= fake=1
+gui_disk_image_change drive 2 <no disk>
+driveclick_insert drive=2 eject=1 click_initialized=0 wave_initialized=0 currprefs.floppyslots[drive].dfxclick=1
+gui_disk_image_change drive 2 <no disk>
+drive_insert drv=0x1f55320 dnum=1 fname= fake=0
+drive_insert drv=0x1f55320 dnum=1 fname= fake=1
+gui_disk_image_change drive 1 <no disk>
+driveclick_insert drive=1 eject=1 click_initialized=0 wave_initialized=0 currprefs.floppyslots[drive].dfxclick=1
+gui_disk_image_change drive 1 <no disk>
+drive_insert drv=0x1f32d00 dnum=0 fname= fake=0
+drive_insert drv=0x1f32d00 dnum=0 fname= fake=1
+gui_disk_image_change drive 0 <no disk>
+driveclick_insert drive=0 eject=1 click_initialized=0 wave_initialized=0 currprefs.floppyslots[drive].dfxclick=1
+gui_disk_image_change drive 0 <no disk>
+uae_shmat shmid 7 shmaddr 0x80000000, shmflg 0 natmem_offset = 0x80000000
+uae_shmat shmid 7 shmaddr 0x80080000, shmflg 0 natmem_offset = 0x80000000
+uae_shmat shmid 7 shmaddr 0x80100000, shmflg 0 natmem_offset = 0x80000000
+uae_shmat shmid 7 shmaddr 0x80180000, shmflg 0 natmem_offset = 0x80000000
+uae_shmat shmid 1 shmaddr 0x90000000, shmflg 0 natmem_offset = 0x80000000
+mousehack_reset
+PAL mode V=50.0804Hz H=15625.0881Hz (227x312+0) IDX=10 (PAL) D=0 RTG=0/0
+target_graphics_buffer_update - clearing buffer
+RTGFREQ: 312*50.0804 = 15625.0879 / 50.1 = 312
+ -- stub -- updatedisplayarea 
+gfx_set_picasso_state 0
+ -- stub -- fpux_restore 
+- VirtualProtect addr=0x80f00000 size=8192 prot=4
+  PAGE_READWRITE
+ROM VP 00F00000 - 00F10000 10000 (64k) UNPROT
+- VirtualProtect addr=0x80f80000 size=524288 prot=4
+  PAGE_READWRITE
+ROM VP 00F80000 - 01000000 80000 (512k) UNPROT
+- VirtualProtect addr=0x80e00000 size=524288 prot=4
+  PAGE_READWRITE
+ROM VP 00E00000 - 00E80000 80000 (512k) UNPROT
+- VirtualProtect addr=0x80f00000 size=8192 prot=2
+  PAGE_READONLY
+ROM VP 00F00000 - 00F10000 10000 (64k) WPROT
+- VirtualProtect addr=0x80f80000 size=524288 prot=2
+  PAGE_READONLY
+ROM VP 00F80000 - 01000000 80000 (512k) WPROT
+- VirtualProtect addr=0x80e00000 size=524288 prot=2
+  PAGE_READONLY
+ROM VP 00E00000 - 00E80000 80000 (512k) WPROT
+hardreset, memory cleared
+init_sound
+driveclick_init
+open_sound returning 1
+- VirtualProtect addr=0x80f00000 size=8192 prot=2
+  PAGE_READONLY
+ROM VP 00F00000 - 00F10000 10000 (64k) WPROT
+- VirtualProtect addr=0x80f80000 size=524288 prot=2
+  PAGE_READONLY
+ROM VP 00F80000 - 01000000 80000 (512k) WPROT
+- VirtualProtect addr=0x80e00000 size=524288 prot=2
+  PAGE_READONLY
+ROM VP 00E00000 - 00E80000 80000 (512k) WPROT
+wait_for_frame_no_netplay: new frame rate 50.00 (time: 20000)
+fs_uae_reconfigure_input_ports_amiga
+sending event to set port 0 to mode 1
+sending event to set port 1 to mode 2
+fs_uae_reconfigure_input_ports_host
+configuring joystick port 0
+* nothing in port
+* FIXME
+configuring joystick port 1
+* nothing in port
+* FIXME
+configuring joystick port 2
+* nothing in port
+* FIXME
+configuring joystick port 3
+* nothing in port
+* FIXME
+configuring joystick port 4
+* nothing in port
+* FIXME
+configuring joystick port 5
+* nothing in port
+* FIXME
+configuring joystick port 6
+* nothing in port
+* FIXME
+configuring joystick port 7
+* nothing in port
+* FIXME
+map_custom_keyboard_actions
+map_custom_joystick_actions
+[INPUT] Map custom joystick actions for keyboard
+[INPUT] Config name "keyboard_0_0_0_0_linux"
+get system config for device: keyboard_0_0_0_0_linux
+checked data "input/keyboard_0_0_0_0_linux.conf" = 3
+config file for keyboard_0_0_0_0_linux was not found
+[INPUT] Did not find generic gamepad config for device "keyboard_0_0_0_0_linux"
+config name "keyboard"
+get system config for device: keyboard
+checked data "input/keyboard.conf" = 0
+read config for keyboard for universal (from data)
+checked data "input/default_keyboard.conf" = 0
+read config for default_keyboard for universal (from data)
+no config for platform universal
+[INPUT] Did not find generic gamepad config for device"keyboard"
+[INPUT] Map custom joystick actions for mouse
+[INPUT] Config name "mouse_0_0_0_0_linux"
+get system config for device: mouse_0_0_0_0_linux
+checked data "input/mouse_0_0_0_0_linux.conf" = 3
+config file for mouse_0_0_0_0_linux was not found
+[INPUT] Did not find generic gamepad config for device "mouse_0_0_0_0_linux"
+config name "mouse"
+get system config for device: mouse
+checked data "input/mouse.conf" = 0
+read config for mouse for universal (from data)
+no config for platform universal
+[INPUT] Did not find generic gamepad config for device"mouse"
+[INPUT] Map custom joystick actions for mouse_xvfb_mouse
+[INPUT] Config name "mouse_xvfb_mouse_0_0_0_0_linux"
+get system config for device: mouse_xvfb_mouse_0_0_0_0_linux
+checked data "input/mouse_xvfb_mouse_0_0_0_0_linux.conf" = 3
+config file for mouse_xvfb_mouse_0_0_0_0_linux was not found
+[INPUT] Did not find generic gamepad config for device "mouse_xvfb_mouse_0_0_0_0_linux"
+config name "mouse_xvfb_mouse"
+get system config for device: mouse_xvfb_mouse
+checked data "input/mouse_xvfb_mouse.conf" = 3
+config file for mouse_xvfb_mouse was not found
+[INPUT] Did not find generic gamepad config for device"mouse_xvfb_mouse"
+amiga_set_joystick_port_mode port=0 mode=1
+fs_uae_reconfigure_input_ports_host
+configuring joystick port 0
+* amiga mouse
+* using device MOUSE
+mapping mouse to port 0
+fs_emu_configure_mouse (device: MOUSE)
+did not match device #0 (Keyboard)
+matched device #1
+configuring joystick port 1
+* nothing in port
+* FIXME
+configuring joystick port 2
+* nothing in port
+* FIXME
+configuring joystick port 3
+* nothing in port
+* FIXME
+configuring joystick port 4
+* nothing in port
+* FIXME
+configuring joystick port 5
+* nothing in port
+* FIXME
+configuring joystick port 6
+* nothing in port
+* FIXME
+configuring joystick port 7
+* nothing in port
+* FIXME
+map_custom_keyboard_actions
+map_custom_joystick_actions
+[INPUT] Map custom joystick actions for keyboard
+[INPUT] Config name "keyboard_0_0_0_0_linux"
+get system config for device: keyboard_0_0_0_0_linux
+checked data "input/keyboard_0_0_0_0_linux.conf" = 3
+config file for keyboard_0_0_0_0_linux was not found
+[INPUT] Did not find generic gamepad config for device "keyboard_0_0_0_0_linux"
+config name "keyboard"
+get system config for device: keyboard
+checked data "input/keyboard.conf" = 0
+read config for keyboard for universal (from data)
+checked data "input/default_keyboard.conf" = 0
+read config for default_keyboard for universal (from data)
+no config for platform universal
+[INPUT] Did not find generic gamepad config for device"keyboard"
+[INPUT] Map custom joystick actions for mouse
+[INPUT] Config name "mouse_0_0_0_0_linux"
+get system config for device: mouse_0_0_0_0_linux
+checked data "input/mouse_0_0_0_0_linux.conf" = 3
+config file for mouse_0_0_0_0_linux was not found
+[INPUT] Did not find generic gamepad config for device "mouse_0_0_0_0_linux"
+config name "mouse"
+get system config for device: mouse
+checked data "input/mouse.conf" = 0
+read config for mouse for universal (from data)
+no config for platform universal
+[INPUT] Did not find generic gamepad config for device"mouse"
+[INPUT] Map custom joystick actions for mouse_xvfb_mouse
+[INPUT] Config name "mouse_xvfb_mouse_0_0_0_0_linux"
+get system config for device: mouse_xvfb_mouse_0_0_0_0_linux
+checked data "input/mouse_xvfb_mouse_0_0_0_0_linux.conf" = 3
+config file for mouse_xvfb_mouse_0_0_0_0_linux was not found
+[INPUT] Did not find generic gamepad config for device "mouse_xvfb_mouse_0_0_0_0_linux"
+config name "mouse_xvfb_mouse"
+get system config for device: mouse_xvfb_mouse
+checked data "input/mouse_xvfb_mouse.conf" = 3
+config file for mouse_xvfb_mouse was not found
+[INPUT] Did not find generic gamepad config for device"mouse_xvfb_mouse"
+amiga_set_joystick_port_mode port=1 mode=2
+fs_uae_reconfigure_input_ports_host
+configuring joystick port 0
+* amiga mouse
+* using device MOUSE
+mapping mouse to port 0
+fs_emu_configure_mouse (device: MOUSE)
+did not match device #0 (Keyboard)
+matched device #1
+configuring joystick port 1
+* amiga joystick
+* using device KEYBOARD
+configure joystick "KEYBOARD" for "amiga" (port index 1
+matched device #0
+config name "Keyboard"
+get system config for device: Keyboard
+checked data "input/Keyboard.conf" = 3
+config file for Keyboard was not found
+did not find config for device "Keyboard"
+config name "keyboard_0_0_0_0_linux"
+get system config for device: keyboard_0_0_0_0_linux
+checked data "input/keyboard_0_0_0_0_linux.conf" = 3
+config file for keyboard_0_0_0_0_linux was not found
+did not find config for device "keyboard_0_0_0_0_linux"
+config name "keyboard"
+get system config for device: keyboard
+checked data "input/keyboard.conf" = 0
+read config for keyboard for amiga (from data)
+checked data "input/default_keyboard.conf" = 0
+read config for default_keyboard for amiga (from data)
+key_ralt (307) => action "1" (68)
+key_down (274) => action "down" (63)
+key_right (275) => action "right" (61)
+did not find action for "default_keyboard"
+key_up (273) => action "up" (62)
+key_left (276) => action "left" (60)
+key_rctrl (305) => action "1" (68)
+[INPUT] Config name "keyboard_0_0_0_0_linux"
+get system config for device: keyboard_0_0_0_0_linux
+checked data "input/keyboard_0_0_0_0_linux.conf" = 3
+config file for keyboard_0_0_0_0_linux was not found
+[INPUT] Did not find generic gamepad config for device "keyboard_0_0_0_0_linux"
+config name "keyboard"
+get system config for device: keyboard
+checked data "input/keyboard.conf" = 0
+read config for keyboard for universal (from data)
+checked data "input/default_keyboard.conf" = 0
+read config for default_keyboard for universal (from data)
+no config for platform universal
+[INPUT] Did not find generic gamepad config for device"keyboard"
+configuring joystick port 2
+* nothing in port
+* FIXME
+configuring joystick port 3
+* nothing in port
+* FIXME
+configuring joystick port 4
+* nothing in port
+* FIXME
+configuring joystick port 5
+* nothing in port
+* FIXME
+configuring joystick port 6
+* nothing in port
+* FIXME
+configuring joystick port 7
+* nothing in port
+* FIXME
+map_custom_keyboard_actions
+map_custom_joystick_actions
+[INPUT] Map custom joystick actions for keyboard
+[INPUT] Config name "keyboard_0_0_0_0_linux"
+get system config for device: keyboard_0_0_0_0_linux
+checked data "input/keyboard_0_0_0_0_linux.conf" = 3
+config file for keyboard_0_0_0_0_linux was not found
+[INPUT] Did not find generic gamepad config for device "keyboard_0_0_0_0_linux"
+config name "keyboard"
+get system config for device: keyboard
+checked data "input/keyboard.conf" = 0
+read config for keyboard for universal (from data)
+checked data "input/default_keyboard.conf" = 0
+read config for default_keyboard for universal (from data)
+no config for platform universal
+[INPUT] Did not find generic gamepad config for device"keyboard"
+[INPUT] Map custom joystick actions for mouse
+[INPUT] Config name "mouse_0_0_0_0_linux"
+get system config for device: mouse_0_0_0_0_linux
+checked data "input/mouse_0_0_0_0_linux.conf" = 3
+config file for mouse_0_0_0_0_linux was not found
+[INPUT] Did not find generic gamepad config for device "mouse_0_0_0_0_linux"
+config name "mouse"
+get system config for device: mouse
+checked data "input/mouse.conf" = 0
+read config for mouse for universal (from data)
+no config for platform universal
+[INPUT] Did not find generic gamepad config for device"mouse"
+[INPUT] Map custom joystick actions for mouse_xvfb_mouse
+[INPUT] Config name "mouse_xvfb_mouse_0_0_0_0_linux"
+get system config for device: mouse_xvfb_mouse_0_0_0_0_linux
+checked data "input/mouse_xvfb_mouse_0_0_0_0_linux.conf" = 3
+config file for mouse_xvfb_mouse_0_0_0_0_linux was not found
+[INPUT] Did not find generic gamepad config for device "mouse_xvfb_mouse_0_0_0_0_linux"
+config name "mouse_xvfb_mouse"
+get system config for device: mouse_xvfb_mouse
+checked data "input/mouse_xvfb_mouse.conf" = 3
+config file for mouse_xvfb_mouse was not found
+[INPUT] Did not find generic gamepad config for device"mouse_xvfb_mouse"
+Display Size: 640x480 Offset: 74x36
+First: 26 Last: 0 MinV: 0 MaxV: 0 Min: 26
+[VIDEO] fs_emu_set_video_frame_rate: 50.08 (50)
+[DISPLAY] Sync: g_fs_emu_video_sync_to_vblank = 0
+uae_shmat shmid 5 shmaddr 0x80000000, shmflg 0 natmem_offset = 0x80000000
+SERIAL: period=372, baud=9600, hsyncs=14, bits=8, PC=f8016a
+68060 FPU state: enabled
+SERIAL: period=30, baud=115200, hsyncs=1, bits=8, PC=f81218
+wait_for_frame_no_netplay: new frame rate 50.08 (time: 19967)
+uae_shmat shmid 3 shmaddr 0x80e90000, shmflg 0 natmem_offset = 0x80000000
+Card 1: Z2 0x00e90000   64K ROM Filesystem autoconfig
+uae_shmat shmid 1 shmaddr 0x90000000, shmflg 0 natmem_offset = 0x80000000
+Card 2: Z3 0x10000000 1024M RAM Zorro III Fast RAM
+uae_shmat shmid 2 shmaddr 0xd0000000, shmflg 0 natmem_offset = 0x80000000
+Card 3: Z3 0x50000000  256M IO  RTG RAM
+Memory map after autoconfig:
+00000000    2048K/1 =    2048K Chip memory
+00200000   10176K/0 =   10176K <none>
+00BF0000      64K/0 =      64K CIA
+00C00000    1024K/0 =    1024K Custom chipset
+00D00000     768K/0 =     768K <none>
+00DC0000      64K/0 =      64K Battery backed up clock (RF5C01A)
+00DD0000      64K/0 =      64K A4000 IDE
+00DE0000      32K/0 =      32K Motherboard Resources
+00DE8000      32K/0 =      32K <none>
+00DF0000      64K/0 =      64K Custom chipset
+00E00000     512K/1 =     512K Extended Kickstart ROM (E473C186)
+00E80000      64K/0 =      64K <none>
+00E90000      64K/1 =      64K Filesystem autoconfig
+00EA0000     384K/0 =     384K <none>
+00F00000      64K/1 =      64K UAE Boot ROM
+00F10000     448K/0 =     448K <none>
+00F80000     512K/1 =     512K Kickstart ROM (9D7D0C57)
+01000000      96M/0 =      96M <none>
+07000000      16M/1 =      16M RAMSEY memory (low)
+08000000     128M/0 =     128M <none>
+10000000    1024M/1 =    1024M Zorro III Fast RAM
+50000000     256M/1 =     256M RTG RAM
+60000000    2560M/0 =    2560M <none>
+JIT: Fault address is 0x86000000 at PC=0x4080db83
+JIT: Register was 5, direction was 1, size was 4
+JIT: Address bank: NONE, address 06000000
+JIT: Create jump to 0x41282000
+JIT: Handled one access!
+JIT: Deleted trigger (0x4080dc40 < 0x4080db83 < 0x4080dc57) 0x80fa3a52
+JIT: Fault address is 0x86f00000 at PC=0x4080e022
+JIT: Register was 3, direction was 1, size was 4
+JIT: Address bank: NONE, address 06f00000
+JIT: Create jump to 0x41282000
+JIT: Handled one access!
+JIT: Deleted trigger (0x4080e100 < 0x4080e022 < 0x4080e117) 0x80fa3aee
+JIT: Fault address is 0x86f00000 at PC=0x4080e02b
+JIT: Register was 2, direction was 1, size was 4
+JIT: Address bank: NONE, address 06f00000
+JIT: Create jump to 0x41282000
+JIT: Handled one access!
+JIT: Huh? Could not find trigger!
+JIT: Fault address is 0x86f00000 at PC=0x4080e039
+JIT: Register was 5, direction was 2, size was 4
+JIT: Address bank: NONE, address 06f00000
+JIT: Create jump to 0x41282000
+JIT: Handled one access!
+JIT: Huh? Could not find trigger!
+JIT: Fault address is 0x86f00000 at PC=0x4080e049
+JIT: Register was 6, direction was 2, size was 4
+JIT: Address bank: NONE, address 06f00000
+JIT: Create jump to 0x41282000
+JIT: Handled one access!
+JIT: Huh? Could not find trigger!
+JIT: Fault address is 0x86f00004 at PC=0x4080e181
+JIT: Register was 5, direction was 1, size was 4
+JIT: Address bank: NONE, address 06f00004
+JIT: Create jump to 0x41282000
+JIT: Handled one access!
+JIT: Deleted trigger (0x4080e260 < 0x4080e181 < 0x4080e277) 0x80fa3b14
+JIT: Fault address is 0x86f00004 at PC=0x4080e193
+JIT: Register was 6, direction was 2, size was 4
+JIT: Address bank: NONE, address 06f00004
+JIT: Create jump to 0x41282000
+JIT: Handled one access!
+JIT: Huh? Could not find trigger!
+JIT: Fault address is 0x86f00000 at PC=0x4080e1a5
+JIT: Register was 6, direction was 1, size was 4
+JIT: Address bank: NONE, address 06f00000
+JIT: Create jump to 0x41282000
+JIT: Handled one access!
+JIT: Huh? Could not find trigger!
+JIT: Fault address is 0x86f00004 at PC=0x4080e1b7
+JIT: Register was 7, direction was 2, size was 4
+JIT: Address bank: NONE, address 06f00004
+JIT: Create jump to 0x41282000
+JIT: Handled one access!
+JIT: Huh? Could not find trigger!
+JIT: Fault address is 0x80e92000 at PC=0x40820c67
+JIT: Register was 1, direction was 1, size was 1
+JIT: Address bank: Filesystem autoconfig, address 00e92000
+JIT: Create jump to 0x41282000
+JIT: Handled one access!
+JIT: Deleted trigger (0x40820d20 < 0x40820c67 < 0x40820d37) 0x80f8598e
+filesystem: diagentry 0701aaf8 configdev 000032a8
+mmu_op F518 PC=00FE7360
+PFLUSH
+PAL mode V=49.9204Hz H=15625.0881Hz (227x312+1) IDX=10 (PAL) D=0 RTG=0/0
+target_graphics_buffer_update - clearing buffer
+[VIDEO] fs_emu_set_video_frame_rate: 49.92 (50)
+[DISPLAY] Sync: g_fs_emu_video_sync_to_vblank = 0
+wait_for_frame_no_netplay: new frame rate 49.92 (time: 20031)
+uaelib: uaelib hook in use
+Mounting uaehf.device 0 (0):
+FS: mounted virtual unit DH0 (/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/sys)
+Mounting uaehf.device 1 (0):
+FS: mounted virtual unit DH1 (/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/0-2/output)
+P96 RESINFO: 5FFFF040-60000000 (84,4032)
+RTG mode mask: 212
+P96: Hardware sprite support disabled
+P96: BIF_INDISPLAYCHAIN force-enabled!
+ 1: 50001000  320x 200 UAE: 320x 200
+ 2: 50011000  320x 240 UAE: 320x 240
+ 3: 50091000  320x 256 UAE: 320x 256
+P96: Non-unique mode 640x360
+ 4: 50FF1000  640x 360 UAE: 640x 360
+ 5: 50021000  640x 400 UAE: 640x 400
+ 6: 50031000  640x 480 UAE: 640x 480
+ 7: 500A1000  640x 512 UAE: 640x 512
+P96: Non-unique mode 672x540
+ 8: 50FE1000  672x 540 UAE: 672x 540
+P96: Non-unique mode 800x450
+ 9: 50FD1000  800x 450 UAE: 800x 450
+P96: Non-unique mode 800x500
+10: 50FC1000  800x 500 UAE: 800x 500
+11: 50041000  800x 600 UAE: 800x 600
+P96: Non-unique mode 960x540
+12: 50FB1000  960x 540 UAE: 960x 540
+13: 508B1000 1024x 576 UAE:1024x 576
+P96: Non-unique mode 1024x600
+14: 50FA1000 1024x 600 UAE:1024x 600
+15: 50051000 1024x 768 UAE:1024x 768
+16: 508E1000 1280x 720 UAE:1280x 720
+17: 50071000 1280x1024 UAE:1280x1024
+P96: Non-unique mode 1344x1080
+18: 50F91000 1344x1080 UAE:1344x1080
+FS: AROS (flags=00000002,E=0,ED=1,EF=0,native='/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/sys') starting..
+FS: QRXOUT (flags=00000002,E=0,ED=1,EF=0,native='/workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/0-2/output') starting..
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+- writing comment 
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+- writing comment 
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rw-d
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+- writing comment 
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rw-d
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+- writing comment 
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rw-d
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+- writing comment 
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rw-d
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+- writing comment 
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rw-d
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+- writing comment 
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+- writing comment 
+need_metadata_file 2 WF_ALWAYS
+- writing mode -s--rwed
+need_metadata_file 2 WF_ALWAYS
+- writing mode -s--rwed
+need_metadata_file 2 WF_ALWAYS
+- writing mode -s--rwed
+need_metadata_file 2 WF_ALWAYS
+- writing mode -s--rwed
+need_metadata_file 2 WF_ALWAYS
+- writing mode -s--rwed
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+gfx_set_picasso_modeinfo 640 480 8 0
+gfx_set_picasso_colors 0
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+gfx_set_picasso_colors 1
+RTG conversion: Depth=4 HostRGBF=9 P96RGBF=1 Mode=13
+SetSwitch() - Picasso96 640x480x8 (640x480x32)
+gfx_set_picasso_state 1
+gfx_set_picasso_colors 1
+ -- stub -- setupcursor 
+PAL mode V=49.9204Hz H=15625.0881Hz (227x312+1) IDX=-1 (<?>) D=0 RTG=1/1
+target_graphics_buffer_update - clearing buffer
+gfx_set_picasso_colors 1
+ -- stub -- setupcursor 
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 320 200 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 320x200x8 (320x200x32)
+gfx_set_picasso_modeinfo 640 480 8 1
+gfx_set_picasso_colors 1
+RTGFREQ: 312*49.9204 = 15575.1680 / 49.9 = 312
+SetSwitch() - Picasso96 640x480x8 (640x480x32)
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+need_metadata_file 2 WF_ALWAYS
+- writing mode ----rwed
+need_metadata_file 6 WF_ALWAYS WF_EXISTS
+- writing mode ----rwed
+Received SDL_QUIT
+fs_ml_maybe_quit
+fs_emu_quit
+executing quit function
+quit_function
+fs_ml_quit
+running g_quit_function
+calling amiga_quit
+uae_quit
+UAE: Stopping
+- VirtualProtect addr=0x80f00000 size=8192 prot=4
+  PAGE_READWRITE
+ROM VP 00F00000 - 00F10000 10000 (64k) UNPROT
+- VirtualProtect addr=0x80f80000 size=524288 prot=4
+  PAGE_READWRITE
+ROM VP 00F80000 - 01000000 80000 (512k) UNPROT
+- VirtualProtect addr=0x80e00000 size=524288 prot=4
+  PAGE_READWRITE
+ROM VP 00E00000 - 00E80000 80000 (512k) UNPROT
+ -- stub -- close_joystick 
+ -- stub -- close_mouse 
+ -- stub -- close_kb 
+serial: close fd=-1
+ -- stub -- gui_exit 
+VM: Decommit 0x40000000 bytes at 0x90000000
+mapped_free direct Zorro III Fast RAM
+VM: Decommit 0x10000000 bytes at 0xd0000000
+mapped_free direct RTG RAM
+VM: Decommit 0x10000    bytes at 0x41855000
+mapped_free direct Filesystem autoconfig
+hdf_close_target
+hdf_close_target
+hdf_close_target
+hdf_close_target
+hdf_close_target
+hdf_close_target
+hdf_close_target
+VM: Decommit 0x1000000  bytes at 0x87000000
+mapped_free direct RAMSEY memory (low)
+VM: Decommit 0x80000    bytes at 0x80f80000
+mapped_free direct Kickstart ROM
+VM: Decommit 0x200000   bytes at 0x80000000
+mapped_free direct Chip memory
+VM: Decommit 0x10000    bytes at 0x80f00000
+VM: Decommit 0x80000    bytes at 0x80e00000
+ -- stub -- machdep_free 
+real_main returned
+calling filesys_flush_cache
+flushing all file streams
+[CORE] Return from amiga_main
+fs_ml_quit
+fs_ml_quit already called
+calling fs_ml_stop because emu thread is done
+[FSE] fs_emu_run: main loop is done
+[FSE] Waiting for emulation thread to stop...
+[FSE] Emulation thread stopped
+[OPENAL] fs_emu_audio_shutdown
+[FSE] Returning from fs_emu_run
+fs-uae shutting down, fs_emu_run returned
+state dir /workspace/qrx-fsuae-jit/doom-fixed-fsjit-on-qrx-on/tmp/qrx-scn.FcTuAV/home/Save States/cfg was removed because it was empty
+end of main function

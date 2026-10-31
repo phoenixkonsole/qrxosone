@@ -1,0 +1,11 @@
+# QRX 22.5.12 winmine test: open the Optionen menu, start a game with a click, snapshot
+wait 300
+menubar 10
+wait 100
+snap winmine-menu.ppm
+click 30 12
+wait 200
+click 40 70
+wait 1500
+snap winmine-game.ppm
+close

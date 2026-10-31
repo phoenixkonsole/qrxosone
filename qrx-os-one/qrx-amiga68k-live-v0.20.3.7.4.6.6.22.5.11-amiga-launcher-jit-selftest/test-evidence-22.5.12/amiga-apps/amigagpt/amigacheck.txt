@@ -1,0 +1,33 @@
+QRXAMIGARUN CHECK SYS:AmigaGPT/AmigaGPT/AmigaGPT_OS3
+  format   : AmigaOS 1.x-3.x HUNK executable (m68k)
+  size     : 744824 bytes
+  hunks    : 3  relocs: 19054  chip: 0  fast: 0  any: 648700 bytes
+    hunk 0 CODE 626208 bytes
+    hunk 1 DATA 10284 bytes
+    hunk 2 BSS 12208 bytes
+  device   : narrator.device -> MISSING
+  library  : translator.library -> MISSING
+  library  : muimaster.library -> ok (in memory)
+  library  : codesets.library -> ok (LIBS:codesets.library)
+  library  : aros.library -> ok (in memory)
+  library  : bsdsocket.library -> MISSING
+  library  : amisslmaster.library -> MISSING
+  device   : audio.device -> ok (ROM resident module)
+  device   : timer.device -> ok (in memory)
+  device   : ahi.device -> ok (DEVS:ahi.device)
+  library  : amissl.library -> MISSING
+  device   : flite.device -> MISSING
+  library  : amigaguide.library -> ok (LIBS:amigaguide.library)
+  library  : asl.library -> ok (in memory)
+  library  : dos.library -> ok (in memory)
+  library  : graphics.library -> ok (in memory)
+  library  : intuition.library -> ok (in memory)
+  library  : locale.library -> ok (in memory)
+  library  : mathieeedoubbas.library -> ok (LIBS:mathieeedoubbas.library)
+  library  : mathieeedoubtrans.library -> ok (LIBS:mathieeedoubtrans.library)
+  library  : utility.library -> ok (in memory)
+  library  : mathieeesingbas.library -> ok (in memory)
+  (library/device names are found by scanning the program image; optional or
+   version-specific requirements cannot be decided statically)
+  RESULT   : RUNNABLE WITH WARNINGS
+QRXTEST AMIGACHECK rc=5

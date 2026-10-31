@@ -1,0 +1,23 @@
+qrx-win32: AROS backend: screen 640x480, pen-mapped WriteChunkyPixels output
+qrx-win32: import KERNEL32.dll!IsDBCSLeadByteEx is not implemented (fails only if called)
+qrx-win32: import msvcrt.dll!__mb_cur_max is not implemented (fails only if called)
+qrx-win32: import msvcrt.dll!localeconv is not implemented (fails only if called)
+qrx-win32: import msvcrt.dll!setlocale is not implemented (fails only if called)
+qrx-win32: import msvcrt.dll!strerror is not implemented (fails only if called)
+qrx-win32: fopen(C:\dxtest.log, w) -> AROS:X86/dxtest.log
+qrx-win32: AROS backend: window 00010004 opened at 0,0 inner 640x480 (+0 menu bar)
+qrx-win32: DirectDrawCreate -> 100005e0
+qrx-win32: DirectDraw: cooperative level 00000011 window 00010004
+qrx-win32: DirectDraw: display mode 640x480x8
+qrx-win32: AROS backend: reopening window 00010004 (own screen)
+qrx-win32: AROS backend: old window closed
+qrx-win32: AROS backend: looking for a 640x480x8 display mode
+qrx-win32: AROS backend: mode 10031100, opening screen
+qrx-win32: AROS backend: screen open, opening backdrop window
+qrx-win32: AROS backend: own screen 640x480x8 (mode 10031100, CLUT) for window 00010004
+qrx-win32: DirectDraw: primary 640x480x8 + back buffer
+qrx-win32: DirectSound: buffer 22050 bytes 22050 Hz (silent: no audio output)
+qrx-win32: AROS backend: display captured after 10 frames -> QRXOUT:dx-screen.ppm
+qrx-win32: AROS backend: reopening window 00010004 (Workbench)
+qrx-win32: AROS backend: old window closed
+qrx-win32: AROS backend: window 00010004 opened at 0,0 inner 640x480 (+0 menu bar)

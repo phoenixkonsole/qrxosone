@@ -1,0 +1,91 @@
+QRX OS One 22.5.11 - qrx-jit-selftest and the QRX86 JIT quarantine
+====================================================================
+
+Status
+------
+* QRX:C/QRX86GRTExec keeps its native m68k JIT QUARANTINED.  `--jit=on` is
+  accepted for script compatibility, prints
+  "QRX86 SAFETY: native JIT quarantined ..." and runs the interpreter
+  (host test: tests-22.5.11/test-qrx86-interpreter.sh, case "--jit=on").
+* `wintrace` (QRXDesktop) calls QRX86GRTExec with --jit=off --trace
+  --max-steps 100000: interpreter only, watchdog active, trace capped at 2000
+  block lines.
+* qrx-jit-selftest is a separate binary.  It is NOT called by Startup-Sequence,
+  QRX-Startup, QRXDesktop, TestReactOS3/TestWin32/TestWinGuestInit or any other
+  installed script except the manual QRX:S/TestAmigaRun (static mode only).
+  diagnostics-v6.6/deploy.sh fails the build if another script references it.
+* Passing the self-test does NOT unlock the QRX86 JIT.  Re-enabling it is a
+  separate, explicit source change (see "Release procedure" below).
+
+What 22.5.11 found in the quarantined path (fixed, still quarantined)
+----------------------------------------------------------------------
+* QRX86GRTExec declared its whole VM state (struct QRXVM, about 1.7 MB: 4096
+  blocks x 416 bytes + regions/modules/bridges) as a LOCAL variable of main().
+  AmigaDOS processes typically get 4-64 KB of stack and m68k AROS has no MMU
+  guard page, so this overflowed the stack into foreign memory on every run.
+  Such corruption produces exactly the kind of random-PC "Illegal instruction"
+  crash recorded in 22.5.8 (PC 0x052881D2) and can also hang the interpreter.
+  22.5.11 moves it to BSS (`static QRXVM v;`), so LoadSeg allocates it or the
+  start fails cleanly.  This is the most likely root cause, but it is not
+  proven on the target yet; the JIT therefore stays quarantined.
+* The JIT block cache allocates code with malloc() and calls CacheClearU().
+  That is the right flush, but the generated blocks call step_one() through a
+  helper and bypass the step watchdog accounting.  Any future JIT must charge
+  guest instructions to the same budget as the interpreter.
+
+qrx-jit-selftest stages
+-----------------------
+  static (default, nothing executed):
+    S1 byte emission         MOVEQ/RTS, MOVE.L #imm/RTS, ADDQ.L/NOP compared
+                             with encodings verified against GNU as
+                             (tests: amiga-runtime-22.5.11/tests/test-jit-emit-host.sh)
+    S2 alloc + alignment     AllocVec(MEMF_PUBLIC), PC must be even (68000/010
+                             raise an address error on odd PCs)
+    S3 copy + flush + read   CacheClearE(CACRF_ClearI|CACRF_ClearD), CacheClearU
+  EXECUTE (opt-in):
+    S4 MOVEQ #42,D0 ; RTS                      expects 42
+    S5 MOVE.L #$51525354,D0 ; RTS              expects $51525354
+    S6 JSR abs.l <C helper> ; ADDQ.L #1,D0 ; RTS   expects 42 and 1 helper call
+    S7 patch MOVEQ immediate in place + CacheClearE, call again; expects 7
+       (instruction-cache coherence after self-modification: the 68040/68060
+       copyback case that breaks naive JITs)
+    S8 1000 JSR-helper round trips (stack/ABI stability)
+
+  The CPU (AttnFlags) and CacheControl() state are printed first.
+
+Crash safety - why a snapshot/emulator is required for EXECUTE
+---------------------------------------------------------------
+An illegal instruction, address error or bus error in generated code is a CPU
+exception.  C code cannot catch it; AROS shows a Guru/crash requester and the
+machine usually has to be reset.  Therefore:
+  * Before every native stage the tool writes QRX-JIT-SELFTEST.stage
+    ("<stage> PENDING") and closes it, so the marker is on disk before the
+    call.  Default directory is T: (RAM, lost on reset); use LOGDIR=<dir> to
+    put marker + log on a volume that survives the crash, e.g. a hard disk
+    partition, RAD:, or in FS-UAE a host directory (the harness uses QRXOUT:).
+  * The full log is written to QRX-JIT-SELFTEST.log in the same directory.
+  * Recommended: FS-UAE/WinUAE with a saved state, or a real machine where a
+    reset is acceptable.  amiga-runtime-22.5.11/emulator/run-fsuae-tests.sh
+    runs EXECUTE on emulated 68020, 68030, 68040 and 68060 configurations and
+    records the per-CPU result in its report.
+
+Results 22.5.11 (FS-UAE, Deadwood AROS master 5b5fd4c, see TESTREPORT-22.5.11.txt)
+--------------------------------------------------------------------------------
+  68020 (no data cache)      static PASS   EXECUTE S4-S8 PASS
+  68030                      static PASS   EXECUTE S4-S8 PASS
+  68040 copyback caches      static PASS   EXECUTE S4-S8 PASS
+  68060 copyback caches      static PASS   EXECUTE S4-S8 PASS
+  Evidence: test-evidence-22.5.11/<cpu>/jit-*.txt.  These are emulator
+  results (FS-UAE's 68040/68060 cache emulation is not cycle-exact); real
+  hardware is still required before any JIT release.
+
+Release procedure for the QRX86 JIT (not done in 22.5.11)
+----------------------------------------------------------
+ 1. qrx-jit-selftest EXECUTE passes on 68020/030/040/060 targets.
+    -> done in FS-UAE (above); still open on real 68040/68060 hardware.
+ 2. QRX86GRTExec (with the 22.5.11 VM-in-BSS fix) runs TestWinGuestInit and
+    reactoscalc in interpreter mode on the target without a crash.
+ 3. The JIT path charges every guest instruction to the watchdog and has its
+    own crash marker file, then it is enabled behind a new explicit flag
+    (e.g. --jit=experimental) for single-block tests only.
+ 4. Only after repeated target passes may the quarantine message be removed.

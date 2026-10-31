@@ -1,0 +1,54 @@
+; QRX 22.5.11 FS-UAE harness - executed by Startup-Sequence at the end of boot.
+; Writes every result to QRXOUT: (a host directory) and then marks DONE.
+FailAt 100
+Assign QRX: SYS:QRX >NIL:
+Echo "QRXHARNESS boot ok" >QRXOUT:boot.txt
+Version >>QRXOUT:boot.txt
+Avail >QRXOUT:avail-boot.txt
+IF EXISTS QRX:C/QRXModeList
+  QRX:C/QRXModeList >QRXOUT:modes.txt
+ENDIF
+ShowConfig >QRXOUT:showconfig.txt
+Execute QRX:S/TestAmigaRun.qrxout
+QRX:C/qrx-jit-selftest LOGDIR=QRXOUT: >QRXOUT:jit-static.txt
+Echo "QRXTEST JIT-STATIC rc=$RC" >>QRXOUT:jit-static.txt
+QRX:C/qrx-jit-selftest LOGDIR=QRXOUT: EXECUTE >QRXOUT:jit-execute.txt
+Echo "QRXTEST JIT-EXECUTE rc=$RC" >>QRXOUT:jit-execute.txt
+IF EXISTS QRX:C/QRX86GRTExec
+  QRX:C/QRX86GRTExec --help >QRXOUT:qrx86-help.txt
+  Echo "QRXTEST QRX86-HELP rc=$RC" >>QRXOUT:qrx86-help.txt
+  QRX:C/QRX86GRTExec --jit=off QRX:Tests/QRX86/count6.qrxgrt >QRXOUT:qrx86.txt
+  Echo "QRXTEST QRX86-COUNT6 rc=$RC" >>QRXOUT:qrx86.txt
+  QRX:C/QRX86GRTExec --jit=off QRX:Tests/QRX86/repfull.qrxgrt >>QRXOUT:qrx86.txt
+  Echo "QRXTEST QRX86-REPFULL rc=$RC" >>QRXOUT:qrx86.txt
+  QRX:C/QRX86GRTExec --jit=off QRX:Tests/QRX86/movr8.qrxgrt >>QRXOUT:qrx86.txt
+  Echo "QRXTEST QRX86-MOVR8 rc=$RC" >>QRXOUT:qrx86.txt
+  QRX:C/QRX86GRTExec --jit=on QRX:Tests/QRX86/ret.qrxgrt >>QRXOUT:qrx86.txt
+  Echo "QRXTEST QRX86-JITON-QUARANTINE rc=$RC" >>QRXOUT:qrx86.txt
+  Date >QRXOUT:wintrace-start.txt
+  QRX:C/QRX86GRTExec --jit=off --trace --max-steps 100000 QRX:Tests/QRX86/spin.qrxgrt >QRXOUT:wintrace-spin.txt
+  Echo "QRXTEST QRX86-WINTRACE-SPIN rc=$RC" >>QRXOUT:qrx86.txt
+  QRX:C/QRX86GRTExec --jit=off --trace --max-steps 100000 QRX:Tests/QRX86/repspin.qrxgrt >QRXOUT:wintrace-repspin.txt
+  Echo "QRXTEST QRX86-WINTRACE-REPSPIN rc=$RC" >>QRXOUT:qrx86.txt
+  Date >QRXOUT:wintrace-end.txt
+ENDIF
+IF EXISTS QRX:C/QRXDesktop
+  Avail >QRXOUT:avail-before-desktop.txt
+  Run >QRXOUT:desktop-stdout.txt QRX:C/QRXDesktop
+  Wait 40
+  Avail >QRXOUT:avail-with-desktop.txt
+  IF EXISTS QRX:C/QRXScreenGrab
+    QRX:C/QRXScreenGrab QRXOUT:desktop-screen.ppm >QRXOUT:grab.txt
+    Wait 60
+    QRX:C/QRXScreenGrab QRXOUT:desktop-screen-late.ppm >>QRXOUT:grab.txt
+  ENDIF
+  Echo "snap" >QRXOUT:SNAP-DESKTOP
+  ; wait until the host harness has taken the RTG screenshot (host always acks)
+  Lab qrxsnap
+  IF NOT EXISTS QRXOUT:SNAP-ACK
+    Wait 1
+    Skip qrxsnap BACK
+  ENDIF
+ENDIF
+Avail >QRXOUT:avail-end.txt
+Echo "done" >QRXOUT:DONE

@@ -1,0 +1,22 @@
+; QRX 22.5.12 scenario: Directory Opus 5.104 (m68k, AmigaOS 3.x build) on Deadwood AROS
+FailAt 100
+Assign QRX: SYS:QRX >NIL:
+Assign DOpus5: SYS:DOpus5
+; open the Workbench screen first (the scenario runs before Startup-Sequence starts Wanderer)
+Run <NIL: >NIL: WANDERER:Wanderer
+Wait 20
+Avail >QRXOUT:avail-before.txt
+QRX:C/amigacheck SYS:DOpus5/DirectoryOpus >QRXOUT:amigacheck.txt
+Echo "QRXTEST AMIGACHECK rc=$RC" >>QRXOUT:amigacheck.txt
+QRX:C/amigarun ASYNC SYS:DOpus5/DirectoryOpus >QRXOUT:amigarun.txt
+Echo "QRXTEST AMIGARUN rc=$RC" >>QRXOUT:amigarun.txt
+Wait 90
+Avail >QRXOUT:avail-running.txt
+Status >QRXOUT:status.txt
+Status FULL >QRXOUT:tasks.txt
+QRX:C/QRXScreenGrab QRXOUT:screen.ppm >QRXOUT:grab.txt
+; second look after another 3 emulated minutes (DOpus initialises slowly without JIT)
+Wait 180
+QRX:C/QRXScreenGrab QRXOUT:screen2.ppm >QRXOUT:grab2.txt
+Status FULL >QRXOUT:tasks2.txt
+Echo "done" >QRXOUT:DONE

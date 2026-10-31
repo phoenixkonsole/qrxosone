@@ -1,0 +1,22 @@
+; QRX OS One v0.20.3.7.4.6.6 automated functional smoke sequence
+Assign QRX: SYS:QRX >NIL:
+Echo "QRX System Test - runtime probes"
+Echo "01 AROS ABI"
+QRX:C/QRXArosAbi02
+Echo "02 POSIX"
+QRX:C/QRXPosixTest
+Echo "03 ELF"
+QRX:C/QRXELF
+Echo "04 QRX86 Dynarec"
+QRX:C/QRXDynarecTest
+Echo "04b QRX86 QRXGRT/JIT executor"
+QRX:C/QRX86GRTExec --help
+Echo "05 Win32 Runtime"
+QRX:C/QRXWinRuntimeTest
+Echo "06 Wine Host"
+QRX:C/QRXWineHostTest
+Echo "07 Wine Display"
+QRX:C/QRXWineDisplayTest
+Echo "08 Wine Services"
+QRX:C/QRXWineServicesTest
+Echo "Functional smoke sequence complete."

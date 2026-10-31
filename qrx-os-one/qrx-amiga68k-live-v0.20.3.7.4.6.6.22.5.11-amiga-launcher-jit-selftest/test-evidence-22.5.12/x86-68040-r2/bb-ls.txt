@@ -1,0 +1,19 @@
+total 6885
+-rwx------    1 65534    65534          930 Oct 29 12:22 bbtest.sh
+-rwx------    1 65534    65534      2095420 Oct 29 12:22 busybox
+-rwx------    1 65534    65534          653 Oct 29 12:22 calc-test.txt
+-rwx------    1 65534    65534       526336 Oct 29 12:22 calc.exe
+-rwx------    1 65534    65534       658432 Oct 29 12:22 cards.dll
+-rwx------    1 65534    65534          192 Oct 29 12:22 clock-test.txt
+-rwx------    1 65534    65534       248284 Oct 29 12:22 difft
+-rwx------    1 65534    65534          141 Oct 29 12:22 dx-test.txt
+-rwx------    1 65534    65534       332095 Oct 29 12:22 dxtest.exe
+-rwx------    1 65534    65534       707360 Oct 29 12:22 fpu
+-rwx------    1 65534    65534       715748 Oct 29 12:22 hello32
+-rwx------    1 65534    65534       125479 Oct 29 12:22 qrxclock.exe
+-rwx------    1 65534    65534          264 Oct 29 12:22 sol-test.txt
+-rwx------    1 65534    65534       256512 Oct 29 12:22 sol.exe
+-rwx------    1 65534    65534          177 Oct 29 12:22 spider-test.txt
+-rwx------    1 65534    65534       219136 Oct 29 12:22 spider.exe
+-rwx------    1 65534    65534          210 Oct 29 12:22 winmine-test.txt
+-rwx------    1 65534    65534      1159168 Oct 29 12:22 winmine.exe

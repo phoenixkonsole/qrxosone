@@ -1,0 +1,4 @@
+qrx-win32: AROS backend: screen 640x480, pen-mapped WriteChunkyPixels output
+qrx-win32: GetProcAddress(msvcrt, _set_invalid_parameter_handler): not implemented
+qrx-win32: AROS backend: window 00010004 opened at 3,41 inner 154x182 (+19 menu bar)
+qrx-win32: AROS backend: present 00010004 154x182

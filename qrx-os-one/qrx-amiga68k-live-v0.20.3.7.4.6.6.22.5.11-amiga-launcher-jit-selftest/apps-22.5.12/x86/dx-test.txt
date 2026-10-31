@@ -1,0 +1,4 @@
+# dxtest.exe (DirectDraw/DirectSound/DirectInput): snapshot during the frame loop, then let it finish
+wait 3000
+snap dx-frame.ppm
+wait 60000

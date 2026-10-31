@@ -1,0 +1,2 @@
+PASS: m68k emitter matches GNU as byte-for-byte (30 bytes: 70 2a 76 ff 20 3c 51 52 53 54 2e 3c 80 00 00 01 52 80 50 82 4e b9 12 34 56 78 4e 71 4e 75)
+PASS: emitter overflow guard

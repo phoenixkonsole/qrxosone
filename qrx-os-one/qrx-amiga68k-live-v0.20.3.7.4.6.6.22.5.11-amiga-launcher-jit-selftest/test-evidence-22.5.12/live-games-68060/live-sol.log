@@ -1,0 +1,8 @@
+qrx-win32: AROS backend: screen 640x480, pen-mapped WriteChunkyPixels output
+qrx-win32: GetProcAddress(msvcrt, _set_invalid_parameter_handler): not implemented
+qrx-win32: import gdi32.dll!GetDCOrgEx is not implemented (fails only if called)
+qrx-win32: loaded cards.dll at 78cb0000 (692224 bytes)
+qrx-win32: DllMain(cards.dll, PROCESS_ATTACH) = 1
+qrx-win32: AROS backend: window 00010004 opened at 43,81 inner 608x406 (+19 menu bar)
+qrx-win32: AROS backend: present 00010004 608x406
+qrx-win32: AROS backend: present 00010004 608x406

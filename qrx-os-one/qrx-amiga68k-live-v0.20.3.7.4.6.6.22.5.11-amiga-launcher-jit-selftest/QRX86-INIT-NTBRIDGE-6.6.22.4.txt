@@ -1,0 +1,16 @@
+QRX OS One 0.20.3.7.4.6.6.22.4 - QRX86 ReactOS initialization + ntdll host bridge
+
+Changes after 6.6.22.3:
+- Reworked the recursive PE loader into two phases so legitimate cyclic ReactOS DLL dependencies can be mapped before IAT resolution.
+- Added QRXWinGuestRuntime, compiled as a native Deadwood AROS/m68k HUNK application.
+- Selected early ntdll APIs can now be rebound to deterministic QRX host-bridge thunk addresses rather than forcing every NT primitive through guest ntdll code.
+- Added explicit bridge entries for early RTL memory/string/heap/last-error/debug/critical-section/virtual-memory/file primitives, including vDbgPrintExWithPrefix seen in the Calculator failure path.
+- Parses IMAGE_TLS_DIRECTORY32 callback lists after relocation.
+- Builds dependency-first DLL_PROCESS_ATTACH order for TLS callbacks and DllMain.
+- Treats ntdll process bootstrap as host-owned and records synthetic TEB, PEB and process-heap anchors.
+- Emits a little-endian QRXGRT1 runtime handoff containing mapped PE images, module addresses, active ntdll bridge thunks and ordered init calls for the QRX86 execution core.
+- New terminal commands: wininit <exe>, winbridge <exe>.
+- ReactOS calc/notepad/third-app/Solitaire smoke scripts now run the init/bridge stage before the existing QRXWinRun path.
+
+Important validation boundary:
+The 6.6.22.4 runtime constructs the real DllMain/TLS execution order and ntdll bridge bindings and serializes a QRX86 handoff. It does NOT mark guest DllMain/TLS callbacks as executed until the QRX86 instruction executor consumes that handoff. A successful message is therefore INIT/LINK PASS, not "Windows application executed". This prevents fake success while giving the next executor integration a deterministic mapped address space.

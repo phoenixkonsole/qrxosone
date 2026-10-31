@@ -1,0 +1,13 @@
+QRX-JIT-SELFTEST 22.5.11 (opt-in; does NOT enable the QRX86 JIT)
+CPU: 68030 +FPU  AttnFlags=0x0000a037  CACR(CacheControl)=0x00002101
+PASS S1 byte-emission
+PASS S2 alloc+alignment  addr=0x0733a2ac (longword aligned)
+PASS S3 copy+CacheClearE/U+readback
+PASS S4 native MOVEQ #42,D0 ; RTS
+PASS S5 native MOVE.L #$51525354,D0 ; RTS
+PASS S6 native JSR abs.l C-helper ; ADDQ.L #1,D0 ; RTS
+PASS S7 modified code visible after CacheClearE (I-cache coherence)
+PASS S8 1000 JSR-helper round trips
+QRX-JIT-SELFTEST RESULT: PASS (static + native)
+QRX86GRTExec native JIT remains quarantined regardless of this result.
+QRXTEST JIT-EXECUTE rc=0

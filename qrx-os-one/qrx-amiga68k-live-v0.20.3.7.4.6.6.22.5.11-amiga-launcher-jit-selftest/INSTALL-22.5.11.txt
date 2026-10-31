@@ -1,0 +1,81 @@
+QRX OS One 0.20.3.7.4.6.6.22.5.11 - installation / build guide
+================================================================
+
+A. Build server prerequisites (unchanged from 22.5.10)
+------------------------------------------------------
+* Linux x86_64 build host, root, ~30 GB free, the packages installed by
+  base-v5.9/deploy.sh (git gcc g++ make bison flex netpbm python3 xorriso
+  mtools unzip file ...).
+* Deadwood AROS workspace  /opt/qrx-os-one/deadwood-aros-build
+    AROS/                git checkout of https://github.com/deadwood2/AROS
+    toolchain-core-m68k/ (rebuild option 11)
+    core-amiga-m68k/     (rebuild option 12, stamped with the commit)
+  Default commit: 29dfac42dd55cddf813c695ab603f19ce2108656 (proven boot path).
+  Latest Deadwood master tested in 22.5.11: 5b5fd4cfd4f039927c0d1bb9cdd7f4fc8644d23e
+  (pass --aros-ref <commit> to select it).
+* Offline sources: <repo>/upstream/ (README.md there).  If the build host cannot
+  reach ftp.gnu.org / unicode.org / mesa3d.org / sourceforge / googlesource,
+  run  upstream/aros-deadwood/prefetch-deadwood-ports.sh  first; it stages all
+  third-party archives into $WORKSPACE/portssources.
+* ReactOS live ZIP:  bash upstream/reactos/0.4.15/restore.sh /tmp
+* Deadwood reference tar (/tmp/amiga-m68k-classic-20260815-012049.tar.gz,
+  SHA-256 c2d7362a...) and the QRX v0.20 payload builder
+  (--qrx-v020-root, build-qrx-amiga68k-live-v0.20.sh + src/) - both are
+  external inputs of the existing pipeline and are NOT contained in this
+  handoff.
+
+B. Full LiveCD build
+--------------------
+  cd qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest
+  sudo ./deploy.sh [--qrx-v020-root PATH] [--reactos-file /tmp/ReactOS-0.4.15-x86-live.zip]
+
+  Order: base-v5.9/deploy.sh (Deadwood core, QRX v0.20 payload with the
+  canonical desktop incl. amigarun/amigacheck, 3520-sector Emergency ADF,
+  EBFHUNKROM=no) -> all validators (incl. validate-22.5.11.py with host
+  tests) -> diagnostics-v6.6/deploy.sh (QRX tools, 22.5.11 launcher +
+  qrx-jit-selftest + test programs, elf2hunk HUNK proof, distfiles ISO,
+  FINAL ISO extraction gates with xorriso).
+
+C. Host-only checks (no Deadwood workspace needed)
+--------------------------------------------------
+  python3 -B validate-22.5.11.py
+  bash tests-22.5.11/test-qrx86-interpreter.sh
+  python3 -B amiga-runtime-22.5.11/tests/test-amiga-launcher-host.py [real-HUNK-dir]
+  bash amiga-runtime-22.5.11/tests/test-jit-emit-host.sh   (needs binutils-m68k-linux-gnu)
+
+D. Building only the 22.5.11 m68k tools
+---------------------------------------
+  QRX_AROS_CC=$WS/toolchain-core-m68k/m68k-aros-gcc \
+  QRX_ELF2HUNK=$WS/core-amiga-m68k/bin/linux-x86_64/tools/elf2hunk \
+  QRX_AROS_CFLAGS="-B<dir of startup.o>/ -I<AROS SDK include> -L<AROS lib dirs>" \
+  bash amiga-runtime-22.5.11/build-target.sh /tmp/qrx-rt2211
+  -> /tmp/qrx-rt2211/hunk/{QRXAmigaRun,amigarun,amigacheck,qrx-jit-selftest,QRXHunkTest*}
+
+E. Emulator target test (FS-UAE, headless)
+------------------------------------------
+  apt-get install fs-uae xvfb imagemagick
+  bash amiga-runtime-22.5.11/emulator/run-fsuae-tests.sh \
+       $WS/core-amiga-m68k/bin/amiga-m68k/AROS \
+       $WS/core-amiga-m68k/bin/amiga-m68k/gen/boot/aros-amiga-m68k-rom.bin \
+       $WS/core-amiga-m68k/bin/amiga-m68k/gen/boot/aros-amiga-m68k-ext.bin \
+       /tmp/qrx-rt2211 /tmp/qrx-fsuae-report "68040 68060 68030 68020"
+  Result: /tmp/qrx-fsuae-report/TARGET-RESULTS.txt (+ screenshots, logs).
+
+F. After booting the LiveCD (manual smoke test on real hardware/emulator)
+-------------------------------------------------------------------------
+  QRX:C/QRXArosAbi02                      (unchanged first step)
+  Execute QRX:S/TestAmigaRun              22.5.11 launcher self-test
+  QRX:C/amigacheck SYS:C/Dir
+  QRX:C/amigarun "Work:My Program" args
+  QRX:C/qrx-jit-selftest                  static only
+  QRX:C/qrx-jit-selftest LOGDIR=<persistent dir> EXECUTE   only with a snapshot / resettable machine
+  QRXDesktop terminal: amigacheck <prog>, amigarun [ASYNC] <prog> [args]
+
+G. Extra emulator test helpers (not installed on the LiveCD)
+------------------------------------------------------------
+  amiga-runtime-22.5.11/tests/amiga/qrx_modelist.c    QRXModeList: lists display modes (RTG proof)
+  amiga-runtime-22.5.11/tests/amiga/qrx_screengrab.c  QRXScreenGrab: front screen -> PPM (RTG-safe)
+  amiga-runtime-22.5.11/tests/desktop/gen-test-wallpaper.py
+      SYNTHETIC qrx_wallpaper.h to compile QRXDesktop without the v0.20 payload
+  Pass the built HUNKs via QRX_EXTRA_C="..." to run-fsuae-tests.sh;
+  QRX_DESKTOP_SCREEN=rtg starts QRXDesktop on its own RTG screen.

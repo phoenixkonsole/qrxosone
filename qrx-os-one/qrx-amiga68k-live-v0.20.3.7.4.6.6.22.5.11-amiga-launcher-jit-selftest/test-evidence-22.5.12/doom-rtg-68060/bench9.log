@@ -1,0 +1,2 @@
+BENCH v11core-nowarp cpu=68040 jit=0 loop=1000 startup=1s workload=31s total=40s status=COMPLETED last=
+BENCH v5core-nowarp cpu=68040 jit=0 loop=1000 startup=1s workload=32s total=43s status=COMPLETED last=

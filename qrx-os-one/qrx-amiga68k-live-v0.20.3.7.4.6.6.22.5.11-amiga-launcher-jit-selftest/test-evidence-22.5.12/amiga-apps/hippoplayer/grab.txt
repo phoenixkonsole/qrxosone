@@ -1,0 +1,1 @@
+QRXGRAB 640x480 depth=8 title=HippoPlayer v2.67 (15.8.2026)

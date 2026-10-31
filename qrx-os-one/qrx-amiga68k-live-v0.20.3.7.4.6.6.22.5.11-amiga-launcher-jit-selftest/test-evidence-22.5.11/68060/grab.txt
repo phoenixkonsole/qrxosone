@@ -1,0 +1,2 @@
+QRXGRAB 1024x768 depth=32 title=QRX OS One Amiga 68K v0.20
+QRXGRAB 1024x768 depth=32 title=QRX OS One Amiga 68K v0.20

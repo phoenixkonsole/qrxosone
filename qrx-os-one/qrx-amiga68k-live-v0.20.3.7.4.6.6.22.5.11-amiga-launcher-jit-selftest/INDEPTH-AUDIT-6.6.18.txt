@@ -1,0 +1,20 @@
+QRX OS One 68K v0.20.3.7.4.6.6.18 - IN-DEPTH UI/FILES/WEB/TERMINAL AUDIT
+
+Runtime findings addressed:
+1. QRX Drive directory traversal: folder activation was dependent on double-click timing and looked like a flash. Drawers now navigate on a single object activation; files retain double-click launch. Parent uses ParentDir/NameFromLock.
+2. File/terminal drag feedback loop: gesture deltas were reconstructed from window-relative coordinates after moving the window. Both now anchor to public-screen MouseX/MouseY.
+3. Terminal was not a shell: added persistent terminal cwd, cd, cd .., pwd, ls relative to cwd and direct AmigaDOS fallback for unknown QRX commands.
+4. Terminal history/completion: RAWKEY cursor up/down history and conservative TAB completion added. Character typing remains VANILLAKEY.
+5. Excess terminal typing redraw: prompt-only redraw added for ordinary typing/backspace.
+6. Desktop RMB: right-click context menu added with QRX Drive, Terminal, Refresh Desktop and Settings.
+7. QRXAI fake user greeting removed. Initial user transcript is empty; assistant displays readiness only.
+8. QRX Web toolbar labels: toolbar drawing now explicitly selects text pen after button fill.
+9. QRX Web keyboard/address input: VANILLAKEY is used for text, eliminating brittle hard-coded raw key maps. Bare hosts such as google.de normalize to https://google.de.
+10. QRX Web default: QRX:Documents/QRX-test-suite-page.html is always first page. It contains typography, image, form, table and benchmark coverage; browser gives it a visual mini-renderer instead of only stripped text.
+11. QRX Web typing redraw: address-bar-only redraw added.
+12. Network truthfulness: HTTPS still requires an installed HTTPS-capable transport (wget/curl or later native TLS backend). The browser no longer claims that URL parsing equals network/TLS support. google.de is accepted/normalized, but cannot be fetched on an image with no HTTPS transport.
+
+Theme consistency hardening:
+A shared qrx_theme.h chrome component now reads SYS:QRX/Prefs/desktop.cfg and is used by QRX Writer, Spreadsheet, Presenter, Hardware, Settings, Welcome, QRX Web, QRXAI and ARES. QRX/Windows/macOS/AmigaOS title geometry and control hit zones are selected from the same persisted look. QRXDesktop/File/Terminal retain their existing native theme renderer but consume the same preference.
+
+Validation gates in deploy.sh remain authoritative: native AROS m68k compile, ELF machine proof, ELF->HUNK conversion, critical runtime presence and final ISO HUNK extraction/proof.

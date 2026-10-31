@@ -1,0 +1,7 @@
+QRX 22.5.9 JIT Safety & Compatibility Foundation
+- Native JIT quarantined at runtime (prior Illegal Instruction on m68k).
+- Default QRX86 interpreter; --trace always interpreter.
+- Guest instruction budget now counts each interpreted instruction and bridge dispatch; no longer one count per block.
+- Read-only HUNK/ELF/PE format identification for future compatibility work.
+- Does NOT yet execute OS4 or Linux PPC applications, and does not certify AmigaOS3 binary compatibility.
+- Real m68k runtime validation still required.

@@ -1,0 +1,12 @@
+total 5451
+-rwx------    1 65534    65534          930 Oct 29 06:59 bbtest.sh
+-rwx------    1 65534    65534      2095420 Oct 29 06:59 busybox
+-rwx------    1 65534    65534          653 Oct 29 06:59 calc-test.txt
+-rwx------    1 65534    65534       526336 Oct 29 06:59 calc.exe
+-rwx------    1 65534    65534          192 Oct 29 06:59 clock-test.txt
+-rwx------    1 65534    65534       248284 Oct 29 06:59 difft
+-rwx------    1 65534    65534       707360 Oct 29 06:59 fpu
+-rwx------    1 65534    65534       715748 Oct 29 06:59 hello32
+-rwx------    1 65534    65534       125479 Oct 29 06:59 qrxclock.exe
+-rwx------    1 65534    65534          210 Oct 29 06:59 winmine-test.txt
+-rwx------    1 65534    65534      1159168 Oct 29 06:59 winmine.exe

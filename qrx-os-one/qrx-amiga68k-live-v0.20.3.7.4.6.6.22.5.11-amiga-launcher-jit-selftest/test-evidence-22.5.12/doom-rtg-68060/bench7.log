@@ -1,0 +1,1 @@
+BENCH v5core-nommu cpu=68040 jit=0 loop=1000 startup=2s workload=72s total=85s status=COMPLETED last=

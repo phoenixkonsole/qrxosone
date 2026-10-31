@@ -1,0 +1,22 @@
+{
+  "command": [
+    "/workspace/qrx-bench/baseline/qrx-win32",
+    "-s",
+    "bench.script",
+    "-e",
+    "SDL_VIDEODRIVER=directx",
+    "prboom-plus.exe",
+    "-iwad",
+    "freedoom1.wad",
+    "-width",
+    "320",
+    "-height",
+    "200",
+    "-fullscreen",
+    "-nosound",
+    "-timedemo",
+    "demo1"
+  ],
+  "exit_code": 255,
+  "wall_seconds": 148.45748373699996
+}

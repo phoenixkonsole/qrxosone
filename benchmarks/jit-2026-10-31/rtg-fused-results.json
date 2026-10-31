@@ -1,0 +1,25 @@
+{
+  "inputs": {
+    "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+    "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+    "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+    "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+  },
+  "runs": [
+    {
+      "jit": "experimental",
+      "runtime": "/workspace/qrx-jit-work/optimization-31/target-fused/hunk/qrx-win32",
+      "runtime_sha256": "e09d8db33bb49233203c8a8b30e94f80ee655cb049abce3f2ddc67ba8176a4ed",
+      "repeat": 0,
+      "cpu": "68060",
+      "backend": "AROS RTG",
+      "instructions": 100000000,
+      "frames": 29,
+      "backend_ms": 225353,
+      "wall_seconds": 234.91740603599828,
+      "wall_fps": 0.12344764268151376,
+      "capture_frame": 10,
+      "frame_sha256": "24c5613f1d537287d5a9572a80d7ce7ebf9ad0ec266dfe207f2f88fd8af17caa"
+    }
+  ]
+}

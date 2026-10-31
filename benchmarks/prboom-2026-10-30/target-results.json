@@ -1,0 +1,16 @@
+{
+  "status": "COMPLETED",
+  "cpu": "FS-UAE 3.1.66 emulated 68060",
+  "instructions": 150000000,
+  "frames": 43,
+  "guest_ms": 358112,
+  "wall_seconds": 370.449712111,
+  "wall_fps": 0.11607513407141118,
+  "guest_fps": 0.12007416674113126,
+  "runtime_sha256": "b5e2b5ba942b9d2aaebc5dbfa94c92c7d04655d7ffe0bd8635fb52ac9595b28e",
+  "warp": false,
+  "jit": false,
+  "mmu": false,
+  "resolution": "320x200x8",
+  "prebuilt": true
+}

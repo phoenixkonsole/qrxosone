@@ -1,0 +1,12 @@
+QRX OS 68K 6.6.21 deep audit
+
+Findings fixed:
+- Shared theme engine expanded to own frame, controls, scrollbars, hit testing and tooltip rendering.
+- QRX Drive paint path no longer rescans mounted volumes, removing an I/O source from redraw.
+- Browser RMB context surface added.
+- QRXAI learns names from multiple German/English phrasings and persists them.
+- Alt+Tab / four logical workspace / Expose foundations added in QRXDesktop without resizing foreign Intuition windows.
+- AmiSSL 5.27 official SDK/runtime bootstrap added with GitHub asset digest verification when provided. HTTPS remains fail-closed until runtime+SDK are proven in final ISO.
+
+Validation boundary:
+Static/source validation is included and run before deployment. The authoritative ABI/HUNK/ISO validation remains the server-side Deadwood build. AmiSSL TLS is NOT falsely advertised as complete until its SDK compiles against the pinned AROS ABI and its runtime/CA store are present in the final ISO.

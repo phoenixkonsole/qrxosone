@@ -1,0 +1,88 @@
+{
+  "inputs": {
+    "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+    "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+    "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+    "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+  },
+  "runs": [
+    {
+      "runtime": "/workspace/qrx-jit-work/wrappers/interpreter-final",
+      "runtime_sha256": "e1459460217e1afb9503cccff18d1251fad99b3a4ac89bbb548d0176882c05b5",
+      "repeat": 0,
+      "instructions": 100000000,
+      "frames": 35,
+      "virtual_ms": 10000,
+      "wall_seconds": 16.334307350000017,
+      "cpu_seconds": 16.307081,
+      "wall_fps": 2.1427293640339125,
+      "exit_code": 139,
+      "frame_sha256": "3ceb236c90b9f1ae51f739a762df89d882a4073d81341574173efb0019ffa081"
+    },
+    {
+      "runtime": "/workspace/qrx-jit-work/wrappers/jit-final",
+      "runtime_sha256": "f85625813f5da44393641aff141049b66e742fd27b7cac93999ad178d2fbfe1d",
+      "repeat": 0,
+      "instructions": 100000000,
+      "frames": 35,
+      "virtual_ms": 10000,
+      "wall_seconds": 24.799022961000446,
+      "cpu_seconds": 24.792644,
+      "wall_fps": 1.411345925000427,
+      "exit_code": 139,
+      "frame_sha256": "3ceb236c90b9f1ae51f739a762df89d882a4073d81341574173efb0019ffa081"
+    },
+    {
+      "runtime": "/workspace/qrx-jit-work/wrappers/jit-final",
+      "runtime_sha256": "f85625813f5da44393641aff141049b66e742fd27b7cac93999ad178d2fbfe1d",
+      "repeat": 1,
+      "instructions": 100000000,
+      "frames": 35,
+      "virtual_ms": 10000,
+      "wall_seconds": 25.244865337999727,
+      "cpu_seconds": 25.184811000000007,
+      "wall_fps": 1.386420546570173,
+      "exit_code": 139,
+      "frame_sha256": "3ceb236c90b9f1ae51f739a762df89d882a4073d81341574173efb0019ffa081"
+    },
+    {
+      "runtime": "/workspace/qrx-jit-work/wrappers/interpreter-final",
+      "runtime_sha256": "e1459460217e1afb9503cccff18d1251fad99b3a4ac89bbb548d0176882c05b5",
+      "repeat": 1,
+      "instructions": 100000000,
+      "frames": 35,
+      "virtual_ms": 10000,
+      "wall_seconds": 16.52474504299971,
+      "cpu_seconds": 16.483368000000002,
+      "wall_fps": 2.118035703965482,
+      "exit_code": 139,
+      "frame_sha256": "3ceb236c90b9f1ae51f739a762df89d882a4073d81341574173efb0019ffa081"
+    },
+    {
+      "runtime": "/workspace/qrx-jit-work/wrappers/interpreter-final",
+      "runtime_sha256": "e1459460217e1afb9503cccff18d1251fad99b3a4ac89bbb548d0176882c05b5",
+      "repeat": 2,
+      "instructions": 100000000,
+      "frames": 35,
+      "virtual_ms": 10000,
+      "wall_seconds": 15.757196168999144,
+      "cpu_seconds": 15.742329000000007,
+      "wall_fps": 2.2212073534287358,
+      "exit_code": 139,
+      "frame_sha256": "3ceb236c90b9f1ae51f739a762df89d882a4073d81341574173efb0019ffa081"
+    },
+    {
+      "runtime": "/workspace/qrx-jit-work/wrappers/jit-final",
+      "runtime_sha256": "f85625813f5da44393641aff141049b66e742fd27b7cac93999ad178d2fbfe1d",
+      "repeat": 2,
+      "instructions": 100000000,
+      "frames": 35,
+      "virtual_ms": 10000,
+      "wall_seconds": 24.696301993000816,
+      "cpu_seconds": 24.70696499999999,
+      "wall_fps": 1.417216229778829,
+      "exit_code": 139,
+      "frame_sha256": "3ceb236c90b9f1ae51f739a762df89d882a4073d81341574173efb0019ffa081"
+    }
+  ]
+}
