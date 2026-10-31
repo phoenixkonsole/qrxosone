@@ -1,0 +1,16 @@
+export PATH=/workspace/qrx-tools/root/usr/bin:$PATH
+export LD_LIBRARY_PATH=/workspace/qrx-tools/root/usr/lib/x86_64-linux-gnu
+export autom4te_perllibdir=/workspace/qrx-tools/root/usr/share/autoconf
+export AUTOM4TE=/workspace/qrx-tools/root/usr/bin/autom4te
+export AUTOCONF=/workspace/qrx-tools/root/usr/bin/autoconf
+export AUTOHEADER=/workspace/qrx-tools/root/usr/bin/autoheader
+export AUTOM4TE_CFG=/workspace/qrx-fsuae-jit/autom4te.cfg
+export AC_MACRODIR=/workspace/qrx-tools/root/usr/share/autoconf
+export trailer_m4=/workspace/qrx-tools/root/usr/share/autoconf/autoconf/trailer.m4
+export M4=/workspace/qrx-tools/root/usr/bin/m4
+export PERL5LIB=/workspace/qrx-tools/root/usr/share/automake-1.17
+export AUTOMAKE_LIBDIR=/workspace/qrx-tools/root/usr/share/automake-1.17
+export ACLOCAL_PATH=/workspace/qrx-tools/root/usr/share/aclocal:/usr/share/aclocal
+export ACLOCAL_AUTOMAKE_DIR=/workspace/qrx-tools/root/usr/share/aclocal-1.17
+export PKG_CONFIG_LIBDIR=/workspace/qrx-tools/root/usr/lib/x86_64-linux-gnu/pkgconfig:/workspace/qrx-tools/root/usr/share/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+export PKG_CONFIG_SYSROOT_DIR=/workspace/qrx-tools/root

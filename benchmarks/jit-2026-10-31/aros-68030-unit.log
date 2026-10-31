@@ -1,0 +1,20 @@
+PASS random register/flags programs: 2000 x 3 interpreter/JIT comparisons
+PASS fallback flags/widths/ADC/SBB/shifts/rotates/LAHF/SAHF + all 16 Jcc: 960 x 3
+PASS MUL/IMUL/DIV/IDIV interpreter fallback surrounded by native blocks: 128 x 3
+PASS memory store/load fallback and native successor preserve little-endian data
+PASS native LEA all ModRM/SIB forms + shifts all immediate counts + near Jcc
+PASS native INC/DEC/ADC/SBB: carry chains, signed/unsigned edges and all Jcc
+PASS native arithmetic conditions (all Jcc, parity fallback, post-flag clobbers) and single-step oracle
+PASS ModRM memory decoder: 16/32-bit addressing and operands, SIB, DS/SS/FS, loads and writes
+SKIP optional native loads (not compiled in this build)
+PASS generated entry preserves D2-D7/A2-A6 and the C stack ABI
+PASS SMC: raw-host-pointer code mutation invalidates compiled block
+PASS exact watchdog at every instruction inside a warmed block
+PASS stop EIP inside a warmed translation block
+PASS unmap/remap rejects stale cached instructions
+PASS negative cache re-probes modified/newly eligible code without global flush
+PASS stop EIP inside a block spanning the 32-bit address wrap
+PASS page-boundary decode faults remain interpreted and precise
+BENCH interpreter_ticks=8818 jit_ticks=2623 warm_ticks=2621 ticks_per_second=50 guest_instructions=1200002 
+STATS profile=30 native_insns=3599910 fallback=96 compilations=1 hits=600059 misses=7 invalidations=0 evictions=0 code_bytes=108 compile_ticks=0 peak_code_bytes=108 
+PASS native m68k JIT differential/safety suite

@@ -1,0 +1,7 @@
+/workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/win32/gdi.c: In function ‘qw_bitmap_from_dib’:
+/workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/win32/gdi.c:461:66: warning: suggest parentheses around ‘&&’ within ‘||’ [-Wparentheses]
+  461 |     if (bw <= 0 || bh <= 0 || bw > 4096 || bh > 4096 || comp > 0 && comp != 3) { qw_log(w, "unsupported DIB (%dx%d %dbpp comp %u)", bw, bh, bpp, comp); return 0; }
+      |                                                         ~~~~~~~~~^~~~~~~~~~~~
+/workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/win32/kernel.c:27:17: warning: ‘host_ms’ defined but not used [-Wunused-function]
+   27 | static uint64_t host_ms(void)
+      |                 ^~~~~~~

@@ -66,12 +66,14 @@ for f, side in [('base-v5.9/tools/qrx_desktop.canonical-6.6.20.c', 'base-v5.9/to
     else:
         print(f'PASS: sidecar {f}')
 
-# qrx86core must not contain native code generation (pure interpreter)
-core = (x86 / 'core/qrx86core.c').read_text()
-for bad in ('mmap(', 'mprotect', 'PROT_EXEC', '__builtin___clear_cache'):
-    if bad in core:
-        print(f'FAIL: qrx86core contains {bad}')
-        fails += 1
+# The experimental backend is separate and explicitly opt-in. The default
+# interpreter remains available on every host; native execution must fail closed.
+need('x86-runtime-22.5.12/core/qrx86jit.h', 'XJ_NATIVE', 'xj_profile', 'xj_fresh',
+     'CacheClearE', 'PROT_READ | PROT_EXEC', 'if (e.bad)', 'c->jb || !xj_profile',
+     'b->count > c->left', '(uint32_t)(stop - b->eip)', 'base_icount')
+need('x86-runtime-22.5.12/core/qrx86core.c', 'run_loop_jit', 'if (c->jit)', 'x86_jit_disable(c)')
+need('x86-runtime-22.5.12/win32/qrx_win32_main.c', 'experimental', 'interpreter fallback', 'x86_jit_enable')
+need('diagnostics-v6.6/tools/qrx86_grt_exec.c', 'native JIT quarantined', 'v.jit_enabled=0;')
 
 # host differential tests
 gcc = shutil.which('gcc')

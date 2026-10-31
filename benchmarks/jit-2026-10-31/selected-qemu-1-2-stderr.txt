@@ -1,0 +1,16 @@
+qrx-win32: experimental m68k JIT enabled (default remains interpreter)
+ default file: C:\/prboom-plus.cfg
+IWAD found: C:\freedoom1.wad
+PrBoom-Plus (built Oct 30 2026 19:04:33), playing: The Ultimate DOOM
+PrBoom-Plus is released under the GNU General Public license v2.0.
+You are welcome to redistribute it under certain conditions.
+It comes with ABSOLUTELY NO WARRANTY. See the file COPYING for details.
+Playing demo demo1.lmp
+P_GetNodesVersion: using normal BSP nodes
+qrx-win32: snapshot /workspace/qrx-jit-work/optimization-31/selected-comparison/1-2/frame.ppm
+qrx-win32: program stopped: instruction budget exhausted at eip=00498d9f addr=00453490 bytes=e8eca6fbff893424 (instruction budget exhausted) eax=1004ac80 ebx=00000058 ecx=100000e0 edx=00000001 esi=1004ac80 edi=00000028 ebp=0000007c esp=002fe89c
+qrx-win32: 100000000 guest instructions in 10000 ms (10000000 per second), 35 DirectDraw frames, 435 HLE imports, 272864 API transitions
+qrx-win32: 100000000 guest instructions in 10000 ms (10000000 per second), 35 DirectDraw frames, 435 HLE imports, 272864 API transitions
+QRX86-JIT profile=68020 native_blocks=2100579 native_insns=6410570 fallback=93589430 compile=3720 hits=23341375 misses=1279287 invalidations=0 evictions=1278775 code_bytes=231804 live_code_bytes=1110 peak_code_bytes=2014 compile_ticks=200377 native_ticks=0 interpreter_ticks=0 ticks_per_second=1000000 timing=0
+qrx-win32: QRX86-JIT profile=68020 native_blocks=2100579 native_insns=6410570 fallback=93589430 compile=3720 hits=23341375 misses=1279287 invalidations=0 evictions=1278775 code_bytes=231804 live_code_bytes=1110 peak_code_bytes=2014 compile_ticks=200377 native_ticks=0 interpreter_ticks=0 ticks_per_second=1000000 timing=0
+

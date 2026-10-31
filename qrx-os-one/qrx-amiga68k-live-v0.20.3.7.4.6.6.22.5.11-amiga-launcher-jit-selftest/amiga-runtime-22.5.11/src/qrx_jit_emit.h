@@ -17,11 +17,15 @@ static void qe_init(struct qrx_emit *e, void *buf, unsigned long cap)
 }
 static void qe_w16(struct qrx_emit *e, unsigned long v)
 {
-    if (e->cap - e->len < 2 || e->len > e->cap) { e->overflow = 1; return; }
+    if (e->overflow || e->len > e->cap || e->cap - e->len < 2) { e->overflow = 1; return; }
     e->p[e->len++] = (unsigned char)(v >> 8);
     e->p[e->len++] = (unsigned char)v;
 }
-static void qe_w32(struct qrx_emit *e, unsigned long v) { qe_w16(e, (v >> 16) & 0xFFFFUL); qe_w16(e, v & 0xFFFFUL); }
+static void qe_w32(struct qrx_emit *e, unsigned long v)
+{
+    if (e->overflow || e->len > e->cap || e->cap - e->len < 4) { e->overflow = 1; return; }
+    qe_w16(e, (v >> 16) & 0xFFFFUL); qe_w16(e, v & 0xFFFFUL);
+}
 /* MOVEQ #imm8,Dn */
 static void qe_moveq(struct qrx_emit *e, int imm, int dn) { qe_w16(e, 0x7000UL | ((unsigned long)(dn & 7) << 9) | ((unsigned long)imm & 0xFFUL)); }
 /* MOVE.L #imm32,Dn */

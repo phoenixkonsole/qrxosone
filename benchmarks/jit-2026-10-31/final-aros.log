@@ -1,0 +1,12 @@
+/workspace/qrx-jit-work/optimization-31/aros-release/tmp/qrx-scn-harness.bUvjai: line 92: 43908 Killed                  HOME="$W/home" DISPLAY=":$d" SDL_AUDIODRIVER=dummy fs-uae "$W/cfg.fs-uae" > "$OUT/fs-uae.stdout" 2>&1
+scenario scenario on 68020: COMPLETED after 38s
+PASS AROS/FS-UAE 68020 (emulator only)
+/workspace/qrx-jit-work/optimization-31/aros-release/tmp/qrx-scn-harness.ZAMPzF: line 92: 44012 Killed                  HOME="$W/home" DISPLAY=":$d" SDL_AUDIODRIVER=dummy fs-uae "$W/cfg.fs-uae" > "$OUT/fs-uae.stdout" 2>&1
+scenario scenario on 68030: COMPLETED after 34s
+PASS AROS/FS-UAE 68030 (emulator only)
+/workspace/qrx-jit-work/optimization-31/aros-release/tmp/qrx-scn-harness.r1CqCK: line 92: 44407 Killed                  HOME="$W/home" DISPLAY=":$d" SDL_AUDIODRIVER=dummy fs-uae "$W/cfg.fs-uae" > "$OUT/fs-uae.stdout" 2>&1
+scenario scenario on 68040: COMPLETED after 28s
+PASS AROS/FS-UAE 68040 (emulator only)
+/workspace/qrx-jit-work/optimization-31/aros-release/tmp/qrx-scn-harness.xaXQrQ: line 92: 44533 Killed                  HOME="$W/home" DISPLAY=":$d" SDL_AUDIODRIVER=dummy fs-uae "$W/cfg.fs-uae" > "$OUT/fs-uae.stdout" 2>&1
+scenario scenario on 68060: COMPLETED after 26s
+PASS AROS/FS-UAE 68060 (emulator only)

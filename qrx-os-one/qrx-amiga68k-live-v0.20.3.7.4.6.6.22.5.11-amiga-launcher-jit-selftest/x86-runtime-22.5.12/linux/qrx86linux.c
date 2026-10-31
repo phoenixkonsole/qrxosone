@@ -689,6 +689,7 @@ static lxproc *proc_fork(lxproc *p)
         x86page *keep[1024];
         memcpy(keep, c->cpu.dir, sizeof(keep));
         c->cpu = p->cpu;
+        c->cpu.jit = NULL; /* owned code/cache must never alias the parent */
         memcpy(c->cpu.dir, keep, sizeof(keep));
         c->cpu.user = c; c->cpu.jb = NULL; c->cpu.depth = 0; c->cpu.stop = 0; c->cpu.fault = 0;
     }

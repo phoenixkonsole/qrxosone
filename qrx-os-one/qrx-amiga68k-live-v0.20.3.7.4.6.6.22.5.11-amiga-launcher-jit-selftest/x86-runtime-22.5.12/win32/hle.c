@@ -175,6 +175,7 @@ static int hle_hook(x86cpu *c, uint32_t idx)
     const qhle *e = idx < w->nthunk ? w->thunk[idx] : NULL;
     uint32_t a[16], ret, r, sp = c->r[X86_ESP];
     int i;
+    w->api_calls++;
     if (!e) {
         qw_log(w, "unimplemented API called: %s", idx < w->nthunk ? w->thunk_name[idx] : "?");
         c->fault = X86_FAULT_HOST;

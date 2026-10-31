@@ -46,6 +46,23 @@ enum x86_fault {
 };
 
 typedef struct x86cpu x86cpu;
+struct x86jit;
+typedef struct x86jit_stats {
+    uint64_t lookups, hits, misses, invalidations, evictions, compilations;
+    uint64_t native_blocks, native_instructions, fallback_instructions, code_bytes;
+    uint64_t live_code_bytes, peak_code_bytes;
+    uint64_t compile_ticks, native_ticks, interpreter_ticks,clock_invalid;
+    uint32_t profile;
+    int timing,cache_profile;
+} x86jit_stats;
+/* Opt-in experimental backend. OFF is the default. Profiles: 20/30/40/60,
+ * or 0 for AROS hardware detection. Returns 0 if unavailable; never executes
+ * generated code on a non-m68k host. Timing is optional (clock() overhead).
+ * High-frequency hit/lookup counters require QRX86_JIT_CACHE_PROFILE; zero with
+ * cache_profile==0 means unmeasured. Native/fallback instruction counts remain exact. */
+int x86_jit_enable(x86cpu *c, unsigned profile, int timing);
+void x86_jit_disable(x86cpu *c);
+void x86_jit_snapshot(const x86cpu *c, x86jit_stats *out);
 typedef int (*x86_int_fn)(x86cpu *c, int vector);      /* return 0 to fault */
 typedef int (*x86_hle_fn)(x86cpu *c, uint32_t index);  /* return 0 to fault */
 
@@ -93,6 +110,7 @@ struct x86cpu {
     int depth;                           /* nested guest calls */
     uint32_t cur_eip;                    /* eip of the instruction being executed */
     jmp_buf *jb;
+    struct x86jit *jit;                 /* owned; NEVER share in a CPU clone */
 };
 
 /* --- setup / memory --- */

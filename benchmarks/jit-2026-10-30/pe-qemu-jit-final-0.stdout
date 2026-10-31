@@ -1,0 +1,3 @@
+qrx-win32: experimental m68k JIT enabled (default remains interpreter)
+qrx-win32: 10000018 guest instructions in 1000 ms (10000018 per second), 0 DirectDraw frames, 8 HLE imports, 1 API transitions
+QRX86-JIT profile=68020 native_blocks=1999985 native_insns=9999925 fallback=93 compile=1 hits=2000041 misses=13 invalidations=0 evictions=0 code_bytes=94 live_code_bytes=94 peak_code_bytes=94 compile_ticks=1153 native_ticks=0 interpreter_ticks=0 ticks_per_second=1000000 timing=0

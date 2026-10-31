@@ -48,6 +48,7 @@ extern void exit(int);
 #endif
 #if defined(__mc68000__) || defined(__m68k__)
 #include <proto/exec.h>
+#include <exec/memory.h>
 #endif
 
 #define QRX_GRT_MAGIC "QRXGRT1\0"
@@ -150,7 +151,7 @@ struct QRXVM {
     uint32_t last_error;
 };
 
-#if defined(__mc68000__) || defined(__m68k__)
+#if defined(__mc68000__) || defined(__m68k__) || defined(QRX_TEST_NATIVE)
 static QRXVM *g_jit_vm;
 static QRXCPU *g_jit_cpu;
 static QRXBlock *g_jit_block;
@@ -184,7 +185,13 @@ for(i=0;i<v->init_count;i++){QRXInitRec*r=&v->init[i];if(!get_u32(f,&r->kind)||!
 for(i=0;i<v->module_count;i++){QRXModuleRec*m=&v->modules[i];m->image=(uint8_t*)malloc(m->size?m->size:1);if(!m->image||fread(m->image,1,m->size,f)!=m->size){fclose(f);return 0;}if(!region_add(v,m->base,m->size,m->image,0,1,m->name)){fclose(f);return 0;}}
 fclose(f);return 1;}
 
-static void free_vm(QRXVM*v){unsigned i;for(i=0;i<v->module_count;i++)free(v->modules[i].image);for(i=0;i<v->region_count;i++)if(v->regions[i].owned)free(v->regions[i].data);for(i=0;i<v->block_count;i++)free(v->blocks[i].native_code);}
+static void free_vm(QRXVM*v){unsigned i;for(i=0;i<v->module_count;i++)free(v->modules[i].image);for(i=0;i<v->region_count;i++)if(v->regions[i].owned)free(v->regions[i].data);for(i=0;i<v->block_count;i++) {
+#if defined(__mc68000__) || defined(__m68k__)
+if(v->blocks[i].native_code)FreeVec(v->blocks[i].native_code);
+#else
+free(v->blocks[i].native_code);
+#endif
+}}
 
 static int bootstrap_vm(QRXVM*v){uint8_t*teb=(uint8_t*)calloc(1,QRX_TEB_SIZE),*peb=(uint8_t*)calloc(1,QRX_PEB_SIZE),*stack=(uint8_t*)calloc(1,QRX_STACK_SIZE);QRXModuleRec*root=&v->modules[v->root_index];if(!teb||!peb||!stack)return 0;if(!region_add(v,v->teb_base,QRX_TEB_SIZE,teb,1,1,"TEB")||!region_add(v,v->peb_base,QRX_PEB_SIZE,peb,1,1,"PEB")||!region_add(v,QRX_STACK_BASE,QRX_STACK_SIZE,stack,1,1,"STACK"))return 0;
 /* x86 NT TEB essentials */
@@ -373,11 +380,26 @@ b->terminal=1;(void)term;break;}if(!b->count)b->count=1;return b;}
  * This removes dispatcher lookup between instructions and establishes executable
  * code-cache/invalidation/cache-flush machinery. Direct per-op m68k emission can
  * replace these helper calls incrementally without changing block ABI. */
+#if defined(__mc68000__) || defined(__m68k__) || defined(QRX_TEST_NATIVE)
+static void jit_thread_helper(void)
+{
+    uint32_t expected; int term = 0;
+    if (!g_jit_vm || !g_jit_cpu || !g_jit_block) return;
+    if (g_jit_cpu->fault || g_jit_cpu->halted || g_jit_index >= g_jit_block->count) return;
+    expected = g_jit_block->insn_eip[g_jit_index++];
+    if (g_jit_cpu->eip != expected) { g_jit_index = g_jit_block->count; return; }
+    if (g_jit_vm->steps >= g_jit_vm->step_deadline) {
+        g_jit_cpu->fault = 5; g_jit_index = g_jit_block->count; return;
+    }
+    g_jit_vm->steps++; /* identical watchdog ownership to run_block's interpreter */
+    if (!step_one(g_jit_vm, g_jit_cpu, &term) || term)
+        g_jit_index = g_jit_block->count;
+}
+#endif
 #if defined(__mc68000__) || defined(__m68k__)
-static void jit_thread_helper(void){if(!g_jit_vm||!g_jit_cpu||!g_jit_block)return;if(g_jit_cpu->fault||g_jit_cpu->halted)return;if(g_jit_index>=g_jit_block->count)return;{uint32_t expected=g_jit_block->insn_eip[g_jit_index++];int term=0;if(g_jit_cpu->eip!=expected)return;(void)step_one(g_jit_vm,g_jit_cpu,&term);}}
 static void put_be16(uint8_t*p,uint16_t x){p[0]=(uint8_t)(x>>8);p[1]=(uint8_t)x;}
 static void put_be32(uint8_t*p,uint32_t x){p[0]=(uint8_t)(x>>24);p[1]=(uint8_t)(x>>16);p[2]=(uint8_t)(x>>8);p[3]=(uint8_t)x;}
-static int jit_compile_native(QRXVM*v,QRXBlock*b){unsigned i;uint32_t n=b->count*6u+2u;uint8_t*p=(uint8_t*)malloc(n),*q=p;uintptr_t fn=(uintptr_t)&jit_thread_helper;(void)v;if(!p)return 0;for(i=0;i<b->count;i++){put_be16(q,0x4eb9);put_be32(q+2,(uint32_t)fn);q+=6;}put_be16(q,0x4e75);b->native_code=p;b->native_size=n;CacheClearU();return 1;}
+static int jit_compile_native(QRXVM*v,QRXBlock*b){unsigned i;uint32_t n=b->count*6u+2u;uint8_t*p=(uint8_t*)AllocVec(n,MEMF_PUBLIC),*q=p;uintptr_t fn=(uintptr_t)&jit_thread_helper;(void)v;if(!p)return 0;for(i=0;i<b->count;i++){put_be16(q,0x4eb9);put_be32(q+2,(uint32_t)fn);q+=6;}put_be16(q,0x4e75);CacheClearE(p,n,CACRF_ClearI|CACRF_ClearD);b->native_size=n;b->native_code=p;return 1;}
 typedef void(*QRXNativeBlockFn)(void);
 #endif
 static int run_block(QRXVM*v,QRXCPU*c,QRXBlock*b){unsigned i;b->hits++;v->blocks_executed++;

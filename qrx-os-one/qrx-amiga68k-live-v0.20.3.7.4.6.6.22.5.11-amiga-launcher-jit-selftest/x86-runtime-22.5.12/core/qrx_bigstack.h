@@ -18,7 +18,7 @@
         struct StackSwapArgs ssa;                                                 \
         IPTR rc;                                                                  \
         APTR stk = AllocMem(QRX_BIGSTACK_SIZE, MEMF_ANY);                         \
-        if (!stk) return real_main(argc, argv);                                   \
+        if (!stk) return 20; /* fail closed: the small DOS stack is unsafe */                                   \
         sss.stk_Lower = stk;                                                      \
         sss.stk_Upper = (APTR)((IPTR)stk + QRX_BIGSTACK_SIZE);                            \
         sss.stk_Pointer = sss.stk_Upper;                                    \

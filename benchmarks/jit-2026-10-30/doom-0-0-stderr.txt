@@ -1,0 +1,12 @@
+ default file: C:\/prboom-plus.cfg
+IWAD found: C:\freedoom1.wad
+PrBoom-Plus (built Oct 30 2026 19:04:33), playing: The Ultimate DOOM
+PrBoom-Plus is released under the GNU General Public license v2.0.
+You are welcome to redistribute it under certain conditions.
+It comes with ABSOLUTELY NO WARRANTY. See the file COPYING for details.
+Playing demo demo1.lmp
+P_GetNodesVersion: using normal BSP nodes
+qrx-win32: snapshot /workspace/qrx-jit-work/doom-final/0-0/frame.ppm
+qrx-win32: program stopped: instruction budget exhausted at eip=00498d9f addr=00453490 bytes=e8eca6fbff893424 (instruction budget exhausted) eax=1004ac80 ebx=00000058 ecx=100000e0 edx=00000001 esi=1004ac80 edi=00000028 ebp=0000007c esp=002fe89c
+qrx-win32: 100000000 guest instructions in 10000 ms (10000000 per second), 35 DirectDraw frames, 435 HLE imports, 272864 API transitions
+qrx-win32: 100000000 guest instructions in 10000 ms (10000000 per second), 35 DirectDraw frames, 435 HLE imports, 272864 API transitions

@@ -82,6 +82,7 @@ void x86_init(x86cpu *c)
 void x86_free(x86cpu *c)
 {
     int i, j;
+    x86_jit_disable(c);
     tlb_flush(c);
     for (i = 0; i < 1024; i++) {
         if (!c->dir[i]) continue;
@@ -1066,8 +1067,10 @@ static const uint8_t prefix_tab[256] = {
     [0x66] = 1, [0x67] = 1, [0xF0] = 1, [0xF2] = 1, [0xF3] = 1
 };
 
+#include "qrx86jit.h"
+
 /* inlined into run_loop only: keeps the CPU pointer and the loop state in registers */
-X86_INLINE void exec_one(x86cpu *c)
+X86_INLINE void exec_one_mode(x86cpu *c,uint32_t stop_eip,int jit,int *did_native)
 {
     prefix_t p;
     uint8_t op;
@@ -1085,6 +1088,14 @@ X86_INLINE void exec_one(x86cpu *c)
     }
     p.osz = 32; p.asz = 32; p.rep = 0; p.seg = -1;
     op = fetch8(c);
+#if XJ_NATIVE && QRX_JIT_FUSED_FETCH
+    /* Reuse the already charged/fetched opcode. A failed probe leaves the
+     * original decoder immediately after its opcode, with no state rollback. */
+    if(jit && c->jit && !prefix_tab[op] && xj_candidate_op(c,start,op) && xj_try(c,stop_eip,start,1)) {
+        if(did_native)*did_native=1;
+        return;
+    }
+#endif
     while (prefix_tab[op]) {                /* one table test for the common no-prefix case */
         switch (op) {
         case 0x66: p.osz = 16; break;
@@ -1444,6 +1455,10 @@ X86_INLINE void exec_one(x86cpu *c)
 }
 
 
+
+X86_INLINE void exec_one(x86cpu *c)
+{ exec_one_mode(c,0,0,NULL); }
+
 /* bring icount up to date, then reload left with the instructions until the budget is
  * reached, capped to 32 bits (refreshed when it runs out) */
 static uint32_t budget_refill(x86cpu *c)
@@ -1457,8 +1472,8 @@ static uint32_t budget_refill(x86cpu *c)
     return c->left;
 }
 
-/* single = 1: exactly one instruction, no budget accounting (x86_step).  exec_one is
- * inlined here exactly once.  The loop tests only eip: faults longjmp out, and the
+/* single = 1: exactly one instruction, no budget accounting (x86_step).
+ * Preserve the established interpreter path independently of JIT tuning.  The loop tests only eip: faults longjmp out, and the
  * hook call sites in exec_one longjmp out when a hook set fault or stop. */
 static int run_loop(x86cpu *c, uint32_t stop_eip, int single)
 {
@@ -1483,8 +1498,74 @@ static int run_loop(x86cpu *c, uint32_t stop_eip, int single)
     return c->fault;
 }
 
+
+#if XJ_NATIVE
+/* Separate hot loops: interpreter-only mode keeps the original decoder loop
+ * without per-instruction cache checks, counters or profiling branches. */
+/* Global -Os regressed the AROS interpreter. Restrict size optimization to
+ * this dispatch loop; normal interpretation keeps the established -O2 build. */
+#if QRX_JIT_SIZE_LOOP && defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("Os")))
+#endif
+static int run_loop_jit(x86cpu *c, uint32_t stop_eip)
+{
+    jmp_buf jb, *old = c->jb;
+    if (c->fault || c->stop) return c->fault;
+    c->jb = &jb;
+    if (setjmp(jb)) { c->jb = old; return c->fault; }
+    budget_refill(c);
+    if(!c->jit->stats.timing) {
+        while(c->eip!=stop_eip) {
+            if(!c->left && !budget_refill(c))
+                FAULT(c,X86_FAULT_BUDGET,c->eip,"instruction budget exhausted");
+            #if QRX_JIT_FUSED_FETCH
+            c->left--;exec_one_mode(c,stop_eip,1,NULL);
+#else
+            if(c->jit && xj_candidate(c) && xj_try(c,stop_eip,c->eip,0))continue;
+            c->left--;exec_one(c);
+#endif
+        }
+        c->jb=old;return c->fault;
+    }
+    while (c->eip != stop_eip) {
+        clock_t t = 0;
+        if (!c->left && !budget_refill(c))
+            FAULT(c, X86_FAULT_BUDGET, c->eip, "instruction budget exhausted");
+        #if !QRX_JIT_FUSED_FETCH
+        if (c->jit && xj_candidate(c) && xj_try(c, stop_eip,c->eip,0)) continue;
+#endif
+        c->left--;
+        if (c->jit) {
+            if (c->jit->stats.timing) t = clock();
+        }
+#if QRX_JIT_FUSED_FETCH
+        int native_done=0;
+        exec_one_mode(c,stop_eip,1,&native_done);
+#else
+        exec_one(c);
+#endif
+        /* execve may destroy the old CPU/JIT inside a hook. */
+        if (c->jit && c->jit->stats.timing
+#if QRX_JIT_FUSED_FETCH
+            && !native_done
+#endif
+            )
+            c->jit->stats.interpreter_ticks += xj_elapsed(&c->jit->stats,t);
+    }
+    c->jb = old;
+    return c->fault;
+}
+#endif
+
+
 int x86_step(x86cpu *c) { c->fault = X86_OK; c->stop = 0; return run_loop(c, c->eip + 1u, 1); }
-int x86_run(x86cpu *c, uint32_t stop_eip) { return run_loop(c, stop_eip, 0); }
+int x86_run(x86cpu *c, uint32_t stop_eip)
+{
+#if XJ_NATIVE
+    if (c->jit) return run_loop_jit(c, stop_eip);
+#endif
+    return run_loop(c, stop_eip, 0);
+}
 
 uint32_t x86_call(x86cpu *c, uint32_t addr, int nargs, const uint32_t *args, int *ok)
 {

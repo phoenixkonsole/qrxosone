@@ -249,6 +249,7 @@ typedef struct qwin {
     uint32_t menu_popup, menu_owner;  /* open popup menu window and its owner */
     int menu_open_index;              /* menu bar item whose popup is open (-1 none) */
     char grab_path[256];              /* -G: capture the display after grab_at DirectDraw frames */
+    uint64_t api_calls;              /* actual HLE transitions, distinct from imports */
     int grab_at, frames;
     void (*fb_lost)(struct qwin *w, qwnd *top);   /* set by DirectDraw while it uses fb_open buffers */
 } qwin;
