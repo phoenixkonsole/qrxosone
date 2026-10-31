@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "benchmark": "qrx3d-grid-v1",
+  "timestamp_utc": "2026-10-31T20:55:00.919498+00:00",
+  "platform": "Linux x86_64 6.18.57",
+  "python": "3.13.5",
+  "scene": {
+    "width": 800,
+    "height": 450,
+    "opaque_triangles": 240,
+    "blended_triangles": 16,
+    "frames": 10,
+    "warmup": 8
+  },
+  "results": [
+    {
+      "api": "cpu",
+      "kind": "cpu_reference",
+      "width": 800,
+      "height": 450,
+      "triangles_per_frame": 256,
+      "commands_per_frame": 257,
+      "frames": 10,
+      "warmup": 8,
+      "elapsed_ms": 31.513,
+      "fps": 317.327,
+      "commands_per_s": 81553.0,
+      "reference_fnv64": "ac7a4785457e07c9",
+      "status": "PASS"
+    },
+    {
+      "api": "glide-mmio",
+      "kind": "command_translation_only",
+      "width": 800,
+      "height": 450,
+      "triangles_per_frame": 256,
+      "commands_per_frame": 257,
+      "frames": 10,
+      "warmup": 8,
+      "elapsed_ms": 0.393,
+      "fps": 25417.87,
+      "commands_per_s": 6532392.5,
+      "reference_fnv64": "ac7a4785457e07c9",
+      "status": "PASS"
+    },
+    {
+      "api": "opengl-hle",
+      "kind": "command_translation_only",
+      "width": 800,
+      "height": 450,
+      "triangles_per_frame": 256,
+      "commands_per_frame": 257,
+      "frames": 10,
+      "warmup": 8,
+      "elapsed_ms": 0.261,
+      "fps": 38299.796,
+      "commands_per_s": 9843047.5,
+      "reference_fnv64": "ac7a4785457e07c9",
+      "status": "PASS"
+    },
+    {
+      "api": "metal",
+      "status": "SKIP",
+      "reason": "macOS mit erfolgreich kompiliertem Metal-Backend erforderlich"
+    },
+    {
+      "api": "vulkan",
+      "status": "SKIP",
+      "reason": "Vulkan SDK + glslangValidator + GPU-Treiber erforderlich"
+    },
+    {
+      "api": "direct3d9-native",
+      "status": "SKIP",
+      "reason": "Separates Windows/Direct3D9-Programm in benchmarks/direct3d9; QRX86 D3D9-HLE fehlt"
+    },
+    {
+      "api": "warp3d",
+      "status": "SKIP",
+      "reason": "Keine Warp3D-Bibliotheksanbindung in ARMITHLON; QRX3D ist nicht binärkompatibel"
+    },
+    {
+      "api": "glide2x.dll",
+      "status": "SKIP",
+      "reason": "Originale 3dfx Glide-DLL nicht implementiert; glide-mmio testet nur QRX3D-Adapter"
+    }
+  ]
+}
