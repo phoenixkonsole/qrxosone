@@ -11,7 +11,8 @@ static void usage(void)
 {
     fprintf(stderr, "usage: qrx-i386 [-r ROOT] [-t] [-b BUDGET] [-e VAR=VALUE]... PROGRAM [ARGS...]\n"
                     "  Runs a Linux i386 ELF (static or with its ld-linux.so.2 below ROOT) in the\n"
-                    "  QRX qrx86core interpreter.  No native x86 code is executed.\n");
+                    "  QRX qrx86core interpreter.  No native x86 code is executed.\n"
+                    "  Experimental embedded X11 display: pass -e DISPLAY=:0.\n");
 }
 
 static int real_main(int argc, char **argv)

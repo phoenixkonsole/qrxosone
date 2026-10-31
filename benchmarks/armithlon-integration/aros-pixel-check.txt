@@ -1,0 +1,2 @@
+PASS native screen geometry: exactly 200 green-dominant pixels form a 20x10 rectangle at (14,31).
+Observed RGB: [(36, 182, 85)]; requested RGB: (18,171,52). The 8-bit AROS public-screen palette approximates the color; exact RGB equality is NOT claimed.

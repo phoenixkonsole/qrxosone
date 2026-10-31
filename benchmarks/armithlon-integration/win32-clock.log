@@ -1,0 +1,3 @@
+qrx-win32: snapshot clock-analog.ppm
+qrx-win32: snapshot clock-digital.ppm
+qrx-win32: snapshot clock-info.ppm

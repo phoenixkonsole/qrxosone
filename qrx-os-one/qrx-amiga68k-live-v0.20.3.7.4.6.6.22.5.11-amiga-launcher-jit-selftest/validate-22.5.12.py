@@ -82,7 +82,7 @@ if gcc and subprocess.run([gcc, '-m32', '-x', 'c', '-o', os.devnull, '-'], input
         t = pathlib.Path(td)
         cf = ['-std=gnu99', '-O2', '-w']
         subprocess.run(['bash', x86 / 'qmath/build-qmath.sh', gcc, 'ar', t], check=True, capture_output=True)
-        subprocess.run([gcc, *cf, '-o', t / 'qrx-i386', x86 / 'core/qrx86core.c', x86 / 'linux/qrx86linux.c', x86 / 'linux/qrx_i386_main.c', t / 'libqmath.a', '-lm'], check=True)
+        subprocess.run([gcc, *cf, '-o', t / 'qrx-i386', x86 / 'core/qrx86core.c', x86 / 'linux/qrx86linux.c', x86 / 'linux/qrx_i386_main.c', x86 / 'linux/qrx_x11.c', t / 'libqmath.a', '-lm'], check=True)
         subprocess.run([sys.executable, x86 / 'tests/gen-diff-test.py', t / 'd.S', t / 'd.meta', '22512', '6'], check=True, capture_output=True)
         subprocess.run([gcc, '-m32', '-nostdlib', '-static', '-o', t / 'd', t / 'd.S'], check=True)
         nat = subprocess.run([t / 'd'], capture_output=True)

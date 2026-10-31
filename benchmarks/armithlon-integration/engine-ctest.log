@@ -1,0 +1,40 @@
+Internal ctest changing into directory: /workspace/armithlon-build
+Test project /workspace/armithlon-build
+      Start  1: foundation_smoke
+ 1/17 Test  #1: foundation_smoke ................................   Passed    0.00 sec
+      Start  2: vm_unit_tests
+ 2/17 Test  #2: vm_unit_tests ...................................   Passed    0.00 sec
+      Start  3: virtual_boot_monitor
+ 3/17 Test  #3: virtual_boot_monitor ............................   Passed    0.00 sec
+      Start  4: guest_gpu_bridge_and_pcm_dma
+ 4/17 Test  #4: guest_gpu_bridge_and_pcm_dma ....................   Passed    0.00 sec
+      Start  5: guest_glide3d_triangle_texture
+ 5/17 Test  #5: guest_glide3d_triangle_texture ..................   Passed    0.00 sec
+      Start  6: mmio_media_devices
+ 6/17 Test  #6: mmio_media_devices ..............................   Passed    0.01 sec
+      Start  7: native_media_68k_demo
+ 7/17 Test  #7: native_media_68k_demo ...........................   Passed    0.01 sec
+      Start  8: native_metal_command_stream_and_qrx86_surface
+ 8/17 Test  #8: native_metal_command_stream_and_qrx86_surface ...   Passed    0.00 sec
+      Start  9: qrx86_hle_guest_frame_host_ipc
+ 9/17 Test  #9: qrx86_hle_guest_frame_host_ipc ..................   Passed    0.00 sec
+      Start 10: qrx86_host_interactive_input_protocol
+10/17 Test #10: qrx86_host_interactive_input_protocol ...........   Passed    0.00 sec
+      Start 11: qrx86_opengl_subset_to_gpu_commands
+11/17 Test #11: qrx86_opengl_subset_to_gpu_commands .............   Passed    0.00 sec
+      Start 12: qrx86_opengl_command_ipc_to_metal_stream
+12/17 Test #12: qrx86_opengl_command_ipc_to_metal_stream ........   Passed    0.00 sec
+      Start 13: qrx_bench_reference_scene
+13/17 Test #13: qrx_bench_reference_scene .......................   Passed    0.02 sec
+      Start 14: qrx_bench_glide_mmio
+14/17 Test #14: qrx_bench_glide_mmio ............................   Passed    0.01 sec
+      Start 15: qrx_bench_opengl_hle
+15/17 Test #15: qrx_bench_opengl_hle ............................   Passed    0.01 sec
+      Start 16: qrx_bench_cpu_renderer
+16/17 Test #16: qrx_bench_cpu_renderer ..........................   Passed    0.02 sec
+      Start 17: external_benchmark_adapters
+17/17 Test #17: external_benchmark_adapters .....................   Passed    0.16 sec
+
+100% tests passed, 0 tests failed out of 17
+
+Total Test time (real) =   0.26 sec

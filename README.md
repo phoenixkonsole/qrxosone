@@ -19,3 +19,5 @@ FS-UAE’s separate host m68k JIT now works using the
 
 ARMithlon 1.1 cumulative source and native host integration:
 [build and M1 validation](docs/ARMITHLON_INTEGRATION.md).
+
+Linux i386 GUI work: [embedded X11 subset and AROS windows](docs/QRX_X11.md).
