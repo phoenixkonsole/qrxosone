@@ -78,8 +78,20 @@ static int real_main(int argc, char **argv)
         fprintf(stderr, "qrx-win32: %s\n", m);
         qw_log(w, "%s", m);
     }
+#ifdef QRX_EXEC_PROFILE
+    qw_log(w, "PROFILE diagnostic-only: timings include instrumentation; API time is inclusive; PC groups sampled every1024 dispatches, collisions=%u", w->cpu.prof_pc_collisions);
+    for (i=0;i<512;i++) if(w->cpu.prof_ops[i])
+        qw_log(w,"PROFILE opcode=%03x dispatches=%u",i,w->cpu.prof_ops[i]);
+    for(i=0;i<512;i++)for(unsigned g=0;g<16;g++)if(w->cpu.prof_operands[i][g])
+        qw_log(w,"PROFILE operand=%03x type=%s group=%u dispatches=%u",i,g<8?"reg":"mem",g&7,w->cpu.prof_operands[i][g]);
+    for (i=0;i<4096;i++) if(w->cpu.prof_pc_hits[i])
+        qw_log(w,"PROFILE pc=%08x samples=%u",w->cpu.prof_pc[i],w->cpu.prof_pc_hits[i]);
+    for (i=0;i<(int)w->nthunk;i++) if(w->prof_api_hits[i])
+        qw_log(w,"PROFILE api=%s calls=%u inclusive_ms=%llu",w->thunk_name[i],w->prof_api_hits[i],(unsigned long long)w->prof_api_ms[i]);
+#endif
     if (w->cpu.jit) {
         x86jit_stats s; x86_jit_snapshot(&w->cpu, &s);
+        qw_log(w,"QRX86-JIT-FEATURES mask=%u (memory=1 write_continue=2 flag_liveness=4 keep_positive=8 compact_deopt=16 memory_cmp=32 compiled_loads=64 enabled_loads=128 carry_chain=256 persist_cc=512 loop_batch=1024 page_cache=2048)",s.features);
         char line[768];
         snprintf(line, sizeof(line), "QRX86-JIT profile=680%u native_blocks=%llu native_insns=%llu fallback=%llu compile=%llu hits=%llu misses=%llu invalidations=%llu evictions=%llu code_bytes=%llu live_code_bytes=%llu peak_code_bytes=%llu compile_ticks=%llu native_ticks=%llu interpreter_ticks=%llu ticks_per_second=%lu timing=%d cache_profile=%d clock_invalid=%llu\n",
             s.profile, (unsigned long long)s.native_blocks, (unsigned long long)s.native_instructions,
@@ -90,6 +102,9 @@ static int real_main(int argc, char **argv)
             (unsigned long long)s.compile_ticks, (unsigned long long)s.native_ticks,
             (unsigned long long)s.interpreter_ticks, (unsigned long)CLOCKS_PER_SEC, s.timing,s.cache_profile,(unsigned long long)s.clock_invalid);
         fputs(line,stderr); qw_log(w,"%s",line);
+#ifdef QRX_JIT_PROFILE_DEOPT
+        qw_log(w,"QRX86-DEOPT total=%u zero=%u partial=%u",s.deopts,s.zero_deopts,s.deopts-s.zero_deopts);
+#endif
         x86_jit_disable(&w->cpu);
     }
     if (w->be->shutdown) w->be->shutdown(w);

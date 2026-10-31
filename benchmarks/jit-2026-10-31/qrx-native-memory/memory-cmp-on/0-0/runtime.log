@@ -1,0 +1,6 @@
+qrx-win32: AROS backend: display buffer captured after 10 frames -> QRXOUT:frame.rgb
+qrx-win32: program stopped: instruction budget exhausted at eip=004987c8 addr=004987ce bytes=8b0d48c55600897c (instruction budget exhausted) eax=00000000 ebx=00000148 ecx=00008a1e edx=001e8f34 esi=0000006e edi=0000001e ebp=00000052 esp=002fe2f0
+qrx-win32: 100000000 guest instructions in 22499 ms (4444641 per second), 31 DirectDraw frames, 435 HLE imports, 278380 API transitions
+qrx-win32: QRX86-JIT-FEATURES mask=63 (memory=1 write_continue=2 flag_liveness=4 keep_positive=8 compact_deopt=16 memory_cmp=32 compiled_loads=64 enabled_loads=128)
+qrx-win32: QRX86-JIT profile=68060 native_blocks=12785059 native_insns=73360572 fallback=26639428 compile=6963 hits=0 misses=85048 invalidations=0 evictions=77210 code_bytes=2629802 live_code_bytes=1062918 peak_code_bytes=1064900 compile_ticks=96 native_ticks=0 interpreter_ticks=0 ticks_per_second=50 timing=0 cache_profile=0 clock_invalid=2
+

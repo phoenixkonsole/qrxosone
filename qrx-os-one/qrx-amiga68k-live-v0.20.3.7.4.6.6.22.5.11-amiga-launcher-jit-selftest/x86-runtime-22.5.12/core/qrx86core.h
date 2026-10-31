@@ -16,6 +16,10 @@
 #include <stddef.h>
 #include <setjmp.h>
 
+#ifndef QRX_JIT_PAGE_CACHE
+#define QRX_JIT_PAGE_CACHE 0
+#endif
+
 #define X86_PAGE_SHIFT 12
 #define X86_PAGE_SIZE  4096u
 #define X86_PAGE_MASK  (X86_PAGE_SIZE - 1u)
@@ -52,8 +56,11 @@ typedef struct x86jit_stats {
     uint64_t native_blocks, native_instructions, fallback_instructions, code_bytes;
     uint64_t live_code_bytes, peak_code_bytes;
     uint64_t compile_ticks, native_ticks, interpreter_ticks,clock_invalid;
-    uint32_t profile;
+    uint32_t profile,features;
     int timing,cache_profile;
+#ifdef QRX_JIT_PROFILE_DEOPT
+    uint32_t deopts,zero_deopts;
+#endif
 } x86jit_stats;
 /* Opt-in experimental backend. OFF is the default. Profiles: 20/30/40/60,
  * or 0 for AROS hardware detection. Returns 0 if unavailable; never executes
@@ -89,6 +96,9 @@ struct x86cpu {
     x86page *dir[1024];
     /* direct-mapped translation cache (tag = page address | 1); flushed on every
      * map/unmap/protect so it never outlives a page */
+#if QRX_JIT_PAGE_CACHE
+    uint64_t memory_serial; /* All mapping/permission/TLB invalidations. */
+#endif
     uint32_t tlb_rtag[64], tlb_wtag[64];
     uint8_t *tlb_rptr[64], *tlb_wptr[64];
     /* instruction fetch window: host = f_base + (eip - f_lo) while eip - f_lo < f_lim
@@ -111,6 +121,12 @@ struct x86cpu {
     uint32_t cur_eip;                    /* eip of the instruction being executed */
     jmp_buf *jb;
     struct x86jit *jit;                 /* owned; NEVER share in a CPU clone */
+#ifdef QRX_EXEC_PROFILE
+    /* Diagnostic build only: dispatcher counts; native block interiors excluded. */
+    uint32_t prof_ops[512], prof_pc[4096], prof_pc_hits[4096];
+    uint32_t prof_sample_left, prof_pc_collisions;
+    uint32_t prof_active_op,prof_operands[512][16];
+#endif
 };
 
 /* --- setup / memory --- */

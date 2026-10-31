@@ -7,6 +7,8 @@ TOOLS="${1:?usage: run-aros-jit-tests.sh TOOLCHAIN-BIN NEW-WORKDIR [CPU ...]}"
 WK="${2:?NEW-WORKDIR required}";shift 2
 [[ $# -gt 0 ]] || set -- 20 30 40 60
 OPT="${QRX_JIT_TEST_OPT:--O2}"
+read -r -a EXTRA <<< "${QRX_JIT_TEST_CFLAGS:-}"
+ORACLE="${QRX_JIT_TEST_ORACLE:-0}"
 case "$OPT" in -O2|-O3|-Os) ;; *) echo "unsupported test optimization" >&2;exit 2;; esac
 if [[ "${QRX_JIT_FSUAE_FAST:-0}" == 1 ]]; then
   export QRX_FSUAE_EXTRA="${QRX_FSUAE_EXTRA:-}
@@ -16,6 +18,7 @@ uae_blitter_cycle_exact = false
 warp_mode = 1"
 fi
 mkdir "$WK";WK="$(cd "$WK" && pwd)";mkdir "$WK/tmp" "$WK/scenario" "$WK/scenario/overlay" "$WK/scenario/overlay/C"
+printf '%s\n' "$OPT" "${EXTRA[@]}" > "$WK/COMPILER-FLAGS"
 TOOLS="$(cd "$TOOLS" && pwd)"
 CC="$TOOLS/aros-gcc";E2H="$TOOLS/elf2hunk"
 AR="${QRX_AROS_AR:-m68k-linux-gnu-ar}"
@@ -30,14 +33,28 @@ if [[ -z "$SYS" ]]; then
   SYS="$WK/system"
 fi
 bash "$ROOT/x86-runtime-22.5.12/qmath/build-qmath.sh" "$CC" "$AR" "$WK/qmath" -m68020 -fno-pic -fno-PIC -fno-optimize-sibling-calls > "$WK/build.log" 2>&1
+if [[ "$ORACLE" == 1 ]]; then
+  mkdir "$WK/core"
+  git -C "$REPO" show "25a6057a00db7201a323db80fc40e66cd459cba1:${ROOT#"$REPO"/}/x86-runtime-22.5.12/core/qrx86core.c" > "$WK/core/qrx86core.c"
+  cp "$ROOT/x86-runtime-22.5.12/core/qrx86core.h" "$WK/core/"
+  ln -s "$ROOT/x86-runtime-22.5.12/qmath/qmath.h" "$WK/qmath/qmath.h"
+  echo 25a6057a00db7201a323db80fc40e66cd459cba1 > "$WK/REFERENCE-COMMIT"
+fi
 for cpu in "$@"; do
   case "$cpu" in 20|30|40|60) ;; *) echo "Unsupported CPU $cpu" >&2;exit 2;; esac
-  "$CC" -m680"$cpu" "$OPT" -std=gnu99 -fno-pic -fno-PIC -fno-optimize-sibling-calls -Wno-volatile-register-var \
+  "$CC" -m680"$cpu" "$OPT" "${EXTRA[@]}" -std=gnu99 -fno-pic -fno-PIC -fno-optimize-sibling-calls -Wno-volatile-register-var \
     -I"$ROOT/x86-runtime-22.5.12/core" -o "$WK/probe-$cpu.elf" "$REPO/tools/qrx86/sdk-abi-probe.c" >> "$WK/build.log" 2>&1
   "$E2H" "$WK/probe-$cpu.elf" "$WK/scenario/overlay/C/sdk-abi-probe"
-  "$CC" -m680"$cpu" "$OPT" -std=gnu99 -fno-pic -fno-PIC -fno-optimize-sibling-calls -Wno-volatile-register-var \
+  oracle_args=()
+  if [[ "$ORACLE" == 1 ]]; then
+    "$CC" -m680"$cpu" -O2 "${EXTRA[@]}" -std=gnu99 -fno-pic -fno-PIC -fno-optimize-sibling-calls -Wno-volatile-register-var -c "$WK/core/qrx86core.c" -o "$WK/reference-$cpu.o" >> "$WK/build.log" 2>&1
+    "${QRX_AROS_NM:-m68k-linux-gnu-nm}" -g --defined-only "$WK/reference-$cpu.o" | awk '$3 ~ /^x86_/ { print $3, "oracle_" $3 }' > "$WK/reference-symbols-$cpu"
+    "${QRX_AROS_OBJCOPY:-m68k-linux-gnu-objcopy}" --redefine-syms="$WK/reference-symbols-$cpu" "$WK/reference-$cpu.o"
+    oracle_args=(-DQRX_JIT_ORACLE "$WK/reference-$cpu.o")
+  fi
+  "$CC" -m680"$cpu" "$OPT" "${EXTRA[@]}" -std=gnu99 -fno-pic -fno-PIC -fno-optimize-sibling-calls -Wno-volatile-register-var \
     -o "$WK/jit-tests-$cpu.elf" "$ROOT/x86-runtime-22.5.12/tests/jit-differential.c" \
-    "$ROOT/x86-runtime-22.5.12/tests/jit-abi.S" "$WK/qmath/libqmath.a" -lm >> "$WK/build.log" 2>&1
+    "$ROOT/x86-runtime-22.5.12/tests/jit-abi.S" "${oracle_args[@]}" "$WK/qmath/libqmath.a" -lm >> "$WK/build.log" 2>&1
   "$E2H" "$WK/jit-tests-$cpu.elf" "$WK/scenario/overlay/C/qrx-jit-tests"
   cat > "$WK/scenario/User-Startup" <<SCN
 FailAt 1000

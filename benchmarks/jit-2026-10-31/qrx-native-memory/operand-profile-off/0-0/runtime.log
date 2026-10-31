@@ -1,0 +1,2844 @@
+qrx-win32: AROS backend: display buffer captured after 10 frames -> QRXOUT:frame.rgb
+qrx-win32: program stopped: instruction budget exhausted at eip=00464d89 addr=00464d8b bytes=01cb8b4c240401ce (instruction budget exhausted) eax=00000e1a ebx=ffdb5836 ecx=0000a3d4 edx=1014099a esi=fff88998 edi=10082590 ebp=10140a50 esp=002ffa30
+qrx-win32: 100000000 guest instructions in 21066 ms (4746985 per second), 32 DirectDraw frames, 435 HLE imports, 275547 API transitions
+qrx-win32: PROFILE diagnostic-only: timings include instrumentation; API time is inclusive; PC groups sampled every1024 dispatches, collisions=37814
+qrx-win32: PROFILE opcode=000 dispatches=1094
+qrx-win32: PROFILE opcode=001 dispatches=5271082
+qrx-win32: PROFILE opcode=003 dispatches=11343
+qrx-win32: PROFILE opcode=004 dispatches=2
+qrx-win32: PROFILE opcode=005 dispatches=22784
+qrx-win32: PROFILE opcode=008 dispatches=7683
+qrx-win32: PROFILE opcode=009 dispatches=761654
+qrx-win32: PROFILE opcode=00a dispatches=68
+qrx-win32: PROFILE opcode=00b dispatches=30917
+qrx-win32: PROFILE opcode=00d dispatches=28180
+qrx-win32: PROFILE opcode=00f dispatches=9840496
+qrx-win32: PROFILE opcode=011 dispatches=3804
+qrx-win32: PROFILE opcode=019 dispatches=7905
+qrx-win32: PROFILE opcode=01b dispatches=288
+qrx-win32: PROFILE opcode=020 dispatches=2161
+qrx-win32: PROFILE opcode=021 dispatches=170736
+qrx-win32: PROFILE opcode=022 dispatches=1
+qrx-win32: PROFILE opcode=023 dispatches=1130
+qrx-win32: PROFILE opcode=024 dispatches=178
+qrx-win32: PROFILE opcode=025 dispatches=27302
+qrx-win32: PROFILE opcode=028 dispatches=1
+qrx-win32: PROFILE opcode=029 dispatches=765260
+qrx-win32: PROFILE opcode=02b dispatches=2563
+qrx-win32: PROFILE opcode=02c dispatches=1
+qrx-win32: PROFILE opcode=02d dispatches=6795
+qrx-win32: PROFILE opcode=030 dispatches=1383
+qrx-win32: PROFILE opcode=031 dispatches=593946
+qrx-win32: PROFILE opcode=032 dispatches=4182
+qrx-win32: PROFILE opcode=035 dispatches=4843
+qrx-win32: PROFILE opcode=038 dispatches=27009
+qrx-win32: PROFILE opcode=039 dispatches=5086887
+qrx-win32: PROFILE opcode=03b dispatches=1182997
+qrx-win32: PROFILE opcode=03c dispatches=125325
+qrx-win32: PROFILE opcode=03d dispatches=56858
+qrx-win32: PROFILE opcode=040 dispatches=1574947
+qrx-win32: PROFILE opcode=041 dispatches=125579
+qrx-win32: PROFILE opcode=042 dispatches=906307
+qrx-win32: PROFILE opcode=043 dispatches=327497
+qrx-win32: PROFILE opcode=045 dispatches=114160
+qrx-win32: PROFILE opcode=046 dispatches=171019
+qrx-win32: PROFILE opcode=047 dispatches=33061
+qrx-win32: PROFILE opcode=048 dispatches=92766
+qrx-win32: PROFILE opcode=049 dispatches=50922
+qrx-win32: PROFILE opcode=04a dispatches=36907
+qrx-win32: PROFILE opcode=04b dispatches=4523
+qrx-win32: PROFILE opcode=04d dispatches=4849
+qrx-win32: PROFILE opcode=04e dispatches=21522
+qrx-win32: PROFILE opcode=04f dispatches=6026
+qrx-win32: PROFILE opcode=050 dispatches=2556
+qrx-win32: PROFILE opcode=051 dispatches=2557
+qrx-win32: PROFILE opcode=052 dispatches=1
+qrx-win32: PROFILE opcode=053 dispatches=454855
+qrx-win32: PROFILE opcode=055 dispatches=297960
+qrx-win32: PROFILE opcode=056 dispatches=434405
+qrx-win32: PROFILE opcode=057 dispatches=301556
+qrx-win32: PROFILE opcode=058 dispatches=2637
+qrx-win32: PROFILE opcode=059 dispatches=2555
+qrx-win32: PROFILE opcode=05a dispatches=6009
+qrx-win32: PROFILE opcode=05b dispatches=454847
+qrx-win32: PROFILE opcode=05d dispatches=297952
+qrx-win32: PROFILE opcode=05e dispatches=434396
+qrx-win32: PROFILE opcode=05f dispatches=301548
+qrx-win32: PROFILE opcode=069 dispatches=3827
+qrx-win32: PROFILE opcode=072 dispatches=282281
+qrx-win32: PROFILE opcode=073 dispatches=1635249
+qrx-win32: PROFILE opcode=074 dispatches=2215375
+qrx-win32: PROFILE opcode=075 dispatches=2610861
+qrx-win32: PROFILE opcode=076 dispatches=8488
+qrx-win32: PROFILE opcode=077 dispatches=16940
+qrx-win32: PROFILE opcode=078 dispatches=125244
+qrx-win32: PROFILE opcode=079 dispatches=161348
+qrx-win32: PROFILE opcode=07c dispatches=1358623
+qrx-win32: PROFILE opcode=07d dispatches=474310
+qrx-win32: PROFILE opcode=07e dispatches=487042
+qrx-win32: PROFILE opcode=07f dispatches=376751
+qrx-win32: PROFILE opcode=080 dispatches=564962
+qrx-win32: PROFILE opcode=081 dispatches=1157188
+qrx-win32: PROFILE opcode=083 dispatches=7192635
+qrx-win32: PROFILE opcode=084 dispatches=110262
+qrx-win32: PROFILE opcode=085 dispatches=2608855
+qrx-win32: PROFILE opcode=087 dispatches=3
+qrx-win32: PROFILE opcode=088 dispatches=2956198
+qrx-win32: PROFILE opcode=089 dispatches=11785690
+qrx-win32: PROFILE opcode=08b dispatches=17732352
+qrx-win32: PROFILE opcode=08d dispatches=3239816
+qrx-win32: PROFILE opcode=090 dispatches=100209
+qrx-win32: PROFILE opcode=098 dispatches=28
+qrx-win32: PROFILE opcode=099 dispatches=74918
+qrx-win32: PROFILE opcode=09b dispatches=1
+qrx-win32: PROFILE opcode=0a1 dispatches=1772566
+qrx-win32: PROFILE opcode=0a2 dispatches=13
+qrx-win32: PROFILE opcode=0a3 dispatches=540177
+qrx-win32: PROFILE opcode=0a4 dispatches=7161
+qrx-win32: PROFILE opcode=0a5 dispatches=35
+qrx-win32: PROFILE opcode=0a8 dispatches=47115
+qrx-win32: PROFILE opcode=0a9 dispatches=435
+qrx-win32: PROFILE opcode=0ab dispatches=3027
+qrx-win32: PROFILE opcode=0b0 dispatches=562
+qrx-win32: PROFILE opcode=0b1 dispatches=484
+qrx-win32: PROFILE opcode=0b2 dispatches=5035
+qrx-win32: PROFILE opcode=0b3 dispatches=567
+qrx-win32: PROFILE opcode=0b8 dispatches=247857
+qrx-win32: PROFILE opcode=0b9 dispatches=157112
+qrx-win32: PROFILE opcode=0ba dispatches=181493
+qrx-win32: PROFILE opcode=0bb dispatches=6779
+qrx-win32: PROFILE opcode=0bd dispatches=146953
+qrx-win32: PROFILE opcode=0be dispatches=3597
+qrx-win32: PROFILE opcode=0bf dispatches=6359
+qrx-win32: PROFILE opcode=0c0 dispatches=2114
+qrx-win32: PROFILE opcode=0c1 dispatches=3617428
+qrx-win32: PROFILE opcode=0c2 dispatches=21
+qrx-win32: PROFILE opcode=0c3 dispatches=876226
+qrx-win32: PROFILE opcode=0c6 dispatches=10846
+qrx-win32: PROFILE opcode=0c7 dispatches=715268
+qrx-win32: PROFILE opcode=0d1 dispatches=33409
+qrx-win32: PROFILE opcode=0d2 dispatches=391
+qrx-win32: PROFILE opcode=0d3 dispatches=18814
+qrx-win32: PROFILE opcode=0d8 dispatches=65677
+qrx-win32: PROFILE opcode=0d9 dispatches=165234
+qrx-win32: PROFILE opcode=0da dispatches=1
+qrx-win32: PROFILE opcode=0db dispatches=100025
+qrx-win32: PROFILE opcode=0dc dispatches=4899
+qrx-win32: PROFILE opcode=0dd dispatches=75602
+qrx-win32: PROFILE opcode=0de dispatches=14211
+qrx-win32: PROFILE opcode=0df dispatches=4416
+qrx-win32: PROFILE opcode=0e8 dispatches=874206
+qrx-win32: PROFILE opcode=0e9 dispatches=427365
+qrx-win32: PROFILE opcode=0eb dispatches=151156
+qrx-win32: PROFILE opcode=0f6 dispatches=167900
+qrx-win32: PROFILE opcode=0f7 dispatches=429978
+qrx-win32: PROFILE opcode=0fc dispatches=406
+qrx-win32: PROFILE opcode=0fe dispatches=114
+qrx-win32: PROFILE opcode=0ff dispatches=518706
+qrx-win32: PROFILE opcode=142 dispatches=154
+qrx-win32: PROFILE opcode=143 dispatches=23
+qrx-win32: PROFILE opcode=144 dispatches=4654
+qrx-win32: PROFILE opcode=145 dispatches=3215
+qrx-win32: PROFILE opcode=146 dispatches=5026
+qrx-win32: PROFILE opcode=147 dispatches=1397
+qrx-win32: PROFILE opcode=148 dispatches=96518
+qrx-win32: PROFILE opcode=149 dispatches=10501
+qrx-win32: PROFILE opcode=14c dispatches=77685
+qrx-win32: PROFILE opcode=14d dispatches=70542
+qrx-win32: PROFILE opcode=14e dispatches=12978
+qrx-win32: PROFILE opcode=14f dispatches=136788
+qrx-win32: PROFILE opcode=182 dispatches=20933
+qrx-win32: PROFILE opcode=183 dispatches=57251
+qrx-win32: PROFILE opcode=184 dispatches=1249980
+qrx-win32: PROFILE opcode=185 dispatches=466097
+qrx-win32: PROFILE opcode=186 dispatches=9197
+qrx-win32: PROFILE opcode=187 dispatches=10201
+qrx-win32: PROFILE opcode=188 dispatches=215222
+qrx-win32: PROFILE opcode=189 dispatches=3728
+qrx-win32: PROFILE opcode=18c dispatches=152556
+qrx-win32: PROFILE opcode=18d dispatches=159525
+qrx-win32: PROFILE opcode=18e dispatches=86287
+qrx-win32: PROFILE opcode=18f dispatches=178239
+qrx-win32: PROFILE opcode=192 dispatches=2
+qrx-win32: PROFILE opcode=193 dispatches=179416
+qrx-win32: PROFILE opcode=194 dispatches=16820
+qrx-win32: PROFILE opcode=195 dispatches=13436
+qrx-win32: PROFILE opcode=196 dispatches=2
+qrx-win32: PROFILE opcode=197 dispatches=16
+qrx-win32: PROFILE opcode=19a dispatches=1
+qrx-win32: PROFILE opcode=19c dispatches=1261
+qrx-win32: PROFILE opcode=19d dispatches=611
+qrx-win32: PROFILE opcode=19e dispatches=5559
+qrx-win32: PROFILE opcode=19f dispatches=14055
+qrx-win32: PROFILE opcode=1a4 dispatches=25933
+qrx-win32: PROFILE opcode=1ac dispatches=110633
+qrx-win32: PROFILE opcode=1ad dispatches=8
+qrx-win32: PROFILE opcode=1af dispatches=735309
+qrx-win32: PROFILE opcode=1b1 dispatches=1
+qrx-win32: PROFILE opcode=1b6 dispatches=4886838
+qrx-win32: PROFILE opcode=1b7 dispatches=478469
+qrx-win32: PROFILE opcode=1bc dispatches=1
+qrx-win32: PROFILE opcode=1bd dispatches=2
+qrx-win32: PROFILE opcode=1be dispatches=93604
+qrx-win32: PROFILE opcode=1bf dispatches=249822
+qrx-win32: PROFILE operand=000 type=reg group=2 dispatches=1024
+qrx-win32: PROFILE operand=000 type=reg group=3 dispatches=2
+qrx-win32: PROFILE operand=000 type=mem group=0 dispatches=34
+qrx-win32: PROFILE operand=000 type=mem group=2 dispatches=34
+qrx-win32: PROFILE operand=001 type=reg group=0 dispatches=312390
+qrx-win32: PROFILE operand=001 type=reg group=1 dispatches=1713718
+qrx-win32: PROFILE operand=001 type=reg group=2 dispatches=393124
+qrx-win32: PROFILE operand=001 type=reg group=3 dispatches=825438
+qrx-win32: PROFILE operand=001 type=reg group=5 dispatches=1148057
+qrx-win32: PROFILE operand=001 type=reg group=6 dispatches=140279
+qrx-win32: PROFILE operand=001 type=reg group=7 dispatches=669612
+qrx-win32: PROFILE operand=001 type=mem group=0 dispatches=67018
+qrx-win32: PROFILE operand=001 type=mem group=1 dispatches=243
+qrx-win32: PROFILE operand=001 type=mem group=2 dispatches=1
+qrx-win32: PROFILE operand=001 type=mem group=3 dispatches=862
+qrx-win32: PROFILE operand=001 type=mem group=5 dispatches=243
+qrx-win32: PROFILE operand=001 type=mem group=6 dispatches=18
+qrx-win32: PROFILE operand=001 type=mem group=7 dispatches=79
+qrx-win32: PROFILE operand=003 type=mem group=0 dispatches=3317
+qrx-win32: PROFILE operand=003 type=mem group=1 dispatches=660
+qrx-win32: PROFILE operand=003 type=mem group=2 dispatches=4195
+qrx-win32: PROFILE operand=003 type=mem group=5 dispatches=1232
+qrx-win32: PROFILE operand=003 type=mem group=6 dispatches=1939
+qrx-win32: PROFILE operand=008 type=reg group=0 dispatches=512
+qrx-win32: PROFILE operand=008 type=reg group=1 dispatches=3022
+qrx-win32: PROFILE operand=008 type=reg group=2 dispatches=4149
+qrx-win32: PROFILE operand=009 type=reg group=0 dispatches=18130
+qrx-win32: PROFILE operand=009 type=reg group=1 dispatches=696594
+qrx-win32: PROFILE operand=009 type=reg group=2 dispatches=28108
+qrx-win32: PROFILE operand=009 type=reg group=3 dispatches=1756
+qrx-win32: PROFILE operand=009 type=reg group=5 dispatches=879
+qrx-win32: PROFILE operand=009 type=reg group=6 dispatches=1600
+qrx-win32: PROFILE operand=009 type=reg group=7 dispatches=14583
+qrx-win32: PROFILE operand=009 type=mem group=0 dispatches=1
+qrx-win32: PROFILE operand=009 type=mem group=2 dispatches=1
+qrx-win32: PROFILE operand=009 type=mem group=3 dispatches=1
+qrx-win32: PROFILE operand=009 type=mem group=7 dispatches=1
+qrx-win32: PROFILE operand=00a type=mem group=0 dispatches=68
+qrx-win32: PROFILE operand=00b type=mem group=0 dispatches=30862
+qrx-win32: PROFILE operand=00b type=mem group=1 dispatches=27
+qrx-win32: PROFILE operand=00b type=mem group=3 dispatches=2
+qrx-win32: PROFILE operand=00b type=mem group=7 dispatches=26
+qrx-win32: PROFILE operand=011 type=reg group=3 dispatches=3804
+qrx-win32: PROFILE operand=019 type=reg group=0 dispatches=9
+qrx-win32: PROFILE operand=019 type=reg group=2 dispatches=3804
+qrx-win32: PROFILE operand=019 type=reg group=3 dispatches=3804
+qrx-win32: PROFILE operand=019 type=reg group=7 dispatches=288
+qrx-win32: PROFILE operand=01b type=mem group=2 dispatches=288
+qrx-win32: PROFILE operand=020 type=reg group=1 dispatches=1767
+qrx-win32: PROFILE operand=020 type=reg group=2 dispatches=3
+qrx-win32: PROFILE operand=020 type=mem group=0 dispatches=391
+qrx-win32: PROFILE operand=021 type=reg group=0 dispatches=3525
+qrx-win32: PROFILE operand=021 type=reg group=1 dispatches=1755
+qrx-win32: PROFILE operand=021 type=reg group=2 dispatches=118087
+qrx-win32: PROFILE operand=021 type=reg group=6 dispatches=28299
+qrx-win32: PROFILE operand=021 type=reg group=7 dispatches=19069
+qrx-win32: PROFILE operand=021 type=mem group=0 dispatches=1
+qrx-win32: PROFILE operand=022 type=mem group=1 dispatches=1
+qrx-win32: PROFILE operand=023 type=mem group=0 dispatches=1024
+qrx-win32: PROFILE operand=023 type=mem group=3 dispatches=53
+qrx-win32: PROFILE operand=023 type=mem group=6 dispatches=53
+qrx-win32: PROFILE operand=028 type=reg group=0 dispatches=1
+qrx-win32: PROFILE operand=029 type=reg group=0 dispatches=297443
+qrx-win32: PROFILE operand=029 type=reg group=1 dispatches=159840
+qrx-win32: PROFILE operand=029 type=reg group=2 dispatches=95830
+qrx-win32: PROFILE operand=029 type=reg group=3 dispatches=114273
+qrx-win32: PROFILE operand=029 type=reg group=5 dispatches=35380
+qrx-win32: PROFILE operand=029 type=reg group=6 dispatches=26599
+qrx-win32: PROFILE operand=029 type=reg group=7 dispatches=32511
+qrx-win32: PROFILE operand=029 type=mem group=2 dispatches=27
+qrx-win32: PROFILE operand=029 type=mem group=6 dispatches=3325
+qrx-win32: PROFILE operand=029 type=mem group=7 dispatches=32
+qrx-win32: PROFILE operand=02b type=mem group=0 dispatches=288
+qrx-win32: PROFILE operand=02b type=mem group=1 dispatches=1428
+qrx-win32: PROFILE operand=02b type=mem group=2 dispatches=133
+qrx-win32: PROFILE operand=02b type=mem group=3 dispatches=26
+qrx-win32: PROFILE operand=02b type=mem group=6 dispatches=688
+qrx-win32: PROFILE operand=030 type=reg group=1 dispatches=1383
+qrx-win32: PROFILE operand=031 type=reg group=0 dispatches=220241
+qrx-win32: PROFILE operand=031 type=reg group=1 dispatches=54020
+qrx-win32: PROFILE operand=031 type=reg group=2 dispatches=181554
+qrx-win32: PROFILE operand=031 type=reg group=3 dispatches=19369
+qrx-win32: PROFILE operand=031 type=reg group=5 dispatches=53120
+qrx-win32: PROFILE operand=031 type=reg group=6 dispatches=53457
+qrx-win32: PROFILE operand=031 type=reg group=7 dispatches=12185
+qrx-win32: PROFILE operand=032 type=mem group=1 dispatches=4149
+qrx-win32: PROFILE operand=032 type=mem group=2 dispatches=33
+qrx-win32: PROFILE operand=038 type=reg group=1 dispatches=1
+qrx-win32: PROFILE operand=038 type=reg group=2 dispatches=328
+qrx-win32: PROFILE operand=038 type=mem group=0 dispatches=2
+qrx-win32: PROFILE operand=038 type=mem group=1 dispatches=26678
+qrx-win32: PROFILE operand=039 type=reg group=0 dispatches=1016329
+qrx-win32: PROFILE operand=039 type=reg group=1 dispatches=618541
+qrx-win32: PROFILE operand=039 type=reg group=2 dispatches=700233
+qrx-win32: PROFILE operand=039 type=reg group=3 dispatches=206513
+qrx-win32: PROFILE operand=039 type=reg group=5 dispatches=944951
+qrx-win32: PROFILE operand=039 type=reg group=6 dispatches=288684
+qrx-win32: PROFILE operand=039 type=reg group=7 dispatches=385004
+qrx-win32: PROFILE operand=039 type=mem group=0 dispatches=249816
+qrx-win32: PROFILE operand=039 type=mem group=1 dispatches=142745
+qrx-win32: PROFILE operand=039 type=mem group=2 dispatches=125862
+qrx-win32: PROFILE operand=039 type=mem group=3 dispatches=185880
+qrx-win32: PROFILE operand=039 type=mem group=5 dispatches=60568
+qrx-win32: PROFILE operand=039 type=mem group=6 dispatches=147992
+qrx-win32: PROFILE operand=039 type=mem group=7 dispatches=13769
+qrx-win32: PROFILE operand=03b type=mem group=0 dispatches=440780
+qrx-win32: PROFILE operand=03b type=mem group=1 dispatches=35157
+qrx-win32: PROFILE operand=03b type=mem group=2 dispatches=666610
+qrx-win32: PROFILE operand=03b type=mem group=3 dispatches=12128
+qrx-win32: PROFILE operand=03b type=mem group=5 dispatches=9517
+qrx-win32: PROFILE operand=03b type=mem group=6 dispatches=4962
+qrx-win32: PROFILE operand=03b type=mem group=7 dispatches=13843
+qrx-win32: PROFILE operand=069 type=reg group=0 dispatches=52
+qrx-win32: PROFILE operand=069 type=reg group=1 dispatches=7
+qrx-win32: PROFILE operand=069 type=reg group=2 dispatches=867
+qrx-win32: PROFILE operand=069 type=reg group=3 dispatches=1629
+qrx-win32: PROFILE operand=069 type=reg group=6 dispatches=288
+qrx-win32: PROFILE operand=069 type=mem group=0 dispatches=955
+qrx-win32: PROFILE operand=069 type=mem group=2 dispatches=29
+qrx-win32: PROFILE operand=080 type=reg group=0 dispatches=962
+qrx-win32: PROFILE operand=080 type=reg group=1 dispatches=2
+qrx-win32: PROFILE operand=080 type=reg group=4 dispatches=4640
+qrx-win32: PROFILE operand=080 type=reg group=5 dispatches=1035
+qrx-win32: PROFILE operand=080 type=reg group=7 dispatches=102890
+qrx-win32: PROFILE operand=080 type=mem group=1 dispatches=125
+qrx-win32: PROFILE operand=080 type=mem group=7 dispatches=455308
+qrx-win32: PROFILE operand=081 type=reg group=0 dispatches=98502
+qrx-win32: PROFILE operand=081 type=reg group=1 dispatches=17011
+qrx-win32: PROFILE operand=081 type=reg group=4 dispatches=701875
+qrx-win32: PROFILE operand=081 type=reg group=5 dispatches=14506
+qrx-win32: PROFILE operand=081 type=reg group=7 dispatches=188110
+qrx-win32: PROFILE operand=081 type=mem group=0 dispatches=4099
+qrx-win32: PROFILE operand=081 type=mem group=1 dispatches=263
+qrx-win32: PROFILE operand=081 type=mem group=4 dispatches=65
+qrx-win32: PROFILE operand=081 type=mem group=7 dispatches=132757
+qrx-win32: PROFILE operand=083 type=reg group=0 dispatches=2702259
+qrx-win32: PROFILE operand=083 type=reg group=1 dispatches=10683
+qrx-win32: PROFILE operand=083 type=reg group=2 dispatches=5569
+qrx-win32: PROFILE operand=083 type=reg group=3 dispatches=1345
+qrx-win32: PROFILE operand=083 type=reg group=4 dispatches=1476653
+qrx-win32: PROFILE operand=083 type=reg group=5 dispatches=1906741
+qrx-win32: PROFILE operand=083 type=reg group=6 dispatches=25468
+qrx-win32: PROFILE operand=083 type=reg group=7 dispatches=603003
+qrx-win32: PROFILE operand=083 type=mem group=0 dispatches=24003
+qrx-win32: PROFILE operand=083 type=mem group=1 dispatches=75974
+qrx-win32: PROFILE operand=083 type=mem group=2 dispatches=4096
+qrx-win32: PROFILE operand=083 type=mem group=4 dispatches=33
+qrx-win32: PROFILE operand=083 type=mem group=5 dispatches=418
+qrx-win32: PROFILE operand=083 type=mem group=7 dispatches=356390
+qrx-win32: PROFILE operand=084 type=reg group=0 dispatches=39899
+qrx-win32: PROFILE operand=084 type=reg group=1 dispatches=3486
+qrx-win32: PROFILE operand=084 type=reg group=2 dispatches=66427
+qrx-win32: PROFILE operand=084 type=reg group=3 dispatches=450
+qrx-win32: PROFILE operand=085 type=reg group=0 dispatches=1282859
+qrx-win32: PROFILE operand=085 type=reg group=1 dispatches=439716
+qrx-win32: PROFILE operand=085 type=reg group=2 dispatches=326208
+qrx-win32: PROFILE operand=085 type=reg group=3 dispatches=177504
+qrx-win32: PROFILE operand=085 type=reg group=5 dispatches=70761
+qrx-win32: PROFILE operand=085 type=reg group=6 dispatches=137080
+qrx-win32: PROFILE operand=085 type=reg group=7 dispatches=174723
+qrx-win32: PROFILE operand=085 type=mem group=3 dispatches=4
+qrx-win32: PROFILE operand=087 type=mem group=0 dispatches=2
+qrx-win32: PROFILE operand=087 type=mem group=3 dispatches=1
+qrx-win32: PROFILE operand=088 type=reg group=0 dispatches=3572
+qrx-win32: PROFILE operand=088 type=reg group=1 dispatches=257
+qrx-win32: PROFILE operand=088 type=reg group=2 dispatches=88346
+qrx-win32: PROFILE operand=088 type=reg group=3 dispatches=3
+qrx-win32: PROFILE operand=088 type=mem group=0 dispatches=801853
+qrx-win32: PROFILE operand=088 type=mem group=1 dispatches=42855
+qrx-win32: PROFILE operand=088 type=mem group=2 dispatches=1032271
+qrx-win32: PROFILE operand=088 type=mem group=3 dispatches=987041
+qrx-win32: PROFILE operand=089 type=reg group=0 dispatches=501283
+qrx-win32: PROFILE operand=089 type=reg group=1 dispatches=422984
+qrx-win32: PROFILE operand=089 type=reg group=2 dispatches=291208
+qrx-win32: PROFILE operand=089 type=reg group=3 dispatches=1814957
+qrx-win32: PROFILE operand=089 type=reg group=4 dispatches=1703
+qrx-win32: PROFILE operand=089 type=reg group=5 dispatches=199013
+qrx-win32: PROFILE operand=089 type=reg group=6 dispatches=869269
+qrx-win32: PROFILE operand=089 type=reg group=7 dispatches=272274
+qrx-win32: PROFILE operand=089 type=mem group=0 dispatches=2478257
+qrx-win32: PROFILE operand=089 type=mem group=1 dispatches=1359268
+qrx-win32: PROFILE operand=089 type=mem group=2 dispatches=1455042
+qrx-win32: PROFILE operand=089 type=mem group=3 dispatches=673450
+qrx-win32: PROFILE operand=089 type=mem group=4 dispatches=1
+qrx-win32: PROFILE operand=089 type=mem group=5 dispatches=461250
+qrx-win32: PROFILE operand=089 type=mem group=6 dispatches=555898
+qrx-win32: PROFILE operand=089 type=mem group=7 dispatches=429833
+qrx-win32: PROFILE operand=08b type=mem group=0 dispatches=3585614
+qrx-win32: PROFILE operand=08b type=mem group=1 dispatches=4761990
+qrx-win32: PROFILE operand=08b type=mem group=2 dispatches=3774979
+qrx-win32: PROFILE operand=08b type=mem group=3 dispatches=1662709
+qrx-win32: PROFILE operand=08b type=mem group=4 dispatches=1
+qrx-win32: PROFILE operand=08b type=mem group=5 dispatches=1182449
+qrx-win32: PROFILE operand=08b type=mem group=6 dispatches=1496614
+qrx-win32: PROFILE operand=08b type=mem group=7 dispatches=1267996
+qrx-win32: PROFILE operand=08d type=mem group=0 dispatches=1032011
+qrx-win32: PROFILE operand=08d type=mem group=1 dispatches=199902
+qrx-win32: PROFILE operand=08d type=mem group=2 dispatches=714775
+qrx-win32: PROFILE operand=08d type=mem group=3 dispatches=273802
+qrx-win32: PROFILE operand=08d type=mem group=4 dispatches=213
+qrx-win32: PROFILE operand=08d type=mem group=5 dispatches=143771
+qrx-win32: PROFILE operand=08d type=mem group=6 dispatches=606840
+qrx-win32: PROFILE operand=08d type=mem group=7 dispatches=268502
+qrx-win32: PROFILE operand=0c0 type=reg group=4 dispatches=2113
+qrx-win32: PROFILE operand=0c0 type=reg group=5 dispatches=1
+qrx-win32: PROFILE operand=0c1 type=reg group=4 dispatches=541328
+qrx-win32: PROFILE operand=0c1 type=reg group=5 dispatches=139610
+qrx-win32: PROFILE operand=0c1 type=reg group=7 dispatches=2936489
+qrx-win32: PROFILE operand=0c1 type=mem group=5 dispatches=1
+qrx-win32: PROFILE operand=0c6 type=mem group=0 dispatches=10846
+qrx-win32: PROFILE operand=0c7 type=mem group=0 dispatches=715268
+qrx-win32: PROFILE operand=0d1 type=reg group=5 dispatches=14094
+qrx-win32: PROFILE operand=0d1 type=reg group=7 dispatches=19296
+qrx-win32: PROFILE operand=0d1 type=mem group=4 dispatches=19
+qrx-win32: PROFILE operand=0d2 type=reg group=0 dispatches=391
+qrx-win32: PROFILE operand=0d3 type=reg group=4 dispatches=5002
+qrx-win32: PROFILE operand=0d3 type=reg group=5 dispatches=4172
+qrx-win32: PROFILE operand=0d3 type=reg group=7 dispatches=9640
+qrx-win32: PROFILE operand=0d8 type=reg group=0 dispatches=2
+qrx-win32: PROFILE operand=0d8 type=reg group=1 dispatches=18610
+qrx-win32: PROFILE operand=0d8 type=mem group=0 dispatches=2
+qrx-win32: PROFILE operand=0d8 type=mem group=1 dispatches=42160
+qrx-win32: PROFILE operand=0d8 type=mem group=4 dispatches=1
+qrx-win32: PROFILE operand=0d8 type=mem group=6 dispatches=4902
+qrx-win32: PROFILE operand=0d9 type=reg group=0 dispatches=9308
+qrx-win32: PROFILE operand=0d9 type=reg group=1 dispatches=18613
+qrx-win32: PROFILE operand=0d9 type=reg group=4 dispatches=1
+qrx-win32: PROFILE operand=0d9 type=reg group=5 dispatches=4411
+qrx-win32: PROFILE operand=0d9 type=reg group=6 dispatches=14234
+qrx-win32: PROFILE operand=0d9 type=reg group=7 dispatches=4409
+qrx-win32: PROFILE operand=0d9 type=mem group=0 dispatches=1
+qrx-win32: PROFILE operand=0d9 type=mem group=2 dispatches=2
+qrx-win32: PROFILE operand=0d9 type=mem group=3 dispatches=14239
+qrx-win32: PROFILE operand=0d9 type=mem group=5 dispatches=76474
+qrx-win32: PROFILE operand=0d9 type=mem group=7 dispatches=23542
+qrx-win32: PROFILE operand=0da type=reg group=1 dispatches=1
+qrx-win32: PROFILE operand=0db type=reg group=4 dispatches=1
+qrx-win32: PROFILE operand=0db type=reg group=6 dispatches=1
+qrx-win32: PROFILE operand=0db type=mem group=0 dispatches=61780
+qrx-win32: PROFILE operand=0db type=mem group=2 dispatches=8
+qrx-win32: PROFILE operand=0db type=mem group=3 dispatches=38229
+qrx-win32: PROFILE operand=0db type=mem group=5 dispatches=2
+qrx-win32: PROFILE operand=0db type=mem group=7 dispatches=4
+qrx-win32: PROFILE operand=0dc type=reg group=1 dispatches=4896
+qrx-win32: PROFILE operand=0dc type=mem group=0 dispatches=1
+qrx-win32: PROFILE operand=0dc type=mem group=1 dispatches=2
+qrx-win32: PROFILE operand=0dd type=reg group=3 dispatches=4415
+qrx-win32: PROFILE operand=0dd type=mem group=0 dispatches=42713
+qrx-win32: PROFILE operand=0dd type=mem group=2 dispatches=2
+qrx-win32: PROFILE operand=0dd type=mem group=3 dispatches=28472
+qrx-win32: PROFILE operand=0de type=reg group=0 dispatches=4410
+qrx-win32: PROFILE operand=0de type=reg group=1 dispatches=4897
+qrx-win32: PROFILE operand=0de type=reg group=4 dispatches=1
+qrx-win32: PROFILE operand=0de type=reg group=5 dispatches=2
+qrx-win32: PROFILE operand=0de type=reg group=6 dispatches=2
+qrx-win32: PROFILE operand=0de type=reg group=7 dispatches=4899
+qrx-win32: PROFILE operand=0df type=reg group=4 dispatches=1
+qrx-win32: PROFILE operand=0df type=reg group=5 dispatches=4410
+qrx-win32: PROFILE operand=0df type=reg group=6 dispatches=3
+qrx-win32: PROFILE operand=0df type=mem group=5 dispatches=2
+qrx-win32: PROFILE operand=0f6 type=reg group=0 dispatches=32150
+qrx-win32: PROFILE operand=0f6 type=reg group=2 dispatches=164
+qrx-win32: PROFILE operand=0f6 type=reg group=3 dispatches=18
+qrx-win32: PROFILE operand=0f6 type=reg group=4 dispatches=1
+qrx-win32: PROFILE operand=0f6 type=mem group=0 dispatches=135567
+qrx-win32: PROFILE operand=0f7 type=reg group=0 dispatches=20838
+qrx-win32: PROFILE operand=0f7 type=reg group=2 dispatches=3737
+qrx-win32: PROFILE operand=0f7 type=reg group=3 dispatches=119132
+qrx-win32: PROFILE operand=0f7 type=reg group=4 dispatches=4627
+qrx-win32: PROFILE operand=0f7 type=reg group=5 dispatches=28074
+qrx-win32: PROFILE operand=0f7 type=reg group=6 dispatches=91948
+qrx-win32: PROFILE operand=0f7 type=reg group=7 dispatches=16793
+qrx-win32: PROFILE operand=0f7 type=mem group=0 dispatches=105
+qrx-win32: PROFILE operand=0f7 type=mem group=4 dispatches=2744
+qrx-win32: PROFILE operand=0f7 type=mem group=5 dispatches=80682
+qrx-win32: PROFILE operand=0f7 type=mem group=6 dispatches=5064
+qrx-win32: PROFILE operand=0f7 type=mem group=7 dispatches=56234
+qrx-win32: PROFILE operand=0fe type=reg group=0 dispatches=80
+qrx-win32: PROFILE operand=0fe type=reg group=1 dispatches=34
+qrx-win32: PROFILE operand=0ff type=reg group=2 dispatches=141464
+qrx-win32: PROFILE operand=0ff type=reg group=4 dispatches=38800
+qrx-win32: PROFILE operand=0ff type=mem group=0 dispatches=31866
+qrx-win32: PROFILE operand=0ff type=mem group=1 dispatches=16470
+qrx-win32: PROFILE operand=0ff type=mem group=2 dispatches=136106
+qrx-win32: PROFILE operand=0ff type=mem group=4 dispatches=153998
+qrx-win32: PROFILE operand=0ff type=mem group=6 dispatches=2
+qrx-win32: PROFILE operand=142 type=reg group=1 dispatches=8
+qrx-win32: PROFILE operand=142 type=reg group=3 dispatches=145
+qrx-win32: PROFILE operand=142 type=reg group=6 dispatches=1
+qrx-win32: PROFILE operand=143 type=reg group=0 dispatches=23
+qrx-win32: PROFILE operand=144 type=reg group=0 dispatches=1
+qrx-win32: PROFILE operand=144 type=reg group=2 dispatches=1
+qrx-win32: PROFILE operand=144 type=reg group=3 dispatches=137
+qrx-win32: PROFILE operand=144 type=reg group=6 dispatches=18
+qrx-win32: PROFILE operand=144 type=reg group=7 dispatches=88
+qrx-win32: PROFILE operand=144 type=mem group=2 dispatches=4409
+qrx-win32: PROFILE operand=145 type=reg group=0 dispatches=1612
+qrx-win32: PROFILE operand=145 type=reg group=2 dispatches=625
+qrx-win32: PROFILE operand=145 type=reg group=5 dispatches=2
+qrx-win32: PROFILE operand=145 type=reg group=6 dispatches=8
+qrx-win32: PROFILE operand=145 type=reg group=7 dispatches=8
+qrx-win32: PROFILE operand=145 type=mem group=0 dispatches=960
+qrx-win32: PROFILE operand=146 type=reg group=0 dispatches=8
+qrx-win32: PROFILE operand=146 type=reg group=1 dispatches=122
+qrx-win32: PROFILE operand=146 type=reg group=2 dispatches=4896
+qrx-win32: PROFILE operand=147 type=reg group=0 dispatches=1397
+qrx-win32: PROFILE operand=148 type=reg group=0 dispatches=33268
+qrx-win32: PROFILE operand=148 type=reg group=1 dispatches=392
+qrx-win32: PROFILE operand=148 type=reg group=2 dispatches=35592
+qrx-win32: PROFILE operand=148 type=reg group=3 dispatches=23189
+qrx-win32: PROFILE operand=148 type=reg group=6 dispatches=838
+qrx-win32: PROFILE operand=148 type=reg group=7 dispatches=3239
+qrx-win32: PROFILE operand=149 type=reg group=0 dispatches=10086
+qrx-win32: PROFILE operand=149 type=reg group=1 dispatches=233
+qrx-win32: PROFILE operand=149 type=reg group=2 dispatches=1
+qrx-win32: PROFILE operand=149 type=reg group=3 dispatches=2
+qrx-win32: PROFILE operand=149 type=reg group=6 dispatches=179
+qrx-win32: PROFILE operand=14c type=reg group=0 dispatches=6293
+qrx-win32: PROFILE operand=14c type=reg group=1 dispatches=65729
+qrx-win32: PROFILE operand=14c type=reg group=2 dispatches=445
+qrx-win32: PROFILE operand=14c type=reg group=3 dispatches=5218
+qrx-win32: PROFILE operand=14d type=reg group=0 dispatches=60553
+qrx-win32: PROFILE operand=14d type=reg group=1 dispatches=9448
+qrx-win32: PROFILE operand=14d type=reg group=6 dispatches=541
+qrx-win32: PROFILE operand=14e type=reg group=0 dispatches=7269
+qrx-win32: PROFILE operand=14e type=reg group=2 dispatches=182
+qrx-win32: PROFILE operand=14e type=reg group=5 dispatches=410
+qrx-win32: PROFILE operand=14e type=reg group=6 dispatches=4325
+qrx-win32: PROFILE operand=14e type=reg group=7 dispatches=1
+qrx-win32: PROFILE operand=14e type=mem group=0 dispatches=395
+qrx-win32: PROFILE operand=14e type=mem group=1 dispatches=395
+qrx-win32: PROFILE operand=14e type=mem group=7 dispatches=1
+qrx-win32: PROFILE operand=14f type=reg group=0 dispatches=125818
+qrx-win32: PROFILE operand=14f type=reg group=1 dispatches=32
+qrx-win32: PROFILE operand=14f type=reg group=2 dispatches=4097
+qrx-win32: PROFILE operand=14f type=reg group=3 dispatches=1596
+qrx-win32: PROFILE operand=14f type=reg group=6 dispatches=5244
+qrx-win32: PROFILE operand=14f type=reg group=7 dispatches=1
+qrx-win32: PROFILE operand=192 type=reg group=0 dispatches=2
+qrx-win32: PROFILE operand=193 type=reg group=0 dispatches=179416
+qrx-win32: PROFILE operand=194 type=reg group=0 dispatches=16819
+qrx-win32: PROFILE operand=194 type=mem group=0 dispatches=1
+qrx-win32: PROFILE operand=195 type=reg group=0 dispatches=13361
+qrx-win32: PROFILE operand=195 type=mem group=0 dispatches=75
+qrx-win32: PROFILE operand=196 type=reg group=0 dispatches=2
+qrx-win32: PROFILE operand=197 type=mem group=0 dispatches=16
+qrx-win32: PROFILE operand=19a type=reg group=0 dispatches=1
+qrx-win32: PROFILE operand=19c type=reg group=0 dispatches=1261
+qrx-win32: PROFILE operand=19d type=reg group=0 dispatches=611
+qrx-win32: PROFILE operand=19e type=reg group=0 dispatches=5495
+qrx-win32: PROFILE operand=19e type=mem group=0 dispatches=64
+qrx-win32: PROFILE operand=19f type=reg group=0 dispatches=14055
+qrx-win32: PROFILE operand=1a4 type=reg group=0 dispatches=480
+qrx-win32: PROFILE operand=1a4 type=reg group=1 dispatches=25453
+qrx-win32: PROFILE operand=1ac type=reg group=2 dispatches=106541
+qrx-win32: PROFILE operand=1ac type=reg group=3 dispatches=4092
+qrx-win32: PROFILE operand=1ad type=reg group=7 dispatches=8
+qrx-win32: PROFILE operand=1af type=reg group=0 dispatches=344087
+qrx-win32: PROFILE operand=1af type=reg group=1 dispatches=223677
+qrx-win32: PROFILE operand=1af type=reg group=2 dispatches=33933
+qrx-win32: PROFILE operand=1af type=reg group=3 dispatches=99848
+qrx-win32: PROFILE operand=1af type=reg group=5 dispatches=11520
+qrx-win32: PROFILE operand=1af type=reg group=6 dispatches=17099
+qrx-win32: PROFILE operand=1af type=reg group=7 dispatches=1078
+qrx-win32: PROFILE operand=1af type=mem group=0 dispatches=4
+qrx-win32: PROFILE operand=1af type=mem group=2 dispatches=4063
+qrx-win32: PROFILE operand=1b1 type=mem group=7 dispatches=1
+qrx-win32: PROFILE operand=1b6 type=reg group=0 dispatches=15670
+qrx-win32: PROFILE operand=1b6 type=reg group=1 dispatches=2204
+qrx-win32: PROFILE operand=1b6 type=reg group=2 dispatches=14990
+qrx-win32: PROFILE operand=1b6 type=reg group=3 dispatches=1965
+qrx-win32: PROFILE operand=1b6 type=reg group=5 dispatches=5746
+qrx-win32: PROFILE operand=1b6 type=reg group=7 dispatches=54
+qrx-win32: PROFILE operand=1b6 type=mem group=0 dispatches=1543587
+qrx-win32: PROFILE operand=1b6 type=mem group=1 dispatches=95045
+qrx-win32: PROFILE operand=1b6 type=mem group=2 dispatches=1258962
+qrx-win32: PROFILE operand=1b6 type=mem group=3 dispatches=1025809
+qrx-win32: PROFILE operand=1b6 type=mem group=5 dispatches=37076
+qrx-win32: PROFILE operand=1b6 type=mem group=6 dispatches=129144
+qrx-win32: PROFILE operand=1b6 type=mem group=7 dispatches=756586
+qrx-win32: PROFILE operand=1b7 type=reg group=0 dispatches=4572
+qrx-win32: PROFILE operand=1b7 type=reg group=1 dispatches=62
+qrx-win32: PROFILE operand=1b7 type=reg group=2 dispatches=6563
+qrx-win32: PROFILE operand=1b7 type=reg group=3 dispatches=62
+qrx-win32: PROFILE operand=1b7 type=reg group=5 dispatches=62
+qrx-win32: PROFILE operand=1b7 type=reg group=6 dispatches=62
+qrx-win32: PROFILE operand=1b7 type=reg group=7 dispatches=490
+qrx-win32: PROFILE operand=1b7 type=mem group=0 dispatches=78758
+qrx-win32: PROFILE operand=1b7 type=mem group=1 dispatches=2697
+qrx-win32: PROFILE operand=1b7 type=mem group=2 dispatches=25483
+qrx-win32: PROFILE operand=1b7 type=mem group=3 dispatches=90148
+qrx-win32: PROFILE operand=1b7 type=mem group=5 dispatches=86561
+qrx-win32: PROFILE operand=1b7 type=mem group=6 dispatches=86627
+qrx-win32: PROFILE operand=1b7 type=mem group=7 dispatches=96322
+qrx-win32: PROFILE operand=1bc type=mem group=0 dispatches=1
+qrx-win32: PROFILE operand=1bd type=reg group=0 dispatches=1
+qrx-win32: PROFILE operand=1bd type=mem group=2 dispatches=1
+qrx-win32: PROFILE operand=1be type=reg group=0 dispatches=3968
+qrx-win32: PROFILE operand=1be type=reg group=2 dispatches=2
+qrx-win32: PROFILE operand=1be type=reg group=5 dispatches=16
+qrx-win32: PROFILE operand=1be type=reg group=6 dispatches=558
+qrx-win32: PROFILE operand=1be type=mem group=0 dispatches=22871
+qrx-win32: PROFILE operand=1be type=mem group=1 dispatches=1370
+qrx-win32: PROFILE operand=1be type=mem group=2 dispatches=62995
+qrx-win32: PROFILE operand=1be type=mem group=5 dispatches=912
+qrx-win32: PROFILE operand=1be type=mem group=7 dispatches=912
+qrx-win32: PROFILE operand=1bf type=reg group=0 dispatches=123
+qrx-win32: PROFILE operand=1bf type=reg group=1 dispatches=34
+qrx-win32: PROFILE operand=1bf type=reg group=2 dispatches=868
+qrx-win32: PROFILE operand=1bf type=reg group=5 dispatches=26
+qrx-win32: PROFILE operand=1bf type=reg group=6 dispatches=407
+qrx-win32: PROFILE operand=1bf type=reg group=7 dispatches=68
+qrx-win32: PROFILE operand=1bf type=mem group=0 dispatches=138319
+qrx-win32: PROFILE operand=1bf type=mem group=1 dispatches=17445
+qrx-win32: PROFILE operand=1bf type=mem group=2 dispatches=51627
+qrx-win32: PROFILE operand=1bf type=mem group=3 dispatches=823
+qrx-win32: PROFILE operand=1bf type=mem group=5 dispatches=834
+qrx-win32: PROFILE operand=1bf type=mem group=6 dispatches=28851
+qrx-win32: PROFILE operand=1bf type=mem group=7 dispatches=10397
+qrx-win32: PROFILE pc=00420410 samples=1
+qrx-win32: PROFILE pc=004b05e0 samples=1
+qrx-win32: PROFILE pc=004e06e0 samples=8
+qrx-win32: PROFILE pc=004e06f0 samples=10
+qrx-win32: PROFILE pc=004906b0 samples=24
+qrx-win32: PROFILE pc=004e06d0 samples=15
+qrx-win32: PROFILE pc=004906d0 samples=33
+qrx-win32: PROFILE pc=004906c0 samples=14
+qrx-win32: PROFILE pc=004906e0 samples=14
+qrx-win32: PROFILE pc=00490790 samples=20
+qrx-win32: PROFILE pc=00490780 samples=18
+qrx-win32: PROFILE pc=004907a0 samples=4
+qrx-win32: PROFILE pc=004907e0 samples=1
+qrx-win32: PROFILE pc=004e0760 samples=143
+qrx-win32: PROFILE pc=004e0770 samples=142
+qrx-win32: PROFILE pc=004e0740 samples=162
+qrx-win32: PROFILE pc=004e0750 samples=123
+qrx-win32: PROFILE pc=004e0720 samples=59
+qrx-win32: PROFILE pc=004e0730 samples=83
+qrx-win32: PROFILE pc=004e0700 samples=219
+qrx-win32: PROFILE pc=004e0710 samples=159
+qrx-win32: PROFILE pc=00420200 samples=1
+qrx-win32: PROFILE pc=00420250 samples=1
+qrx-win32: PROFILE pc=00440340 samples=1
+qrx-win32: PROFILE pc=00440330 samples=1
+qrx-win32: PROFILE pc=00420ca0 samples=30
+qrx-win32: PROFILE pc=00420cb0 samples=15
+qrx-win32: PROFILE pc=00420c80 samples=2
+qrx-win32: PROFILE pc=00420c90 samples=1
+qrx-win32: PROFILE pc=00420cc0 samples=36
+qrx-win32: PROFILE pc=00420cd0 samples=4
+qrx-win32: PROFILE pc=004a0890 samples=1
+qrx-win32: PROFILE pc=004908e0 samples=1
+qrx-win32: PROFILE pc=004b0810 samples=1
+qrx-win32: PROFILE pc=00490820 samples=2
+qrx-win32: PROFILE pc=004208e0 samples=10
+qrx-win32: PROFILE pc=004208f0 samples=9
+qrx-win32: PROFILE pc=00490990 samples=25
+qrx-win32: PROFILE pc=00490980 samples=15
+qrx-win32: PROFILE pc=004909a0 samples=15
+qrx-win32: PROFILE pc=004a09e0 samples=2
+qrx-win32: PROFILE pc=004a09f0 samples=2
+qrx-win32: PROFILE pc=004a09d0 samples=4
+qrx-win32: PROFILE pc=00490970 samples=21
+qrx-win32: PROFILE pc=004a0950 samples=1
+qrx-win32: PROFILE pc=004a0aa0 samples=5
+qrx-win32: PROFILE pc=004a0a80 samples=6
+qrx-win32: PROFILE pc=004a0a90 samples=5
+qrx-win32: PROFILE pc=004a0ae0 samples=5
+qrx-win32: PROFILE pc=004a0af0 samples=4
+qrx-win32: PROFILE pc=004a0a20 samples=3
+qrx-win32: PROFILE pc=004a0a30 samples=1
+qrx-win32: PROFILE pc=004a0a00 samples=4
+qrx-win32: PROFILE pc=004a0a10 samples=2
+qrx-win32: PROFILE pc=004c0a00 samples=4
+qrx-win32: PROFILE pc=004a0a70 samples=4
+qrx-win32: PROFILE pc=004c0a30 samples=4
+qrx-win32: PROFILE pc=00490b80 samples=1
+qrx-win32: PROFILE pc=004e14c0 samples=4
+qrx-win32: PROFILE pc=004e14d0 samples=7
+qrx-win32: PROFILE pc=004e14a0 samples=5
+qrx-win32: PROFILE pc=004e14b0 samples=16
+qrx-win32: PROFILE pc=004e1480 samples=2
+qrx-win32: PROFILE pc=00491410 samples=1
+qrx-win32: PROFILE pc=00491400 samples=1
+qrx-win32: PROFILE pc=004e1440 samples=5
+qrx-win32: PROFILE pc=004e1450 samples=4
+qrx-win32: PROFILE pc=004e1420 samples=5
+qrx-win32: PROFILE pc=004e1430 samples=4
+qrx-win32: PROFILE pc=004e1400 samples=3
+qrx-win32: PROFILE pc=004e1410 samples=3
+qrx-win32: PROFILE pc=00451540 samples=47
+qrx-win32: PROFILE pc=00451500 samples=1
+qrx-win32: PROFILE pc=00451530 samples=36
+qrx-win32: PROFILE pc=00451520 samples=66
+qrx-win32: PROFILE pc=004e1540 samples=1
+qrx-win32: PROFILE pc=004115c0 samples=1
+qrx-win32: PROFILE pc=004c16d0 samples=1
+qrx-win32: PROFILE pc=004e16c0 samples=1
+qrx-win32: PROFILE pc=004e16d0 samples=5
+qrx-win32: PROFILE pc=004e16a0 samples=1
+qrx-win32: PROFILE pc=004e1690 samples=4
+qrx-win32: PROFILE pc=004e1670 samples=2
+qrx-win32: PROFILE pc=004e1640 samples=2
+qrx-win32: PROFILE pc=004e1650 samples=1
+qrx-win32: PROFILE pc=004e1620 samples=3
+qrx-win32: PROFILE pc=004e1610 samples=1
+qrx-win32: PROFILE pc=004c17d0 samples=2
+qrx-win32: PROFILE pc=004c1790 samples=1
+qrx-win32: PROFILE pc=004e1760 samples=3
+qrx-win32: PROFILE pc=004e1740 samples=1
+qrx-win32: PROFILE pc=004e1750 samples=3
+qrx-win32: PROFILE pc=00451790 samples=1
+qrx-win32: PROFILE pc=004e1730 samples=3
+qrx-win32: PROFILE pc=004e10f0 samples=7
+qrx-win32: PROFILE pc=004a1080 samples=2
+qrx-win32: PROFILE pc=004a1020 samples=3
+qrx-win32: PROFILE pc=004a1030 samples=1
+qrx-win32: PROFILE pc=004e1020 samples=1
+qrx-win32: PROFILE pc=004a1070 samples=2
+qrx-win32: PROFILE pc=004a1040 samples=22
+qrx-win32: PROFILE pc=004e1010 samples=1
+qrx-win32: PROFILE pc=004e11f0 samples=45
+qrx-win32: PROFILE pc=004e11a0 samples=1
+qrx-win32: PROFILE pc=004e1190 samples=1
+qrx-win32: PROFILE pc=004e1160 samples=4
+qrx-win32: PROFILE pc=004e1170 samples=1
+qrx-win32: PROFILE pc=004e1120 samples=1
+qrx-win32: PROFILE pc=004e1130 samples=3
+qrx-win32: PROFILE pc=004e1100 samples=1
+qrx-win32: PROFILE pc=004e12e0 samples=12
+qrx-win32: PROFILE pc=004e12f0 samples=9
+qrx-win32: PROFILE pc=004e12a0 samples=1
+qrx-win32: PROFILE pc=004e12b0 samples=1
+qrx-win32: PROFILE pc=004e1280 samples=4
+qrx-win32: PROFILE pc=004912e0 samples=1
+qrx-win32: PROFILE pc=004e1240 samples=27
+qrx-win32: PROFILE pc=004e1220 samples=25
+qrx-win32: PROFILE pc=004e1230 samples=25
+qrx-win32: PROFILE pc=004e1200 samples=9
+qrx-win32: PROFILE pc=004e1210 samples=5
+qrx-win32: PROFILE pc=00491390 samples=8
+qrx-win32: PROFILE pc=00491380 samples=17
+qrx-win32: PROFILE pc=004e13c0 samples=11
+qrx-win32: PROFILE pc=004913a0 samples=2
+qrx-win32: PROFILE pc=004913d0 samples=3
+qrx-win32: PROFILE pc=004913c0 samples=13
+qrx-win32: PROFILE pc=004913f0 samples=3
+qrx-win32: PROFILE pc=004913e0 samples=3
+qrx-win32: PROFILE pc=004e1360 samples=8
+qrx-win32: PROFILE pc=004e1370 samples=4
+qrx-win32: PROFILE pc=004e1340 samples=2
+qrx-win32: PROFILE pc=004e1350 samples=5
+qrx-win32: PROFILE pc=004e1320 samples=3
+qrx-win32: PROFILE pc=004e1330 samples=2
+qrx-win32: PROFILE pc=004013e0 samples=1
+qrx-win32: PROFILE pc=00491360 samples=7
+qrx-win32: PROFILE pc=004e1c80 samples=2
+qrx-win32: PROFILE pc=004e1c60 samples=2
+qrx-win32: PROFILE pc=004e1c70 samples=2
+qrx-win32: PROFILE pc=004e1c40 samples=4
+qrx-win32: PROFILE pc=004e1c50 samples=1
+qrx-win32: PROFILE pc=004e1c20 samples=5
+qrx-win32: PROFILE pc=004e1c30 samples=9
+qrx-win32: PROFILE pc=004e1c00 samples=3
+qrx-win32: PROFILE pc=004e1c10 samples=3
+qrx-win32: PROFILE pc=00451830 samples=1
+qrx-win32: PROFILE pc=004c1850 samples=1
+qrx-win32: PROFILE pc=004e1800 samples=3
+qrx-win32: PROFILE pc=004919f0 samples=1
+qrx-win32: PROFILE pc=004e1920 samples=2
+qrx-win32: PROFILE pc=004e1900 samples=1
+qrx-win32: PROFILE pc=004e1910 samples=1
+qrx-win32: PROFILE pc=004e1ab0 samples=1
+qrx-win32: PROFILE pc=00451ab0 samples=1
+qrx-win32: PROFILE pc=004e1be0 samples=6
+qrx-win32: PROFILE pc=004e1bf0 samples=4
+qrx-win32: PROFILE pc=004e1bc0 samples=1
+qrx-win32: PROFILE pc=004e1bd0 samples=3
+qrx-win32: PROFILE pc=004e1ba0 samples=3
+qrx-win32: PROFILE pc=004e1bb0 samples=3
+qrx-win32: PROFILE pc=004e1b80 samples=1
+qrx-win32: PROFILE pc=004e1b70 samples=1
+qrx-win32: PROFILE pc=004924d0 samples=8
+qrx-win32: PROFILE pc=004924c0 samples=5
+qrx-win32: PROFILE pc=00492400 samples=2
+qrx-win32: PROFILE pc=004524f0 samples=9
+qrx-win32: PROFILE pc=004524e0 samples=28
+qrx-win32: PROFILE pc=00452490 samples=7
+qrx-win32: PROFILE pc=00492470 samples=6
+qrx-win32: PROFILE pc=00492460 samples=18
+qrx-win32: PROFILE pc=00492590 samples=22
+qrx-win32: PROFILE pc=00492580 samples=16
+qrx-win32: PROFILE pc=004925b0 samples=17
+qrx-win32: PROFILE pc=004925d0 samples=4
+qrx-win32: PROFILE pc=004925c0 samples=27
+qrx-win32: PROFILE pc=004925e0 samples=3
+qrx-win32: PROFILE pc=004525f0 samples=15
+qrx-win32: PROFILE pc=004525e0 samples=30
+qrx-win32: PROFILE pc=00492550 samples=29
+qrx-win32: PROFILE pc=00492540 samples=29
+qrx-win32: PROFILE pc=00492570 samples=18
+qrx-win32: PROFILE pc=00492560 samples=19
+qrx-win32: PROFILE pc=00452650 samples=4
+qrx-win32: PROFILE pc=00452640 samples=32
+qrx-win32: PROFILE pc=00452670 samples=12
+qrx-win32: PROFILE pc=00452660 samples=18
+qrx-win32: PROFILE pc=00452610 samples=16
+qrx-win32: PROFILE pc=00452600 samples=16
+qrx-win32: PROFILE pc=00452630 samples=19
+qrx-win32: PROFILE pc=00452620 samples=18
+qrx-win32: PROFILE pc=004b2630 samples=1
+qrx-win32: PROFILE pc=004526c0 samples=13
+qrx-win32: PROFILE pc=00492630 samples=15
+qrx-win32: PROFILE pc=00492620 samples=4
+qrx-win32: PROFILE pc=00452690 samples=15
+qrx-win32: PROFILE pc=00492640 samples=10
+qrx-win32: PROFILE pc=004526b0 samples=23
+qrx-win32: PROFILE pc=004526a0 samples=22
+qrx-win32: PROFILE pc=00452750 samples=16
+qrx-win32: PROFILE pc=00452740 samples=16
+qrx-win32: PROFILE pc=004927b0 samples=1
+qrx-win32: PROFILE pc=00452760 samples=7
+qrx-win32: PROFILE pc=00452710 samples=10
+qrx-win32: PROFILE pc=00452700 samples=9
+qrx-win32: PROFILE pc=00452730 samples=27
+qrx-win32: PROFILE pc=00452720 samples=15
+qrx-win32: PROFILE pc=004527d0 samples=1
+qrx-win32: PROFILE pc=004527c0 samples=10
+qrx-win32: PROFILE pc=00492720 samples=1
+qrx-win32: PROFILE pc=004b2770 samples=1
+qrx-win32: PROFILE pc=00452780 samples=10
+qrx-win32: PROFILE pc=004527b0 samples=9
+qrx-win32: PROFILE pc=004527a0 samples=6
+qrx-win32: PROFILE pc=00492090 samples=4
+qrx-win32: PROFILE pc=004e20f0 samples=1
+qrx-win32: PROFILE pc=004920a0 samples=2
+qrx-win32: PROFILE pc=004c2040 samples=1
+qrx-win32: PROFILE pc=004c2020 samples=1
+qrx-win32: PROFILE pc=004a2100 samples=26
+qrx-win32: PROFILE pc=004521e0 samples=1
+qrx-win32: PROFILE pc=004a2160 samples=4
+qrx-win32: PROFILE pc=004e2100 samples=1
+qrx-win32: PROFILE pc=004e2110 samples=1
+qrx-win32: PROFILE pc=004e22f0 samples=1
+qrx-win32: PROFILE pc=00452270 samples=30
+qrx-win32: PROFILE pc=004e2260 samples=2
+qrx-win32: PROFILE pc=004e2270 samples=1
+qrx-win32: PROFILE pc=004e2240 samples=3
+qrx-win32: PROFILE pc=004e2250 samples=3
+qrx-win32: PROFILE pc=004e2220 samples=3
+qrx-win32: PROFILE pc=004e2230 samples=2
+qrx-win32: PROFILE pc=004522b0 samples=3
+qrx-win32: PROFILE pc=004e23e0 samples=1
+qrx-win32: PROFILE pc=004e23f0 samples=1
+qrx-win32: PROFILE pc=004923b0 samples=2
+qrx-win32: PROFILE pc=00452300 samples=5
+qrx-win32: PROFILE pc=004e2360 samples=1
+qrx-win32: PROFILE pc=004e2370 samples=2
+qrx-win32: PROFILE pc=004e2350 samples=2
+qrx-win32: PROFILE pc=004e2320 samples=1
+qrx-win32: PROFILE pc=004e2300 samples=2
+qrx-win32: PROFILE pc=004e2310 samples=1
+qrx-win32: PROFILE pc=00442c40 samples=10
+qrx-win32: PROFILE pc=00442c50 samples=6
+qrx-win32: PROFILE pc=00442c60 samples=15
+qrx-win32: PROFILE pc=00442c70 samples=2
+qrx-win32: PROFILE pc=00492cd0 samples=22
+qrx-win32: PROFILE pc=00492cc0 samples=29
+qrx-win32: PROFILE pc=00442c20 samples=4
+qrx-win32: PROFILE pc=00442c30 samples=8
+qrx-win32: PROFILE pc=00442cc0 samples=4
+qrx-win32: PROFILE pc=00452cc0 samples=8
+qrx-win32: PROFILE pc=00452ce0 samples=2
+qrx-win32: PROFILE pc=00442c80 samples=16
+qrx-win32: PROFILE pc=00442c90 samples=62
+qrx-win32: PROFILE pc=00442ca0 samples=6
+qrx-win32: PROFILE pc=00442cb0 samples=9
+qrx-win32: PROFILE pc=00412d10 samples=1
+qrx-win32: PROFILE pc=00452dd0 samples=9
+qrx-win32: PROFILE pc=00412db0 samples=1
+qrx-win32: PROFILE pc=00452de0 samples=7
+qrx-win32: PROFILE pc=00452d80 samples=1
+qrx-win32: PROFILE pc=004e2ee0 samples=1
+qrx-win32: PROFILE pc=004e2ef0 samples=1
+qrx-win32: PROFILE pc=004e2ed0 samples=2
+qrx-win32: PROFILE pc=00452e10 samples=3
+qrx-win32: PROFILE pc=00452e00 samples=11
+qrx-win32: PROFILE pc=00452e30 samples=2
+qrx-win32: PROFILE pc=00452e20 samples=2
+qrx-win32: PROFILE pc=00452ec0 samples=7
+qrx-win32: PROFILE pc=00492e30 samples=1
+qrx-win32: PROFILE pc=00452e90 samples=2
+qrx-win32: PROFILE pc=00452eb0 samples=3
+qrx-win32: PROFILE pc=004e2fe0 samples=4
+qrx-win32: PROFILE pc=004e2ff0 samples=3
+qrx-win32: PROFILE pc=004e2fc0 samples=1
+qrx-win32: PROFILE pc=004e2fd0 samples=1
+qrx-win32: PROFILE pc=004e2fa0 samples=9
+qrx-win32: PROFILE pc=004e2fb0 samples=3
+qrx-win32: PROFILE pc=004e2f80 samples=4
+qrx-win32: PROFILE pc=004e2f90 samples=4
+qrx-win32: PROFILE pc=004e2f60 samples=3
+qrx-win32: PROFILE pc=004e2f70 samples=1
+qrx-win32: PROFILE pc=004e2f50 samples=3
+qrx-win32: PROFILE pc=00412fc0 samples=1
+qrx-win32: PROFILE pc=004e2f00 samples=1
+qrx-win32: PROFILE pc=004e2f10 samples=3
+qrx-win32: PROFILE pc=00452850 samples=2
+qrx-win32: PROFILE pc=00452840 samples=10
+qrx-win32: PROFILE pc=00452860 samples=8
+qrx-win32: PROFILE pc=00452810 samples=13
+qrx-win32: PROFILE pc=00452800 samples=17
+qrx-win32: PROFILE pc=00452830 samples=7
+qrx-win32: PROFILE pc=004928e0 samples=6
+qrx-win32: PROFILE pc=004528d0 samples=19
+qrx-win32: PROFILE pc=004528e0 samples=6
+qrx-win32: PROFILE pc=004528b0 samples=15
+qrx-win32: PROFILE pc=00452950 samples=1
+qrx-win32: PROFILE pc=00452940 samples=12
+qrx-win32: PROFILE pc=00452970 samples=8
+qrx-win32: PROFILE pc=00452960 samples=18
+qrx-win32: PROFILE pc=00452910 samples=7
+qrx-win32: PROFILE pc=004929c0 samples=1
+qrx-win32: PROFILE pc=004929f0 samples=2
+qrx-win32: PROFILE pc=00452920 samples=17
+qrx-win32: PROFILE pc=00492900 samples=6
+qrx-win32: PROFILE pc=004529f0 samples=30
+qrx-win32: PROFILE pc=004529e0 samples=37
+qrx-win32: PROFILE pc=00452990 samples=5
+qrx-win32: PROFILE pc=00452980 samples=7
+qrx-win32: PROFILE pc=004529b0 samples=11
+qrx-win32: PROFILE pc=004529a0 samples=9
+qrx-win32: PROFILE pc=004c2ac0 samples=1
+qrx-win32: PROFILE pc=00492a80 samples=53
+qrx-win32: PROFILE pc=00452a70 samples=12
+qrx-win32: PROFILE pc=00492ad0 samples=49
+qrx-win32: PROFILE pc=00492ac0 samples=44
+qrx-win32: PROFILE pc=00492af0 samples=56
+qrx-win32: PROFILE pc=00492ae0 samples=48
+qrx-win32: PROFILE pc=00452ad0 samples=17
+qrx-win32: PROFILE pc=00452ac0 samples=10
+qrx-win32: PROFILE pc=00452af0 samples=12
+qrx-win32: PROFILE pc=00452ae0 samples=17
+qrx-win32: PROFILE pc=00452a90 samples=19
+qrx-win32: PROFILE pc=00452a80 samples=14
+qrx-win32: PROFILE pc=00492a70 samples=56
+qrx-win32: PROFILE pc=00452aa0 samples=18
+qrx-win32: PROFILE pc=00442b40 samples=12
+qrx-win32: PROFILE pc=00442b50 samples=24
+qrx-win32: PROFILE pc=00442b60 samples=19
+qrx-win32: PROFILE pc=00442b70 samples=17
+qrx-win32: PROFILE pc=00452b10 samples=4
+qrx-win32: PROFILE pc=00452b00 samples=6
+qrx-win32: PROFILE pc=00452b30 samples=1
+qrx-win32: PROFILE pc=00442b30 samples=23
+qrx-win32: PROFILE pc=00492b10 samples=58
+qrx-win32: PROFILE pc=00492b00 samples=43
+qrx-win32: PROFILE pc=00492b30 samples=2
+qrx-win32: PROFILE pc=00492b20 samples=64
+qrx-win32: PROFILE pc=00442b80 samples=10
+qrx-win32: PROFILE pc=00442b90 samples=20
+qrx-win32: PROFILE pc=00452bb0 samples=13
+qrx-win32: PROFILE pc=00452ba0 samples=32
+qrx-win32: PROFILE pc=004a34a0 samples=80
+qrx-win32: PROFILE pc=004a34b0 samples=66
+qrx-win32: PROFILE pc=004a3480 samples=80
+qrx-win32: PROFILE pc=004a3490 samples=82
+qrx-win32: PROFILE pc=004a34e0 samples=4
+qrx-win32: PROFILE pc=004a34f0 samples=67
+qrx-win32: PROFILE pc=004a34c0 samples=669
+qrx-win32: PROFILE pc=004a34d0 samples=196
+qrx-win32: PROFILE pc=004a3460 samples=33
+qrx-win32: PROFILE pc=004a3470 samples=68
+qrx-win32: PROFILE pc=004534b0 samples=196
+qrx-win32: PROFILE pc=004534a0 samples=505
+qrx-win32: PROFILE pc=004e3570 samples=1
+qrx-win32: PROFILE pc=004a3500 samples=3
+qrx-win32: PROFILE pc=004e3520 samples=1
+qrx-win32: PROFILE pc=004e3500 samples=1
+qrx-win32: PROFILE pc=004e3510 samples=1
+qrx-win32: PROFILE pc=00453650 samples=6
+qrx-win32: PROFILE pc=00453640 samples=5
+qrx-win32: PROFILE pc=00453660 samples=3
+qrx-win32: PROFILE pc=00453630 samples=3
+qrx-win32: PROFILE pc=00453620 samples=4
+qrx-win32: PROFILE pc=004a3630 samples=2
+qrx-win32: PROFILE pc=004a37a0 samples=47
+qrx-win32: PROFILE pc=004a37b0 samples=37
+qrx-win32: PROFILE pc=004937b0 samples=2
+qrx-win32: PROFILE pc=004937a0 samples=2
+qrx-win32: PROFILE pc=004a37e0 samples=63
+qrx-win32: PROFILE pc=004a37f0 samples=67
+qrx-win32: PROFILE pc=004a37c0 samples=52
+qrx-win32: PROFILE pc=004a37d0 samples=50
+qrx-win32: PROFILE pc=004537d0 samples=3
+qrx-win32: PROFILE pc=004537c0 samples=4
+qrx-win32: PROFILE pc=004537f0 samples=4
+qrx-win32: PROFILE pc=004537e0 samples=4
+qrx-win32: PROFILE pc=00493750 samples=19
+qrx-win32: PROFILE pc=00493740 samples=20
+qrx-win32: PROFILE pc=004a3740 samples=1
+qrx-win32: PROFILE pc=004537a0 samples=1
+qrx-win32: PROFILE pc=00443020 samples=11
+qrx-win32: PROFILE pc=004e3090 samples=1
+qrx-win32: PROFILE pc=004e3070 samples=1
+qrx-win32: PROFILE pc=004e3000 samples=2
+qrx-win32: PROFILE pc=004a31a0 samples=8
+qrx-win32: PROFILE pc=004a31b0 samples=1
+qrx-win32: PROFILE pc=004a31e0 samples=9
+qrx-win32: PROFILE pc=004a31f0 samples=5
+qrx-win32: PROFILE pc=004a31c0 samples=5
+qrx-win32: PROFILE pc=004a31d0 samples=1
+qrx-win32: PROFILE pc=00413180 samples=1
+qrx-win32: PROFILE pc=004131d0 samples=1
+qrx-win32: PROFILE pc=004a32b0 samples=4
+qrx-win32: PROFILE pc=004a3280 samples=1
+qrx-win32: PROFILE pc=004a32e0 samples=13
+qrx-win32: PROFILE pc=004a32f0 samples=11
+qrx-win32: PROFILE pc=004a32c0 samples=4
+qrx-win32: PROFILE pc=004a32d0 samples=8
+qrx-win32: PROFILE pc=004a3220 samples=1
+qrx-win32: PROFILE pc=004a3200 samples=7
+qrx-win32: PROFILE pc=004a3210 samples=9
+qrx-win32: PROFILE pc=004a3260 samples=2
+qrx-win32: PROFILE pc=004a3270 samples=2
+qrx-win32: PROFILE pc=004a33a0 samples=67
+qrx-win32: PROFILE pc=004a3380 samples=188
+qrx-win32: PROFILE pc=004a3390 samples=168
+qrx-win32: PROFILE pc=004a33e0 samples=12
+qrx-win32: PROFILE pc=004a33c0 samples=76
+qrx-win32: PROFILE pc=004a33d0 samples=8
+qrx-win32: PROFILE pc=004c3350 samples=1
+qrx-win32: PROFILE pc=004a3360 samples=155
+qrx-win32: PROFILE pc=004a3370 samples=148
+qrx-win32: PROFILE pc=004c3320 samples=1
+qrx-win32: PROFILE pc=004c3330 samples=1
+qrx-win32: PROFILE pc=00493c90 samples=32
+qrx-win32: PROFILE pc=00493c80 samples=23
+qrx-win32: PROFILE pc=00493cb0 samples=16
+qrx-win32: PROFILE pc=00493ca0 samples=51
+qrx-win32: PROFILE pc=00493cd0 samples=8
+qrx-win32: PROFILE pc=00493cc0 samples=16
+qrx-win32: PROFILE pc=00443c30 samples=10
+qrx-win32: PROFILE pc=00443cc0 samples=21
+qrx-win32: PROFILE pc=00493c00 samples=1
+qrx-win32: PROFILE pc=00493c30 samples=16
+qrx-win32: PROFILE pc=00493c20 samples=22
+qrx-win32: PROFILE pc=00493c50 samples=21
+qrx-win32: PROFILE pc=00493c40 samples=14
+qrx-win32: PROFILE pc=00493c70 samples=24
+qrx-win32: PROFILE pc=00493c60 samples=24
+qrx-win32: PROFILE pc=004a3da0 samples=1
+qrx-win32: PROFILE pc=004a3db0 samples=1
+qrx-win32: PROFILE pc=004a3d80 samples=19
+qrx-win32: PROFILE pc=004a3d90 samples=7
+qrx-win32: PROFILE pc=00493dd0 samples=31
+qrx-win32: PROFILE pc=00493dc0 samples=3
+qrx-win32: PROFILE pc=00493df0 samples=21
+qrx-win32: PROFILE pc=00493de0 samples=24
+qrx-win32: PROFILE pc=00453dd0 samples=2
+qrx-win32: PROFILE pc=00453dc0 samples=3
+qrx-win32: PROFILE pc=004a3d60 samples=20
+qrx-win32: PROFILE pc=004a3d70 samples=6
+qrx-win32: PROFILE pc=004a3d40 samples=19
+qrx-win32: PROFILE pc=004a3d50 samples=14
+qrx-win32: PROFILE pc=00493ed0 samples=16
+qrx-win32: PROFILE pc=004a3ec0 samples=1
+qrx-win32: PROFILE pc=00493ee0 samples=25
+qrx-win32: PROFILE pc=00493e10 samples=7
+qrx-win32: PROFILE pc=00493e00 samples=9
+qrx-win32: PROFILE pc=00453ef0 samples=52
+qrx-win32: PROFILE pc=00493e20 samples=4
+qrx-win32: PROFILE pc=00493e40 samples=7
+qrx-win32: PROFILE pc=00493e60 samples=1
+qrx-win32: PROFILE pc=00453f10 samples=44
+qrx-win32: PROFILE pc=00453f00 samples=23
+qrx-win32: PROFILE pc=00493f00 samples=5
+qrx-win32: PROFILE pc=004a38a0 samples=36
+qrx-win32: PROFILE pc=004a38b0 samples=25
+qrx-win32: PROFILE pc=004a3880 samples=9
+qrx-win32: PROFILE pc=004a3890 samples=24
+qrx-win32: PROFILE pc=004a38e0 samples=11
+qrx-win32: PROFILE pc=004a38f0 samples=5
+qrx-win32: PROFILE pc=004a38c0 samples=28
+qrx-win32: PROFILE pc=004a38d0 samples=22
+qrx-win32: PROFILE pc=004a3820 samples=28
+qrx-win32: PROFILE pc=004a3830 samples=54
+qrx-win32: PROFILE pc=004a3800 samples=58
+qrx-win32: PROFILE pc=004a3810 samples=40
+qrx-win32: PROFILE pc=004a3860 samples=14
+qrx-win32: PROFILE pc=00453880 samples=10
+qrx-win32: PROFILE pc=004a3840 samples=28
+qrx-win32: PROFILE pc=004a3850 samples=18
+qrx-win32: PROFILE pc=004a39a0 samples=2
+qrx-win32: PROFILE pc=004a39b0 samples=2
+qrx-win32: PROFILE pc=004a3980 samples=11
+qrx-win32: PROFILE pc=004a3990 samples=3
+qrx-win32: PROFILE pc=00453910 samples=6
+qrx-win32: PROFILE pc=00453900 samples=2
+qrx-win32: PROFILE pc=004939f0 samples=9
+qrx-win32: PROFILE pc=004939e0 samples=6
+qrx-win32: PROFILE pc=004539d0 samples=2
+qrx-win32: PROFILE pc=004539c0 samples=4
+qrx-win32: PROFILE pc=004539f0 samples=4
+qrx-win32: PROFILE pc=00493920 samples=2
+qrx-win32: PROFILE pc=004a3960 samples=23
+qrx-win32: PROFILE pc=004a3970 samples=18
+qrx-win32: PROFILE pc=004a3940 samples=4
+qrx-win32: PROFILE pc=004a3950 samples=4
+qrx-win32: PROFILE pc=004e3af0 samples=1
+qrx-win32: PROFILE pc=00453a10 samples=8
+qrx-win32: PROFILE pc=00453a30 samples=3
+qrx-win32: PROFILE pc=00453a20 samples=1
+qrx-win32: PROFILE pc=00493a10 samples=6
+qrx-win32: PROFILE pc=00493a00 samples=8
+qrx-win32: PROFILE pc=00493a30 samples=17
+qrx-win32: PROFILE pc=00453ae0 samples=1
+qrx-win32: PROFILE pc=00443a80 samples=10
+qrx-win32: PROFILE pc=00493a40 samples=10
+qrx-win32: PROFILE pc=004e3b00 samples=1
+qrx-win32: PROFILE pc=00444540 samples=1
+qrx-win32: PROFILE pc=00494690 samples=1
+qrx-win32: PROFILE pc=004e46f0 samples=5
+qrx-win32: PROFILE pc=004946a0 samples=18
+qrx-win32: PROFILE pc=004946f0 samples=1
+qrx-win32: PROFILE pc=004446c0 samples=1
+qrx-win32: PROFILE pc=004446d0 samples=3
+qrx-win32: PROFILE pc=00494630 samples=17
+qrx-win32: PROFILE pc=00494620 samples=25
+qrx-win32: PROFILE pc=00494650 samples=10
+qrx-win32: PROFILE pc=00494640 samples=5
+qrx-win32: PROFILE pc=00494670 samples=13
+qrx-win32: PROFILE pc=004446b0 samples=4
+qrx-win32: PROFILE pc=00494790 samples=2
+qrx-win32: PROFILE pc=00444750 samples=4
+qrx-win32: PROFILE pc=004e47c0 samples=2
+qrx-win32: PROFILE pc=004947a0 samples=1
+qrx-win32: PROFILE pc=004947f0 samples=1
+qrx-win32: PROFILE pc=004947e0 samples=3
+qrx-win32: PROFILE pc=00494700 samples=1
+qrx-win32: PROFILE pc=004e4740 samples=1
+qrx-win32: PROFILE pc=004e4750 samples=2
+qrx-win32: PROFILE pc=004e4720 samples=8
+qrx-win32: PROFILE pc=004e4730 samples=10
+qrx-win32: PROFILE pc=004e4700 samples=5
+qrx-win32: PROFILE pc=004e4710 samples=1
+qrx-win32: PROFILE pc=004b4080 samples=22
+qrx-win32: PROFILE pc=004a41a0 samples=1
+qrx-win32: PROFILE pc=004a41b0 samples=2
+qrx-win32: PROFILE pc=004a4180 samples=3
+qrx-win32: PROFILE pc=004a4190 samples=1
+qrx-win32: PROFILE pc=00444120 samples=7
+qrx-win32: PROFILE pc=00444130 samples=5
+qrx-win32: PROFILE pc=004a4130 samples=2
+qrx-win32: PROFILE pc=00444180 samples=4
+qrx-win32: PROFILE pc=00444190 samples=38
+qrx-win32: PROFILE pc=004a4140 samples=3
+qrx-win32: PROFILE pc=004441b0 samples=5
+qrx-win32: PROFILE pc=00444240 samples=27
+qrx-win32: PROFILE pc=00444250 samples=13
+qrx-win32: PROFILE pc=00444260 samples=3
+qrx-win32: PROFILE pc=00444270 samples=26
+qrx-win32: PROFILE pc=00444200 samples=6
+qrx-win32: PROFILE pc=00444210 samples=6
+qrx-win32: PROFILE pc=00444220 samples=3
+qrx-win32: PROFILE pc=00444230 samples=3
+qrx-win32: PROFILE pc=004442c0 samples=20
+qrx-win32: PROFILE pc=004442d0 samples=36
+qrx-win32: PROFILE pc=004442e0 samples=27
+qrx-win32: PROFILE pc=004442f0 samples=2
+qrx-win32: PROFILE pc=00444280 samples=16
+qrx-win32: PROFILE pc=00444290 samples=18
+qrx-win32: PROFILE pc=004442a0 samples=19
+qrx-win32: PROFILE pc=004442b0 samples=26
+qrx-win32: PROFILE pc=00494390 samples=40
+qrx-win32: PROFILE pc=00494380 samples=146
+qrx-win32: PROFILE pc=004943a0 samples=43
+qrx-win32: PROFILE pc=00444300 samples=1
+qrx-win32: PROFILE pc=00494330 samples=178
+qrx-win32: PROFILE pc=00494320 samples=150
+qrx-win32: PROFILE pc=00494350 samples=114
+qrx-win32: PROFILE pc=00494340 samples=352
+qrx-win32: PROFILE pc=00494370 samples=256
+qrx-win32: PROFILE pc=00494360 samples=173
+qrx-win32: PROFILE pc=00494c90 samples=2
+qrx-win32: PROFILE pc=00444c50 samples=10
+qrx-win32: PROFILE pc=00494cb0 samples=2
+qrx-win32: PROFILE pc=00494ca0 samples=3
+qrx-win32: PROFILE pc=00494cd0 samples=1
+qrx-win32: PROFILE pc=00494cc0 samples=5
+qrx-win32: PROFILE pc=00494cf0 samples=2
+qrx-win32: PROFILE pc=00494ce0 samples=3
+qrx-win32: PROFILE pc=00494c10 samples=20
+qrx-win32: PROFILE pc=00494c00 samples=13
+qrx-win32: PROFILE pc=00494c30 samples=220
+qrx-win32: PROFILE pc=00494c20 samples=13
+qrx-win32: PROFILE pc=00494c50 samples=293
+qrx-win32: PROFILE pc=00494c40 samples=608
+qrx-win32: PROFILE pc=00494c70 samples=18
+qrx-win32: PROFILE pc=00494c60 samples=63
+qrx-win32: PROFILE pc=00464d60 samples=20
+qrx-win32: PROFILE pc=00464d70 samples=5056
+qrx-win32: PROFILE pc=00494db0 samples=3
+qrx-win32: PROFILE pc=00494da0 samples=1
+qrx-win32: PROFILE pc=00464d20 samples=48
+qrx-win32: PROFILE pc=00464d30 samples=30
+qrx-win32: PROFILE pc=004e4d80 samples=6
+qrx-win32: PROFILE pc=00494de0 samples=4
+qrx-win32: PROFILE pc=004e4d60 samples=7
+qrx-win32: PROFILE pc=004e4d70 samples=11
+qrx-win32: PROFILE pc=004e4d40 samples=5
+qrx-win32: PROFILE pc=004e4d50 samples=16
+qrx-win32: PROFILE pc=004e4d20 samples=1
+qrx-win32: PROFILE pc=004e4d30 samples=2
+qrx-win32: PROFILE pc=004e4d00 samples=2
+qrx-win32: PROFILE pc=00494d60 samples=108
+qrx-win32: PROFILE pc=00494e90 samples=6
+qrx-win32: PROFILE pc=00494eb0 samples=11
+qrx-win32: PROFILE pc=00494ea0 samples=8
+qrx-win32: PROFILE pc=004e4ea0 samples=1
+qrx-win32: PROFILE pc=00494ec0 samples=3
+qrx-win32: PROFILE pc=00444e20 samples=15
+qrx-win32: PROFILE pc=004e4e90 samples=1
+qrx-win32: PROFILE pc=00494e00 samples=1
+qrx-win32: PROFILE pc=004e4e50 samples=1
+qrx-win32: PROFILE pc=00404ee0 samples=1
+qrx-win32: PROFILE pc=00494f90 samples=231
+qrx-win32: PROFILE pc=00494fb0 samples=135
+qrx-win32: PROFILE pc=00494fa0 samples=86
+qrx-win32: PROFILE pc=00494fd0 samples=151
+qrx-win32: PROFILE pc=00494fc0 samples=133
+qrx-win32: PROFILE pc=00494ff0 samples=92
+qrx-win32: PROFILE pc=00494fe0 samples=234
+qrx-win32: PROFILE pc=00494890 samples=1
+qrx-win32: PROFILE pc=00494880 samples=10
+qrx-win32: PROFILE pc=004948a0 samples=1
+qrx-win32: PROFILE pc=004948d0 samples=1
+qrx-win32: PROFILE pc=004948f0 samples=1
+qrx-win32: PROFILE pc=004948e0 samples=1
+qrx-win32: PROFILE pc=00494810 samples=27
+qrx-win32: PROFILE pc=00494800 samples=18
+qrx-win32: PROFILE pc=00494830 samples=8
+qrx-win32: PROFILE pc=00494820 samples=33
+qrx-win32: PROFILE pc=00494850 samples=1
+qrx-win32: PROFILE pc=00494840 samples=4
+qrx-win32: PROFILE pc=00494870 samples=21
+qrx-win32: PROFILE pc=00494860 samples=23
+qrx-win32: PROFILE pc=00494990 samples=1
+qrx-win32: PROFILE pc=00494980 samples=2
+qrx-win32: PROFILE pc=004949b0 samples=1
+qrx-win32: PROFILE pc=00444970 samples=15
+qrx-win32: PROFILE pc=004949d0 samples=2
+qrx-win32: PROFILE pc=004949c0 samples=1
+qrx-win32: PROFILE pc=00444920 samples=6
+qrx-win32: PROFILE pc=004949e0 samples=2
+qrx-win32: PROFILE pc=00494910 samples=16
+qrx-win32: PROFILE pc=00494900 samples=13
+qrx-win32: PROFILE pc=00494930 samples=23
+qrx-win32: PROFILE pc=00494920 samples=32
+qrx-win32: PROFILE pc=00494950 samples=2
+qrx-win32: PROFILE pc=00494940 samples=8
+qrx-win32: PROFILE pc=004449a0 samples=9
+qrx-win32: PROFILE pc=00494960 samples=2
+qrx-win32: PROFILE pc=00494a90 samples=13
+qrx-win32: PROFILE pc=00494a80 samples=16
+qrx-win32: PROFILE pc=00494ab0 samples=21
+qrx-win32: PROFILE pc=00494aa0 samples=20
+qrx-win32: PROFILE pc=00494ad0 samples=15
+qrx-win32: PROFILE pc=00494ac0 samples=11
+qrx-win32: PROFILE pc=00494af0 samples=15
+qrx-win32: PROFILE pc=00494ae0 samples=12
+qrx-win32: PROFILE pc=00444ac0 samples=6
+qrx-win32: PROFILE pc=00494a30 samples=18
+qrx-win32: PROFILE pc=00494a20 samples=1
+qrx-win32: PROFILE pc=00494a50 samples=15
+qrx-win32: PROFILE pc=00494a40 samples=25
+qrx-win32: PROFILE pc=00494a70 samples=15
+qrx-win32: PROFILE pc=00494a60 samples=20
+qrx-win32: PROFILE pc=00494b90 samples=401
+qrx-win32: PROFILE pc=00494b80 samples=12
+qrx-win32: PROFILE pc=00494bb0 samples=104
+qrx-win32: PROFILE pc=00494ba0 samples=590
+qrx-win32: PROFILE pc=00494bd0 samples=11
+qrx-win32: PROFILE pc=00494bc0 samples=25
+qrx-win32: PROFILE pc=00494bf0 samples=24
+qrx-win32: PROFILE pc=00444b30 samples=4
+qrx-win32: PROFILE pc=00494b10 samples=26
+qrx-win32: PROFILE pc=00494b00 samples=29
+qrx-win32: PROFILE pc=00494b30 samples=28
+qrx-win32: PROFILE pc=00494b20 samples=26
+qrx-win32: PROFILE pc=00494b50 samples=19
+qrx-win32: PROFILE pc=00494b40 samples=16
+qrx-win32: PROFILE pc=00494b70 samples=15
+qrx-win32: PROFILE pc=00494b60 samples=12
+qrx-win32: PROFILE pc=00495490 samples=1
+qrx-win32: PROFILE pc=004e54f0 samples=2
+qrx-win32: PROFILE pc=004954b0 samples=16
+qrx-win32: PROFILE pc=004954a0 samples=10
+qrx-win32: PROFILE pc=004954d0 samples=18
+qrx-win32: PROFILE pc=004954c0 samples=19
+qrx-win32: PROFILE pc=004954f0 samples=20
+qrx-win32: PROFILE pc=004954e0 samples=30
+qrx-win32: PROFILE pc=00495410 samples=29
+qrx-win32: PROFILE pc=00495400 samples=6
+qrx-win32: PROFILE pc=00495430 samples=27
+qrx-win32: PROFILE pc=00495420 samples=16
+qrx-win32: PROFILE pc=00495450 samples=8
+qrx-win32: PROFILE pc=00495440 samples=13
+qrx-win32: PROFILE pc=00495470 samples=5
+qrx-win32: PROFILE pc=00495460 samples=10
+qrx-win32: PROFILE pc=004e55e0 samples=1
+qrx-win32: PROFILE pc=004e55f0 samples=2
+qrx-win32: PROFILE pc=004e55c0 samples=3
+qrx-win32: PROFILE pc=004e55d0 samples=3
+qrx-win32: PROFILE pc=004e55a0 samples=2
+qrx-win32: PROFILE pc=004e5590 samples=1
+qrx-win32: PROFILE pc=004e5560 samples=2
+qrx-win32: PROFILE pc=00495500 samples=888
+qrx-win32: PROFILE pc=004e5540 samples=3
+qrx-win32: PROFILE pc=004e5550 samples=1
+qrx-win32: PROFILE pc=004e5530 samples=1
+qrx-win32: PROFILE pc=004e5500 samples=2
+qrx-win32: PROFILE pc=004e5510 samples=2
+qrx-win32: PROFILE pc=00405610 samples=1
+qrx-win32: PROFILE pc=004956d0 samples=2
+qrx-win32: PROFILE pc=004956c0 samples=4
+qrx-win32: PROFILE pc=004956f0 samples=2
+qrx-win32: PROFILE pc=004e5690 samples=3
+qrx-win32: PROFILE pc=004e5660 samples=1
+qrx-win32: PROFILE pc=004e5640 samples=2
+qrx-win32: PROFILE pc=00495620 samples=1
+qrx-win32: PROFILE pc=004e5620 samples=1
+qrx-win32: PROFILE pc=004e5630 samples=1
+qrx-win32: PROFILE pc=00495670 samples=8
+qrx-win32: PROFILE pc=00495660 samples=5
+qrx-win32: PROFILE pc=00495790 samples=44
+qrx-win32: PROFILE pc=004e57f0 samples=1
+qrx-win32: PROFILE pc=004957b0 samples=5
+qrx-win32: PROFILE pc=004957a0 samples=25
+qrx-win32: PROFILE pc=004957d0 samples=7
+qrx-win32: PROFILE pc=004957c0 samples=1
+qrx-win32: PROFILE pc=004957f0 samples=8
+qrx-win32: PROFILE pc=004e5760 samples=1
+qrx-win32: PROFILE pc=00495700 samples=1
+qrx-win32: PROFILE pc=004e5740 samples=1
+qrx-win32: PROFILE pc=00495720 samples=6
+qrx-win32: PROFILE pc=00495750 samples=17
+qrx-win32: PROFILE pc=00495740 samples=3
+qrx-win32: PROFILE pc=004e5700 samples=1
+qrx-win32: PROFILE pc=004e5710 samples=3
+qrx-win32: PROFILE pc=00495090 samples=1
+qrx-win32: PROFILE pc=00405020 samples=1
+qrx-win32: PROFILE pc=004950f0 samples=1
+qrx-win32: PROFILE pc=00495030 samples=56
+qrx-win32: PROFILE pc=00495050 samples=127
+qrx-win32: PROFILE pc=00495040 samples=154
+qrx-win32: PROFILE pc=00495190 samples=9
+qrx-win32: PROFILE pc=00495180 samples=25
+qrx-win32: PROFILE pc=004951d0 samples=1
+qrx-win32: PROFILE pc=004e5190 samples=1
+qrx-win32: PROFILE pc=00495110 samples=1
+qrx-win32: PROFILE pc=00495130 samples=2
+qrx-win32: PROFILE pc=00495120 samples=1
+qrx-win32: PROFILE pc=00495150 samples=4
+qrx-win32: PROFILE pc=00495140 samples=15
+qrx-win32: PROFILE pc=00495170 samples=21
+qrx-win32: PROFILE pc=00495160 samples=18
+qrx-win32: PROFILE pc=00455260 samples=1
+qrx-win32: PROFILE pc=004952d0 samples=3
+qrx-win32: PROFILE pc=004952c0 samples=5
+qrx-win32: PROFILE pc=004952f0 samples=9
+qrx-win32: PROFILE pc=004952e0 samples=5
+qrx-win32: PROFILE pc=00495240 samples=1
+qrx-win32: PROFILE pc=00495390 samples=9
+qrx-win32: PROFILE pc=00495380 samples=9
+qrx-win32: PROFILE pc=004953b0 samples=3
+qrx-win32: PROFILE pc=004953a0 samples=11
+qrx-win32: PROFILE pc=004953d0 samples=7
+qrx-win32: PROFILE pc=004953c0 samples=7
+qrx-win32: PROFILE pc=004953f0 samples=7
+qrx-win32: PROFILE pc=004953e0 samples=24
+qrx-win32: PROFILE pc=00405380 samples=8
+qrx-win32: PROFILE pc=00405390 samples=10
+qrx-win32: PROFILE pc=004053a0 samples=8
+qrx-win32: PROFILE pc=00495350 samples=1
+qrx-win32: PROFILE pc=004053e0 samples=1
+qrx-win32: PROFILE pc=00495360 samples=1
+qrx-win32: PROFILE pc=00495c00 samples=21
+qrx-win32: PROFILE pc=00445d40 samples=9
+qrx-win32: PROFILE pc=00445d50 samples=6
+qrx-win32: PROFILE pc=00445d60 samples=5
+qrx-win32: PROFILE pc=00445d70 samples=2
+qrx-win32: PROFILE pc=00495dd0 samples=19
+qrx-win32: PROFILE pc=00495dc0 samples=31
+qrx-win32: PROFILE pc=00495df0 samples=16
+qrx-win32: PROFILE pc=00495de0 samples=14
+qrx-win32: PROFILE pc=00445dd0 samples=20
+qrx-win32: PROFILE pc=00445de0 samples=8
+qrx-win32: PROFILE pc=00445df0 samples=2
+qrx-win32: PROFILE pc=00405dc0 samples=6
+qrx-win32: PROFILE pc=00405dd0 samples=9
+qrx-win32: PROFILE pc=00405de0 samples=3
+qrx-win32: PROFILE pc=00495d60 samples=9
+qrx-win32: PROFILE pc=00445e40 samples=2
+qrx-win32: PROFILE pc=00445e50 samples=1
+qrx-win32: PROFILE pc=00495eb0 samples=32
+qrx-win32: PROFILE pc=00495ea0 samples=24
+qrx-win32: PROFILE pc=00495ed0 samples=19
+qrx-win32: PROFILE pc=00495ec0 samples=12
+qrx-win32: PROFILE pc=00445e30 samples=1
+qrx-win32: PROFILE pc=00495e10 samples=31
+qrx-win32: PROFILE pc=00495e00 samples=22
+qrx-win32: PROFILE pc=00495e30 samples=23
+qrx-win32: PROFILE pc=00495e20 samples=21
+qrx-win32: PROFILE pc=00445e80 samples=13
+qrx-win32: PROFILE pc=00445e90 samples=11
+qrx-win32: PROFILE pc=00445ea0 samples=6
+qrx-win32: PROFILE pc=00495e60 samples=8
+qrx-win32: PROFILE pc=00445f40 samples=2
+qrx-win32: PROFILE pc=00445f50 samples=2
+qrx-win32: PROFILE pc=00445f60 samples=1
+qrx-win32: PROFILE pc=00445f10 samples=3
+qrx-win32: PROFILE pc=00445f20 samples=3
+qrx-win32: PROFILE pc=00405f70 samples=1
+qrx-win32: PROFILE pc=00445fc0 samples=3
+qrx-win32: PROFILE pc=00445fd0 samples=1
+qrx-win32: PROFILE pc=00445f80 samples=2
+qrx-win32: PROFILE pc=00445f90 samples=2
+qrx-win32: PROFILE pc=00445fa0 samples=2
+qrx-win32: PROFILE pc=00445fb0 samples=3
+qrx-win32: PROFILE pc=00495880 samples=2
+qrx-win32: PROFILE pc=00495810 samples=8
+qrx-win32: PROFILE pc=00495800 samples=5
+qrx-win32: PROFILE pc=00495830 samples=52
+qrx-win32: PROFILE pc=00495820 samples=6
+qrx-win32: PROFILE pc=00495850 samples=790
+qrx-win32: PROFILE pc=00495840 samples=232
+qrx-win32: PROFILE pc=004e5800 samples=2
+qrx-win32: PROFILE pc=004e5810 samples=1
+qrx-win32: PROFILE pc=004b59b0 samples=1
+qrx-win32: PROFILE pc=004b59a0 samples=2
+qrx-win32: PROFILE pc=004b5980 samples=1
+qrx-win32: PROFILE pc=004959d0 samples=130
+qrx-win32: PROFILE pc=004959f0 samples=116
+qrx-win32: PROFILE pc=004959e0 samples=166
+qrx-win32: PROFILE pc=00495a90 samples=10
+qrx-win32: PROFILE pc=00495a80 samples=72
+qrx-win32: PROFILE pc=00495ab0 samples=112
+qrx-win32: PROFILE pc=00495aa0 samples=147
+qrx-win32: PROFILE pc=00405a40 samples=6
+qrx-win32: PROFILE pc=00495ac0 samples=25
+qrx-win32: PROFILE pc=00415a70 samples=1
+qrx-win32: PROFILE pc=00495a10 samples=116
+qrx-win32: PROFILE pc=00495a00 samples=63
+qrx-win32: PROFILE pc=00495a20 samples=55
+qrx-win32: PROFILE pc=00405ac0 samples=2
+qrx-win32: PROFILE pc=00405ae0 samples=2
+qrx-win32: PROFILE pc=00405af0 samples=2
+qrx-win32: PROFILE pc=00405b00 samples=2
+qrx-win32: PROFILE pc=00405b30 samples=1
+qrx-win32: PROFILE pc=00495bd0 samples=23
+qrx-win32: PROFILE pc=00495bf0 samples=10
+qrx-win32: PROFILE pc=00495be0 samples=12
+qrx-win32: PROFILE pc=00495b00 samples=1
+qrx-win32: PROFILE pc=00495b20 samples=1
+qrx-win32: PROFILE pc=00495b50 samples=4
+qrx-win32: PROFILE pc=00495b40 samples=3
+qrx-win32: PROFILE pc=00495b60 samples=3
+qrx-win32: PROFILE pc=00496490 samples=28
+qrx-win32: PROFILE pc=00496480 samples=621
+qrx-win32: PROFILE pc=004964b0 samples=26
+qrx-win32: PROFILE pc=004964a0 samples=36
+qrx-win32: PROFILE pc=004964d0 samples=1
+qrx-win32: PROFILE pc=004964c0 samples=203
+qrx-win32: PROFILE pc=004964f0 samples=28
+qrx-win32: PROFILE pc=00496410 samples=15
+qrx-win32: PROFILE pc=00496400 samples=13
+qrx-win32: PROFILE pc=00496430 samples=34
+qrx-win32: PROFILE pc=00496420 samples=23
+qrx-win32: PROFILE pc=00496450 samples=4
+qrx-win32: PROFILE pc=00496440 samples=4
+qrx-win32: PROFILE pc=00496470 samples=600
+qrx-win32: PROFILE pc=00496460 samples=1
+qrx-win32: PROFILE pc=00496510 samples=13
+qrx-win32: PROFILE pc=00496530 samples=3
+qrx-win32: PROFILE pc=00496520 samples=1
+qrx-win32: PROFILE pc=00496550 samples=7
+qrx-win32: PROFILE pc=00496540 samples=3
+qrx-win32: PROFILE pc=00496570 samples=5
+qrx-win32: PROFILE pc=00496560 samples=4
+qrx-win32: PROFILE pc=00496790 samples=3
+qrx-win32: PROFILE pc=004e67c0 samples=1
+qrx-win32: PROFILE pc=004e67d0 samples=1
+qrx-win32: PROFILE pc=004967d0 samples=19
+qrx-win32: PROFILE pc=004967c0 samples=8
+qrx-win32: PROFILE pc=004967f0 samples=11
+qrx-win32: PROFILE pc=004e6790 samples=1
+qrx-win32: PROFILE pc=004e6760 samples=3
+qrx-win32: PROFILE pc=00496730 samples=22
+qrx-win32: PROFILE pc=00496720 samples=14
+qrx-win32: PROFILE pc=00496750 samples=1
+qrx-win32: PROFILE pc=00496740 samples=31
+qrx-win32: PROFILE pc=00496770 samples=13
+qrx-win32: PROFILE pc=00496760 samples=4
+qrx-win32: PROFILE pc=004961c0 samples=1
+qrx-win32: PROFILE pc=00446240 samples=44
+qrx-win32: PROFILE pc=00446250 samples=20
+qrx-win32: PROFILE pc=00406250 samples=2
+qrx-win32: PROFILE pc=00406260 samples=2
+qrx-win32: PROFILE pc=00406270 samples=3
+qrx-win32: PROFILE pc=00496210 samples=27
+qrx-win32: PROFILE pc=00496200 samples=33
+qrx-win32: PROFILE pc=004062a0 samples=1
+qrx-win32: PROFILE pc=004062b0 samples=230
+qrx-win32: PROFILE pc=004062c0 samples=303
+qrx-win32: PROFILE pc=004062d0 samples=295
+qrx-win32: PROFILE pc=00496270 samples=4
+qrx-win32: PROFILE pc=00496260 samples=14
+qrx-win32: PROFILE pc=00406300 samples=3
+qrx-win32: PROFILE pc=00406320 samples=1
+qrx-win32: PROFILE pc=00406330 samples=1
+qrx-win32: PROFILE pc=00406340 samples=1
+qrx-win32: PROFILE pc=004963c0 samples=25
+qrx-win32: PROFILE pc=00406360 samples=60
+qrx-win32: PROFILE pc=00406370 samples=19
+qrx-win32: PROFILE pc=00406380 samples=2
+qrx-win32: PROFILE pc=004063d0 samples=1
+qrx-win32: PROFILE pc=004063e0 samples=1
+qrx-win32: PROFILE pc=00496360 samples=1
+qrx-win32: PROFILE pc=004b6c80 samples=1
+qrx-win32: PROFILE pc=00406c50 samples=3
+qrx-win32: PROFILE pc=00406c60 samples=2
+qrx-win32: PROFILE pc=00406c70 samples=3
+qrx-win32: PROFILE pc=00406c80 samples=22
+qrx-win32: PROFILE pc=00406c90 samples=14
+qrx-win32: PROFILE pc=00406ca0 samples=4
+qrx-win32: PROFILE pc=00406cb0 samples=2
+qrx-win32: PROFILE pc=00406cc0 samples=1
+qrx-win32: PROFILE pc=00406cd0 samples=3
+qrx-win32: PROFILE pc=00406cf0 samples=1
+qrx-win32: PROFILE pc=00406d10 samples=5
+qrx-win32: PROFILE pc=00436d10 samples=1
+qrx-win32: PROFILE pc=00406d30 samples=5
+qrx-win32: PROFILE pc=004b6fb0 samples=5
+qrx-win32: PROFILE pc=004b6fa0 samples=4
+qrx-win32: PROFILE pc=004b6f90 samples=5
+qrx-win32: PROFILE pc=004b6f80 samples=3
+qrx-win32: PROFILE pc=00436f90 samples=1
+qrx-win32: PROFILE pc=004b6f70 samples=4
+qrx-win32: PROFILE pc=004e6f30 samples=1
+qrx-win32: PROFILE pc=00496890 samples=2
+qrx-win32: PROFILE pc=00496880 samples=2
+qrx-win32: PROFILE pc=004968b0 samples=6
+qrx-win32: PROFILE pc=004968a0 samples=1
+qrx-win32: PROFILE pc=004968d0 samples=2
+qrx-win32: PROFILE pc=004e68b0 samples=3
+qrx-win32: PROFILE pc=004968f0 samples=4
+qrx-win32: PROFILE pc=004e6890 samples=1
+qrx-win32: PROFILE pc=004e6860 samples=14
+qrx-win32: PROFILE pc=004e6870 samples=1
+qrx-win32: PROFILE pc=004e6840 samples=12
+qrx-win32: PROFILE pc=004e6850 samples=11
+qrx-win32: PROFILE pc=004e6820 samples=8
+qrx-win32: PROFILE pc=004e6830 samples=7
+qrx-win32: PROFILE pc=004e6800 samples=3
+qrx-win32: PROFILE pc=004e6810 samples=2
+qrx-win32: PROFILE pc=00496990 samples=12
+qrx-win32: PROFILE pc=00496980 samples=22
+qrx-win32: PROFILE pc=00446960 samples=3
+qrx-win32: PROFILE pc=00446970 samples=1
+qrx-win32: PROFILE pc=004969d0 samples=3
+qrx-win32: PROFILE pc=004969c0 samples=14
+qrx-win32: PROFILE pc=004e6980 samples=2
+qrx-win32: PROFILE pc=004e6990 samples=1
+qrx-win32: PROFILE pc=004e6960 samples=2
+qrx-win32: PROFILE pc=00496900 samples=6
+qrx-win32: PROFILE pc=00496930 samples=517
+qrx-win32: PROFILE pc=00496920 samples=4
+qrx-win32: PROFILE pc=004e6920 samples=1
+qrx-win32: PROFILE pc=00446990 samples=2
+qrx-win32: PROFILE pc=004469a0 samples=3
+qrx-win32: PROFILE pc=00496960 samples=4
+qrx-win32: PROFILE pc=00496a90 samples=11
+qrx-win32: PROFILE pc=00496a80 samples=3
+qrx-win32: PROFILE pc=00496a00 samples=4
+qrx-win32: PROFILE pc=004e6a40 samples=1
+qrx-win32: PROFILE pc=004e6a50 samples=1
+qrx-win32: PROFILE pc=00496a50 samples=91
+qrx-win32: PROFILE pc=00496a40 samples=88
+qrx-win32: PROFILE pc=00496a70 samples=3
+qrx-win32: PROFILE pc=004e6a10 samples=1
+qrx-win32: PROFILE pc=00446b40 samples=11
+qrx-win32: PROFILE pc=00446b50 samples=10
+qrx-win32: PROFILE pc=00446b60 samples=11
+qrx-win32: PROFILE pc=00417430 samples=1
+qrx-win32: PROFILE pc=004a7420 samples=1
+qrx-win32: PROFILE pc=004a7400 samples=4
+qrx-win32: PROFILE pc=004a7460 samples=2
+qrx-win32: PROFILE pc=004a7440 samples=1
+qrx-win32: PROFILE pc=004a7450 samples=3
+qrx-win32: PROFILE pc=004a75a0 samples=19
+qrx-win32: PROFILE pc=004a75b0 samples=12
+qrx-win32: PROFILE pc=004a7580 samples=16
+qrx-win32: PROFILE pc=004a7590 samples=15
+qrx-win32: PROFILE pc=00417560 samples=1
+qrx-win32: PROFILE pc=004a7520 samples=13
+qrx-win32: PROFILE pc=004a7530 samples=13
+qrx-win32: PROFILE pc=004a7560 samples=15
+qrx-win32: PROFILE pc=004a7570 samples=16
+qrx-win32: PROFILE pc=004a7540 samples=13
+qrx-win32: PROFILE pc=004a7550 samples=11
+qrx-win32: PROFILE pc=004a76a0 samples=425
+qrx-win32: PROFILE pc=004a76b0 samples=462
+qrx-win32: PROFILE pc=004a7680 samples=216
+qrx-win32: PROFILE pc=004a7690 samples=264
+qrx-win32: PROFILE pc=004576d0 samples=22
+qrx-win32: PROFILE pc=004576c0 samples=30
+qrx-win32: PROFILE pc=004576f0 samples=238
+qrx-win32: PROFILE pc=004576e0 samples=12
+qrx-win32: PROFILE pc=004a7660 samples=300
+qrx-win32: PROFILE pc=004a7670 samples=396
+qrx-win32: PROFILE pc=004a7640 samples=460
+qrx-win32: PROFILE pc=004a7650 samples=289
+qrx-win32: PROFILE pc=00457750 samples=135
+qrx-win32: PROFILE pc=004a77b0 samples=2
+qrx-win32: PROFILE pc=00457770 samples=737
+qrx-win32: PROFILE pc=00457760 samples=1136
+qrx-win32: PROFILE pc=00457710 samples=195
+qrx-win32: PROFILE pc=00457700 samples=349
+qrx-win32: PROFILE pc=00457730 samples=304
+qrx-win32: PROFILE pc=00457720 samples=259
+qrx-win32: PROFILE pc=004577d0 samples=136
+qrx-win32: PROFILE pc=004a7730 samples=1
+qrx-win32: PROFILE pc=004577f0 samples=11
+qrx-win32: PROFILE pc=004577e0 samples=96
+qrx-win32: PROFILE pc=00457790 samples=46
+qrx-win32: PROFILE pc=004a7770 samples=1
+qrx-win32: PROFILE pc=004577b0 samples=28
+qrx-win32: PROFILE pc=004577a0 samples=19
+qrx-win32: PROFILE pc=004a71e0 samples=2
+qrx-win32: PROFILE pc=004a71f0 samples=1
+qrx-win32: PROFILE pc=004b7150 samples=1
+qrx-win32: PROFILE pc=004a7220 samples=2
+qrx-win32: PROFILE pc=004a7200 samples=10
+qrx-win32: PROFILE pc=004a7210 samples=2
+qrx-win32: PROFILE pc=004a7240 samples=1
+qrx-win32: PROFILE pc=004a7250 samples=1
+qrx-win32: PROFILE pc=00417310 samples=1
+qrx-win32: PROFILE pc=004173b0 samples=1
+qrx-win32: PROFILE pc=00407c00 samples=1
+qrx-win32: PROFILE pc=00407c10 samples=1
+qrx-win32: PROFILE pc=00497cb0 samples=3
+qrx-win32: PROFILE pc=00497ca0 samples=1
+qrx-win32: PROFILE pc=00497cd0 samples=4
+qrx-win32: PROFILE pc=00497cc0 samples=2
+qrx-win32: PROFILE pc=00497cf0 samples=3
+qrx-win32: PROFILE pc=00407c80 samples=1
+qrx-win32: PROFILE pc=00407ca0 samples=1
+qrx-win32: PROFILE pc=00407cb0 samples=1
+qrx-win32: PROFILE pc=00407cc0 samples=2
+qrx-win32: PROFILE pc=00497c40 samples=2
+qrx-win32: PROFILE pc=00497c70 samples=1
+qrx-win32: PROFILE pc=00497c60 samples=2
+qrx-win32: PROFILE pc=00497d90 samples=17
+qrx-win32: PROFILE pc=00497d80 samples=21
+qrx-win32: PROFILE pc=00497db0 samples=17
+qrx-win32: PROFILE pc=00447d70 samples=3
+qrx-win32: PROFILE pc=00497dd0 samples=14
+qrx-win32: PROFILE pc=00497dc0 samples=10
+qrx-win32: PROFILE pc=004a7dc0 samples=1
+qrx-win32: PROFILE pc=00497de0 samples=19
+qrx-win32: PROFILE pc=00447dc0 samples=1
+qrx-win32: PROFILE pc=00447dd0 samples=7
+qrx-win32: PROFILE pc=00447de0 samples=29
+qrx-win32: PROFILE pc=00407db0 samples=1
+qrx-win32: PROFILE pc=00447d80 samples=5
+qrx-win32: PROFILE pc=00447d90 samples=4
+qrx-win32: PROFILE pc=00447da0 samples=17
+qrx-win32: PROFILE pc=00447db0 samples=25
+qrx-win32: PROFILE pc=00497e90 samples=11
+qrx-win32: PROFILE pc=00497e80 samples=11
+qrx-win32: PROFILE pc=00497eb0 samples=16
+qrx-win32: PROFILE pc=00497ea0 samples=20
+qrx-win32: PROFILE pc=00497ed0 samples=8
+qrx-win32: PROFILE pc=00497ec0 samples=8
+qrx-win32: PROFILE pc=00497ef0 samples=17
+qrx-win32: PROFILE pc=00497ee0 samples=14
+qrx-win32: PROFILE pc=00497e10 samples=13
+qrx-win32: PROFILE pc=00497e00 samples=17
+qrx-win32: PROFILE pc=00497e30 samples=11
+qrx-win32: PROFILE pc=00497e20 samples=16
+qrx-win32: PROFILE pc=00497e50 samples=21
+qrx-win32: PROFILE pc=00497e40 samples=10
+qrx-win32: PROFILE pc=00497e70 samples=14
+qrx-win32: PROFILE pc=00497e60 samples=6
+qrx-win32: PROFILE pc=00497f80 samples=1
+qrx-win32: PROFILE pc=00497f10 samples=15
+qrx-win32: PROFILE pc=00497f00 samples=21
+qrx-win32: PROFILE pc=004e7f40 samples=1
+qrx-win32: PROFILE pc=00497f50 samples=4
+qrx-win32: PROFILE pc=00497f40 samples=3
+qrx-win32: PROFILE pc=00497f70 samples=3
+qrx-win32: PROFILE pc=00457850 samples=17
+qrx-win32: PROFILE pc=00457840 samples=10
+qrx-win32: PROFILE pc=00457870 samples=9
+qrx-win32: PROFILE pc=00457860 samples=20
+qrx-win32: PROFILE pc=00457810 samples=9
+qrx-win32: PROFILE pc=00457800 samples=11
+qrx-win32: PROFILE pc=00457830 samples=19
+qrx-win32: PROFILE pc=00457820 samples=32
+qrx-win32: PROFILE pc=004a7820 samples=1
+qrx-win32: PROFILE pc=004578c0 samples=21
+qrx-win32: PROFILE pc=004578f0 samples=380
+qrx-win32: PROFILE pc=004578e0 samples=525
+qrx-win32: PROFILE pc=004a7860 samples=1
+qrx-win32: PROFILE pc=00457880 samples=71
+qrx-win32: PROFILE pc=004578b0 samples=20
+qrx-win32: PROFILE pc=004578a0 samples=25
+qrx-win32: PROFILE pc=00457910 samples=3
+qrx-win32: PROFILE pc=00457900 samples=253
+qrx-win32: PROFILE pc=00457930 samples=66
+qrx-win32: PROFILE pc=00457920 samples=318
+qrx-win32: PROFILE pc=004a7920 samples=4
+qrx-win32: PROFILE pc=004a7930 samples=6
+qrx-win32: PROFILE pc=004a7900 samples=2
+qrx-win32: PROFILE pc=004079d0 samples=2
+qrx-win32: PROFILE pc=004079f0 samples=3
+qrx-win32: PROFILE pc=00407a00 samples=71
+qrx-win32: PROFILE pc=00407a10 samples=142
+qrx-win32: PROFILE pc=00407a20 samples=60
+qrx-win32: PROFILE pc=00407a30 samples=35
+qrx-win32: PROFILE pc=00407a40 samples=2
+qrx-win32: PROFILE pc=00497ac0 samples=35
+qrx-win32: PROFILE pc=00407a60 samples=1
+qrx-win32: PROFILE pc=00407a70 samples=6
+qrx-win32: PROFILE pc=00497a10 samples=86
+qrx-win32: PROFILE pc=00407a90 samples=2
+qrx-win32: PROFILE pc=00497a30 samples=44
+qrx-win32: PROFILE pc=00497a20 samples=34
+qrx-win32: PROFILE pc=00497a50 samples=71
+qrx-win32: PROFILE pc=00497a40 samples=40
+qrx-win32: PROFILE pc=00497a70 samples=44
+qrx-win32: PROFILE pc=00407b00 samples=2
+qrx-win32: PROFILE pc=00407b10 samples=2
+qrx-win32: PROFILE pc=00407b20 samples=2
+qrx-win32: PROFILE pc=00497ba0 samples=3
+qrx-win32: PROFILE pc=00497bd0 samples=2
+qrx-win32: PROFILE pc=00407b50 samples=11
+qrx-win32: PROFILE pc=00407b60 samples=2
+qrx-win32: PROFILE pc=00407b70 samples=1
+qrx-win32: PROFILE pc=00407b80 samples=1
+qrx-win32: PROFILE pc=00407b90 samples=5
+qrx-win32: PROFILE pc=00407ba0 samples=1
+qrx-win32: PROFILE pc=00497b20 samples=16
+qrx-win32: PROFILE pc=00407bc0 samples=2
+qrx-win32: PROFILE pc=00407bd0 samples=3
+qrx-win32: PROFILE pc=00407be0 samples=3
+qrx-win32: PROFILE pc=00497b60 samples=14
+qrx-win32: PROFILE pc=00448440 samples=30
+qrx-win32: PROFILE pc=00498480 samples=7
+qrx-win32: PROFILE pc=00448460 samples=45
+qrx-win32: PROFILE pc=00448470 samples=13
+qrx-win32: PROFILE pc=00448400 samples=23
+qrx-win32: PROFILE pc=004984c0 samples=5
+qrx-win32: PROFILE pc=00448420 samples=9
+qrx-win32: PROFILE pc=00448430 samples=48
+qrx-win32: PROFILE pc=004484c0 samples=12
+qrx-win32: PROFILE pc=00498400 samples=6
+qrx-win32: PROFILE pc=004484e0 samples=14
+qrx-win32: PROFILE pc=004484f0 samples=8
+qrx-win32: PROFILE pc=00448480 samples=13
+qrx-win32: PROFILE pc=00498440 samples=2
+qrx-win32: PROFILE pc=00498470 samples=11
+qrx-win32: PROFILE pc=00498460 samples=9
+qrx-win32: PROFILE pc=00498590 samples=8
+qrx-win32: PROFILE pc=00448550 samples=3
+qrx-win32: PROFILE pc=00418530 samples=1
+qrx-win32: PROFILE pc=00418520 samples=1
+qrx-win32: PROFILE pc=004985d0 samples=5
+qrx-win32: PROFILE pc=004a85f0 samples=1
+qrx-win32: PROFILE pc=00408560 samples=1
+qrx-win32: PROFILE pc=00418560 samples=1
+qrx-win32: PROFILE pc=00418590 samples=1
+qrx-win32: PROFILE pc=004485d0 samples=12
+qrx-win32: PROFILE pc=00498530 samples=16
+qrx-win32: PROFILE pc=00498520 samples=20
+qrx-win32: PROFILE pc=00448580 samples=33
+qrx-win32: PROFILE pc=00498540 samples=7
+qrx-win32: PROFILE pc=00498570 samples=2
+qrx-win32: PROFILE pc=00498560 samples=8
+qrx-win32: PROFILE pc=00498690 samples=16
+qrx-win32: PROFILE pc=00498680 samples=8
+qrx-win32: PROFILE pc=004986b0 samples=200
+qrx-win32: PROFILE pc=004986a0 samples=12
+qrx-win32: PROFILE pc=004986d0 samples=303
+qrx-win32: PROFILE pc=004986c0 samples=385
+qrx-win32: PROFILE pc=004986f0 samples=300
+qrx-win32: PROFILE pc=004986e0 samples=235
+qrx-win32: PROFILE pc=00498610 samples=10
+qrx-win32: PROFILE pc=00498600 samples=14
+qrx-win32: PROFILE pc=004086a0 samples=1
+qrx-win32: PROFILE pc=004086b0 samples=1
+qrx-win32: PROFILE pc=004286e0 samples=1
+qrx-win32: PROFILE pc=00498640 samples=9
+qrx-win32: PROFILE pc=00498670 samples=4
+qrx-win32: PROFILE pc=00498660 samples=19
+qrx-win32: PROFILE pc=00498790 samples=124
+qrx-win32: PROFILE pc=00498780 samples=208
+qrx-win32: PROFILE pc=004987b0 samples=141
+qrx-win32: PROFILE pc=004987a0 samples=242
+qrx-win32: PROFILE pc=004987d0 samples=104
+qrx-win32: PROFILE pc=004987c0 samples=168
+qrx-win32: PROFILE pc=004987f0 samples=207
+qrx-win32: PROFILE pc=004987e0 samples=207
+qrx-win32: PROFILE pc=00498710 samples=81
+qrx-win32: PROFILE pc=00498700 samples=121
+qrx-win32: PROFILE pc=00498730 samples=368
+qrx-win32: PROFILE pc=00498720 samples=364
+qrx-win32: PROFILE pc=004287e0 samples=1
+qrx-win32: PROFILE pc=00498740 samples=334
+qrx-win32: PROFILE pc=004287c0 samples=4
+qrx-win32: PROFILE pc=004287d0 samples=4
+qrx-win32: PROFILE pc=00498090 samples=17
+qrx-win32: PROFILE pc=00498080 samples=11
+qrx-win32: PROFILE pc=004980b0 samples=14
+qrx-win32: PROFILE pc=004980a0 samples=14
+qrx-win32: PROFILE pc=004980d0 samples=19
+qrx-win32: PROFILE pc=004b80e0 samples=1
+qrx-win32: PROFILE pc=004980f0 samples=11
+qrx-win32: PROFILE pc=004980e0 samples=13
+qrx-win32: PROFILE pc=004480c0 samples=3
+qrx-win32: PROFILE pc=00498000 samples=14
+qrx-win32: PROFILE pc=00498030 samples=11
+qrx-win32: PROFILE pc=00498020 samples=9
+qrx-win32: PROFILE pc=00498050 samples=14
+qrx-win32: PROFILE pc=00498040 samples=17
+qrx-win32: PROFILE pc=00498070 samples=12
+qrx-win32: PROFILE pc=004480b0 samples=9
+qrx-win32: PROFILE pc=00498190 samples=12
+qrx-win32: PROFILE pc=00498180 samples=18
+qrx-win32: PROFILE pc=004981b0 samples=11
+qrx-win32: PROFILE pc=004981a0 samples=7
+qrx-win32: PROFILE pc=004981d0 samples=20
+qrx-win32: PROFILE pc=004981c0 samples=9
+qrx-win32: PROFILE pc=004981f0 samples=9
+qrx-win32: PROFILE pc=004981e0 samples=7
+qrx-win32: PROFILE pc=00498110 samples=13
+qrx-win32: PROFILE pc=00498100 samples=13
+qrx-win32: PROFILE pc=00498130 samples=5
+qrx-win32: PROFILE pc=00498120 samples=14
+qrx-win32: PROFILE pc=00498150 samples=6
+qrx-win32: PROFILE pc=00498140 samples=9
+qrx-win32: PROFILE pc=00498170 samples=8
+qrx-win32: PROFILE pc=00498160 samples=11
+qrx-win32: PROFILE pc=00498290 samples=6
+qrx-win32: PROFILE pc=00498280 samples=14
+qrx-win32: PROFILE pc=004982a0 samples=5
+qrx-win32: PROFILE pc=004d8280 samples=1
+qrx-win32: PROFILE pc=004982f0 samples=12
+qrx-win32: PROFILE pc=004982e0 samples=10
+qrx-win32: PROFILE pc=00498210 samples=12
+qrx-win32: PROFILE pc=00498200 samples=14
+qrx-win32: PROFILE pc=00498230 samples=15
+qrx-win32: PROFILE pc=00498220 samples=15
+qrx-win32: PROFILE pc=00498250 samples=11
+qrx-win32: PROFILE pc=00498240 samples=11
+qrx-win32: PROFILE pc=00498270 samples=13
+qrx-win32: PROFILE pc=00498260 samples=24
+qrx-win32: PROFILE pc=00498390 samples=1
+qrx-win32: PROFILE pc=00498380 samples=3
+qrx-win32: PROFILE pc=004983b0 samples=5
+qrx-win32: PROFILE pc=004983a0 samples=3
+qrx-win32: PROFILE pc=004983c0 samples=4
+qrx-win32: PROFILE pc=004983f0 samples=2
+qrx-win32: PROFILE pc=004d83a0 samples=1
+qrx-win32: PROFILE pc=00498310 samples=7
+qrx-win32: PROFILE pc=00498300 samples=9
+qrx-win32: PROFILE pc=00498330 samples=1
+qrx-win32: PROFILE pc=00498320 samples=5
+qrx-win32: PROFILE pc=00498350 samples=6
+qrx-win32: PROFILE pc=00448390 samples=5
+qrx-win32: PROFILE pc=00498370 samples=10
+qrx-win32: PROFILE pc=00498360 samples=11
+qrx-win32: PROFILE pc=00498c90 samples=180
+qrx-win32: PROFILE pc=00498c80 samples=196
+qrx-win32: PROFILE pc=00498cb0 samples=138
+qrx-win32: PROFILE pc=00498ca0 samples=198
+qrx-win32: PROFILE pc=00498cd0 samples=19
+qrx-win32: PROFILE pc=00498cc0 samples=8
+qrx-win32: PROFILE pc=00498cf0 samples=29
+qrx-win32: PROFILE pc=00498ce0 samples=20
+qrx-win32: PROFILE pc=00498c10 samples=11
+qrx-win32: PROFILE pc=00498c00 samples=33
+qrx-win32: PROFILE pc=004a8c00 samples=1
+qrx-win32: PROFILE pc=00498c20 samples=38
+qrx-win32: PROFILE pc=00498c50 samples=21
+qrx-win32: PROFILE pc=00498c40 samples=25
+qrx-win32: PROFILE pc=00498c70 samples=17
+qrx-win32: PROFILE pc=00498c60 samples=19
+qrx-win32: PROFILE pc=004b8db0 samples=1
+qrx-win32: PROFILE pc=004b8da0 samples=3
+qrx-win32: PROFILE pc=00498db0 samples=83
+qrx-win32: PROFILE pc=00498da0 samples=62
+qrx-win32: PROFILE pc=00498dd0 samples=51
+qrx-win32: PROFILE pc=00428d70 samples=1
+qrx-win32: PROFILE pc=00498df0 samples=72
+qrx-win32: PROFILE pc=00498de0 samples=60
+qrx-win32: PROFILE pc=00428da0 samples=193
+qrx-win32: PROFILE pc=00498d00 samples=20
+qrx-win32: PROFILE pc=00428d80 samples=205
+qrx-win32: PROFILE pc=00428d90 samples=88
+qrx-win32: PROFILE pc=00498d50 samples=14
+qrx-win32: PROFILE pc=00498d40 samples=22
+qrx-win32: PROFILE pc=00428dc0 samples=1
+qrx-win32: PROFILE pc=00498d60 samples=14
+qrx-win32: PROFILE pc=00498e90 samples=1
+qrx-win32: PROFILE pc=00498e80 samples=5
+qrx-win32: PROFILE pc=00498eb0 samples=1
+qrx-win32: PROFILE pc=00498ea0 samples=1
+qrx-win32: PROFILE pc=00428e60 samples=2
+qrx-win32: PROFILE pc=00428e70 samples=1
+qrx-win32: PROFILE pc=00428e40 samples=2
+qrx-win32: PROFILE pc=00428e50 samples=2
+qrx-win32: PROFILE pc=00428ea0 samples=2
+qrx-win32: PROFILE pc=00498e00 samples=54
+qrx-win32: PROFILE pc=00498e30 samples=2
+qrx-win32: PROFILE pc=00498e20 samples=21
+qrx-win32: PROFILE pc=00498e50 samples=3
+qrx-win32: PROFILE pc=00498e70 samples=5
+qrx-win32: PROFILE pc=00498e60 samples=3
+qrx-win32: PROFILE pc=004a8fa0 samples=13
+qrx-win32: PROFILE pc=00498f80 samples=10
+qrx-win32: PROFILE pc=004a8f80 samples=18
+qrx-win32: PROFILE pc=004a8f90 samples=14
+qrx-win32: PROFILE pc=00498f10 samples=15
+qrx-win32: PROFILE pc=004d8f40 samples=1
+qrx-win32: PROFILE pc=00498f30 samples=10
+qrx-win32: PROFILE pc=00498f20 samples=16
+qrx-win32: PROFILE pc=00498f50 samples=18
+qrx-win32: PROFILE pc=00498f40 samples=10
+qrx-win32: PROFILE pc=00498f70 samples=12
+qrx-win32: PROFILE pc=00498f60 samples=8
+qrx-win32: PROFILE pc=00498890 samples=78
+qrx-win32: PROFILE pc=00498880 samples=53
+qrx-win32: PROFILE pc=004988b0 samples=85
+qrx-win32: PROFILE pc=004988a0 samples=20
+qrx-win32: PROFILE pc=004988d0 samples=234
+qrx-win32: PROFILE pc=004a88f0 samples=3
+qrx-win32: PROFILE pc=004988f0 samples=128
+qrx-win32: PROFILE pc=004988e0 samples=57
+qrx-win32: PROFILE pc=00498810 samples=102
+qrx-win32: PROFILE pc=00498800 samples=222
+qrx-win32: PROFILE pc=00498830 samples=78
+qrx-win32: PROFILE pc=00498820 samples=100
+qrx-win32: PROFILE pc=00498850 samples=104
+qrx-win32: PROFILE pc=00498840 samples=69
+qrx-win32: PROFILE pc=00498870 samples=87
+qrx-win32: PROFILE pc=00498860 samples=141
+qrx-win32: PROFILE pc=00498990 samples=9
+qrx-win32: PROFILE pc=00498980 samples=7
+qrx-win32: PROFILE pc=004989b0 samples=1
+qrx-win32: PROFILE pc=004989a0 samples=10
+qrx-win32: PROFILE pc=004989d0 samples=8
+qrx-win32: PROFILE pc=004989c0 samples=1
+qrx-win32: PROFILE pc=004989e0 samples=9
+qrx-win32: PROFILE pc=004289a0 samples=6
+qrx-win32: PROFILE pc=004289b0 samples=1
+qrx-win32: PROFILE pc=004a8900 samples=4
+qrx-win32: PROFILE pc=00428990 samples=8
+qrx-win32: PROFILE pc=00498950 samples=18
+qrx-win32: PROFILE pc=00498940 samples=131
+qrx-win32: PROFILE pc=00498970 samples=1
+qrx-win32: PROFILE pc=00498960 samples=6
+qrx-win32: PROFILE pc=00498af0 samples=3
+qrx-win32: PROFILE pc=00498ae0 samples=8
+qrx-win32: PROFILE pc=00498b90 samples=123
+qrx-win32: PROFILE pc=00498b80 samples=105
+qrx-win32: PROFILE pc=00498bb0 samples=31
+qrx-win32: PROFILE pc=00498ba0 samples=36
+qrx-win32: PROFILE pc=00498bd0 samples=22
+qrx-win32: PROFILE pc=00498bc0 samples=32
+qrx-win32: PROFILE pc=00498bf0 samples=22
+qrx-win32: PROFILE pc=00498be0 samples=42
+qrx-win32: PROFILE pc=00498b10 samples=2
+qrx-win32: PROFILE pc=00498b00 samples=4
+qrx-win32: PROFILE pc=00498b30 samples=10
+qrx-win32: PROFILE pc=00498b70 samples=136
+qrx-win32: PROFILE pc=00498b60 samples=127
+qrx-win32: PROFILE pc=00439430 samples=1
+qrx-win32: PROFILE pc=00499400 samples=3
+qrx-win32: PROFILE pc=004a9400 samples=1
+qrx-win32: PROFILE pc=004a95b0 samples=1
+qrx-win32: PROFILE pc=00419530 samples=1
+qrx-win32: PROFILE pc=004a95c0 samples=1
+qrx-win32: PROFILE pc=004495c0 samples=16
+qrx-win32: PROFILE pc=004495d0 samples=8
+qrx-win32: PROFILE pc=004495a0 samples=19
+qrx-win32: PROFILE pc=004495b0 samples=9
+qrx-win32: PROFILE pc=00449640 samples=12
+qrx-win32: PROFILE pc=00419600 samples=1
+qrx-win32: PROFILE pc=004d96f0 samples=1
+qrx-win32: PROFILE pc=00449670 samples=3
+qrx-win32: PROFILE pc=00449610 samples=1
+qrx-win32: PROFILE pc=00449620 samples=7
+qrx-win32: PROFILE pc=00449630 samples=6
+qrx-win32: PROFILE pc=004496c0 samples=1
+qrx-win32: PROFILE pc=004496d0 samples=3
+qrx-win32: PROFILE pc=004496e0 samples=2
+qrx-win32: PROFILE pc=004496f0 samples=1
+qrx-win32: PROFILE pc=00449680 samples=7
+qrx-win32: PROFILE pc=00449690 samples=4
+qrx-win32: PROFILE pc=004496a0 samples=2
+qrx-win32: PROFILE pc=004496b0 samples=1
+qrx-win32: PROFILE pc=00499790 samples=1
+qrx-win32: PROFILE pc=00499780 samples=5
+qrx-win32: PROFILE pc=004997b0 samples=2
+qrx-win32: PROFILE pc=004997a0 samples=1
+qrx-win32: PROFILE pc=004997d0 samples=1
+qrx-win32: PROFILE pc=004997c0 samples=2
+qrx-win32: PROFILE pc=004997f0 samples=3
+qrx-win32: PROFILE pc=004997e0 samples=3
+qrx-win32: PROFILE pc=004297a0 samples=2
+qrx-win32: PROFILE pc=00429780 samples=1
+qrx-win32: PROFILE pc=00429790 samples=1
+qrx-win32: PROFILE pc=00449780 samples=46
+qrx-win32: PROFILE pc=004297f0 samples=2
+qrx-win32: PROFILE pc=004297c0 samples=2
+qrx-win32: PROFILE pc=004297d0 samples=3
+qrx-win32: PROFILE pc=00499090 samples=1
+qrx-win32: PROFILE pc=00499080 samples=3
+qrx-win32: PROFILE pc=004990a0 samples=6
+qrx-win32: PROFILE pc=004990d0 samples=5
+qrx-win32: PROFILE pc=004990c0 samples=6
+qrx-win32: PROFILE pc=004990f0 samples=5
+qrx-win32: PROFILE pc=004990e0 samples=2
+qrx-win32: PROFILE pc=00499000 samples=1
+qrx-win32: PROFILE pc=004a9010 samples=1
+qrx-win32: PROFILE pc=00499050 samples=8
+qrx-win32: PROFILE pc=00499040 samples=7
+qrx-win32: PROFILE pc=00499070 samples=4
+qrx-win32: PROFILE pc=00499060 samples=5
+qrx-win32: PROFILE pc=00499190 samples=2
+qrx-win32: PROFILE pc=00499180 samples=1
+qrx-win32: PROFILE pc=004991b0 samples=1
+qrx-win32: PROFILE pc=004991a0 samples=2
+qrx-win32: PROFILE pc=004991d0 samples=3
+qrx-win32: PROFILE pc=004991c0 samples=3
+qrx-win32: PROFILE pc=00499110 samples=4
+qrx-win32: PROFILE pc=00499100 samples=6
+qrx-win32: PROFILE pc=00499130 samples=2
+qrx-win32: PROFILE pc=00499120 samples=6
+qrx-win32: PROFILE pc=00499150 samples=1
+qrx-win32: PROFILE pc=00499140 samples=2
+qrx-win32: PROFILE pc=00499170 samples=4
+qrx-win32: PROFILE pc=00499160 samples=4
+qrx-win32: PROFILE pc=00429260 samples=1
+qrx-win32: PROFILE pc=004992f0 samples=1
+qrx-win32: PROFILE pc=00429250 samples=3
+qrx-win32: PROFILE pc=00499230 samples=1
+qrx-win32: PROFILE pc=00499220 samples=1
+qrx-win32: PROFILE pc=00499250 samples=1
+qrx-win32: PROFILE pc=00499270 samples=2
+qrx-win32: PROFILE pc=004c9230 samples=1
+qrx-win32: PROFILE pc=00499390 samples=1
+qrx-win32: PROFILE pc=00499380 samples=5
+qrx-win32: PROFILE pc=004993b0 samples=2
+qrx-win32: PROFILE pc=00429310 samples=1
+qrx-win32: PROFILE pc=004993d0 samples=2
+qrx-win32: PROFILE pc=00419340 samples=1
+qrx-win32: PROFILE pc=004993f0 samples=3
+qrx-win32: PROFILE pc=004993e0 samples=1
+qrx-win32: PROFILE pc=00499320 samples=1
+qrx-win32: PROFILE pc=00499350 samples=2
+qrx-win32: PROFILE pc=00499370 samples=2
+qrx-win32: PROFILE pc=00499360 samples=1
+qrx-win32: PROFILE pc=00499c90 samples=1
+qrx-win32: PROFILE pc=00499c80 samples=4
+qrx-win32: PROFILE pc=00499cb0 samples=3
+qrx-win32: PROFILE pc=00499ca0 samples=5
+qrx-win32: PROFILE pc=00499cd0 samples=6
+qrx-win32: PROFILE pc=00499cc0 samples=6
+qrx-win32: PROFILE pc=00499cf0 samples=4
+qrx-win32: PROFILE pc=00499ce0 samples=2
+qrx-win32: PROFILE pc=00499c10 samples=5
+qrx-win32: PROFILE pc=00499c00 samples=4
+qrx-win32: PROFILE pc=00499c30 samples=8
+qrx-win32: PROFILE pc=00499c20 samples=1
+qrx-win32: PROFILE pc=00499c50 samples=1
+qrx-win32: PROFILE pc=00499c40 samples=9
+qrx-win32: PROFILE pc=00499c70 samples=4
+qrx-win32: PROFILE pc=00499c60 samples=3
+qrx-win32: PROFILE pc=00499d90 samples=4
+qrx-win32: PROFILE pc=00499d80 samples=3
+qrx-win32: PROFILE pc=00499d10 samples=3
+qrx-win32: PROFILE pc=00499d00 samples=4
+qrx-win32: PROFILE pc=00499d30 samples=4
+qrx-win32: PROFILE pc=00499d20 samples=7
+qrx-win32: PROFILE pc=00499d50 samples=3
+qrx-win32: PROFILE pc=00499d40 samples=4
+qrx-win32: PROFILE pc=00499d70 samples=3
+qrx-win32: PROFILE pc=00499d60 samples=5
+qrx-win32: PROFILE pc=00499ef0 samples=2
+qrx-win32: PROFILE pc=00499e30 samples=5
+qrx-win32: PROFILE pc=00499e40 samples=3
+qrx-win32: PROFILE pc=004a9fa0 samples=1637
+qrx-win32: PROFILE pc=00499f80 samples=7
+qrx-win32: PROFILE pc=00499fb0 samples=4
+qrx-win32: PROFILE pc=004a9f90 samples=18
+qrx-win32: PROFILE pc=00499fd0 samples=2
+qrx-win32: PROFILE pc=00499fc0 samples=6
+qrx-win32: PROFILE pc=00499fe0 samples=12
+qrx-win32: PROFILE pc=00499f10 samples=2
+qrx-win32: PROFILE pc=00499f00 samples=6
+qrx-win32: PROFILE pc=00499f30 samples=1
+qrx-win32: PROFILE pc=00499f20 samples=3
+qrx-win32: PROFILE pc=00499f50 samples=7
+qrx-win32: PROFILE pc=00499f40 samples=9
+qrx-win32: PROFILE pc=00499f70 samples=5
+qrx-win32: PROFILE pc=00499f60 samples=4
+qrx-win32: PROFILE pc=00449840 samples=60
+qrx-win32: PROFILE pc=00449850 samples=67
+qrx-win32: PROFILE pc=004998b0 samples=1
+qrx-win32: PROFILE pc=00429810 samples=1
+qrx-win32: PROFILE pc=00449800 samples=23
+qrx-win32: PROFILE pc=004998c0 samples=2
+qrx-win32: PROFILE pc=00449820 samples=11
+qrx-win32: PROFILE pc=00449830 samples=44
+qrx-win32: PROFILE pc=004298a0 samples=9
+qrx-win32: PROFILE pc=00499800 samples=2
+qrx-win32: PROFILE pc=00429880 samples=1
+qrx-win32: PROFILE pc=00499820 samples=11
+qrx-win32: PROFILE pc=00499850 samples=9
+qrx-win32: PROFILE pc=00449890 samples=26
+qrx-win32: PROFILE pc=004498a0 samples=22
+qrx-win32: PROFILE pc=00449950 samples=1
+qrx-win32: PROFILE pc=00449960 samples=1
+qrx-win32: PROFILE pc=00449900 samples=1
+qrx-win32: PROFILE pc=00449910 samples=1
+qrx-win32: PROFILE pc=00449920 samples=4
+qrx-win32: PROFILE pc=004999e0 samples=2
+qrx-win32: PROFILE pc=004499c0 samples=3
+qrx-win32: PROFILE pc=004499d0 samples=10
+qrx-win32: PROFILE pc=004499e0 samples=21
+qrx-win32: PROFILE pc=004499f0 samples=44
+qrx-win32: PROFILE pc=00499950 samples=5
+qrx-win32: PROFILE pc=00499940 samples=22
+qrx-win32: PROFILE pc=00499970 samples=1
+qrx-win32: PROFILE pc=00499960 samples=3
+qrx-win32: PROFILE pc=00499a90 samples=1
+qrx-win32: PROFILE pc=00499a80 samples=1
+qrx-win32: PROFILE pc=00449a60 samples=1
+qrx-win32: PROFILE pc=00449a70 samples=1
+qrx-win32: PROFILE pc=00449a00 samples=6
+qrx-win32: PROFILE pc=00449a10 samples=8
+qrx-win32: PROFILE pc=00499af0 samples=24
+qrx-win32: PROFILE pc=00449ac0 samples=3
+qrx-win32: PROFILE pc=00449a80 samples=1
+qrx-win32: PROFILE pc=00499a40 samples=1
+qrx-win32: PROFILE pc=00499a60 samples=1
+qrx-win32: PROFILE pc=00429b20 samples=5
+qrx-win32: PROFILE pc=00429b30 samples=3
+qrx-win32: PROFILE pc=00429b00 samples=3
+qrx-win32: PROFILE pc=00429b10 samples=3
+qrx-win32: PROFILE pc=00499bd0 samples=5
+qrx-win32: PROFILE pc=00499bc0 samples=9
+qrx-win32: PROFILE pc=00409b60 samples=1
+qrx-win32: PROFILE pc=00409b70 samples=1
+qrx-win32: PROFILE pc=00409b80 samples=2
+qrx-win32: PROFILE pc=00499b00 samples=17
+qrx-win32: PROFILE pc=00409ba0 samples=1
+qrx-win32: PROFILE pc=00429b90 samples=4
+qrx-win32: PROFILE pc=00499b40 samples=17
+qrx-win32: PROFILE pc=00429bc0 samples=1
+qrx-win32: PROFILE pc=00499b60 samples=15
+qrx-win32: PROFILE pc=004da4d0 samples=2
+qrx-win32: PROFILE pc=0049a480 samples=4
+qrx-win32: PROFILE pc=004da4f0 samples=1
+qrx-win32: PROFILE pc=004da4e0 samples=2
+qrx-win32: PROFILE pc=0045a410 samples=489
+qrx-win32: PROFILE pc=004da480 samples=1
+qrx-win32: PROFILE pc=004da4b0 samples=2
+qrx-win32: PROFILE pc=004da4a0 samples=1
+qrx-win32: PROFILE pc=0045a4d0 samples=43
+qrx-win32: PROFILE pc=004da440 samples=1
+qrx-win32: PROFILE pc=0049a420 samples=2
+qrx-win32: PROFILE pc=0049a450 samples=3
+qrx-win32: PROFILE pc=0049a440 samples=5
+qrx-win32: PROFILE pc=0049a470 samples=5
+qrx-win32: PROFILE pc=0049a460 samples=6
+qrx-win32: PROFILE pc=0049a590 samples=4
+qrx-win32: PROFILE pc=0049a580 samples=3
+qrx-win32: PROFILE pc=0049a5b0 samples=10
+qrx-win32: PROFILE pc=0049a5a0 samples=3
+qrx-win32: PROFILE pc=0049a5d0 samples=3
+qrx-win32: PROFILE pc=0049a5c0 samples=12
+qrx-win32: PROFILE pc=0049a5f0 samples=1
+qrx-win32: PROFILE pc=0049a5e0 samples=4
+qrx-win32: PROFILE pc=0049a510 samples=1
+qrx-win32: PROFILE pc=0049a500 samples=1
+qrx-win32: PROFILE pc=004da570 samples=1
+qrx-win32: PROFILE pc=004da560 samples=2
+qrx-win32: PROFILE pc=004da510 samples=1
+qrx-win32: PROFILE pc=0049a540 samples=2
+qrx-win32: PROFILE pc=0049a570 samples=2
+qrx-win32: PROFILE pc=0049a560 samples=6
+qrx-win32: PROFILE pc=0049a690 samples=1
+qrx-win32: PROFILE pc=0049a680 samples=2
+qrx-win32: PROFILE pc=0045a670 samples=12
+qrx-win32: PROFILE pc=0045a660 samples=34
+qrx-win32: PROFILE pc=004da690 samples=1
+qrx-win32: PROFILE pc=004da680 samples=1
+qrx-win32: PROFILE pc=004da6b0 samples=1
+qrx-win32: PROFILE pc=0045a620 samples=78
+qrx-win32: PROFILE pc=0045a6d0 samples=72
+qrx-win32: PROFILE pc=0049a600 samples=3
+qrx-win32: PROFILE pc=0045a6f0 samples=360
+qrx-win32: PROFILE pc=0044a6f0 samples=4
+qrx-win32: PROFILE pc=0049a650 samples=2
+qrx-win32: PROFILE pc=004da600 samples=1
+qrx-win32: PROFILE pc=0049a670 samples=5
+qrx-win32: PROFILE pc=0049a660 samples=4
+qrx-win32: PROFILE pc=0049a780 samples=3
+qrx-win32: PROFILE pc=0049a7b0 samples=1
+qrx-win32: PROFILE pc=0044a770 samples=2
+qrx-win32: PROFILE pc=0049a7d0 samples=1
+qrx-win32: PROFILE pc=0049a7f0 samples=1
+qrx-win32: PROFILE pc=0049a710 samples=9
+qrx-win32: PROFILE pc=0044a7e0 samples=1
+qrx-win32: PROFILE pc=0049a750 samples=2
+qrx-win32: PROFILE pc=0049a740 samples=1
+qrx-win32: PROFILE pc=0049a770 samples=1
+qrx-win32: PROFILE pc=0044a7b0 samples=1
+qrx-win32: PROFILE pc=0049a080 samples=3
+qrx-win32: PROFILE pc=0049a050 samples=4
+qrx-win32: PROFILE pc=0049a040 samples=4
+qrx-win32: PROFILE pc=0049a070 samples=1
+qrx-win32: PROFILE pc=0049a060 samples=4
+qrx-win32: PROFILE pc=004da1d0 samples=2
+qrx-win32: PROFILE pc=004da1c0 samples=2
+qrx-win32: PROFILE pc=004da1f0 samples=1
+qrx-win32: PROFILE pc=004da1e0 samples=1
+qrx-win32: PROFILE pc=0049a1d0 samples=2
+qrx-win32: PROFILE pc=0049a1c0 samples=1
+qrx-win32: PROFILE pc=004da1b0 samples=1
+qrx-win32: PROFILE pc=004da1a0 samples=1
+qrx-win32: PROFILE pc=0049a100 samples=3
+qrx-win32: PROFILE pc=004da170 samples=1
+qrx-win32: PROFILE pc=0049a120 samples=2
+qrx-win32: PROFILE pc=0049a150 samples=2
+qrx-win32: PROFILE pc=0049a140 samples=4
+qrx-win32: PROFILE pc=004da2d0 samples=1
+qrx-win32: PROFILE pc=004da2c0 samples=2
+qrx-win32: PROFILE pc=004da2f0 samples=1
+qrx-win32: PROFILE pc=004da2e0 samples=1
+qrx-win32: PROFILE pc=004da290 samples=1
+qrx-win32: PROFILE pc=004da2a0 samples=2
+qrx-win32: PROFILE pc=004da240 samples=2
+qrx-win32: PROFILE pc=004da270 samples=1
+qrx-win32: PROFILE pc=004da210 samples=2
+qrx-win32: PROFILE pc=004da200 samples=1
+qrx-win32: PROFILE pc=004da230 samples=1
+qrx-win32: PROFILE pc=004da220 samples=1
+qrx-win32: PROFILE pc=004da3d0 samples=1
+qrx-win32: PROFILE pc=004da3c0 samples=1
+qrx-win32: PROFILE pc=004da3f0 samples=1
+qrx-win32: PROFILE pc=0049a3a0 samples=1
+qrx-win32: PROFILE pc=004da3b0 samples=2
+qrx-win32: PROFILE pc=004da3a0 samples=2
+qrx-win32: PROFILE pc=004da350 samples=1
+qrx-win32: PROFILE pc=004da340 samples=2
+qrx-win32: PROFILE pc=004da370 samples=2
+qrx-win32: PROFILE pc=0045a3e0 samples=401
+qrx-win32: PROFILE pc=004da310 samples=2
+qrx-win32: PROFILE pc=004da300 samples=2
+qrx-win32: PROFILE pc=0049a370 samples=1
+qrx-win32: PROFILE pc=0040ac00 samples=13
+qrx-win32: PROFILE pc=0040ac10 samples=13
+qrx-win32: PROFILE pc=0040ac20 samples=13
+qrx-win32: PROFILE pc=0040ac30 samples=14
+qrx-win32: PROFILE pc=0040ac40 samples=12
+qrx-win32: PROFILE pc=0040ac50 samples=6
+qrx-win32: PROFILE pc=0043ac40 samples=4
+qrx-win32: PROFILE pc=0049ac10 samples=29
+qrx-win32: PROFILE pc=0049ac00 samples=29
+qrx-win32: PROFILE pc=0049ac30 samples=23
+qrx-win32: PROFILE pc=0049ac20 samples=24
+qrx-win32: PROFILE pc=0049ac50 samples=45
+qrx-win32: PROFILE pc=0049ac40 samples=27
+qrx-win32: PROFILE pc=0049ac70 samples=5
+qrx-win32: PROFILE pc=0049ac60 samples=6
+qrx-win32: PROFILE pc=0043ad30 samples=1
+qrx-win32: PROFILE pc=0043ad20 samples=1
+qrx-win32: PROFILE pc=0043ad10 samples=1
+qrx-win32: PROFILE pc=0043ad50 samples=1
+qrx-win32: PROFILE pc=0043ad80 samples=1
+qrx-win32: PROFILE pc=0041adc0 samples=1
+qrx-win32: PROFILE pc=0043add0 samples=2
+qrx-win32: PROFILE pc=0043adc0 samples=1
+qrx-win32: PROFILE pc=0043ae30 samples=2
+qrx-win32: PROFILE pc=0043ae20 samples=1
+qrx-win32: PROFILE pc=0041ae30 samples=6
+qrx-win32: PROFILE pc=0041ae50 samples=1
+qrx-win32: PROFILE pc=0041ae40 samples=5
+qrx-win32: PROFILE pc=0041ae70 samples=1
+qrx-win32: PROFILE pc=0043ae40 samples=1
+qrx-win32: PROFILE pc=0043aeb0 samples=2
+qrx-win32: PROFILE pc=0043aef0 samples=3
+qrx-win32: PROFILE pc=0041aec0 samples=2
+qrx-win32: PROFILE pc=0049ae70 samples=1
+qrx-win32: PROFILE pc=0041af00 samples=1
+qrx-win32: PROFILE pc=0043a830 samples=2
+qrx-win32: PROFILE pc=0043a820 samples=8
+qrx-win32: PROFILE pc=0049a8d0 samples=100
+qrx-win32: PROFILE pc=0043a860 samples=2
+qrx-win32: PROFILE pc=0043a850 samples=4
+qrx-win32: PROFILE pc=0043a840 samples=4
+qrx-win32: PROFILE pc=0049a810 samples=1
+qrx-win32: PROFILE pc=0049a800 samples=1
+qrx-win32: PROFILE pc=0049a830 samples=2
+qrx-win32: PROFILE pc=0049a820 samples=10
+qrx-win32: PROFILE pc=0043a8f0 samples=14
+qrx-win32: PROFILE pc=0043a8e0 samples=35
+qrx-win32: PROFILE pc=0049a860 samples=1
+qrx-win32: PROFILE pc=0043a930 samples=5
+qrx-win32: PROFILE pc=0043a920 samples=2
+qrx-win32: PROFILE pc=0043a910 samples=3
+qrx-win32: PROFILE pc=0043a900 samples=8
+qrx-win32: PROFILE pc=0043a970 samples=16
+qrx-win32: PROFILE pc=0043a960 samples=1
+qrx-win32: PROFILE pc=0043a950 samples=2
+qrx-win32: PROFILE pc=0043a940 samples=2
+qrx-win32: PROFILE pc=0049a910 samples=398
+qrx-win32: PROFILE pc=0049a900 samples=17
+qrx-win32: PROFILE pc=0049a930 samples=366
+qrx-win32: PROFILE pc=0049a920 samples=479
+qrx-win32: PROFILE pc=0049a950 samples=490
+qrx-win32: PROFILE pc=0049a940 samples=481
+qrx-win32: PROFILE pc=0049a970 samples=404
+qrx-win32: PROFILE pc=0049a960 samples=308
+qrx-win32: PROFILE pc=0049aa90 samples=5
+qrx-win32: PROFILE pc=0049aa80 samples=2
+qrx-win32: PROFILE pc=0049aab0 samples=5
+qrx-win32: PROFILE pc=0049aaa0 samples=1
+qrx-win32: PROFILE pc=0049aad0 samples=1
+qrx-win32: PROFILE pc=0043aa60 samples=4
+qrx-win32: PROFILE pc=0049aaf0 samples=3
+qrx-win32: PROFILE pc=0049aae0 samples=1
+qrx-win32: PROFILE pc=0043aab0 samples=3
+qrx-win32: PROFILE pc=0049aa00 samples=6
+qrx-win32: PROFILE pc=0043aa90 samples=1
+qrx-win32: PROFILE pc=0049aa20 samples=4
+qrx-win32: PROFILE pc=0043aaf0 samples=2
+qrx-win32: PROFILE pc=0043aae0 samples=2
+qrx-win32: PROFILE pc=0049aa70 samples=1
+qrx-win32: PROFILE pc=0043aac0 samples=3
+qrx-win32: PROFILE pc=0043ab30 samples=1
+qrx-win32: PROFILE pc=0043ab20 samples=3
+qrx-win32: PROFILE pc=0043ab10 samples=1
+qrx-win32: PROFILE pc=0043ab00 samples=3
+qrx-win32: PROFILE pc=0043ab70 samples=3
+qrx-win32: PROFILE pc=0043ab60 samples=2
+qrx-win32: PROFILE pc=0043ab50 samples=2
+qrx-win32: PROFILE pc=0049abe0 samples=26
+qrx-win32: PROFILE pc=0043abb0 samples=1
+qrx-win32: PROFILE pc=0043aba0 samples=1
+qrx-win32: PROFILE pc=0040aba0 samples=6
+qrx-win32: PROFILE pc=0040abb0 samples=9
+qrx-win32: PROFILE pc=0040abc0 samples=12
+qrx-win32: PROFILE pc=0040abd0 samples=10
+qrx-win32: PROFILE pc=0040abe0 samples=12
+qrx-win32: PROFILE pc=0040abf0 samples=12
+qrx-win32: PROFILE pc=0049b490 samples=5
+qrx-win32: PROFILE pc=0049b480 samples=6
+qrx-win32: PROFILE pc=0040b420 samples=1
+qrx-win32: PROFILE pc=0049b4a0 samples=16
+qrx-win32: PROFILE pc=0043b470 samples=7
+qrx-win32: PROFILE pc=0043b460 samples=4
+qrx-win32: PROFILE pc=0043b4b0 samples=31
+qrx-win32: PROFILE pc=0043b4a0 samples=2
+qrx-win32: PROFILE pc=0043b490 samples=3
+qrx-win32: PROFILE pc=0043b480 samples=2
+qrx-win32: PROFILE pc=0043b4f0 samples=6
+qrx-win32: PROFILE pc=0043b4e0 samples=3
+qrx-win32: PROFILE pc=0043b4d0 samples=25
+qrx-win32: PROFILE pc=0043b4c0 samples=21
+qrx-win32: PROFILE pc=0049b590 samples=4
+qrx-win32: PROFILE pc=0049b580 samples=31
+qrx-win32: PROFILE pc=0049b5b0 samples=3
+qrx-win32: PROFILE pc=0049b5a0 samples=4
+qrx-win32: PROFILE pc=0049b5c0 samples=16
+qrx-win32: PROFILE pc=0049b5f0 samples=18
+qrx-win32: PROFILE pc=0049b500 samples=2
+qrx-win32: PROFILE pc=0049b530 samples=4
+qrx-win32: PROFILE pc=0049b520 samples=2
+qrx-win32: PROFILE pc=0049b550 samples=34
+qrx-win32: PROFILE pc=0049b540 samples=1
+qrx-win32: PROFILE pc=0049b570 samples=1
+qrx-win32: PROFILE pc=0049b560 samples=6
+qrx-win32: PROFILE pc=0040b600 samples=1
+qrx-win32: PROFILE pc=0049b6b0 samples=2
+qrx-win32: PROFILE pc=0049b6c0 samples=4
+qrx-win32: PROFILE pc=0049b610 samples=19
+qrx-win32: PROFILE pc=0049b600 samples=20
+qrx-win32: PROFILE pc=0049b630 samples=218
+qrx-win32: PROFILE pc=0049b620 samples=21
+qrx-win32: PROFILE pc=0049b650 samples=17
+qrx-win32: PROFILE pc=0049b640 samples=90
+qrx-win32: PROFILE pc=0049b670 samples=6
+qrx-win32: PROFILE pc=0049b660 samples=15
+qrx-win32: PROFILE pc=004bb0f0 samples=2
+qrx-win32: PROFILE pc=0043b060 samples=1
+qrx-win32: PROFILE pc=004bb0d0 samples=1
+qrx-win32: PROFILE pc=0049b0e0 samples=6
+qrx-win32: PROFILE pc=0043b090 samples=2
+qrx-win32: PROFILE pc=0043b080 samples=3
+qrx-win32: PROFILE pc=0049b050 samples=1
+qrx-win32: PROFILE pc=0043b0c0 samples=2
+qrx-win32: PROFILE pc=0049b110 samples=4
+qrx-win32: PROFILE pc=004bb120 samples=2
+qrx-win32: PROFILE pc=004bb110 samples=10
+qrx-win32: PROFILE pc=004bb100 samples=1
+qrx-win32: PROFILE pc=0049b150 samples=2
+qrx-win32: PROFILE pc=0049b140 samples=5
+qrx-win32: PROFILE pc=0049b160 samples=3
+qrx-win32: PROFILE pc=0049b280 samples=1
+qrx-win32: PROFILE pc=0044b270 samples=2
+qrx-win32: PROFILE pc=0040b240 samples=1
+qrx-win32: PROFILE pc=0049b2c0 samples=1
+qrx-win32: PROFILE pc=0043b250 samples=1
+qrx-win32: PROFILE pc=0043b2b0 samples=1
+qrx-win32: PROFILE pc=0040b2a0 samples=1
+qrx-win32: PROFILE pc=0043b2f0 samples=1
+qrx-win32: PROFILE pc=0043b2e0 samples=2
+qrx-win32: PROFILE pc=0043b2d0 samples=3
+qrx-win32: PROFILE pc=0043b2c0 samples=1
+qrx-win32: PROFILE pc=0043b330 samples=2
+qrx-win32: PROFILE pc=0043b320 samples=2
+qrx-win32: PROFILE pc=0043b310 samples=2
+qrx-win32: PROFILE pc=0043b300 samples=2
+qrx-win32: PROFILE pc=0043b370 samples=2
+qrx-win32: PROFILE pc=0043b360 samples=1
+qrx-win32: PROFILE pc=0043b350 samples=1
+qrx-win32: PROFILE pc=0043b340 samples=1
+qrx-win32: PROFILE pc=0043b3b0 samples=2
+qrx-win32: PROFILE pc=0043b380 samples=1
+qrx-win32: PROFILE pc=004bb360 samples=1
+qrx-win32: PROFILE pc=0043b3c0 samples=1
+qrx-win32: PROFILE pc=0043bd80 samples=5
+qrx-win32: PROFILE pc=0049bd50 samples=1
+qrx-win32: PROFILE pc=0043bdc0 samples=2
+qrx-win32: PROFILE pc=0043be10 samples=3
+qrx-win32: PROFILE pc=0043be00 samples=3
+qrx-win32: PROFILE pc=0043be50 samples=4
+qrx-win32: PROFILE pc=0043be40 samples=3
+qrx-win32: PROFILE pc=0043bea0 samples=1
+qrx-win32: PROFILE pc=0043bef0 samples=1
+qrx-win32: PROFILE pc=0043bed0 samples=1
+qrx-win32: PROFILE pc=0043bf70 samples=2
+qrx-win32: PROFILE pc=0043bf60 samples=3
+qrx-win32: PROFILE pc=0043bf50 samples=4
+qrx-win32: PROFILE pc=0043bfb0 samples=24
+qrx-win32: PROFILE pc=0043bfa0 samples=38
+qrx-win32: PROFILE pc=0043bf80 samples=1
+qrx-win32: PROFILE pc=0043bff0 samples=1
+qrx-win32: PROFILE pc=0043bfe0 samples=1
+qrx-win32: PROFILE pc=0043bfd0 samples=1
+qrx-win32: PROFILE pc=0043bfc0 samples=1
+qrx-win32: PROFILE pc=0041b810 samples=1
+qrx-win32: PROFILE pc=0049b880 samples=23
+qrx-win32: PROFILE pc=0049b8d0 samples=13
+qrx-win32: PROFILE pc=0049b8c0 samples=20
+qrx-win32: PROFILE pc=0049b8f0 samples=2
+qrx-win32: PROFILE pc=0049b8e0 samples=5
+qrx-win32: PROFILE pc=0049b860 samples=1
+qrx-win32: PROFILE pc=0049b9a0 samples=3
+qrx-win32: PROFILE pc=0049b910 samples=11
+qrx-win32: PROFILE pc=0049b930 samples=9
+qrx-win32: PROFILE pc=0049b920 samples=2
+qrx-win32: PROFILE pc=0049b940 samples=2
+qrx-win32: PROFILE pc=0041ba90 samples=1
+qrx-win32: PROFILE pc=0040bab0 samples=1
+qrx-win32: PROFILE pc=0041bae0 samples=1
+qrx-win32: PROFILE pc=0049bb90 samples=24
+qrx-win32: PROFILE pc=0049bb80 samples=20
+qrx-win32: PROFILE pc=0049bbb0 samples=3
+qrx-win32: PROFILE pc=0049bbd0 samples=3
+qrx-win32: PROFILE pc=0049bbc0 samples=3
+qrx-win32: PROFILE pc=0049bbf0 samples=4
+qrx-win32: PROFILE pc=0049bbe0 samples=15
+qrx-win32: PROFILE pc=0049bb50 samples=5
+qrx-win32: PROFILE pc=0049bb70 samples=11
+qrx-win32: PROFILE pc=0049bb60 samples=4
+qrx-win32: PROFILE pc=0040c420 samples=1
+qrx-win32: PROFILE pc=0041c4d0 samples=1
+qrx-win32: PROFILE pc=0043c530 samples=2
+qrx-win32: PROFILE pc=0043c520 samples=4
+qrx-win32: PROFILE pc=0043c510 samples=1
+qrx-win32: PROFILE pc=0043c500 samples=8
+qrx-win32: PROFILE pc=0043c570 samples=3
+qrx-win32: PROFILE pc=0043c560 samples=4
+qrx-win32: PROFILE pc=0043c550 samples=5
+qrx-win32: PROFILE pc=0043c540 samples=3
+qrx-win32: PROFILE pc=0043c5b0 samples=4
+qrx-win32: PROFILE pc=0043c590 samples=3
+qrx-win32: PROFILE pc=0043c580 samples=5
+qrx-win32: PROFILE pc=0043c5f0 samples=3
+qrx-win32: PROFILE pc=0043c5e0 samples=2
+qrx-win32: PROFILE pc=0043c5d0 samples=3
+qrx-win32: PROFILE pc=0043c600 samples=4
+qrx-win32: PROFILE pc=0043c730 samples=30
+qrx-win32: PROFILE pc=0043c720 samples=39
+qrx-win32: PROFILE pc=0043c710 samples=28
+qrx-win32: PROFILE pc=0040c730 samples=1
+qrx-win32: PROFILE pc=0043c750 samples=51
+qrx-win32: PROFILE pc=0043c740 samples=41
+qrx-win32: PROFILE pc=0043c7a0 samples=65
+qrx-win32: PROFILE pc=0043c790 samples=89
+qrx-win32: PROFILE pc=0043c780 samples=18
+qrx-win32: PROFILE pc=0043c030 samples=1
+qrx-win32: PROFILE pc=0043c020 samples=1
+qrx-win32: PROFILE pc=0043c000 samples=2
+qrx-win32: PROFILE pc=0043c070 samples=1
+qrx-win32: PROFILE pc=0043c060 samples=2
+qrx-win32: PROFILE pc=0043c050 samples=3
+qrx-win32: PROFILE pc=0043c0b0 samples=1
+qrx-win32: PROFILE pc=0043c0a0 samples=2
+qrx-win32: PROFILE pc=0043c090 samples=1
+qrx-win32: PROFILE pc=0043c0f0 samples=1
+qrx-win32: PROFILE pc=0043c0e0 samples=1
+qrx-win32: PROFILE pc=0043c0d0 samples=4
+qrx-win32: PROFILE pc=0043c0c0 samples=1
+qrx-win32: PROFILE pc=0043c130 samples=1
+qrx-win32: PROFILE pc=0043c120 samples=2
+qrx-win32: PROFILE pc=0043c100 samples=2
+qrx-win32: PROFILE pc=0043c170 samples=2
+qrx-win32: PROFILE pc=0043c160 samples=2
+qrx-win32: PROFILE pc=0043c150 samples=2
+qrx-win32: PROFILE pc=0043ccb0 samples=20
+qrx-win32: PROFILE pc=0043cca0 samples=29
+qrx-win32: PROFILE pc=0043cc90 samples=44
+qrx-win32: PROFILE pc=0043cc80 samples=25
+qrx-win32: PROFILE pc=0043ccf0 samples=3
+qrx-win32: PROFILE pc=0043cce0 samples=22
+qrx-win32: PROFILE pc=0043ccc0 samples=4
+qrx-win32: PROFILE pc=0043ce30 samples=10
+qrx-win32: PROFILE pc=0043ce60 samples=1
+qrx-win32: PROFILE pc=0043ce50 samples=2
+qrx-win32: PROFILE pc=0043ce40 samples=42
+qrx-win32: PROFILE pc=0041cea0 samples=1
+qrx-win32: PROFILE pc=0043ca40 samples=1
+qrx-win32: PROFILE pc=0049d4f0 samples=1
+qrx-win32: PROFILE pc=0049d4e0 samples=3
+qrx-win32: PROFILE pc=0040d560 samples=1
+qrx-win32: PROFILE pc=0049d510 samples=2
+qrx-win32: PROFILE pc=0049d500 samples=2
+qrx-win32: PROFILE pc=004bd560 samples=1
+qrx-win32: PROFILE pc=004bd540 samples=1
+qrx-win32: PROFILE pc=0049d690 samples=1
+qrx-win32: PROFILE pc=0049d6a0 samples=2
+qrx-win32: PROFILE pc=004bd630 samples=1
+qrx-win32: PROFILE pc=0049d620 samples=1
+qrx-win32: PROFILE pc=0041d6e0 samples=1
+qrx-win32: PROFILE pc=004bd7b0 samples=4
+qrx-win32: PROFILE pc=0049d780 samples=1
+qrx-win32: PROFILE pc=0049d770 samples=3
+qrx-win32: PROFILE pc=004bd060 samples=1
+qrx-win32: PROFILE pc=0049d190 samples=1
+qrx-win32: PROFILE pc=0049d1b0 samples=1
+qrx-win32: PROFILE pc=0049d1a0 samples=5
+qrx-win32: PROFILE pc=0049d1d0 samples=1
+qrx-win32: PROFILE pc=0042d170 samples=8
+qrx-win32: PROFILE pc=004bd1d0 samples=1
+qrx-win32: PROFILE pc=004bd1c0 samples=1
+qrx-win32: PROFILE pc=0042d1a0 samples=2
+qrx-win32: PROFILE pc=0042d1b0 samples=3
+qrx-win32: PROFILE pc=0042d180 samples=4
+qrx-win32: PROFILE pc=0042d190 samples=3
+qrx-win32: PROFILE pc=0049d150 samples=1
+qrx-win32: PROFILE pc=0049d140 samples=1
+qrx-win32: PROFILE pc=0049d170 samples=3
+qrx-win32: PROFILE pc=0049d160 samples=1
+qrx-win32: PROFILE pc=0049d290 samples=1
+qrx-win32: PROFILE pc=0049d280 samples=11
+qrx-win32: PROFILE pc=0049d2b0 samples=5
+qrx-win32: PROFILE pc=0049d2a0 samples=12
+qrx-win32: PROFILE pc=0042d260 samples=1
+qrx-win32: PROFILE pc=0049d2c0 samples=1
+qrx-win32: PROFILE pc=0042d240 samples=3
+qrx-win32: PROFILE pc=0042d2a0 samples=2
+qrx-win32: PROFILE pc=0049d200 samples=3
+qrx-win32: PROFILE pc=0042d280 samples=3
+qrx-win32: PROFILE pc=0042d290 samples=4
+qrx-win32: PROFILE pc=0049d240 samples=2
+qrx-win32: PROFILE pc=0042d2c0 samples=17
+qrx-win32: PROFILE pc=0049d260 samples=1
+qrx-win32: PROFILE pc=0042d350 samples=2
+qrx-win32: PROFILE pc=0043dc30 samples=1
+qrx-win32: PROFILE pc=0043dc00 samples=2
+qrx-win32: PROFILE pc=0042dc60 samples=6
+qrx-win32: PROFILE pc=0042dc70 samples=3
+qrx-win32: PROFILE pc=0042dca0 samples=2
+qrx-win32: PROFILE pc=0042dcb0 samples=1
+qrx-win32: PROFILE pc=0043dd70 samples=1
+qrx-win32: PROFILE pc=0043ddb0 samples=3
+qrx-win32: PROFILE pc=0043dda0 samples=1
+qrx-win32: PROFILE pc=0043dd90 samples=1
+qrx-win32: PROFILE pc=0043dd80 samples=2
+qrx-win32: PROFILE pc=0043ddc0 samples=3
+qrx-win32: PROFILE pc=004adf80 samples=1
+qrx-win32: PROFILE pc=004adf60 samples=1
+qrx-win32: PROFILE pc=004adf50 samples=1
+qrx-win32: PROFILE pc=004bd8b0 samples=4
+qrx-win32: PROFILE pc=0042d870 samples=2
+qrx-win32: PROFILE pc=004bd8c0 samples=6
+qrx-win32: PROFILE pc=0049d9b0 samples=1
+qrx-win32: PROFILE pc=0049d9a0 samples=1
+qrx-win32: PROFILE pc=004bd9f0 samples=1
+qrx-win32: PROFILE pc=0049d9c0 samples=1
+qrx-win32: PROFILE pc=0043d9f0 samples=3
+qrx-win32: PROFILE pc=0043da30 samples=2
+qrx-win32: PROFILE pc=0043da10 samples=2
+qrx-win32: PROFILE pc=0043da70 samples=2
+qrx-win32: PROFILE pc=0043da60 samples=3
+qrx-win32: PROFILE pc=0043da50 samples=4
+qrx-win32: PROFILE pc=0043da40 samples=3
+qrx-win32: PROFILE pc=0049da10 samples=1
+qrx-win32: PROFILE pc=0043da90 samples=2
+qrx-win32: PROFILE pc=0043da80 samples=1
+qrx-win32: PROFILE pc=0043db20 samples=2
+qrx-win32: PROFILE pc=0043db10 samples=1
+qrx-win32: PROFILE pc=0043db70 samples=1
+qrx-win32: PROFILE pc=0043db50 samples=1
+qrx-win32: PROFILE pc=004edb90 samples=2
+qrx-win32: PROFILE pc=0049db10 samples=2
+qrx-win32: PROFILE pc=004edb70 samples=1
+qrx-win32: PROFILE pc=0043db80 samples=1
+qrx-win32: PROFILE pc=0043dbe0 samples=3
+qrx-win32: PROFILE pc=0043dbd0 samples=2
+qrx-win32: PROFILE pc=0049e490 samples=1
+qrx-win32: PROFILE pc=0044e420 samples=1
+qrx-win32: PROFILE pc=0049e4e0 samples=2
+qrx-win32: PROFILE pc=0041e490 samples=33
+qrx-win32: PROFILE pc=0041e480 samples=42
+qrx-win32: PROFILE pc=0044e540 samples=2
+qrx-win32: PROFILE pc=0044e550 samples=3
+qrx-win32: PROFILE pc=0044e520 samples=1
+qrx-win32: PROFILE pc=0044e530 samples=1
+qrx-win32: PROFILE pc=0044e5c0 samples=5
+qrx-win32: PROFILE pc=0044e5d0 samples=3
+qrx-win32: PROFILE pc=0044e5e0 samples=18
+qrx-win32: PROFILE pc=0044e5f0 samples=15
+qrx-win32: PROFILE pc=0044e600 samples=6
+qrx-win32: PROFILE pc=0040e650 samples=1
+qrx-win32: PROFILE pc=0044e680 samples=22
+qrx-win32: PROFILE pc=0044e6a0 samples=1
+qrx-win32: PROFILE pc=004ae0b0 samples=1
+qrx-win32: PROFILE pc=0049e0c0 samples=1
+qrx-win32: PROFILE pc=0049e010 samples=1
+qrx-win32: PROFILE pc=0049e000 samples=1
+qrx-win32: PROFILE pc=0049e1b0 samples=1
+qrx-win32: PROFILE pc=0044e1c0 samples=7
+qrx-win32: PROFILE pc=0044e1d0 samples=6
+qrx-win32: PROFILE pc=0044e1e0 samples=1
+qrx-win32: PROFILE pc=0044e180 samples=5
+qrx-win32: PROFILE pc=0044e190 samples=3
+qrx-win32: PROFILE pc=0044e1a0 samples=9
+qrx-win32: PROFILE pc=0044e1b0 samples=10
+qrx-win32: PROFILE pc=0044e240 samples=2
+qrx-win32: PROFILE pc=0044e230 samples=2
+qrx-win32: PROFILE pc=0049e270 samples=1
+qrx-win32: PROFILE pc=0049e390 samples=1
+qrx-win32: PROFILE pc=004ee3c0 samples=44
+qrx-win32: PROFILE pc=0049e360 samples=1
+qrx-win32: PROFILE pc=004eeca0 samples=1
+qrx-win32: PROFILE pc=004eec80 samples=2
+qrx-win32: PROFILE pc=004eec90 samples=15
+qrx-win32: PROFILE pc=004eec70 samples=41
+qrx-win32: PROFILE pc=004eec00 samples=10
+qrx-win32: PROFILE pc=004eed40 samples=1
+qrx-win32: PROFILE pc=004eed20 samples=1
+qrx-win32: PROFILE pc=004eed10 samples=69
+qrx-win32: PROFILE pc=0049ef90 samples=1
+qrx-win32: PROFILE pc=004eeaf0 samples=2
+qrx-win32: PROFILE pc=004eebf0 samples=8
+qrx-win32: PROFILE pc=004eebd0 samples=9
+qrx-win32: PROFILE pc=004eeb80 samples=5
+qrx-win32: PROFILE pc=004eeb90 samples=3
+qrx-win32: PROFILE pc=0041f410 samples=196
+qrx-win32: PROFILE pc=0041f400 samples=136
+qrx-win32: PROFILE pc=0049f4b0 samples=5
+qrx-win32: PROFILE pc=0049f4a0 samples=9
+qrx-win32: PROFILE pc=0049f4c0 samples=1
+qrx-win32: PROFILE pc=0043f4a0 samples=1
+qrx-win32: PROFILE pc=0049f420 samples=1
+qrx-win32: PROFILE pc=0041f4f0 samples=4
+qrx-win32: PROFILE pc=0041f4e0 samples=16
+qrx-win32: PROFILE pc=0049f510 samples=1
+qrx-win32: PROFILE pc=0041f5b0 samples=10
+qrx-win32: PROFILE pc=0041f7f0 samples=1
+qrx-win32: PROFILE pc=004af0a0 samples=2
+qrx-win32: PROFILE pc=004af0b0 samples=1
+qrx-win32: PROFILE pc=004af090 samples=1
+qrx-win32: PROFILE pc=004af0f0 samples=1
+qrx-win32: PROFILE pc=0042f0e0 samples=3
+qrx-win32: PROFILE pc=0042f0f0 samples=2
+qrx-win32: PROFILE pc=0042f120 samples=1
+qrx-win32: PROFILE pc=0042f130 samples=3
+qrx-win32: PROFILE pc=0042f100 samples=2
+qrx-win32: PROFILE pc=0042f1e0 samples=4
+qrx-win32: PROFILE pc=0042f1d0 samples=1
+qrx-win32: PROFILE pc=0042f230 samples=3
+qrx-win32: PROFILE pc=0040fca0 samples=1
+qrx-win32: PROFILE pc=0040fbc0 samples=1
+qrx-win32: PROFILE api=GetDeviceCaps calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=CreateEventA calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=EnterCriticalSection calls=4 inclusive_ms=0
+qrx-win32: PROFILE api=FreeLibrary calls=3 inclusive_ms=0
+qrx-win32: PROFILE api=GetACP calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=GetCommandLineA calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=GetEnvironmentVariableA calls=9 inclusive_ms=0
+qrx-win32: PROFILE api=GetLocaleInfoA calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=GetModuleHandleA calls=3 inclusive_ms=0
+qrx-win32: PROFILE api=GetModuleHandleW calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=GetProcAddress calls=6 inclusive_ms=1
+qrx-win32: PROFILE api=GetStartupInfoA calls=1 inclusive_ms=1
+qrx-win32: PROFILE api=GetVersion calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=GetVersionExA calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=InitializeCriticalSection calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=LeaveCriticalSection calls=4 inclusive_ms=0
+qrx-win32: PROFILE api=LoadLibraryA calls=5 inclusive_ms=0
+qrx-win32: PROFILE api=SetUnhandledExceptionFilter calls=1 inclusive_ms=1
+qrx-win32: PROFILE api=WideCharToMultiByte calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=__getmainargs calls=1 inclusive_ms=1
+qrx-win32: PROFILE api=__p__acmdln calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=__p__commode calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=__p__fmode calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=__set_app_type calls=1 inclusive_ms=1
+qrx-win32: PROFILE api=_errno calls=2552 inclusive_ms=9
+qrx-win32: PROFILE api=_initterm calls=2 inclusive_ms=2
+qrx-win32: PROFILE api=_ismbblead calls=17 inclusive_ms=0
+qrx-win32: PROFILE api=_lock calls=58 inclusive_ms=0
+qrx-win32: PROFILE api=_onexit calls=9 inclusive_ms=0
+qrx-win32: PROFILE api=_stricmp calls=64479 inclusive_ms=1068
+qrx-win32: PROFILE api=_strnicmp calls=45542 inclusive_ms=1297
+qrx-win32: PROFILE api=_unlock calls=58 inclusive_ms=1
+qrx-win32: PROFILE api=atoi calls=3 inclusive_ms=1
+qrx-win32: PROFILE api=calloc calls=20 inclusive_ms=0
+qrx-win32: PROFILE api=fclose calls=3 inclusive_ms=2
+qrx-win32: PROFILE api=feof calls=3 inclusive_ms=0
+qrx-win32: PROFILE api=fgets calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=fopen calls=3 inclusive_ms=10
+qrx-win32: PROFILE api=fputc calls=2202 inclusive_ms=90
+qrx-win32: PROFILE api=fread calls=4 inclusive_ms=5
+qrx-win32: PROFILE api=free calls=1928 inclusive_ms=8
+qrx-win32: PROFILE api=fseek calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=getenv calls=4 inclusive_ms=0
+qrx-win32: PROFILE api=isalnum calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=isspace calls=10033 inclusive_ms=29
+qrx-win32: PROFILE api=localeconv calls=2973 inclusive_ms=5
+qrx-win32: PROFILE api=malloc calls=3518 inclusive_ms=173
+qrx-win32: PROFILE api=memchr calls=10032 inclusive_ms=119
+qrx-win32: PROFILE api=memcmp calls=110 inclusive_ms=1
+qrx-win32: PROFILE api=memcpy calls=13 inclusive_ms=0
+qrx-win32: PROFILE api=memset calls=61 inclusive_ms=1
+qrx-win32: PROFILE api=qsort calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=realloc calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=setbuf calls=1 inclusive_ms=1
+qrx-win32: PROFILE api=setlocale calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=signal calls=14 inclusive_ms=0
+qrx-win32: PROFILE api=strcat calls=3 inclusive_ms=0
+qrx-win32: PROFILE api=strchr calls=3 inclusive_ms=0
+qrx-win32: PROFILE api=strcmp calls=35100 inclusive_ms=86
+qrx-win32: PROFILE api=strcpy calls=1491 inclusive_ms=9
+qrx-win32: PROFILE api=strlen calls=3529 inclusive_ms=5
+qrx-win32: PROFILE api=strncat calls=203 inclusive_ms=1
+qrx-win32: PROFILE api=strncmp calls=12884 inclusive_ms=97
+qrx-win32: PROFILE api=strncpy calls=4510 inclusive_ms=51
+qrx-win32: PROFILE api=strrchr calls=3 inclusive_ms=0
+qrx-win32: PROFILE api=strtol calls=300 inclusive_ms=3
+qrx-win32: PROFILE api=tolower calls=1643 inclusive_ms=0
+qrx-win32: PROFILE api=toupper calls=69411 inclusive_ms=297
+qrx-win32: PROFILE api=_read calls=344 inclusive_ms=32
+qrx-win32: PROFILE api=_putenv calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=_open calls=5 inclusive_ms=13
+qrx-win32: PROFILE api=_lseek calls=342 inclusive_ms=136
+qrx-win32: PROFILE api=_isatty calls=53 inclusive_ms=2
+qrx-win32: PROFILE api=_getcwd calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=_fileno calls=53 inclusive_ms=0
+qrx-win32: PROFILE api=_access calls=16 inclusive_ms=52
+qrx-win32: PROFILE api=AdjustWindowRectEx calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=BeginPaint calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=ClientToScreen calls=61 inclusive_ms=1
+qrx-win32: PROFILE api=ClipCursor calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=CreateCursor calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=CreateIconFromResourceEx calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=CreateWindowExA calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=DefWindowProcA calls=7 inclusive_ms=1
+qrx-win32: PROFILE api=DispatchMessageA calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=EndPaint calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=EnumDisplaySettingsA calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=GetCursorPos calls=4 inclusive_ms=0
+qrx-win32: PROFILE api=GetDC calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=GetForegroundWindow calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=GetKeyboardLayout calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=GetMenu calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=GetMessageA calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=GetParent calls=4 inclusive_ms=0
+qrx-win32: PROFILE api=GetSystemMetrics calls=7 inclusive_ms=0
+qrx-win32: PROFILE api=GetWindowLongA calls=4 inclusive_ms=0
+qrx-win32: PROFILE api=LoadImageA calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=MsgWaitForMultipleObjects calls=126 inclusive_ms=3
+qrx-win32: PROFILE api=PeekMessageA calls=130 inclusive_ms=11
+qrx-win32: PROFILE api=PtInRect calls=3 inclusive_ms=0
+qrx-win32: PROFILE api=RegisterClassA calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=ReleaseDC calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=ScreenToClient calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=SetClassLongA calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=SetCursorPos calls=61 inclusive_ms=2
+qrx-win32: PROFILE api=SetForegroundWindow calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=SetWindowLongA calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=SetWindowPos calls=1 inclusive_ms=4
+qrx-win32: PROFILE api=SetWindowTextA calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=ShowWindow calls=3 inclusive_ms=29
+qrx-win32: PROFILE api=TranslateMessage calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=timeBeginPeriod calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=timeGetTime calls=1343 inclusive_ms=26
+qrx-win32: PROFILE api=DirectDrawCreate calls=2 inclusive_ms=4
+qrx-win32: PROFILE api=IDirectDraw::QueryInterface calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDraw::Release calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDraw::CreateSurface calls=1 inclusive_ms=19
+qrx-win32: PROFILE api=IDirectDraw::SetCooperativeLevel calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDraw2::CreatePalette calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDraw2::CreateSurface calls=1 inclusive_ms=4
+qrx-win32: PROFILE api=IDirectDraw2::EnumDisplayModes calls=1 inclusive_ms=1
+qrx-win32: PROFILE api=IDirectDraw2::GetCaps calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDraw2::SetCooperativeLevel calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDraw2::SetDisplayMode calls=1 inclusive_ms=513
+qrx-win32: PROFILE api=IDirectDraw2::GetAvailableVidMem calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDrawSurface::QueryInterface calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDrawSurface::Release calls=3 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDrawSurface::Flip calls=27 inclusive_ms=82
+qrx-win32: PROFILE api=IDirectDrawSurface::GetAttachedSurface calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDrawSurface::GetCaps calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDrawSurface::GetFlipStatus calls=27 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDrawSurface::GetSurfaceDesc calls=1 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDrawSurface::Lock calls=28 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectDrawSurface::SetPalette calls=1 inclusive_ms=1
+qrx-win32: PROFILE api=IDirectDrawSurface::Unlock calls=28 inclusive_ms=2
+qrx-win32: PROFILE api=IDirectDrawPalette::SetEntries calls=3 inclusive_ms=2
+qrx-win32: PROFILE api=IDirectInputA::CreateDevice calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectInputDeviceA::QueryInterface calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectInputDeviceA::Release calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectInputDeviceA::SetProperty calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectInputDeviceA::Acquire calls=4 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectInputDeviceA::Unacquire calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectInputDeviceA::SetDataFormat calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectInputDeviceA::SetEventNotification calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectInputDeviceA::SetCooperativeLevel calls=4 inclusive_ms=0
+qrx-win32: PROFILE api=IDirectInputDeviceA::Poll calls=2 inclusive_ms=0
+qrx-win32: PROFILE api=DirectInputCreateA calls=1 inclusive_ms=0
+qrx-win32: AROS backend: system clock stepped backwards 241600 times (up to 1000 ms), held monotonic

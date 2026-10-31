@@ -17,6 +17,7 @@ extern int oracle_x86_step(x86cpu *);
 #define DATA 0x20000u
 static x86cpu a, b;
 static uint32_t rng = 0x22512;
+static unsigned check_watchdog;
 static uint32_t rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
 static void put32(uint8_t *p, uint32_t v) { p[0]=v;p[1]=v>>8;p[2]=v>>16;p[3]=v>>24; }
 static void init(unsigned profile)
@@ -39,6 +40,7 @@ static void check(const uint8_t *p, unsigned n, const uint32_t *regs, uint32_t f
     for(repeat=0;repeat<3;repeat++){
         uint64_t ai=x86_icount(&a), bi=x86_icount(&b); int fa,fb;
         reset(&a,regs,flags);reset(&b,regs,flags);
+        if(check_watchdog){a.budget=ai+check_watchdog;b.budget=bi+check_watchdog;}
         fa=reference_run(&a,CODE+n);fb=x86_run(&b,CODE+n);
         if(fa!=fb||memcmp(a.r,b.r,32)||a.eip!=b.eip||x86_get_flags(&a)!=x86_get_flags(&b)||
            x86_icount(&a)-ai!=x86_icount(&b)-bi){
@@ -142,6 +144,23 @@ static void carry_tests(void)
         p[n++]=0xbb;put32(p+n,rnd());n+=4;p[n++]=0x90;
         check(p,n,regs,0xad6|cf);
     }
+#if QRX_JIT_NATIVE_MEMORY && QRX_JIT_CARRY_CHAIN
+    /* Prior full flag producers must not split INC/DEC or carry arithmetic. */
+    for(unsigned producer=0;producer<5;producer++)for(unsigned v=0;v<8;v++)for(unsigned cf=0;cf<2;cf++){
+        unsigned n=0;memset(regs,0,sizeof regs);regs[0]=edges[v];regs[1]=edges[(v+1)%8];
+        p[n++]=0x90;p[n++]=0x90;
+        if(producer<4){static const uint8_t op[]={0x01,0x29,0x39,0x31};p[n++]=op[producer];p[n++]=0xc8;}
+        else {p[n++]=0xc1;p[n++]=0xf8;p[n++]=16;}
+        p[n++]=0x42;p[n++]=0x4a; /* INC/DEC edx preserve producer CF */
+        p[n++]=0x11;p[n++]=0xc8;p[n++]=0x19;p[n++]=0xc0; /* ADC alias + SBB eax,eax */
+        p[n++]=0x11;p[n++]=0xc9;p[n++]=0x90;
+        check(p,n,regs,0x202|cf);
+        xj_block block={0};xj_op decoded[XJ_MAX_OPS];unsigned count;int flags;
+        block.eip=CODE;assert(xj_decode(&b,&block,decoded,&count,&flags));
+        assert(block.end==CODE+n&&count==9);
+    }
+    puts("PASS unsplit native CF chains: ADD/SUB/CMP/XOR/SAR -> INC/DEC -> ADC/SBB, aliases");
+#endif
     assert(b.jit->stats.native_instructions>native+10000);
     puts("PASS native INC/DEC/ADC/SBB: carry chains, signed/unsigned edges and all Jcc");
 }
@@ -327,6 +346,264 @@ static void safety_tests(void)
     puts("PASS page-boundary decode faults remain interpreted and precise");
 }
 /* Avoid Debian's 68020-only printf division sequence on the 68060 test CPU. */
+#if QRX_JIT_KEEP_POSITIVE && XJ_NATIVE
+static void positive_cache_retention(void)
+{
+    uint8_t p[]={0xb8,1,0,0,0,0x05,2,0,0,0,0x89,0xc3};
+    uint8_t cold[]={0xb8,0,0,0,0,0x0f,0x0b};
+    uint32_t regs[8]={0},other=CODE+8192;
+    unsigned slot=(CODE^(CODE>>7))&(XJ_SLOTS-1);
+    check(p,sizeof p,regs,0x202);
+    xj_block *published=b.jit->slots[slot].block;
+    assert(published&&published->eip==CODE);
+    while(other<CODE+65536 && ((other^(other>>7))&(XJ_SLOTS-1))!=slot)other++;
+    assert(other<CODE+65536);
+    assert(x86_map(&b,CODE+8192,65536-8192,1)&&x86_write_mem(&b,other,cold,sizeof cold));
+    reset(&b,regs,0x202);
+    for(unsigned i=0;i<b.jit->threshold+8;i++){
+        b.eip=other;
+        assert(!xj_try(&b,other+sizeof cold,other,0));
+        assert(b.jit->slots[slot].block==published);
+    }
+    /* Retention cannot hide actual self modification of the protected block. */
+    uint64_t invalid=b.jit->stats.invalidations;
+    x86_host_ptr(&b,CODE)[1]^=1;
+    b.eip=CODE;
+    assert(!xj_try(&b,CODE+sizeof p,CODE,0));
+    assert(b.jit->stats.invalidations==invalid+1);
+    puts("PASS positive code survives cold/failed colliding probes; raw SMC still invalidates it");
+}
+#endif
+
+#if QRX_JIT_NATIVE_MEMORY
+static void native_memory_guards(void)
+{
+    uint8_t moves[]={0x8b,0x03,0x83,0xc0,3,0x0f,0xb6,0x53,1,
+                     0x01,0xc2,0x89,0x53,8,0x0f,0xbe,0x63,2,0x90,0x90};
+    uint8_t faultread[]={0xb8,1,0,0,0,0x83,0xc0,2,0x8b,0x13,0x90};
+    uint8_t carries[]={0x8b,0x03,0x40,0x11,0xc0,0x89,0x43,12,0x90,0x90};
+    uint8_t aliases[]={0x0f,0xb6,0xc4,0x0f,0xbe,0xd5,0x0f,0xbf,0xd2,0x88,0x63,16,
+                       0x8a,0x6b,16,0x0f,0xbf,0xd1,0x0f,0xb7,0x4b,32,0x0f,0xbf,0x53,34,0x90};
+    uint8_t selfwrite[]={0xb8,0xba,7,0,0,0xb9,4,0,0,0,0x89,0x03,
+                        0xb8,1,0,0,0,0x83,0xc0,1,0x90};
+    uint32_t regs[8]={0};uint64_t native=b.jit->stats.native_instructions;
+    assert(x86_map(&a,DATA,8192,1)&&x86_map(&b,DATA,8192,1));
+    for(unsigned i=0;i<8192;i++){
+        *x86_host_ptr(&a,DATA+i)=(uint8_t)(i*29+7);
+        *x86_host_ptr(&b,DATA+i)=(uint8_t)(i*29+7);
+    }
+    check_watchdog=10000;
+    puts("MEMORY-GUARD initialized");fflush(stdout);
+    regs[X86_EBX]=DATA;
+    check(moves,sizeof moves,regs,0x202);
+    puts("MEMORY-GUARD warm moves passed");fflush(stdout);
+    tlb_flush(&b); /* warmed native block, cold TLB: zero-progress bailout */
+    check(moves,sizeof moves,regs,0x202);
+    assert(!memcmp(x86_host_ptr(&a,DATA),x86_host_ptr(&b,DATA),4096));
+    assert(b.jit->stats.native_instructions>native);
+
+    puts("MEMORY-GUARD cold moves passed");fflush(stdout);
+    {
+        extern int qrx_test_callee_saved(void (*fn)(x86cpu *),x86cpu *);
+        xj_block *block=b.jit->slots[(CODE^(CODE>>7))&(XJ_SLOTS-1)].block;
+        assert(block&&block->memory&&qrx_test_callee_saved((void (*)(x86cpu *))block->code,&b));
+        tlb_flush(&b);
+        assert(qrx_test_callee_saved((void (*)(x86cpu *))block->code,&b));
+    }
+    for(unsigned cf=0;cf<2;cf++){
+        regs[X86_EAX]=0x80ff7f01;regs[X86_ECX]=0xf001;regs[X86_EDX]=0x81aa55f0;
+        check(carries,sizeof carries,regs,0x202|cf);
+        tlb_flush(&b);check(carries,sizeof carries,regs,0x202|cf);
+        check(aliases,sizeof aliases,regs,0x202|cf);
+        assert(!memcmp(x86_host_ptr(&a,DATA),x86_host_ptr(&b,DATA),4096));
+    }
+    puts("MEMORY-GUARD byte aliases, carry chains and saved-D2 ABI passed");fflush(stdout);
+    /* Warm a block whose later load can fail, then remove only its data page.
+     * Earlier native effects, lazy flags and budget accounting must survive. */
+    check(faultread,sizeof faultread,regs,0x202);
+    x86_unmap(&a,DATA+4096,4096);x86_unmap(&b,DATA+4096,4096);
+    regs[X86_EBX]=DATA+4094;
+    for(unsigned repeat=0;repeat<3;repeat++){
+        uint64_t ai=x86_icount(&a),bi=x86_icount(&b);int fa,fb;
+        assert(x86_write_mem(&a,CODE,faultread,sizeof faultread)&&x86_write_mem(&b,CODE,faultread,sizeof faultread));
+        reset(&a,regs,0x202);reset(&b,regs,0x202);
+        fa=reference_run(&a,CODE+sizeof faultread);fb=x86_run(&b,CODE+sizeof faultread);
+        assert(fa==X86_FAULT_PAGE&&fb==fa);
+        assert(a.eip==b.eip&&a.fault_eip==b.fault_eip&&a.fault_addr==b.fault_addr);
+        assert(!memcmp(a.r,b.r,32)&&x86_get_flags(&a)==x86_get_flags(&b));
+        assert(x86_icount(&a)-ai==x86_icount(&b)-bi);
+    }
+    puts("MEMORY-GUARD cross-page passed");fflush(stdout);
+    /* Writable-TLB tags are revoked by protect. A rejected store must fault
+     * through the interpreter, after exactly the preceding native effects. */
+    regs[X86_EBX]=DATA;check(moves,sizeof moves,regs,0x202);
+    assert(x86_protect(&a,DATA,4096,0)&&x86_protect(&b,DATA,4096,0));
+    {
+        uint64_t ai=x86_icount(&a),bi=x86_icount(&b);int fa,fb;
+        assert(x86_write_mem(&a,CODE,moves,sizeof moves)&&x86_write_mem(&b,CODE,moves,sizeof moves));
+        reset(&a,regs,0x202);reset(&b,regs,0x202);
+        fa=reference_run(&a,CODE+sizeof moves);fb=x86_run(&b,CODE+sizeof moves);
+        assert(fa==X86_FAULT_PAGE&&fb==fa&&a.eip==b.eip&&a.fault_addr==b.fault_addr);
+        assert(!memcmp(a.r,b.r,32)&&x86_get_flags(&a)==x86_get_flags(&b));
+        assert(x86_icount(&a)-ai==x86_icount(&b)-bi);
+    }
+    assert(x86_protect(&a,DATA,4096,1)&&x86_protect(&b,DATA,4096,1));
+
+    puts("MEMORY-GUARD readonly passed");fflush(stdout);
+    /* Compile with an ordinary data destination, then point the same cached
+     * store at its next opcode. The native store itself runs on a warm TLB. */
+    regs[X86_EBX]=DATA+128;check(selfwrite,sizeof selfwrite,regs,0x202);
+    assert(x86_write_mem(&a,CODE,selfwrite,sizeof selfwrite)&&x86_write_mem(&b,CODE,selfwrite,sizeof selfwrite));
+    regs[X86_EBX]=CODE+12;
+    (void)wptr(&b,CODE+12);
+    reset(&a,regs,0x202);reset(&b,regs,0x202);
+    {
+        uint64_t ai=x86_icount(&a),bi=x86_icount(&b);
+        assert(!reference_run(&a,CODE+sizeof selfwrite)&&!x86_run(&b,CODE+sizeof selfwrite));
+        assert(!memcmp(a.r,b.r,32)&&a.r[X86_EDX]==7&&a.r[X86_EAX]==0x7bb);
+        assert(a.eip==b.eip&&x86_get_flags(&a)==x86_get_flags(&b));
+        assert(x86_icount(&a)-ai==x86_icount(&b)-bi);
+        assert(!memcmp(x86_host_ptr(&a,CODE),x86_host_ptr(&b,CODE),sizeof selfwrite));
+    }
+    /* The same host code page can be writable through another guest address.
+     * A guest-address-only SMC test would miss this alias. */
+#if QRX_JIT_WRITE_CONTINUE
+    regs[X86_EBX]=DATA+128;check(selfwrite,sizeof selfwrite,regs,0x202);
+    assert(x86_write_mem(&a,CODE,selfwrite,sizeof selfwrite)&&x86_write_mem(&b,CODE,selfwrite,sizeof selfwrite));
+    assert(x86_map_ext(&a,DATA,4096,x86_host_ptr(&a,CODE),1));
+    assert(x86_map_ext(&b,DATA,4096,x86_host_ptr(&b,CODE),1));
+    (void)wptr(&b,DATA+12);
+    regs[X86_EBX]=DATA+12;
+    reset(&a,regs,0x202);reset(&b,regs,0x202);
+    {
+        uint64_t ai=x86_icount(&a),bi=x86_icount(&b);
+        assert(!reference_run(&a,CODE+sizeof selfwrite)&&!x86_run(&b,CODE+sizeof selfwrite));
+        assert(!memcmp(a.r,b.r,32)&&b.r[X86_EAX]==0x7bb&&b.r[X86_EDX]==7);
+        assert(x86_icount(&a)-ai==x86_icount(&b)-bi);
+        assert(!memcmp(x86_host_ptr(&a,CODE),x86_host_ptr(&b,CODE),sizeof selfwrite));
+    }
+    x86_unmap(&a,DATA,4096);x86_unmap(&b,DATA,4096);
+    assert(x86_map(&a,DATA,4096,1)&&x86_map(&b,DATA,4096,1));
+    puts("MEMORY-GUARD virtual alias cannot hide self modification");fflush(stdout);
+#endif
+    check_watchdog=0;
+    puts("PASS emitted native memory: cold/mid-block TLB deopt, cross-page fault, readonly store, raw SMC successor, exact state/budget");
+}
+#endif
+
+#if QRX_JIT_NATIVE_MEMORY && QRX_JIT_MEMORY_CMP && XJ_NATIVE
+static void native_memory_comparisons(void)
+{
+    static const uint32_t values[]={0,1,0xffffffffu,0x80000000u,0x7fffffffu,0x55aa55aau};
+    uint8_t p[64];uint32_t regs[8]={0};uint64_t native=b.jit->stats.native_instructions;
+    assert(x86_map(&a,DATA,8192,1)&&x86_map(&b,DATA,8192,1));
+    regs[X86_EBX]=DATA;
+    for(unsigned form=0;form<4;form++)for(unsigned v=0;v<6;v++)for(unsigned cc=0;cc<16;cc++){
+        unsigned n=0;
+        uint32_t right=values[(v+1)%6];
+        assert(x86_wr32(&a,DATA,values[v])&&x86_wr32(&b,DATA,values[v]));
+        regs[X86_EDX]=right;
+        p[n++]=0x90;p[n++]=0x90;
+        if(form<2){p[n++]=form?0x3b:0x39;p[n++]=0x13;}
+        else {p[n++]=form==2?0x81:0x83;p[n++]=0x3b;
+            if(form==2){put32(p+n,right);n+=4;}else p[n++]=(uint8_t)right;}
+        p[n++]=0x70+cc;p[n++]=5;
+        p[n++]=0xb8;put32(p+n,0x12345678);n+=4;
+        p[n++]=0x89;p[n++]=0xc7;
+        check(p,n,regs,0x202);
+        if(!(cc&3)){tlb_flush(&b);check(p,n,regs,0x202);}
+    }
+    /* The compare's branch result must survive subsequent guarded loads,
+     * stores, and their reuse of A1/CCR. Exercise every condition, including
+     * parity's deliberate C fallback, and both branch directions. */
+    for(unsigned v=0;v<6;v++)for(unsigned cc=0;cc<16;cc++){
+        unsigned n=0;regs[X86_EBX]=DATA;regs[X86_EDX]=values[(v+1)%6];
+        assert(x86_wr32(&a,DATA,values[v])&&x86_wr32(&b,DATA,values[v]));
+        p[n++]=0x90;p[n++]=0x90;p[n++]=0x3b;p[n++]=0x13;
+        p[n++]=0x0f;p[n++]=0xb6;p[n++]=0x03; /* movzx eax,byte [ebx] */
+        p[n++]=0x88;p[n++]=0x43;p[n++]=8; /* mov [ebx+8],al */
+        p[n++]=0x70+cc;p[n++]=5;
+        p[n++]=0xb8;put32(p+n,0x12345678);n+=4;
+        p[n++]=0x89;p[n++]=0xc7;
+        check(p,n,regs,0x202);tlb_flush(&b);check(p,n,regs,0x202);
+    }
+    assert(b.jit->stats.native_instructions>native);
+    /* A failed CMP read must still expose the preceding ADD flags, even
+     * though a successful comparison would overwrite them. */
+    {uint8_t q[]={0xb8,1,0,0,0,0x83,0xc0,2,0x3b,0x13,0x90};
+     regs[X86_EBX]=DATA;check(q,sizeof q,regs,0x202);
+     x86_unmap(&a,DATA+4096,4096);x86_unmap(&b,DATA+4096,4096);
+     regs[X86_EBX]=DATA+4094;
+     assert(x86_write_mem(&a,CODE,q,sizeof q)&&x86_write_mem(&b,CODE,q,sizeof q));
+     reset(&a,regs,0x202);reset(&b,regs,0x202);
+     uint64_t ai=x86_icount(&a),bi=x86_icount(&b);
+     assert(reference_run(&a,CODE+sizeof q)==X86_FAULT_PAGE);
+     assert(x86_run(&b,CODE+sizeof q)==X86_FAULT_PAGE);
+     assert(!memcmp(a.r,b.r,32)&&a.eip==b.eip&&a.fault_addr==b.fault_addr&&a.fault_eip==b.fault_eip);
+     assert(x86_get_flags(&a)==x86_get_flags(&b)&&x86_icount(&a)-ai==x86_icount(&b)-bi);
+    }
+    puts("PASS native memory CMP: both operand orders, imm8/imm32, all Jcc, overflow edges, precise fault flags");
+}
+#endif
+
+#if QRX_JIT_NATIVE_MEMORY && QRX_JIT_LOOP_BATCH && XJ_NATIVE
+static void native_loop_batches(void)
+{
+    /* Six-instruction self loop: guarded load/store, carry-preserving INC,
+     * conditional backedge. Compare every budget through the 256-iteration
+     * batch boundary against the unchanged reference interpreter. */
+    uint8_t p[]={0x8b,0x04,0x93,0x01,0xc8,0x89,0x04,0x97,0x42,0x39,0xea,0x75,0xf3};
+    uint32_t regs[8]={0};regs[X86_EBX]=DATA;regs[X86_EDI]=DATA+4096;
+    regs[X86_ECX]=3;regs[X86_EBP]=300;
+    assert(x86_map(&a,DATA,8192,1)&&x86_map(&b,DATA,8192,1));
+    check(p,sizeof p,regs,0x202);
+    xj_block *block=b.jit->slots[(CODE^(CODE>>7))&(XJ_SLOTS-1)].block;
+    assert(block&&block->eip==CODE&&block->loop_batch&&block->count==6);
+    for(unsigned budget=1;budget<=6*260;budget++){
+        reset(&a,regs,0x202);reset(&b,regs,0x202);
+        uint64_t ai=x86_icount(&a),bi=x86_icount(&b);
+        a.budget=ai+budget;b.budget=bi+budget;
+        int fa=reference_run(&a,CODE+sizeof p),fb=x86_run(&b,CODE+sizeof p);
+        assert(fa==fb&&memcmp(a.r,b.r,32)==0&&a.eip==b.eip&&a.cur_eip==b.cur_eip);
+        assert(x86_get_flags(&a)==x86_get_flags(&b));
+        assert(x86_icount(&a)-ai==budget&&x86_icount(&b)-bi==budget);
+    }
+    /* A TLB miss after completed native iterations must retain exact progress
+     * and flags. The fourth input crosses into an unmapped page. */
+    x86_unmap(&a,DATA+8192,4096);x86_unmap(&b,DATA+8192,4096);
+    regs[X86_EBX]=DATA+8192-16;regs[X86_EDI]=DATA;
+    reset(&a,regs,0x202);reset(&b,regs,0x202);
+    uint64_t ai=x86_icount(&a),bi=x86_icount(&b);
+    int fa=reference_run(&a,CODE+sizeof p),fb=x86_run(&b,CODE+sizeof p);
+    assert(fa==X86_FAULT_PAGE&&fa==fb&&!memcmp(a.r,b.r,32)&&a.eip==b.eip);
+    assert(a.fault_eip==b.fault_eip&&a.fault_addr==b.fault_addr);
+    assert(x86_get_flags(&a)==x86_get_flags(&b)&&x86_icount(&a)-ai==x86_icount(&b)-bi);
+    puts("PASS native loop batching: exact budgets 1..1560, batch cap, guarded memory, partial-loop fault state");
+}
+#endif
+
+#if QRX_JIT_NATIVE_MEMORY && QRX_JIT_PAGE_CACHE && XJ_NATIVE
+static void native_page_remapping(void)
+{
+    static uint8_t aa[4096],bb[4096];
+    uint8_t p[]={0x8b,0x03,0x83,0xc0,3,0x89,0x43,8,0x89,0xc2};
+    uint32_t regs[8]={0};regs[X86_EBX]=DATA;
+    assert(x86_map(&a,DATA,4096,1)&&x86_map(&b,DATA,4096,1));
+    check(p,sizeof p,regs,0x202);
+    assert(x86_map_ext(&a,DATA,4096,aa,1)&&x86_map_ext(&b,DATA,4096,bb,1));
+    for(unsigned i=0;i<4096;i++)aa[i]=bb[i]=(uint8_t)(i*17+9);
+    check(p,sizeof p,regs,0x202);
+    assert(!memcmp(aa,bb,4096)&&a.r[0]==ld32(aa)+3);
+    aa[0]^=77;bb[0]^=77;check(p,sizeof p,regs,0x202);
+    assert(!memcmp(aa,bb,4096));
+    x86_unmap(&a,DATA,4096);x86_unmap(&b,DATA,4096);
+    assert(x86_map(&a,DATA,4096,1)&&x86_map(&b,DATA,4096,1));
+    assert(x86_wr32(&a,DATA,0x12345678)&&x86_wr32(&b,DATA,0x12345678));
+    check(p,sizeof p,regs,0x202);assert(a.r[0]==0x1234567b&&b.r[0]==a.r[0]);
+    puts("PASS native page cache: warmed host remap, external pages, raw data edits, unmap/reallocation");
+}
+#endif
+
 static void metric(const char *name, uint64_t value)
 {
     char digits[24];unsigned n=0;
@@ -369,7 +646,22 @@ static int jit_test_main(int argc,char **argv)
         xj_store(&e,0,16);xj_store_imm(&e,0x12345678,20);xj_w16(&e,0x4e75);
         return fwrite(buf,1,e.n,stdout)==e.n?0:1;
     }
-    init(profile);random_tests();extended_register_tests();carry_tests();condition_and_step_tests();memory_decode_tests();leading_load_tests();safety_tests();
+    puts("JIT-TEST initializing");init(profile);puts("JIT-TEST random register programs");random_tests();extended_register_tests();carry_tests();condition_and_step_tests();memory_decode_tests();leading_load_tests();safety_tests();
+#if QRX_JIT_KEEP_POSITIVE
+    positive_cache_retention();
+#endif
+#if QRX_JIT_NATIVE_MEMORY
+    native_memory_guards();
+#endif
+#if QRX_JIT_NATIVE_MEMORY && QRX_JIT_MEMORY_CMP
+    native_memory_comparisons();
+#endif
+#if QRX_JIT_NATIVE_MEMORY && QRX_JIT_LOOP_BATCH
+    native_loop_batches();
+#endif
+#if QRX_JIT_NATIVE_MEMORY && QRX_JIT_PAGE_CACHE
+    native_page_remapping();
+#endif
     /* Restore the second code page after boundary tests. */
     assert(x86_map(&a,CODE+4096,4096,1)&&x86_map(&b,CODE+4096,4096,1));
     benchmark(200000);
