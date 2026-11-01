@@ -1,0 +1,22 @@
+ARMITHLON 1.4 – reproducible validation record
+=============================================
+Current package is a developer-kit snapshot based on ARMITHLON 1.3.
+
+Linux host: Debian 13 / x86_64.
+Source baseline: existing ARMITHLON 1.3 package, integrated repo pin cc2ba06a0cc76a87bdd49edcd4b475df4227e716.
+
+PASS: CMake configure and build (default QRX_ENABLE_MUSASHI=OFF).
+PASS: CTest default suite 22/22 (including isolated mock of the new bus).
+PASS: CMake Debug build with -fsanitize=address,undefined and CTest 22/22.
+PASS: C11 syntax / warnings -Werror for new CPU wrapper, CLI and full-CPU test
+      against a declaration-only API placeholder (NOT a real Musashi runtime).
+PASS: bash -n on new fetch script and updated launch script.
+PASS: SHA-256 manifest, executable script modes and ZIP CRC after packaging.
+
+NOT RUN: genuine Musashi CPU build and CPU/exception/ROM/IRQ runtime test
+         (third-party Musashi source intentionally fetched on user's host).
+NOT RUN: ARM64/M1 CPU backend, Metal display, real AROS boot, native QRX OS boot.
+NOT IMPLEMENTED: full 68060/68080 compatibility, Amiga custom chipset,
+                 native AROS BSP, native 68k JIT for Musashi backend.
+
+Never interpret the isolated bus mock as a full instruction emulator pass.

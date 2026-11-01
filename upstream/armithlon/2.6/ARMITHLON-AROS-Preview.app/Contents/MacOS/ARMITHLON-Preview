@@ -1,0 +1,16 @@
+#!/bin/bash
+# Finder launcher. First run must be prepared using ./armithlon fetch in Terminal.
+set -e
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+HERE="$(cd "$(dirname "$0")/../../.." && pwd)"
+DATA="${ARMITHLON_DATA_DIR:-$HERE/data}"
+mkdir -p "$DATA"
+LOG="$DATA/finder-preview.log"
+if [[ ! -f "$DATA/images/aros-amiga-m68k.iso" ]]; then
+  /usr/bin/osascript -e 'display dialog "AROS-Images fehlen. Bitte zuerst im Terminal ./armithlon fetch ausführen. Dieser Starter enthält noch keinen fertigen QRX-Desktop." buttons {"OK"} default button "OK"' >/dev/null || true
+  exit 2
+fi
+if ! "$HERE/armithlon" run-aros >> "$LOG" 2>&1; then
+  /usr/bin/osascript -e 'display dialog "AROS-Start fehlgeschlagen. Bitte data/finder-preview.log prüfen." buttons {"OK"} default button "OK"' >/dev/null || true
+  exit 1
+fi

@@ -1,0 +1,25 @@
+ARMITHLON 2.0 QRX68100 – verification 2026-11-01
+GitHub reference phoenixkonsole/qrxosone branch claude/qrx-22.5.11
+Pinned source revision: cc2ba06a0cc76a87bdd49edcd4b475df4227e716
+
+Linux x86_64 portable CMake RelWithDebInfo: 33/33 CTests PASS
+Linux x86_64 AddressSanitizer + UBSan Debug: 33/33 CTests PASS
+Actual QRX standalone 68k firmware shell executed and tested:
+ - No-image (--volatile-disk) boot PASS
+ - Real host-folder file LIST/STAT/READ/WRITE/DELETE/TRUNCATE PASS
+ - Read-only default, explicit RW opt-in PASS
+ - Symlink and pathname traversal rejection PASS
+ - DMA transfer callback + guest JIT invalidation generation PASS
+ - 68040 upper MMIO FF000800 alias tested with CPU STUB PASS
+ - Real 68k QEX executable loaded from host directory PASS
+ - SMP ready-queue CPU-affinity/priority/shared queue 2 host threads PASS
+
+NOT tested / NOT implemented:
+ - Actual native AROS boot on QRX68100
+ - AROS Exec SMP kernel scheduler or per-core Exec/current task
+ - AROS-hosted HOST: DOS packet handler/volume
+ - AROS-side new tools cross-compilation and execution (cross toolchain absent)
+ - Full Musashi FPU/MMU ISA differential; Apple M1; Metal; Win32/Linux apps in AROS
+ - Fully integrated RTG/AHI/input drivers
+
+Full source ZIP includes prior 1.9 code and all new 2.0 code.

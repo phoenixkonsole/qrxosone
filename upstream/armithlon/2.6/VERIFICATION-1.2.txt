@@ -1,0 +1,24 @@
+ARMITHLON 1.2 reproducible local verification
+GitHub source reference: phoenixkonsole/qrxosone claude/qrx-22.5.11
+Audited commit: cc2ba06a0cc76a87bdd49edcd4b475df4227e716
+This is an ARMITHLON cumulative source ZIP with opt-in source integration. It does
+NOT bundle the whole private QRX GitHub repository or a bootable QRX OS One ISO.
+
+Local build commands:
+  ./armithlon build
+  ./armithlon test
+  ./armithlon x11-bridge-test
+
+Observed in Linux x86-64 container with GCC and CMake:
+  ARMITHLON CTest: 18 / 18 PASS
+  ASan+UBSan Debug CTest: 18 / 18 PASS
+  QRX X11 -> Q86F Unix socket -> QRXAccelFrame: PASS
+  Signature-gated latest-X11 source patch fixture + idempotence/drift: PASS
+  Prebuilt demo checked: ELF32 Intel i386 statically linked
+
+Unverified:
+  Latest full QRX86 linux host build (private repo unavailable inside container)
+  Apple M1 Clang, Cocoa, Metal, Linux i386 demo in Metal viewport
+  Native Vulkan hardware; AROS QRX68100 boot
+
+Previous 1.1 features preserved. Local private GitHub checkout is never pushed.

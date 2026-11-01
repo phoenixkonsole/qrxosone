@@ -1,0 +1,28 @@
+ARMITHLON 2.1 – QRX68100 memory / AmigaOS compatibility verification
+Execution environment: Linux x86_64 container (NOT Apple M1), 2026-11-01
+GitHub base: phoenixkonsole/qrxosone claude/qrx-22.5.11 cc2ba06a
+
+Local release (CMake RelWithDebInfo): 39/39 CTest PASS
+Local Debug (-fsanitize=address,undefined): 39/39 CTest PASS
+Host actual RAM: sysconf physical 5.8 GiB, container cap 4 GiB
+Effective host RAM: 4 GiB; default guest RAM: 1 GiB (quarter)
+Guest command with --ram auto --volatile-disk --command mem: PASS
+Boot with --ram-mib 128 --run HELLO.QEX: PASS
+QRX user workstation: boot + real read-only HOST: mount and no IMG: PASS
+Sparse guest RAM test: 3840 MiB mmap, guest 32-bit access E0000000: PASS
+68040 bus 128MiB test: PASS with Musashi MOCK (not real CPU)
+Real standalone 68k HUNK host launch and UART HK: PASS
+Bounded HUNK CODE/DATA/BSS relocation loader, malformed rejection: PASS
+AmigaOS 3.x FS-UAE configuration generation (ROM supplied by user): PASS
+Real AmigaOS 3.x or Kickstart/Workbench boot: NOT RUN
+Native Deadwood AROS boot on QRX68100: NOT RUN/NOT IMPLEMENTED
+Native AROS SMP Exec: NOT IMPLEMENTED
+Native AROS graphics.hidd/AHI/input.device: NOT IMPLEMENTED
+QRXDesktop guest under native QRX68100: NOT RUN/NOT IMPLEMENTED
+Real Musashi CPU and FPU exception suite: NOT RUN (pinned sources not fetched)
+Apple Silicon Metal / Cocoa app: NOT RUN (Mac unavailable)
+
+The 32-bit address bus has a hard ceiling <4 GiB; this does not make a
+68040 a physically 64-bit-addressing CPU. AmigaOS 3.x-compatible execution
+requires a native OS or an appropriate compatibility OS environment; the
+firmware HUNK loader does not implement Exec/DOS calls.

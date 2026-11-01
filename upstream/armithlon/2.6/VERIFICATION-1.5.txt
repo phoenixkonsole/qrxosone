@@ -1,0 +1,24 @@
+ARMITHLON 1.5 — QRX68100 fictional dual-68040 implementation
+============================================================
+Repository basis: phoenixkonsole/qrxosone, branch claude/qrx-22.5.11
+Pinned SHA: cc2ba06a0cc76a87bdd49edcd4b475df4227e716
+Musashi upstream pin (separate opt-in download): 313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd
+Test host: Linux x86_64, CMake/C11.
+
+PASS: default build, test suite 23/23.
+PASS: sanitized build AddressSanitizer+UndefinedBehaviorSanitizer 23/23.
+PASS: 68040 dual-core MMIO, legacy mode, 2 core-context behavior using
+      explicit NON-EXECUTING CPU MOCK, JIT tag/ASID separation, 4-way cache,
+      invalidation on guest writes and DMA notification, IPI mailbox.
+PASS: C11 -Werror syntax of real dual demo and test against declaration mock.
+PASS: bash syntax validation for CLI, source manifest and zip CRC.
+
+NOT RUN: actual Musashi dual-core execution. Source not present in sandbox;
+         user must run ./armithlon full68k-setup, full68k-build and dualcore-test.
+NOT RUN: physical Apple M1/macOS Metal and dual CPU timings.
+NOT IMPLEMENTED: native two-thread concurrent Musashi calls, host ARM64 JIT,
+                 OS-level SMP kernel, 68060/68080 instruction sets,
+                 native AmigaOS 3.x/AROS/QRX boot on this chipset-less board.
+
+Interpretation: independent Musashi contexts and deterministic time-slicing,
+not accelerated multicore host execution. Translation cache stores metadata only.

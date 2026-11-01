@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -Wl,--dependency-file=CMakeFiles/qrx86_input_tests.dir/link.d CMakeFiles/qrx86_input_tests.dir/tests/qrx86_input_tests.c.o -o qrx86_input_tests  libqrx68100_core.a -lm

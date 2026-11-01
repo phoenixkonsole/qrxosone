@@ -1,0 +1,31 @@
+ARMITHLON 1.6 verification / 2026-11-01
+Base: ARMITHLON 1.5 cumulative source
+New parallel execution: two real pthread workers only for whitelisted
+ADDQ.L #n,Dx + BRA.S -4 loops, with A64 native code on AArch64 hosts.
+No arbitrary concurrent Musashi execution is attempted.
+
+Linux x86_64:
+- cmake configured and built: PASS (QRX_ENABLE_MUSASHI=OFF)
+- CTest: 24/24 PASS (includes parallel loop worker/mock-state tests)
+- AddressSanitizer + UndefinedBehaviorSanitizer: 24/24 PASS
+- Parallel worker test: PASS on portable C fallback, exact registers/CCR,
+  ROM/guest cache epoch invalidation, legacy single core gating.
+- Cross-assembled A64 8-instruction code with clang --target=aarch64-linux-gnu.
+  Encoding exactly matched hardcoded A64 JIT emitter (step=1): PASS.
+
+NOT TESTED / NOT IMPLEMENTED:
+- Execution of native generated machine code on real Apple M1.
+- Real Musashi CPU dual context + fast path (needs pinned external Git checkout).
+- Parallel execution of general 68040 opcodes, exceptions, MMIO, atomics.
+- QRX/AROS/AmigaOS 3.x boot natively on QRX68100.
+- QRX86/PPC/x64/ARM guest translation to ARM64 or end-to-end PrBoom run.
+- M1 CPU/GPU benchmark results, historical CPU comparisons.
+
+Run on macOS M1:
+./armithlon build
+./armithlon test
+./armithlon dualcore-parallel-test
+./armithlon full68k-setup
+./armithlon full68k-build
+./armithlon full68k-test
+./armithlon dualcore-parallel-bench 10000000

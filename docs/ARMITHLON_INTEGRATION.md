@@ -1,3 +1,9 @@
+# Current integration: ARMithlon 2.6
+
+The build wrapper now selects `upstream/armithlon/2.6`. The complete supplied archive was checksum-verified and retained alongside 1.1. All 52 portable CTest cases passed; tests explicitly labelled mock or compile-only do not establish real Musashi execution. Existing QRX Linux X11 code is preserved. Evidence: `benchmarks/armithlon-2.6/ctest.log`.
+
+The missing layers.library, GadTools, BOOPSI, fonts, Workbench startup, ASL, file locks and real DOS process management remain outstanding implementation work. This merge does not claim broad AmigaOS application compatibility.
+
 # ARMithlon integration
 
 The starting revision is `fb1d03e45a09e0fb896712590782011baa76de92` on

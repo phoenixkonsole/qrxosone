@@ -1,0 +1,2 @@
+/usr/bin/ar qc libqrx68_hle.a CMakeFiles/qrx68_hle.dir/qrx68/qrx68_hle.c.o
+/usr/bin/ranlib libqrx68_hle.a

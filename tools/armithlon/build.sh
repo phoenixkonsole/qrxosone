@@ -2,7 +2,7 @@
 # Build the complete imported devkit and the QRX86 host bridge without patching the checkout.
 set -Eeuo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-VENDOR="$REPO/upstream/armithlon/1.1"
+VENDOR="$REPO/upstream/armithlon/2.6"
 OUT="${1:-$REPO/.build/armithlon}"
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"

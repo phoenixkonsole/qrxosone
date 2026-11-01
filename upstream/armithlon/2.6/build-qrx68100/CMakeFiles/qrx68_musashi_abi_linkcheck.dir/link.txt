@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -Wl,--dependency-file=CMakeFiles/qrx68_musashi_abi_linkcheck.dir/link.d CMakeFiles/qrx68_musashi_abi_linkcheck.dir/qrx68/qrx68_main.c.o CMakeFiles/qrx68_musashi_abi_linkcheck.dir/qrx68/qrx68_musashi.c.o CMakeFiles/qrx68_musashi_abi_linkcheck.dir/tests/musashi_qrx68_api_stub/m68k.c.o -o qrx68_musashi_abi_linkcheck  libqrx68_hle.a libqrx68100_core.a -lm

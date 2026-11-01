@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -Wl,--dependency-file=CMakeFiles/qrx68_hunk_large_tests.dir/link.d CMakeFiles/qrx68_hunk_large_tests.dir/tests/qrx68_hunk_large_tests.c.o -o qrx68_hunk_large_tests  libqrx68_hle.a libqrx68100_core.a -lm

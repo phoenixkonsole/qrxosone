@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -Wl,--dependency-file=CMakeFiles/qrx_app_router_tests.dir/link.d CMakeFiles/qrx_app_router_tests.dir/tests/app_router_tests.c.o -o qrx_app_router_tests  libqrx_app_router.a
