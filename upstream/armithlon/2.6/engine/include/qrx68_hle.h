@@ -45,6 +45,7 @@ typedef struct {
     uint32_t window, rastport;
     int x, y, width, height;
     int cursor_x, cursor_y;
+    uint32_t text_font; /* guest TextFont, classic 52-byte ABI */
     uint8_t pen;
     bool open;
     uint32_t userport, idcmp_flags, first_gadget, menu_strip;

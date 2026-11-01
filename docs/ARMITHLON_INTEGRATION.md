@@ -65,3 +65,7 @@ patch was present here. Other chats and the failed session's filesystem are not
 accessible from this session; the pasted conversation does not contain a source
 diff from which those changes could safely be reconstructed. No old environment
 was deleted or reset. Keep it available for recovery.
+
+## QRX68 bitmap text extension
+
+The repository extends the imported 2.6 sources with graphics.library SetFont (-66), TextLength (-54) and Text (-60), using guest-owned classic 52-byte TextFont structures. Monochrome glyphs support baseline, character locations, signed spacing/kerning, fallback glyph and clipping through the existing window renderer. Invalid font memory and color-font structures fail closed. Tests check actual guest ABI calls, width, cursor movement and pixels. This does not implement OpenFont, diskfont, styled/color fonts, JAM2/complement modes, TextExtent or the remaining AmigaOS compatibility subsystems. The original upstream SHA256SUMS remains the import provenance; it is not a checksum manifest for these subsequent source edits.

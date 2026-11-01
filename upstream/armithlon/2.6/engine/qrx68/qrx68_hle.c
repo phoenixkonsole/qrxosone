@@ -958,6 +958,42 @@ static uint32_t intuition_api(QRX68 *r,unsigned lvo,bool *known){
         default:*known=false;return 0;
     }
 }
+/* Classic bitmap TextFont. All table pointers are guest addresses, never
+ * host pointers. Validate the complete font before publishing SetFont. */
+static bool bitmap_font(QRX68 *r,uint32_t f){
+    if(!ram_region(r,f,52))return false;
+    unsigned height=rd16(r->memory+f+20),stride=rd16(r->memory+f+38);
+    unsigned lo=r->memory[f+32],hi=r->memory[f+33];
+    if(hi<lo||!height||height>256||!stride||stride>4096)return false;
+    if(r->memory[f+22])return false; /* styled / FSF_COLORFONT require separate rendering */
+    unsigned count=hi-lo+2;
+    uint32_t data=rd32(r->memory+f+34),loc=rd32(r->memory+f+40);
+    if(!ram_region(r,data,(size_t)height*stride)||!ram_region(r,loc,count*4))return false;
+    for(unsigned off=44;off<=48;off+=4){uint32_t a=rd32(r->memory+f+off);if(a&&!ram_region(r,a,count*2))return false;}
+    for(unsigned i=0;i<count;i++)if((unsigned)rd16(r->memory+loc+4*i)+rd16(r->memory+loc+4*i+2)>stride*8)return false;
+    return rd16(r->memory+f+26)<height;
+}
+static bool bitmap_text(QRX68 *r,QRX68Window *w,uint32_t str,uint32_t count,bool draw,int *advance){
+    uint32_t f=w->text_font;
+    if(count>32767||!bitmap_font(r,f)||(count&&!ram_region(r,str,count)))return false;
+    /* Bound cursor arithmetic before any pixels or state are modified. */
+    int64_t reach=(int64_t)count*65536+32768;
+    if((int64_t)w->cursor_x+reach>INT32_MAX||(int64_t)w->cursor_x-reach<INT32_MIN)return false;
+    unsigned lo=r->memory[f+32],hi=r->memory[f+33];
+    unsigned height=rd16(r->memory+f+20),stride=rd16(r->memory+f+38);
+    uint32_t data=rd32(r->memory+f+34),loc=rd32(r->memory+f+40);
+    uint32_t space=rd32(r->memory+f+44),kern=rd32(r->memory+f+48);
+    int x=w->cursor_x,y=w->cursor_y-rd16(r->memory+f+26),start=x;
+    for(unsigned i=0;i<count;i++){
+        unsigned ch=r->memory[str+i],index=(ch<lo||ch>hi)?hi-lo+1:ch-lo;
+        unsigned bit=rd16(r->memory+loc+index*4),width=rd16(r->memory+loc+index*4+2);
+        x+=kern?(int16_t)rd16(r->memory+kern+index*2):0;
+        if(draw)for(unsigned row=0;row<height;row++)for(unsigned col=0;col<width;col++)
+            if(r->memory[data+row*stride+(bit+col)/8]&(0x80u>>((bit+col)&7)))set_pixel(r,w,x+(int)col,y+(int)row);
+        x+=space?(int16_t)rd16(r->memory+space+index*2):rd16(r->memory+f+24);
+    }
+    *advance=x-start;if(draw){w->cursor_x=x;compose(r);}return true;
+}
 static uint32_t graphics_api(QRX68 *r,unsigned lvo,bool *known){
     QRXCPU *c=&r->vm.cpu;
     *known=true;
@@ -965,6 +1001,14 @@ static uint32_t graphics_api(QRX68 *r,unsigned lvo,bool *known){
     if(!w){*known=false;return 0;}
     r->gfx_calls++;
     switch(lvo){
+        case 66: /* SetFont(A1=RastPort,A0=TextFont) */
+            if(!bitmap_font(r,c->a[0])){*known=false;return 0;}
+            w->text_font=c->a[0];return 0;
+        case 54: case 60: { /* TextLength / Text(A1,A0,D0=count) */
+            int advance=0;
+            if(!bitmap_text(r,w,c->a[0],c->d[0],lvo==60,&advance)){*known=false;return 0;}
+            return (uint32_t)advance;
+        }
         case 342:{uint8_t old=w->pen;w->pen=(uint8_t)(c->d[0]&15u);return old;} /* SetAPen */
         case 306:{ /* RectFill */
             int x0=(int16_t)c->d[0],y0=(int16_t)c->d[1];

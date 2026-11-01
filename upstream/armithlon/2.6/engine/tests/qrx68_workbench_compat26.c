@@ -70,6 +70,26 @@ int main(void){
     set_newwindow(&r,0x24000u,8,8,128,100,flags,gad);
     c->a[0]=0x24000u;assert(call(&r,4,204)==1);uint32_t win=c->d[0];assert(win);
     assert(qrx68_open_window_count(&r)==1);
+    /* Real guest TextFont ABI: a 3x3 A, baseline 2, spacing 4. */
+    {uint32_t font=0x29000,loc=0x29100,data=0x29200,text=0x29300;
+     wr16(r.memory+font+20,3);wr16(r.memory+font+24,4);wr16(r.memory+font+26,2);
+     r.memory[font+32]='A';r.memory[font+33]='A';wr32(r.memory+font+34,data);
+     wr16(r.memory+font+38,1);wr32(r.memory+font+40,loc);
+     wr16(r.memory+loc,0);wr16(r.memory+loc+2,3);
+     r.memory[data]=0x40;r.memory[data+1]=0xa0;r.memory[data+2]=0xe0;
+     memcpy(r.memory+text,"AA",2);
+     c->a[1]=r.windows[0].rastport;c->a[0]=font;assert(call(&r,3,66)==1);
+     c->d[0]=3;assert(call(&r,3,342)==1);
+     c->d[0]=20;c->d[1]=22;assert(call(&r,3,240)==1);
+     c->a[0]=text;c->d[0]=2;assert(call(&r,3,54)==1&&c->d[0]==8);
+     assert(r.windows[0].cursor_x==20);
+     c->d[0]=2;assert(call(&r,3,60)==1&&r.windows[0].cursor_x==28);
+     assert(r.windows[0].surface[20*128+21]==3);
+     assert(r.windows[0].surface[21*128+20]==3);
+     assert(r.windows[0].surface[21*128+22]==3);
+     assert(r.windows[0].surface[20*128+25]==3);
+    }
+
     assert(rd32(r.memory+win+62)==gad); /* Window.FirstGadget */
     uint32_t port=r.windows[0].userport;assert(port);
     assert(qrx68_post_event(&r,0,QRX68_IDCMP_MOUSEBUTTONS,104,0,25,30));
