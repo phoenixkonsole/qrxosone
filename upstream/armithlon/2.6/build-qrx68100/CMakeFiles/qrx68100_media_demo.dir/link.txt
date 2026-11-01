@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -Wl,--dependency-file=CMakeFiles/qrx68100_media_demo.dir/link.d CMakeFiles/qrx68100_media_demo.dir/src/media_demo_main.c.o -o qrx68100_media_demo  libqrx68100_core.a -lm

@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -Wl,--dependency-file=CMakeFiles/qrx_smp_ready_tests.dir/link.d CMakeFiles/qrx_smp_ready_tests.dir/tests/smp_ready_tests.c.o -o qrx_smp_ready_tests  libqrx_smp_ready.a

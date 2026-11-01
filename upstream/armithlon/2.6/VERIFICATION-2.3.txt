@@ -1,0 +1,32 @@
+ARMITHLON 2.3 validation report — 2026-11-01
+Source: cumulative fork of ARMITHLON 2.2, upstream QRX git pin
+  cc2ba06a0cc76a87bdd49edcd4b475df4227e716
+Musashi required source pin:
+  313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd
+
+Build platform: Linux x86_64, GCC, CMake, Python 3.
+Portable core: 47/47 CTest PASS.
+ASan+UBSan: 47/47 CTest PASS (with -fsanitize=address,undefined).
+Direct graphics demo: QRX68-GUI.hunk PASS, 32 guest steps, 5 HLE calls.
+Direct Exec/DOS demo: QRX68-Hello.hunk PASS, printed Hello QRX68.
+Guest graphics pixel: blue RGB=(64,96,244) at x=25,y=30, PASS.
+Guest graphics socket: Q86F 640x256 XRGB32/ARGB transport and pixel PASS.
+96KiB HUNK and relocated heap guard: PASS (previous 64KiB limit removed).
+Compiled and linked qrx68_musashi.c using a NONEXECUTING TEST STUB: PASS.
+Source-level opt-in QRXDesktop QRXMODE=QRX68 patch: PASS on synthetic fixture.
+
+NOT EXECUTED / NOT VERIFIED:
+- Real downloaded Musashi 68040+FPU binary execution on this machine.
+- Registered real Musashi illegal instruction -> exception -> RTE test.
+- Full Musashi HUNK/Exec/DOS/graphics integration test.
+- Real Apple M1 Metal runtime or true GPU throughput.
+- Modified actual QRXDesktop running under AROS, guest handler QRX68Run absent.
+- AROS native boot on QRX68100, Exec SMP and conventional AmigaOS3 app coverage.
+- Completeness of intuition/layers/icon/workbench libraries and chipset emulation.
+- ARM64 native QRX68 JIT or full QRX86/PPC/x64/ARM code translation.
+
+Safety:
+- Bounded executable file size, execution instruction budget,
+  permissioned HOST directory, opt-in graphics, fail-closed unknown LVOs.
+- Whole source archive contains project source but NOT external Musashi repo.
+- Actual hardware compatibility claims require tests on user Mac/AROS.

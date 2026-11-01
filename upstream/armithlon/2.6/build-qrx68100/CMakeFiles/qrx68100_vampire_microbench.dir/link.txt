@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -Wl,--dependency-file=CMakeFiles/qrx68100_vampire_microbench.dir/link.d CMakeFiles/qrx68100_vampire_microbench.dir/full68k/vampire_bench.c.o -o qrx68100_vampire_microbench  libqrx_full_bus_mock.a libqrx68100_core.a -lm

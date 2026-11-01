@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -Wl,--dependency-file=CMakeFiles/qrx68100_vm.dir/link.d CMakeFiles/qrx68100_vm.dir/src/virt_main.c.o -o qrx68100_vm  libqrx68100_core.a -lm

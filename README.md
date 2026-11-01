@@ -16,3 +16,8 @@ Experimental QRX86 m68k JIT work (default **off**):
 PrBoom currently runs slower with this experimental QRX86 backend.
 FS-UAE’s separate host m68k JIT now works using the
 [patched emulator and validated profile](tools/qrx86/fsuae/README.md).
+
+ARMithlon 1.1 cumulative source and native host integration:
+[build and M1 validation](docs/ARMITHLON_INTEGRATION.md).
+
+Linux i386 GUI work: [embedded X11 subset and AROS windows](docs/QRX_X11.md).

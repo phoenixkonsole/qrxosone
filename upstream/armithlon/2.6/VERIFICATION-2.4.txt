@@ -1,0 +1,22 @@
+ARMITHLON 2.4 QRX68/1 bridge – 2026-11-01
+
+Host environment: Linux x86-64 GCC/CMake/Python 3; not Apple M1; no FS-UAE,
+no real AROS/m68k SDK, no full Musashi sources installed in test environment.
+
+Implemented and validated:
+- 50/50 portable CMake/CTest tests passed, including new QRX68/1 pipeline.
+- 50/50 ASan+UBSan CMake/CTest tests passed with ASAN_OPTIONS=detect_leaks=0.
+- Actual Amiga HUNK (HELLO) run via isolated QRX68 portable CPU; output captured.
+- Actual Amiga HUNK (GUI) run via isolated QRX68 portable CPU; 640x256 RGB PPM captured.
+- Invalid input, symlinked guest payload, ID path-traversal rejected.
+- QRXDesktop 6.6.20 guarded source-transform regression (not a guest build).
+- Installer rejects ELF/fake binaries, refuses overwrite, supports idempotence.
+
+UNVERIFIED / NOT IMPLEMENTED:
+- No actual AROS m68k cross-compile, QRXDesktop HUNK rebuild or guest execution.
+- No full Musashi CPU runtime test in this environment.
+- No FS-UAE guest boot or Apple Silicon Metal/Cocoa runtime test.
+- No live AmigaOS Intuition/IDCMP interactivity; frames are post-execution snapshots.
+- No native QRX68100 AROS BSP boot or real AROS/SMP integration.
+
+See README-2.4-DE.md for setup, architecture, limitations and permissions.

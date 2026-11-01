@@ -1,0 +1,21 @@
+ARMITHLON 2.6 - Verified build evidence, Linux x86_64, 2026-11-01
+
+Base: cumulative ARMITHLON 2.5 source + additions in CHANGELOG-2.6.md.
+
+STANDARD SUITE:
+  cmake -S engine -B /mnt/data/qrx-26build
+  cmake --build /mnt/data/qrx-26build --parallel
+  ctest --test-dir /mnt/data/qrx-26build --output-on-failure -j 6
+  Result: 52/52 PASS
+
+SANITIZER SUITE:
+  cmake -S engine -B /mnt/data/qrx-26asan -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer -O1' -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+  cmake --build /mnt/data/qrx-26asan --parallel
+  ctest --test-dir /mnt/data/qrx-26asan --output-on-failure -j 4
+  Result: 52/52 PASS
+
+The newly added qrx68_compat26_tests verify Exec LVOs, signals, message ports, guest structures, Intuition gadgets, menu events, layered-window compositor, DOS process metadata, and fail-closed unsupported CreateProc. Existing qrx68 live guest HUNK regression is retained.
+
+LIMITS: No real Directory Opus or Final Writer binary supplied or executed. No AROS cross-compiler, FS-UAE, native Apple M1 or actual Musashi runtime validated in this environment. Not a general AmigaOS 3.x compatibility claim.
+
+The ZIP source tree is re-built and verified on fresh extraction separately.

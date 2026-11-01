@@ -13,14 +13,25 @@ def main():
     for n in ['system','sdk','game','output']:ap.add_argument(n,type=Path)
     ap.add_argument('runtimes',type=Path,nargs='+')
     ap.add_argument('--capture-frame',type=int,default=10)
+    ap.add_argument('--frame-window',type=int,nargs=2,metavar=('START','END'),help='also time this displayed-frame interval, excluding startup; budget must reach END')
+    ap.add_argument('--fixed-pitch',action='store_true',help='disable time-dependent PrBoom pitch autotuning; use a fresh matching baseline')
     ap.add_argument('--no-wipe',action='store_true',help='disable time-dependent Doom melt for deterministic captured frames')
+    ap.add_argument('--guest-env',action='append',default=[],metavar='QRX_NAME=VALUE',help='explicit experimental guest settings; recorded in results')
     ap.add_argument('--jit',choices=['off','experimental'],default='off')
+    ap.add_argument('--require-jit-max-ops',type=int,default=0,help='require compiled native block limit in the runtime manifest')
+    ap.add_argument('--require-jit-features',type=lambda v:int(v,0),default=0,help='require a compiled/runtime QRX86 feature mask in the guest log')
     ap.add_argument('--fsuae-jit',choices=['off','on'],default='on' if os.environ.get('QRX_FSUAE_JIT')=='1' else 'off',help='FS-UAE host m68k JIT; default follows QRX_FSUAE_JIT; independent of QRX86 --jit')
     ap.add_argument('--budget',type=int,default=100_000_000)
     ap.add_argument('--runs',type=int,default=1)
     ap.add_argument('--cpu',choices=['68020','68030','68040','68060'],default='68060')
     ap.add_argument('--timeout',type=int,default=900)
     a=ap.parse_args()
+    for setting in a.guest_env:
+        if not re.fullmatch(r'QRX[A-Z0-9_]*=[A-Za-z0-9_.+-]+',setting):ap.error('guest settings require QRX names and simple literal values')
+    if a.frame_window and not 0<a.frame_window[0]<a.frame_window[1]<=0x7fffffff:ap.error('invalid frame window')
+    guest_env_lines=''.join('SetEnv '+v.replace('=',' ',1)+'\n' for v in a.guest_env)
+    if a.frame_window:
+        guest_env_lines+=f'SetEnv QRX_WIN_FRAME_MARKERS QRXOUT:\nSetEnv QRX_WIN_FRAME_START {a.frame_window[0]}\nSetEnv QRX_WIN_FRAME_END {a.frame_window[1]}\n'
     if a.capture_frame<1:ap.error("positive capture frame required")
     if a.runs<1 or a.budget<100_000_000:ap.error('positive runs and budget >=100M required')
     for n in ['system','sdk','game','output']:setattr(a,n,getattr(a,n).resolve())
@@ -42,9 +53,10 @@ def main():
             scn=run/'scenario';overlay=scn/'overlay';(overlay/'C').mkdir(parents=True);game=overlay/'X86/Doom';game.mkdir(parents=True)
             shutil.copy2(runtime,overlay/'C/qrx-win32')
             for n in names:shutil.copy2(a.game/n,game/n)
-            game_config='render_wipescreen 0\n' if a.no_wipe else None
+            game_config=('render_wipescreen 0\n' if a.no_wipe else '')+('try_to_reduce_cpu_cache_misses 0\n' if a.fixed_pitch else '')
+            game_config=game_config or None
             if game_config:(game/'qrx-benchmark.cfg').write_text(game_config)
-            game_args=' -config qrx-benchmark.cfg' if a.no_wipe else ''
+            game_args=' -config qrx-benchmark.cfg' if game_config else ''
             (overlay/'X86/input.txt').write_text(f'wait {a.budget//20000}\nsnap frame.rgb\nwait 1000000000\n')
             (scn/'User-Startup').write_text(f'''FailAt 1000
 SetEnv QRX_WIN_STATS 1
@@ -52,7 +64,7 @@ SetEnv QRX_WIN_BUDGET {a.budget}
 SetEnv QRX_HL_IPMS 10000
 SetEnv QRX_DX_RTG 1
 SetEnv QRX86_JIT {a.jit}
-CD SYS:X86/Doom
+{guest_env_lines}CD SYS:X86/Doom
 Echo START >QRXOUT:START
 C:qrx-win32 -G QRXOUT:frame.rgb {a.capture_frame} -o QRXOUT: -L QRXOUT:runtime.log -e SDL_VIDEODRIVER=directx SYS:X86/Doom/prboom-plus.exe -iwad freedoom1.wad -width 320 -height 200 -fullscreen -nosound -timedemo demo1{game_args} >QRXOUT:stdout.txt
 Echo "guest rc=$RC" >QRXOUT:guest.rc
@@ -61,13 +73,16 @@ Echo done >QRXOUT:DONE
 ''')
             out=run/'output';env=dict(os.environ,QRX_SCENARIO_TMPDIR=str(a.output/'tmp'),QRX_BOOT_RETRIES='0',QRX_FSUAE_JIT='1' if a.fsuae_jit=='on' else '0')
             cmd=['bash',str(harness),str(a.system),str(a.sdk/'aros-amiga-m68k-rom.bin'),str(a.sdk/'aros-amiga-m68k-ext.bin'),str(scn),str(out),a.cpu,str(a.timeout)]
-            start=end=None;deadline=time.monotonic()+a.timeout+60
+            start=end=frame_start=frame_end=None;deadline=time.monotonic()+a.timeout+60
             with (run/'harness.log').open('w') as log:
                 process=subprocess.Popen(cmd,env=env,stdout=log,stderr=subprocess.STDOUT)
                 while process.poll() is None:
                     now=time.perf_counter()
                     if start is None and (out/'START').exists():start=now
                     if end is None and (out/'END').exists():end=now
+                    if a.frame_window:
+                        if frame_start is None and (out/'frame-start.mark').exists():frame_start=now
+                        if frame_end is None and (out/'frame-end.mark').exists():frame_end=now
                     if time.monotonic()>deadline:
                         process.terminate();process.wait(timeout=15);raise RuntimeError(f'harness timeout: {run}')
                     time.sleep(.01)
@@ -76,11 +91,21 @@ Echo done >QRXOUT:DONE
             stats=re.search(r'(\d+) guest instructions in (\d+) ms .*?, (\d+) DirectDraw frames',text)
             if not stats or int(stats[1])!=a.budget or int(stats[3])<=0 or 'instruction budget exhausted' not in text or 'unimplemented API called' in text or (out/'guest.rc').read_text().strip()!='guest rc=139':raise RuntimeError(f'invalid guest result: {run}')
             if a.jit=='experimental' and not re.search(r'native_insns=[1-9][0-9]*',text):raise RuntimeError(f'JIT did not execute: {run}')
+            feature_match=re.search(r'QRX86-JIT-FEATURES mask=(\d+)',text)
+            features=int(feature_match[1]) if feature_match else None
+            limits=re.search(r'max_ops=(\d+) code_cap=(\d+)',text)
+            max_ops=int(limits[1]) if limits else None
+            if a.require_jit_max_ops and max_ops!=a.require_jit_max_ops:raise RuntimeError(f'JIT block limit mismatch: {run}')
+            if a.require_jit_features and (features is None or features&a.require_jit_features!=a.require_jit_features):raise RuntimeError(f'JIT feature mismatch: {run}')
+            if a.frame_window:
+                if frame_start is None or frame_end is None or frame_end<=frame_start:raise RuntimeError(f'frame window not completed; increase budget: {run}')
+                for filename,expected in zip(['frame-start.mark','frame-end.mark'],a.frame_window):
+                    if int((out/filename).read_text().strip())!=expected:raise RuntimeError(f'frame marker mismatch: {run}')
             emulator_log=(out/'fs-uae.log.txt').read_text(errors='replace')
             enabled=bool(re.search(r'JIT=CPU(?:/FPU)?=[1-9][0-9]*',emulator_log))
             if enabled != (a.fsuae_jit=='on'):raise RuntimeError(f'FS-UAE JIT mode mismatch: {run}')
             emulator=shutil.which(os.environ.get('QRX_FSUAE_BIN','fs-uae'))
-            row=dict(game_config=game_config,fsuae_jit=a.fsuae_jit,fsuae_binary=emulator,fsuae_sha256=sha(Path(emulator)),jit=a.jit,runtime=str(runtime),runtime_sha256=sha(runtime),repeat=repeat,cpu=a.cpu,backend="AROS RTG",instructions=int(stats[1]),frames=int(stats[3]),backend_ms=int(stats[2]),wall_seconds=end-start,wall_fps=int(stats[3])/(end-start),capture_frame=a.capture_frame,frame_sha256=sha(out/'frame.rgb') if (out/'frame.rgb').exists() else None)
+            row=dict(frame_window=a.frame_window,frame_wall_seconds=frame_end-frame_start if a.frame_window else None,frame_wall_fps=(a.frame_window[1]-a.frame_window[0])/(frame_end-frame_start) if a.frame_window else None,fixed_pitch=a.fixed_pitch,jit_features=features,jit_max_ops=max_ops,jit_code_cap=int(limits[2]) if limits else None,guest_env=a.guest_env,game_config=game_config,fsuae_jit=a.fsuae_jit,fsuae_binary=emulator,fsuae_sha256=sha(Path(emulator)),jit=a.jit,runtime=str(runtime),runtime_sha256=sha(runtime),repeat=repeat,cpu=a.cpu,backend="AROS RTG",instructions=int(stats[1]),frames=int(stats[3]),backend_ms=int(stats[2]),wall_seconds=end-start,wall_fps=int(stats[3])/(end-start),capture_frame=a.capture_frame,frame_sha256=sha(out/'frame.rgb') if (out/'frame.rgb').exists() else None)
             rows.append(row);(a.output/'results.json').write_text(json.dumps(dict(inputs=inputs,runs=rows),indent=2)+'\n');print(json.dumps(row),flush=True)
     if any(not r['frame_sha256'] for r in rows) or len({r['frame_sha256'] for r in rows})!=1:raise RuntimeError('snapshot missing/different; do not compare performance')
 if __name__=='__main__':main()

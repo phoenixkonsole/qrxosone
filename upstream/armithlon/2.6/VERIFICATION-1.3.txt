@@ -1,0 +1,16 @@
+ARMITHLON 1.3 verification; Linux x86_64 container, 2026-10-31
+Actual CMake engine compilation: PASS
+Ctest regressions: 21/21 PASS
+X11 input patch idempotence/source drift gates: PASS
+Cross-OS benchmark classification and reference HTML: PASS
+FS-UAE compat boot fail-closed SHA gate: PASS
+Native host C checksum: 903be502 PASS
+Linux freestanding i386 ELF32 compile: PASS (no direct i386 execution available)
+QRX86 Windows PE32 build and real execution: SKIP (no mingw, no QRX repo checkout)
+QRX86 Linux ELF32 actual execution: SKIP (no QRX repo checkout)
+Windows PrBoom new runtime measurement: SKIP (no game files/runtime)
+Linux PrBoom new runtime measurement: SKIP (no game rootfs/runtime)
+Metal/Vulkan GPU M1 execution: NOT RUN
+FS-UAE AROS/QRX HUNK boot: NOT RUN
+Full QRX OS One native QRX68100 boot: NOT IMPLEMENTED
+Reference evidence: QRX repo benchmarks/prboom-2026-10-30, not new runs.

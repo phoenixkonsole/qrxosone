@@ -14,6 +14,7 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include "qrx86linux.h"
+#include "qrx_x11.h"
 
 /* ---------------------------------------------------------------- Linux ABI constants */
 #define L_EPERM 1
@@ -52,7 +53,7 @@
 #define LX_EXEC_BIAS  0x56555000u    /* ET_DYN main program */
 #define LX_INTERP_BIAS 0xB7E00000u   /* program interpreter (ld-linux.so.2) */
 
-enum { F_HOST = 1, F_DIR, F_PIPE_R, F_PIPE_W, F_NULL };
+enum { F_HOST = 1, F_DIR, F_PIPE_R, F_PIPE_W, F_NULL, F_X11 };
 
 typedef struct lxpipe { uint8_t *buf; size_t len, cap, rpos; int readers, writers; } lxpipe;
 
@@ -61,6 +62,8 @@ typedef struct lxfile {
     DIR *dir;
     char *path;              /* host path for directories */
     lxpipe *pipe;
+    qxx *x11;
+    int connected;
     struct dirent *pend;     /* readdir entry that did not fit into the last getdents buffer */
     uint32_t dpos;
 } lxfile;
@@ -80,6 +83,8 @@ typedef struct lxproc {
     lxzombie *zombies;
     lxresv *resv;             /* PROT_NONE reservations (not backed by memory) */
     uint32_t umask_v;
+    int xwait;
+    uint64_t xdeadline;
     int blocked;              /* last syscall would block: re-executed on the next slice */
     struct lxproc *next;
 } lxproc;
@@ -244,6 +249,7 @@ static void fput(lxfile *f)
     if (f->kind == F_PIPE_R && f->pipe) f->pipe->readers--;
     if (f->kind == F_PIPE_W && f->pipe) f->pipe->writers--;
     if (f->pipe && f->pipe->readers <= 0 && f->pipe->writers <= 0) { free(f->pipe->buf); free(f->pipe); }
+    if (f->x11) qxx_free(f->x11);
     free(f->path);
     free(f);
 }
@@ -581,6 +587,19 @@ static uint32_t do_read(lxproc *p, lxfile *f, uint32_t buf, uint32_t n)
 {
     uint32_t done = 0;
     if (!f) return NEG(L_EBADF);
+    if (f->kind == F_X11) {
+        unsigned char data[4096]; int got; uint32_t k=n>sizeof(data)?sizeof(data):n;
+        if (!f->connected) return NEG(107);
+        if (!n) return 0;
+        got=qxx_ready(f->x11);
+        if (got<0) return NEG(L_EIO);
+        if (!got) { if(f->flags&04000u)return NEG(L_EAGAIN);p->blocked=1;p->xwait=1;return 0; }
+        if(k>(uint32_t)got)k=(uint32_t)got;
+        /* Validate the complete guest destination before consuming the stream. */
+        for(done=0;done<k;done++)if(!x86_host_ptr(&p->cpu,buf+done))return NEG(L_EFAULT);
+        got=qxx_read(f->x11,data,k);
+        return got<0?NEG(L_EIO):x86_write_mem(&p->cpu,buf,data,(uint32_t)got)?(uint32_t)got:NEG(L_EFAULT);
+    }
     if (f->kind == F_DIR) return NEG(L_EISDIR);
     if (f->kind == F_NULL) {
         if (!f->flags) return 0;
@@ -617,6 +636,15 @@ static uint32_t do_write(lxproc *p, lxfile *f, uint32_t buf, uint32_t n)
 {
     uint32_t done = 0;
     if (!f) return NEG(L_EBADF);
+    if (f->kind == F_X11) {
+        unsigned char data[4096];
+        if(!f->connected)return NEG(107);
+        while(done<n){uint32_t k=n-done;if(k>sizeof(data))k=sizeof(data);
+            if(!x86_read_mem(&p->cpu,buf+done,data,k))return done?done:NEG(L_EFAULT);
+            if(qxx_write(f->x11,data,k)<0)return done?done:NEG(L_EIO);
+            done+=k;
+        }return done;
+    }
     if (f->kind == F_NULL) return n;
     if (f->kind == F_PIPE_W) {
         lxpipe *pp = f->pipe;
@@ -649,6 +677,114 @@ static uint32_t do_write(lxproc *p, lxfile *f, uint32_t buf, uint32_t n)
         if ((uint32_t)r < k) break;
     }
     return done;
+}
+
+/* Local Linux AF_UNIX stream sockets are served in-process, including on AROS.
+ * No arbitrary host sockets, TCP fallback, or network permissions are implied. */
+static uint32_t do_xsocket(lxproc *p,uint32_t domain,uint32_t type,uint32_t protocol) {
+    lxfile *f;int fd;
+    if(domain!=1)return NEG(97);
+    if((type&~(02000000u|04000u))!=1 || protocol)return NEG(L_EINVAL);
+    f=fnew(F_X11);if(!f)return NEG(L_ENOMEM);
+    f->flags=(int)(type&04000u);f->x11=qxx_new();if(!f->x11){fput(f);return NEG(L_ENOMEM);}
+    fd=falloc(p,0,f);if(fd<0){fput(f);return NEG(L_EMFILE);}p->cloexec[fd]=(type&02000000u)!=0;return (uint32_t)fd;
+}
+static uint32_t do_xconnect(lxproc *p,uint32_t fd,uint32_t addr,uint32_t len) {
+    unsigned char sa[110];const char name[]="/tmp/.X11-unix/X0";size_t off=2,used;lxfile *f=fget(p,fd);
+    if(!f || f->kind!=F_X11)return NEG(L_EBADF);
+    if(f->connected)return NEG(106);
+    if(len<3||len>sizeof(sa))return NEG(L_EINVAL);
+    memset(sa,0,sizeof(sa));if(!x86_read_mem(&p->cpu,addr,sa,len))return NEG(L_EFAULT);
+    if(sa[0]!=1||sa[1]!=0)return NEG(97);
+    if(!sa[2])off=3;
+    used=len-off;
+    if(used<sizeof(name)-1 || memcmp(sa+off,name,sizeof(name)-1))return NEG(111);
+    if(used>sizeof(name)-1 && sa[off+sizeof(name)-1])return NEG(111);
+    f->connected=1;return 0;
+}
+static uint32_t do_xpoll(lxproc *p,uint32_t addr,uint32_t count,int32_t timeout) {
+    uint32_t i,ready=0;int has_x=0;struct timeval tv;uint64_t now;
+    if(count>LX_MAXFD)return NEG(L_EINVAL);
+    for(i=0;i<count;i++){
+        unsigned char b[8];int32_t fd;uint16_t events,revents=0;lxfile *f;
+        if(!x86_read_mem(&p->cpu,addr+8*i,b,8))return NEG(L_EFAULT);
+        fd=(int32_t)((uint32_t)b[0]|((uint32_t)b[1]<<8)|((uint32_t)b[2]<<16)|((uint32_t)b[3]<<24));events=(uint16_t)(b[4]|(b[5]<<8));
+        f=fd<0?NULL:fget(p,(uint32_t)fd);
+        if(fd<0)revents=0;
+        else if(!f)revents=32;
+        else if(f->kind==F_X11){int n=qxx_ready(f->x11);has_x=1;if(n<0)revents=8;else {if(n>0)revents|=events&1;if(f->connected)revents|=events&4;}}
+        else if(f->kind==F_PIPE_R)revents=(f->pipe->len>f->pipe->rpos?events&1:0)|(f->pipe->writers?0:16);
+        else if(f->kind==F_PIPE_W)revents=f->pipe->readers?(events&4):8;
+        else revents=events&5;
+        if(!x86_wr16(&p->cpu,addr+8*i+6,revents))return NEG(L_EFAULT);
+        if(revents)ready++;
+    }
+    if(ready||timeout==0||!has_x){p->xdeadline=0;return ready;}
+    gettimeofday(&tv,NULL);now=(uint64_t)tv.tv_sec*1000+tv.tv_usec/1000;
+    if(timeout>0){if(!p->xdeadline)p->xdeadline=now+(uint32_t)timeout;
+        else if(now>=p->xdeadline){p->xdeadline=0;return 0;}}
+    p->blocked=1;p->xwait=1;return 0;
+}
+static uint32_t do_xselect(lxproc *p,uint32_t nfds,uint32_t rd,uint32_t wr,uint32_t ex,uint32_t tvaddr) {
+    unsigned char sets[3][32]={{0}},out[3][32]={{0}};uint32_t ptrs[3]={rd,wr,ex},i,j,ready=0,bytes;int has_x=0,finite=0;uint64_t timeout=0,now;struct timeval tv;
+    if(nfds>LX_MAXFD)return NEG(L_EINVAL);
+    bytes=((nfds+31)/32)*4;
+    for(j=0;j<3;j++)if(ptrs[j]&&!x86_read_mem(&p->cpu,ptrs[j],sets[j],bytes))return NEG(L_EFAULT);
+    if(tvaddr){unsigned char t[8];uint32_t sec,usec;if(!x86_read_mem(&p->cpu,tvaddr,t,8))return NEG(L_EFAULT);
+        sec=x86_rd32(&p->cpu,tvaddr);usec=x86_rd32(&p->cpu,tvaddr+4);if(sec>0x7fffffff||usec>=1000000)return NEG(L_EINVAL);timeout=(uint64_t)sec*1000+(usec+999)/1000;finite=1;}
+    for(i=0;i<nfds;i++){
+        unsigned bit=1u<<(i%8);lxfile *f;int readable=0,writable=0;
+        if(!((sets[0][i/8]|sets[1][i/8]|sets[2][i/8])&bit))continue;
+        f=fget(p,i);if(!f)return NEG(L_EBADF);
+        if(f->kind==F_X11){int n=qxx_ready(f->x11);has_x=1;readable=n!=0;writable=f->connected;}
+        else if(f->kind==F_PIPE_R)readable=f->pipe->len>f->pipe->rpos||!f->pipe->writers;
+        else if(f->kind==F_PIPE_W)writable=1;
+        else readable=writable=1;
+        if(readable&&(sets[0][i/8]&bit)){out[0][i/8]|=(unsigned char)bit;ready++;}
+        if(writable&&(sets[1][i/8]&bit)){out[1][i/8]|=(unsigned char)bit;ready++;}
+    }
+    gettimeofday(&tv,NULL);now=(uint64_t)tv.tv_sec*1000+tv.tv_usec/1000;
+    if(!ready&&has_x&&(!finite||timeout)){
+        if(!finite||!p->xdeadline||now<p->xdeadline){if(finite&&!p->xdeadline)p->xdeadline=now+timeout;p->blocked=p->xwait=1;return 0;}
+    }
+    p->xdeadline=0;
+    for(j=0;j<3;j++)if(ptrs[j]&&!x86_write_mem(&p->cpu,ptrs[j],out[j],bytes))return NEG(L_EFAULT);
+    return ready;
+}
+/* i386 msghdr/iovec layout, deliberately without descriptor passing. */
+static uint32_t do_xmsg(lxproc *p,uint32_t fd,uint32_t msg,uint32_t flags,int send) {
+    unsigned char header[28];uint32_t vec,count,i,total=0;lxfile *f=fget(p,fd);int oldflags;
+    if(!f||f->kind!=F_X11)return NEG(L_EBADF);
+    if(flags&~(0x40u|0x4000u))return NEG(L_ENOSYS); /* DONTWAIT, NOSIGNAL */
+    if(!x86_read_mem(&p->cpu,msg,header,sizeof(header)))return NEG(L_EFAULT);
+    if(x86_rd32(&p->cpu,msg+4)||x86_rd32(&p->cpu,msg+20))return NEG(L_ENOSYS);
+    vec=x86_rd32(&p->cpu,msg+8);count=x86_rd32(&p->cpu,msg+12);
+    if(count>1024)return NEG(L_EINVAL);
+    oldflags=f->flags;if(flags&0x40)f->flags|=04000;
+    for(i=0;i<count;i++){
+        unsigned char entry[8];uint32_t addr,len,res;
+        if(!x86_read_mem(&p->cpu,vec+8*i,entry,8)){f->flags=oldflags;return total?total:NEG(L_EFAULT);}
+        addr=x86_rd32(&p->cpu,vec+8*i);len=x86_rd32(&p->cpu,vec+8*i+4);
+        res=send?do_write(p,f,addr,len):do_read(p,f,addr,len);
+        if(total&&p->blocked){p->blocked=p->xwait=0;break;}
+        if((int32_t)res<0){f->flags=oldflags;return total?total:res;}
+        total+=res;if(res<len)break;
+    }
+    f->flags=oldflags;
+    if(!send){x86_wr32(&p->cpu,msg+20,0);x86_wr32(&p->cpu,msg+24,0);}
+    return total;
+}
+static uint32_t do_socketcall(lxproc *p,uint32_t op,uint32_t addr) {
+    uint32_t a[6]={0};unsigned i,count;unsigned char raw[24];
+    count=op==1||op==3||op==16||op==17?3:op==9||op==10?4:0;
+    if(!count)return NEG(L_ENOSYS);
+    if(!x86_read_mem(&p->cpu,addr,raw,4*count))return NEG(L_EFAULT);
+    for(i=0;i<count;i++)a[i]=(uint32_t)raw[i*4]|((uint32_t)raw[i*4+1]<<8)|((uint32_t)raw[i*4+2]<<16)|((uint32_t)raw[i*4+3]<<24);
+    if(op==1)return do_xsocket(p,a[0],a[1],a[2]);
+    if(op==3)return do_xconnect(p,a[0],a[1],a[2]);
+    if(op==16||op==17)return do_xmsg(p,a[0],a[1],a[2],op==16);
+    if(a[3])return NEG(L_ENOSYS);
+    return op==9?do_write(p,fget(p,a[0]),a[1],a[2]):do_read(p,fget(p,a[0]),a[1],a[2]);
 }
 
 /* ---------------------------------------------------------------- process model */
@@ -861,6 +997,11 @@ static uint32_t syscall_dispatch(lxproc *p, uint32_t nr, uint32_t a1, uint32_t a
         { uint32_t pid = do_fork(p);
           if ((int32_t)pid > 0 && (a1 & 0x01000000u) && a5) x86_wr32(c, a5, 0);    /* CLONE_CHILD_SETTID in child only */
           return pid; }
+    case 102: return do_socketcall(p,a1,a2);
+    case 359: return do_xsocket(p,a1,a2,a3);
+    case 362: return do_xconnect(p,a1,a2,a3);
+    case 370: return do_xmsg(p,a1,a2,a3,1);
+    case 372: return do_xmsg(p,a1,a2,a3,0);
     case 3: return do_read(p, fget(p, a1), a2, a3);
     case 4: return do_write(p, fget(p, a1), a2, a3);
     case 5: if (!gstr(p, a1, path, sizeof(path))) return NEG(L_EFAULT); return do_open(p, path, a2, a3);
@@ -942,6 +1083,7 @@ static uint32_t syscall_dispatch(lxproc *p, uint32_t nr, uint32_t a1, uint32_t a
     case 54: {
         f = fget(p, a1);
         if (!f) return NEG(L_EBADF);
+        if (f->kind==F_X11 && a2==0x541bu) {int n=qxx_ready(f->x11);if(n<0)return NEG(L_EIO);return x86_wr32(c,a3,(uint32_t)n)?0:NEG(L_EFAULT);}
         if (f->kind != F_HOST || !isatty(f->hfd)) return NEG(L_ENOTTY);
         if (a2 == 0x5401u) { uint32_t i; for (i = 0; i < 60; i++) x86_wr8(c, a3 + i, 0); x86_wr32(c, a3 + 12, 0x8A3Bu); x86_wr32(c, a3 + 8, 0xBFu); x86_wr32(c, a3 + 4, 0x5u); x86_wr32(c, a3, 0x500u); return 0; }
         if (a2 == 0x5413u) { x86_wr16(c, a3, 24); x86_wr16(c, a3 + 2, 80); x86_wr16(c, a3 + 4, 0); x86_wr16(c, a3 + 6, 0); return 0; }
@@ -954,8 +1096,8 @@ static uint32_t syscall_dispatch(lxproc *p, uint32_t nr, uint32_t a1, uint32_t a
         case 0: case 1030: { int n = falloc(p, (int)a3, f); if (n < 0) return NEG(L_EMFILE); f->refs++; if (a2 == 1030) p->cloexec[n] = 1; return (uint32_t)n; }
         case 1: return p->cloexec[a1];
         case 2: p->cloexec[a1] = (unsigned char)(a3 & 1); return 0;
-        case 3: return f->kind == F_PIPE_W ? 1u : f->kind == F_PIPE_R ? 0u : (uint32_t)(f->kind == F_HOST && f->hfd == 1 ? 1 : 2);
-        case 4: return 0;
+        case 3: if(f->kind==F_X11)return (uint32_t)(2|f->flags); return f->kind == F_PIPE_W ? 1u : f->kind == F_PIPE_R ? 0u : (uint32_t)(f->kind == F_HOST && f->hfd == 1 ? 1 : 2);
+        case 4: if(f->kind==F_X11)f->flags=(int)(a3&04000u);return 0;
         default: return NEG(L_EINVAL);
         }
     case 60: { uint32_t o = p->umask_v; p->umask_v = a1 & 0777u; return o; }
@@ -1065,7 +1207,9 @@ static uint32_t syscall_dispatch(lxproc *p, uint32_t nr, uint32_t a1, uint32_t a
     case 186: case 173: case 179: return 0;
     case 141: return do_getdents(p, fget(p, a1), a2, a3, 0);
     case 220: return do_getdents(p, fget(p, a1), a2, a3, 1);
-    case 142: case 168: case 308: case 309: {                   /* select/poll: everything ready */
+    case 168: return do_xpoll(p,a1,a2,(int32_t)a3);
+    case 142: return do_xselect(p,a1,a2,a3,a4,a5);
+    case 308: case 309: {                   /* select/poll: everything ready */
         if (nr == 168 || nr == 309) { uint32_t i; for (i = 0; i < a2; i++) { uint16_t ev = x86_rd16(c, a1 + i * 8 + 4); x86_wr16(c, a1 + i * 8 + 6, (uint16_t)(ev & 5u)); } return a2; }
         return a1; }
     case 145: case 146: {
@@ -1075,6 +1219,7 @@ static uint32_t syscall_dispatch(lxproc *p, uint32_t nr, uint32_t a1, uint32_t a
             uint32_t b = x86_rd32(c, a2 + i * 8), l = x86_rd32(c, a2 + i * 8 + 4);
             if (!l) continue;
             r = nr == 145 ? do_read(p, f, b, l) : do_write(p, f, b, l);
+            if (tot && p->blocked) { p->blocked=0; p->xwait=0; return tot; }
             if ((int32_t)r < 0) return tot ? tot : r;
             tot += r;
             if (r < l) break;
@@ -1155,6 +1300,7 @@ static int lx_int(x86cpu *c, int vec)
     if (vec != 0x80) return 0;
     nr = c->r[X86_EAX];
     p->blocked = 0;
+    p->xwait = 0;
     r = syscall_dispatch(p, nr, c->r[X86_EBX], c->r[X86_ECX], c->r[X86_EDX], c->r[X86_ESI], c->r[X86_EDI], c->r[X86_EBP]);
     if (p->o->trace && !p->blocked) fprintf(stderr, "[qrx-i386 %d] sys %u(%08lx, %08lx, %08lx) = %ld\n", p->pid, nr,
                              (unsigned long)c->r[X86_EBX], (unsigned long)c->r[X86_ECX], (unsigned long)c->r[X86_EDX], (long)(int32_t)r);
@@ -1178,6 +1324,7 @@ static int run_slice(lxproc *p)
     c->stop = 0;
     c->budget = lim;
     p->blocked = 0;
+    p->xwait = 0;
     f = x86_run(c, 0xFFFFFFFFu);
     if (f == X86_FAULT_BUDGET && !(p->o->budget && x86_icount(c) >= p->o->budget)) { c->fault = X86_OK; return 1; }  /* preempted */
     if (f && !p->exited) {
@@ -1219,6 +1366,10 @@ int lx_run(const lxopts *o, const char *path, int argc, char **argv, char **envp
             if (q->exited && q != p) { *pp = q->next; proc_free(q); } else pp = &q->next;
         }
         if (!progress) {
+            int external_wait=0;
+            for(q=g_procs;q;q=q->next)if(!q->exited&&q->blocked&&q->xwait)external_wait=1;
+            if(external_wait){g_deadlock=0;usleep(10000);continue;}
+
             if (g_deadlock) { fprintf(stderr, "qrx-i386: all processes blocked - terminating\n"); break; }
             g_deadlock = 1;        /* one round in which blocking calls fail instead of waiting */
         } else g_deadlock = 0;

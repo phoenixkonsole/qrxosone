@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "benchmark_suite": "armithlon-external-v1",
+  "machine": {
+    "system": "Linux",
+    "machine": "x86_64",
+    "release": "6.18.57",
+    "python": "3.13.5",
+    "host_name": "0d1c51a1bf59",
+    "collected_utc": "2026-10-31T20:55:01+00:00"
+  },
+  "results": {
+    "glmark2": {
+      "tool": "glmark2",
+      "status": "SKIP",
+      "recorded_utc": "2026-10-31T20:57:25+00:00",
+      "scope": "native_host_only",
+      "reason": "Not installed/built; use benchmark-tools fetch/build (Linux), or your package manager"
+    },
+    "vkmark": {
+      "tool": "vkmark",
+      "status": "SKIP",
+      "recorded_utc": "2026-10-31T20:57:25+00:00",
+      "scope": "native_host_only",
+      "reason": "Not installed/built; use benchmark-tools fetch/build (Linux), or your package manager"
+    }
+  },
+  "updated_utc": "2026-10-31T20:57:25+00:00"
+}

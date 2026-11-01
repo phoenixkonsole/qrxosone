@@ -186,6 +186,22 @@ static void fb_show(qwin *w, dxobj *prim, const uint32_t *pal)
     }
 }
 
+/* Two opt-in markers allow the host to time a fixed displayed-frame interval
+ * independently of loading and the guest/backend clock. No guest state changes. */
+static void frame_marker(qwin *w)
+{
+    unsigned frame=(unsigned)w->frames;
+    if(w->bench_frame_start && (frame==w->bench_frame_start||frame==w->bench_frame_end)){
+        char path[320];size_t n=strlen(w->bench_marker_dir);
+        const char *separator=n && (w->bench_marker_dir[n-1]==':'||w->bench_marker_dir[n-1]=='/')?"":"/";
+        snprintf(path,sizeof path,"%s%sframe-%s.mark",w->bench_marker_dir,separator,frame==w->bench_frame_start?"start":"end");
+        FILE *f=fopen(path,"w");
+        if(!f){qw_log(w,"frame marker open failed: %s",path);return;}
+        fprintf(f,"%u\n",frame);
+        if(fclose(f))qw_log(w,"frame marker close failed: %s",path);
+    }
+}
+
 /* ------------------------------------------------------------------ presentation */
 /* show the primary surface in the cooperative window */
 static void present(qwin *w, dxobj *prim)
@@ -198,6 +214,7 @@ static void present(qwin *w, dxobj *prim)
     t = win_top(w, t);
     if (!t) return;
     w->frames++;
+    frame_marker(w);
     if (t->cw != prim->sw || t->ch != prim->sh) {
         const qhle *mv = qw_find_hle("user32", "MoveWindow");
         uint32_t b[16];

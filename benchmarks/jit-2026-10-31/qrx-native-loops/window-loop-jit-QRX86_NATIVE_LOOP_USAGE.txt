@@ -1,0 +1,9 @@
+Experimental QRX86 loop JIT. The ordinary source defaults remain unchanged.
+Use the CPU-specific hunk/qrx-win32 built here. Before invoking it on AROS:
+SetEnv QRX86_JIT experimental
+SetEnv QRX86_JIT_LOOPS_ONLY 1
+SetEnv QRX86_JIT_BACKEDGE_ONLY 1
+SetEnv QRX86_JIT_THRESHOLD 64
+Expected feature mask: 4194111; max_ops=64; code_cap=16384.
+FS-UAE stays on the separately qualified fixed test profile.
+Performance must be compared with matching game configuration and captured output.

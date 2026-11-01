@@ -250,7 +250,13 @@ typedef struct qwin {
     int menu_open_index;              /* menu bar item whose popup is open (-1 none) */
     char grab_path[256];              /* -G: capture the display after grab_at DirectDraw frames */
     uint64_t api_calls;              /* actual HLE transitions, distinct from imports */
+#ifdef QRX_EXEC_PROFILE
+    uint32_t prof_api_hits[QW_THUNK_MAX];
+    uint64_t prof_api_ms[QW_THUNK_MAX]; /* inclusive diagnostic timing */
+#endif
     int grab_at, frames;
+    unsigned bench_frame_start,bench_frame_end;
+    char bench_marker_dir[256]; /* Optional host-monotonic benchmark markers. */
     void (*fb_lost)(struct qwin *w, qwnd *top);   /* set by DirectDraw while it uses fb_open buffers */
 } qwin;
 

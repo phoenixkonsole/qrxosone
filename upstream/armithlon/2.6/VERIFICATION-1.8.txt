@@ -1,0 +1,22 @@
+ARMITHLON 1.8 local verification – November 1, 2026
+
+- Source base: ARMITHLON 1.7 cumulative archive. GitHub unchanged.
+- Real 68k QRX firmware boot: PASS, executed on QRX foundation interpreter (Linux x86-64).
+- Actual M68000 opcodes for UART RX, command buffer and MMIO invocation: PASS.
+- QEX1 HELLO.QEX guest application with actual M68000 code / RTS: PASS.
+- QEX1 BENCH.QEX 10,002 guest instructions, host-monotonic wall measurement: PASS.
+- QRXFS-1 persistent write/read, append, delete, checksum, cold start and reboot: PASS.
+- Corrupt disk image rejected without overwriting: PASS.
+- Real independent-process persistent-disk read/write: PASS.
+- Portable CMake / CTest: 26 of 26 PASS, including all previous tests.
+- AddressSanitizer + UndefinedBehaviorSanitizer: 26 of 26 PASS.
+- Bash wrapper syntax: PASS.
+- macOS Cocoa QRX firmware GUI: authored; actual macOS build/runtime NOT TESTED here.
+- Real Musashi 68040 backend: optional external source, NOT COMPILED HERE.
+- AROS/AmigaOS desktop under native QRX68100: NOT BOOTED; BSP/Amiga chipset absent.
+- Existing separate FS-UAE AROS compatibility desktop: launcher retained; NOT RUN here.
+- Windows/Linux PrBoom, QRX86 crossbench and Metal/Vulkan GPU: retained; NOT RUN in this update.
+- Dualcore and JIT support: unchanged partial development stage, not a full SMP OS.
+
+IMPORTANT: "booted" means standalone QRX firmware and QEX1 guest software,
+not AmigaOS, AROS, a complete 68040, 68080, or a physical SAGA-compatible machine.
