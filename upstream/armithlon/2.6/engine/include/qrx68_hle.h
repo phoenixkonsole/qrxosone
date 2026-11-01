@@ -34,6 +34,12 @@
 #define QRX68_MAX_ALLOCS 128
 #define QRX68_DEFAULT_RAM (2u*1024u*1024u)
 typedef struct {
+    uint32_t address;
+    int fd, mode;
+    void *directory;
+    char name[108];
+} QRX68Lock;
+typedef struct {
     int fd;
     unsigned used;
 } QRX68File;
@@ -88,6 +94,7 @@ typedef struct {
     char program_name[128], current_directory[128];
     unsigned defer_count;
     unsigned menu_picks, gadget_picks;
+    QRX68Lock locks[QRX68_MAX_HANDLES];
     QRX68File files[QRX68_MAX_HANDLES];
     QRX68Allocation allocations[QRX68_MAX_ALLOCS];
     int shared_dirfd;

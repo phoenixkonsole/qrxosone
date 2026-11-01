@@ -10,6 +10,8 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <sys/file.h>
+#include <dirent.h>
 #include <unistd.h>
 
 /* Isolated-library, 6-byte jump vectors, same negative-LVO convention as
@@ -101,6 +103,10 @@ bool qrx68_init(QRX68 *r,size_t bytes,QRXConsoleFn output,void *ctx){
 void qrx68_destroy(QRX68 *r){
     if(!r)return;
     for(size_t i=0;i<QRX68_MAX_HANDLES;i++)if(r->files[i].used)close(r->files[i].fd);
+    for(unsigned i=0;i<QRX68_MAX_HANDLES;i++)if(r->locks[i].address){
+        if(r->locks[i].directory)closedir(r->locks[i].directory);
+        close(r->locks[i].fd);
+    }
     if(r->shared_dirfd>=0)close(r->shared_dirfd);
     qrx_vm_destroy(&r->vm);
     for(unsigned i=0;i<QRX68_MAX_WINDOWS;i++)free(r->windows[i].surface);
@@ -492,10 +498,98 @@ static int get_fd(QRX68 *r,uint32_t handle){
     if(handle<USER_FH_BASE || handle>=USER_FH_BASE+QRX68_MAX_HANDLES)return -1;
     QRX68File *f=&r->files[handle-USER_FH_BASE];return f->used?f->fd:-1;
 }
+/* Real guest FileLock BPTRs; host descriptors pin objects across renames.
+ * flock is advisory host coordination, not a replacement for DOS packets. */
+static QRX68Lock *file_lock(QRX68 *r,uint32_t bptr){
+    if(!bptr||bptr>UINT32_MAX/4)return NULL;
+    for(unsigned i=0;i<QRX68_MAX_HANDLES;i++)if(r->locks[i].address==bptr*4)return &r->locks[i];
+    return NULL;
+}
+static uint32_t lock_create(QRX68 *r,const char *name,int mode){
+    if(r->shared_dirfd<0){r->ioerr=205;return 0;}
+    if(mode!=-1&&mode!=-2){r->ioerr=209;return 0;}
+    int fd=openat(r->shared_dirfd,*name?name:".",O_RDONLY|O_NOFOLLOW|O_CLOEXEC);
+    if(fd<0){r->ioerr=errno==ENOENT?205:214;return 0;}
+    struct stat st;if(fstat(fd,&st)||(!S_ISREG(st.st_mode)&&!S_ISDIR(st.st_mode))){close(fd);r->ioerr=212;return 0;}
+    if(flock(fd,(mode==-1?LOCK_EX:LOCK_SH)|LOCK_NB)){close(fd);r->ioerr=202;return 0;}
+    for(unsigned i=0;i<QRX68_MAX_HANDLES;i++)if(!r->locks[i].address){
+        uint32_t a=mem_alloc(r,20,0x10000,false);if(!a){close(fd);r->ioerr=103;return 0;}
+        QRX68Lock *l=&r->locks[i];l->address=a;l->fd=fd;l->mode=mode;l->directory=NULL;
+        snprintf(l->name,sizeof(l->name),"%s",name);
+        wr32(r->memory+a+4,(uint32_t)st.st_ino);wr32(r->memory+a+8,(uint32_t)mode);
+        r->ioerr=0;return a/4;
+    }
+    close(fd);r->ioerr=103;return 0;
+}
+static bool lock_info(QRX68 *r,uint32_t fib,const char *name,const struct stat *st){
+    if(!ram_region(r,fib,260)){r->ioerr=209;return false;}
+    if(st->st_size>INT32_MAX){r->ioerr=209;return false;}
+    memset(r->memory+fib,0,260);
+    uint32_t type=S_ISDIR(st->st_mode)?2:UINT32_MAX-2;
+    wr32(r->memory+fib,(uint32_t)st->st_ino);wr32(r->memory+fib+4,type);
+    snprintf((char*)r->memory+fib+8,108,"%s",*name?name:"HOST");
+    wr32(r->memory+fib+116,r->shared_write?0:5); /* delete/write protection */
+    wr32(r->memory+fib+120,type);wr32(r->memory+fib+124,(uint32_t)st->st_size);
+    wr32(r->memory+fib+128,(uint32_t)((st->st_size+511)/512));
+    /* Amiga DateStamp: days since 1978, minutes, 50 Hz ticks. */
+    int64_t sec=(int64_t)st->st_mtime-252460800;if(sec<0)sec=0;
+    wr32(r->memory+fib+132,(uint32_t)(sec/86400));
+    wr32(r->memory+fib+136,(uint32_t)((sec%86400)/60));
+    wr32(r->memory+fib+140,(uint32_t)((sec%60)*50));
+    r->ioerr=0;return true;
+}
 static uint32_t dos_api(QRX68 *r,unsigned lvo,bool *known){
     QRXCPU *c=&r->vm.cpu;
     *known=true;
     switch(lvo){
+        case 84: { /* Lock(D1=name,D2=access) */
+            char text[128];const char *name;
+            if(!read_str(r,c->d[1],text,sizeof(text))){r->ioerr=209;return 0;}
+            if(!strcasecmp(text,"HOST:"))name="";
+            else if(!basename_only(text,&name)){r->ioerr=205;return 0;}
+            return lock_create(r,name,(int32_t)c->d[2]);
+        }
+        case 90: { /* UnLock: zero is valid; stale BPTR is not */
+            if(!c->d[1])return 0;
+            QRX68Lock *l=file_lock(r,c->d[1]);if(!l){r->ioerr=211;return 0;}
+            if(l->directory)closedir(l->directory);
+            close(l->fd);mem_free(r,l->address,20,false);memset(l,0,sizeof(*l));r->ioerr=0;return 0;
+        }
+        case 96: { /* DupLock: exclusive locks cannot be duplicated */
+            if(!c->d[1])return lock_create(r,"",-2);
+            QRX68Lock *l=file_lock(r,c->d[1]);
+            if(!l){r->ioerr=211;return 0;}if(l->mode==-1){r->ioerr=202;return 0;}
+            /* dup pins the original inode even if its pathname was renamed. */
+            int fd=dup(l->fd);if(fd<0){r->ioerr=103;return 0;}
+            if(fcntl(fd,F_SETFD,FD_CLOEXEC)<0){close(fd);r->ioerr=103;return 0;}
+            for(unsigned i=0;i<QRX68_MAX_HANDLES;i++)if(!r->locks[i].address){
+                uint32_t addr=mem_alloc(r,20,0x10000,false);
+                if(!addr){close(fd);r->ioerr=103;return 0;}
+                QRX68Lock *copy=&r->locks[i];*copy=*l;
+                copy->address=addr;copy->fd=fd;copy->directory=NULL;
+                memcpy(r->memory+addr,r->memory+l->address,20);r->ioerr=0;return addr/4;
+            }
+            close(fd);r->ioerr=103;return 0;
+        }
+        case 102: case 108: { /* Examine / ExNext, classic FileInfoBlock */
+            QRX68Lock *l=file_lock(r,c->d[1]);struct stat st;
+            if(!l){r->ioerr=211;return 0;}
+            if(!ram_region(r,c->d[2],260)){r->ioerr=209;return 0;}
+            if(lvo==102){
+                if(fstat(l->fd,&st)){r->ioerr=205;return 0;}
+                if(l->directory){closedir(l->directory);l->directory=NULL;}
+                if(S_ISDIR(st.st_mode)){int fd=openat(l->fd,".",O_RDONLY|O_DIRECTORY|O_CLOEXEC);if(fd<0){r->ioerr=214;return 0;}l->directory=fdopendir(fd);if(!l->directory){close(fd);r->ioerr=103;return 0;}}
+                return lock_info(r,c->d[2],l->name,&st)?UINT32_MAX:0;
+            }
+            if(!l->directory){r->ioerr=212;return 0;}
+            struct dirent *entry;
+            while((entry=readdir(l->directory))){
+                if(entry->d_name[0]=='.')continue;
+                if(fstatat(l->fd,entry->d_name,&st,AT_SYMLINK_NOFOLLOW)||(!S_ISREG(st.st_mode)&&!S_ISDIR(st.st_mode)))continue;
+                return lock_info(r,c->d[2],entry->d_name,&st)?UINT32_MAX:0;
+            }
+            r->ioerr=232;return 0;
+        }
         case 144: /* Exit(D1=returncode) terminates current process */
             r->complete=1;return c->d[1];
         case 216: return (c->d[1]==INPUT_FH || c->d[1]==OUTPUT_FH)?1u:0u;
@@ -544,13 +638,15 @@ static uint32_t dos_api(QRX68 *r,unsigned lvo,bool *known){
             }
             int flags=0;
             if(c->d[2]==1005)flags=O_RDONLY;
-            else if(r->shared_write && c->d[2]==1006)flags=O_WRONLY|O_CREAT|O_TRUNC;
+            else if(r->shared_write && c->d[2]==1006)flags=O_WRONLY|O_CREAT;
             else if(r->shared_write && c->d[2]==1004)flags=O_RDWR|O_CREAT;
             else{r->ioerr=214;return 0;}
             int fd=openat(r->shared_dirfd,name,flags|O_NOFOLLOW|O_CLOEXEC,0600);
             if(fd<0){r->ioerr=(errno==ENOENT?205:214);return 0;}
             struct stat st;
             if(fstat(fd,&st)!=0||!S_ISREG(st.st_mode)){close(fd);r->ioerr=214;return 0;}
+            if(flock(fd,(c->d[2]==1005?LOCK_SH:LOCK_EX)|LOCK_NB)){close(fd);r->ioerr=202;return 0;}
+            if(c->d[2]==1006&&ftruncate(fd,0)){close(fd);r->ioerr=214;return 0;}
             for(unsigned i=0;i<QRX68_MAX_HANDLES;i++)if(!r->files[i].used){
                 r->files[i].fd=fd;r->files[i].used=1;r->ioerr=0;
                 return USER_FH_BASE+i;
