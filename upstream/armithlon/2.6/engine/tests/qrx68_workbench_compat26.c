@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/file.h>
 
 /* Calls the very same negative LVO trap decoded after a real 68k JSR.
  * This tests ABI dispatch without pretending to be a complete HUNK app. */
@@ -29,6 +33,32 @@ int main(void){
     QRX68 r;assert(qrx68_init(&r,QRX68_DEFAULT_RAM,NULL,NULL));
     assert(qrx68_enable_gui(&r));
     QRXCPU *c=&r.vm.cpu;
+    strcpy((char*)r.memory+0x24000,"dos.library");c->a[1]=0x24000;c->d[0]=0;
+    assert(call(&r,1,552)==1&&c->d[0]==QRX68_DOS_BASE);
+    {char dir[]="/tmp/qrx68-locks-XXXXXX",path[256];assert(mkdtemp(dir));
+     snprintf(path,sizeof(path),"%s/sample",dir);int fd=open(path,O_CREAT|O_RDWR,0600);assert(fd>=0);assert(write(fd,"abc",3)==3);
+     assert(qrx68_share(&r,dir,false));strcpy((char*)r.memory+0x24000,"HOST:sample");
+     c->d[1]=0x24000;c->d[2]=(uint32_t)-2;assert(call(&r,2,84)==1);uint32_t lock=c->d[0];assert(lock);
+     assert(rd32(r.memory+lock*4+8)==(uint32_t)-2);
+     assert(flock(fd,LOCK_EX|LOCK_NB)<0); /* another host descriptor really conflicts */
+     c->d[1]=0x24000;c->d[2]=(uint32_t)-1;assert(call(&r,2,84)==1&&c->d[0]==0&&r.ioerr==202);
+     c->d[1]=lock;assert(call(&r,2,96)==1);uint32_t dup=c->d[0];assert(dup&&dup!=lock);
+     c->d[1]=lock;c->d[2]=0x25000;assert(call(&r,2,102)==1&&c->d[0]==UINT32_MAX);
+     assert(rd32(r.memory+0x25000+124)==3);assert(!strcmp((char*)r.memory+0x25008,"sample"));
+     c->d[1]=lock;assert(call(&r,2,90)==1);c->d[1]=dup;assert(call(&r,2,90)==1);
+     assert(flock(fd,LOCK_EX|LOCK_NB)==0);
+     c->d[1]=0x24000;c->d[2]=1005;assert(call(&r,2,30)==1&&!c->d[0]&&r.ioerr==202);
+     assert(flock(fd,LOCK_UN)==0);
+     c->d[1]=dup;assert(call(&r,2,90)==1&&r.ioerr==211);
+     strcpy((char*)r.memory+0x24000,"HOST:");c->d[1]=0x24000;c->d[2]=(uint32_t)-2;
+     assert(call(&r,2,84)==1&&c->d[0]);lock=c->d[0];
+     c->d[1]=lock;c->d[2]=0x25000;assert(call(&r,2,102)==1&&c->d[0]);
+     assert(call(&r,2,108)==1&&c->d[0]&&!strcmp((char*)r.memory+0x25008,"sample"));
+     assert(call(&r,2,108)==1&&!c->d[0]&&r.ioerr==232);
+     c->d[1]=lock;assert(call(&r,2,90)==1);
+     close(fd);assert(unlink(path)==0);assert(rmdir(dir)==0);
+    }
+
     strcpy((char*)r.memory+0x25080,"intuition.library");
     c->a[1]=0x25080;c->d[0]=0;
     assert(call(&r,1,552)==1 && c->d[0]==QRX68_INTUITION_BASE);
@@ -70,6 +100,26 @@ int main(void){
     set_newwindow(&r,0x24000u,8,8,128,100,flags,gad);
     c->a[0]=0x24000u;assert(call(&r,4,204)==1);uint32_t win=c->d[0];assert(win);
     assert(qrx68_open_window_count(&r)==1);
+    /* Real guest TextFont ABI: a 3x3 A, baseline 2, spacing 4. */
+    {uint32_t font=0x29000,loc=0x29100,data=0x29200,text=0x29300;
+     wr16(r.memory+font+20,3);wr16(r.memory+font+24,4);wr16(r.memory+font+26,2);
+     r.memory[font+32]='A';r.memory[font+33]='A';wr32(r.memory+font+34,data);
+     wr16(r.memory+font+38,1);wr32(r.memory+font+40,loc);
+     wr16(r.memory+loc,0);wr16(r.memory+loc+2,3);
+     r.memory[data]=0x40;r.memory[data+1]=0xa0;r.memory[data+2]=0xe0;
+     memcpy(r.memory+text,"AA",2);
+     c->a[1]=r.windows[0].rastport;c->a[0]=font;assert(call(&r,3,66)==1);
+     c->d[0]=3;assert(call(&r,3,342)==1);
+     c->d[0]=20;c->d[1]=22;assert(call(&r,3,240)==1);
+     c->a[0]=text;c->d[0]=2;assert(call(&r,3,54)==1&&c->d[0]==8);
+     assert(r.windows[0].cursor_x==20);
+     c->d[0]=2;assert(call(&r,3,60)==1&&r.windows[0].cursor_x==28);
+     assert(r.windows[0].surface[20*128+21]==3);
+     assert(r.windows[0].surface[21*128+20]==3);
+     assert(r.windows[0].surface[21*128+22]==3);
+     assert(r.windows[0].surface[20*128+25]==3);
+    }
+
     assert(rd32(r.memory+win+62)==gad); /* Window.FirstGadget */
     uint32_t port=r.windows[0].userport;assert(port);
     assert(qrx68_post_event(&r,0,QRX68_IDCMP_MOUSEBUTTONS,104,0,25,30));
