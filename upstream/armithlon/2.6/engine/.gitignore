@@ -3,3 +3,6 @@ build-*/
 *.o
 *.a
 .DS_Store
+
+# Pinned external CPU checkout (fetched by tools/fetch-musashi.sh)
+third_party/Musashi/

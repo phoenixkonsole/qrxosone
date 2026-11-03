@@ -1,6 +1,10 @@
 /* QRX 1.7 microbenchmark: host-side interface only, NOT Apollo/68040 clock
  * performance, not Musashi 68k ISA execution, not a guest CPU MIPS score. */
+#ifndef __APPLE__
 #define _POSIX_C_SOURCE 200809L
+#else
+#define _DARWIN_C_SOURCE
+#endif
 #include "qrx68100_vampire.h"
 #include <inttypes.h>
 #include <stdio.h>

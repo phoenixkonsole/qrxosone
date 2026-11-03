@@ -1,6 +1,10 @@
 /* ARMITHLON 1.8 boots actual 68k firmware; shell commands go through MMIO.
  * Optional alternate binary links the tested full Musashi 68040 backend. */
+#ifndef __APPLE__
 #define _POSIX_C_SOURCE 200809L
+#else
+#define _DARWIN_C_SOURCE
+#endif
 #include "qrx_bootshell.h"
 #include "qrx_block.h"
 #include "qrx_hostfs.h"
@@ -14,11 +18,15 @@
 #include <string.h>
 
 static void output(void *ctx,uint8_t c){(void)ctx;fputc(c,stdout);fflush(stdout);}
-static void usage(const char *p){fprintf(stderr,"Usage: %s [--disk PATH] [--script FILE] [--command CMD] [--rom PATH] [--share DIR] [--share-rw] [--ram auto|MiB] [--ram-mib MiB] [--volatile-disk] [--no-interactive] [--dual (Musashi only)]\nDefault guest RAM: one quarter of effective host RAM (capped at 3840 MiB by 32-bit address space).\n",p);}
+static void usage(const char *p){fprintf(stderr,"Usage: %s [--disk PATH] [--script FILE] [--command CMD] [--rom PATH] [--share DIR] [--share-rw] [--share2 DIR] [--share2-rw] [--ram auto|MiB] [--ram-mib MiB] [--volatile-disk] [--no-interactive] [--dual (Musashi only)]\nDefault guest RAM: one quarter of effective host RAM (capped at 3840 MiB by 32-bit address space).\n",p);}
 #ifdef QRX_BOOT_USE_MUSASHI
 static int musashi_run(void *p,uint64_t budget){return qrx_full_run_cycles((QRXFullCPU*)p,budget);}
 static bool musashi_subroutine(void *p,uint32_t entry,uint64_t budget,uint64_t *retired){return qrx_full_run_subroutine((QRXFullCPU*)p,entry,budget,retired);}
 static int dual_run(void *p,uint64_t budget){return qrx_dual_run((QRXDual*)p,budget);}
+static bool dual_subroutine(void *p,uint32_t entry,uint64_t budget,uint64_t *retired){
+    QRXDual *dual=p;
+    return qrx_full_run_subroutine(dual->board,entry,budget,retired);
+}
 /* Core 1 executes a finite CPU-side counter task and parks in STOP.
    Core 0 continues to host the interactive 68k firmware.  This is a
    dual-68040 scheduling diagnostic, NOT AmigaOS/AROS SMP. */
@@ -51,6 +59,7 @@ int main(int argc,char **argv){
     unsigned raw_sectors=0;int create_raw=0;
     size_t guest_ram_bytes=qrx_ram_auto_bytes();
     const char *share_dir=NULL;int share_rw=0,volatile_disk=0;
+    const char *share2_dir=NULL;int share2_rw=0;
     int interactive=1, dual_requested=0;
     if(!disk||!*disk)disk="qrx-system.img";
     for(int i=1;i<argc;i++){
@@ -72,6 +81,8 @@ int main(int argc,char **argv){
         }
         else if(!strcmp(argv[i],"--share")&&i+1<argc)share_dir=argv[++i];
         else if(!strcmp(argv[i],"--share-rw"))share_rw=1;
+        else if(!strcmp(argv[i],"--share2")&&i+1<argc)share2_dir=argv[++i];
+        else if(!strcmp(argv[i],"--share2-rw"))share2_rw=1;
         else if(!strcmp(argv[i],"--volatile-disk"))volatile_disk=1;
         else if(!strcmp(argv[i],"--raw-disk")&&i+1<argc)raw_disk=argv[++i];
         else if(!strcmp(argv[i],"--raw-sectors")&&i+1<argc)raw_sectors=(unsigned)strtoul(argv[++i],NULL,10);
@@ -88,7 +99,8 @@ int main(int argc,char **argv){
     }
     if(volatile_disk)disk=":memory:";
     if(share_rw&&!share_dir){fprintf(stderr,"--share-rw requires --share DIRECTORY\n");return 2;}
-    int rc=1;QRXBlock raw_block={0};QRXHostFS hostfs={0};
+    if(share2_rw&&!share2_dir){fprintf(stderr,"--share2-rw requires --share2 DIRECTORY\n");return 2;}
+    int rc=1;QRXBlock raw_block={0};QRXHostFS hostfs={0};QRXHostFS hostfs2={0};
     QRXShell *shell=calloc(1,sizeof(QRXShell));
     if(!shell)return 2;
     QRXVM *vm=NULL;
@@ -116,6 +128,13 @@ int main(int argc,char **argv){
         }
         qrx_hostfs_attach(vm,&hostfs);
         fprintf(stderr,"[QRX] HOST: directory mounted %s (%s)\n",share_dir,share_rw?"read/write":"read-only");
+    }
+    if(share2_dir){
+        if(!qrx_hostfs_mount(&hostfs2,share2_dir,!share2_rw)){
+            fprintf(stderr,"[QRX] Second host directory mount failed (no symlinks allowed)\n");goto done;
+        }
+        qrx_hostfs_attach2(vm,&hostfs2);
+        fprintf(stderr,"[QRX] TEST: directory mounted %s (%s)\n",share2_dir,share2_rw?"read/write":"read-only");
     }
     if(raw_disk){
         if(!qrx_block_mount(&raw_block,raw_disk,raw_sectors,create_raw,false)){
@@ -153,7 +172,7 @@ int main(int argc,char **argv){
         if(!dual || !qrx_dual_init(dual,&full) || !start_guest_worker(&full,dual)){
             fprintf(stderr,"QRX68100 secondary core did not start\n");goto done;
         }
-        shell->cpu_opaque=dual; shell->run_cycles=dual_run;
+        shell->cpu_opaque=dual; shell->run_cycles=dual_run; shell->run_subroutine=dual_subroutine;
         printf("QRX68100: dual 68040 mode enabled; core 1 running diagnostic worker\n");
     }
 #else
@@ -211,15 +230,23 @@ int main(int argc,char **argv){
 done:
 #ifdef QRX_BOOT_USE_MUSASHI
     if(dual){
+        /* A short scripted shell session may finish before the asynchronous
+         * diagnostic worker. Give it a bounded scheduling drain before
+         * reporting its result; do not replace the guest counter on the host. */
+        if(rc==0)for(unsigned i=0;i<100 && !dual->core[1].idle;i++){
+            if(qrx_dual_run(dual,1000)<0){rc=1;break;}
+        }
         uint32_t count=0;
         (void)qrx_full_bus_read(&full,0x1b000u,4,&count);
         fprintf(stderr,"QRX68100 core1 guest worker counter=%u (expect 2000 after scheduling)\n",count);
+        if(rc==0 && count!=2000)rc=1;
         qrx_dual_destroy(dual);free(dual);
     }
 #endif
     qrx_shell_detach(shell);
-    if(vm){qrx_block_attach(vm,NULL);qrx_hostfs_attach(vm,NULL);}
+    if(vm){qrx_block_attach(vm,NULL);qrx_hostfs_attach(vm,NULL);qrx_hostfs_attach2(vm,NULL);}
     qrx_hostfs_unmount(&hostfs);
+    qrx_hostfs_unmount(&hostfs2);
     qrx_block_unmount(&raw_block);
 #ifdef QRX_BOOT_USE_MUSASHI
     qrx_full_destroy(&full);

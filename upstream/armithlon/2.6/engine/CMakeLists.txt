@@ -185,7 +185,24 @@ if(QRX_ENABLE_MUSASHI)
     DEPENDS qrx_m68kmake "${QRX_MUSASHI_DIR}/m68k_in.c"
     COMMENT "Generate pin-verified Motorola 680x0 opcode tables"
     VERBATIM)
-  add_library(qrx_musashi STATIC "${QRX_MUSASHI_DIR}/m68kcpu.c"
+  # ARMITHLON 2.7: FSAVE-(An) IDLE-frame fix on a build-tree COPY of the pinned
+  # Musashi sources (vendor tree stays pristine for fetch-musashi.sh).
+  # Real 68040 FSAVE (An) stores the IDLE frame without adjusting An; upstream
+  # Musashi fatalerror()s on this mode, which AROS cpu_detect.S uses to probe
+  # the FPU, so the AROS ROM cannot boot without it.
+  if(NOT Python3_Interpreter_FOUND)
+    message(FATAL_ERROR "Musashi backend needs python3 for the FSAVE build-tree patch.")
+  endif()
+  set(QRX_MUSASHI_PATCHED_DIR "${CMAKE_CURRENT_BINARY_DIR}/musashi_patched")
+  file(MAKE_DIRECTORY "${QRX_MUSASHI_PATCHED_DIR}")
+  add_custom_command(OUTPUT "${QRX_MUSASHI_PATCHED_DIR}/m68kcpu.c" "${QRX_MUSASHI_PATCHED_DIR}/m68kfpu.c"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/patch-musashi-fsave-an.py"
+      "${QRX_MUSASHI_DIR}" "${QRX_MUSASHI_PATCHED_DIR}"
+    DEPENDS "${QRX_MUSASHI_DIR}/m68kcpu.c" "${QRX_MUSASHI_DIR}/m68kfpu.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tools/patch-musashi-fsave-an.py"
+    COMMENT "Copy pinned Musashi CPU with FSAVE-(An) boot fix"
+    VERBATIM)
+  add_library(qrx_musashi STATIC "${QRX_MUSASHI_PATCHED_DIR}/m68kcpu.c"
     "${QRX_GENERATED_DIR}/m68kops.c" "${QRX_MUSASHI_DIR}/softfloat/softfloat.c")
   target_include_directories(qrx_musashi PUBLIC "${QRX_MUSASHI_DIR}" "${QRX_GENERATED_DIR}")
   target_compile_definitions(qrx_musashi PRIVATE M68K_INSTRUCTION_HOOK=1 M68K_EMULATE_INT_ACK=1 M68K_EMULATE_ADDRESS_ERROR=1)
@@ -211,6 +228,11 @@ if(QRX_ENABLE_MUSASHI)
     COMMAND qrx68-musashi-exceptions)
   add_executable(qrx68100_full_run full68k/full_main.c)
   target_link_libraries(qrx68100_full_run PRIVATE qrx68100_full)
+  if(APPLE)
+    target_sources(qrx68100_full_run PRIVATE macos/qrx_aros_window.m)
+    set_source_files_properties(macos/qrx_aros_window.m PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+    target_link_libraries(qrx68100_full_run PRIVATE ${COCOA_FRAMEWORK})
+  endif()
   add_executable(qrx68100_full_tests full68k/full_tests.c)
   target_link_libraries(qrx68100_full_tests PRIVATE qrx68100_full)
   target_compile_options(qrx68100_full_tests PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)
