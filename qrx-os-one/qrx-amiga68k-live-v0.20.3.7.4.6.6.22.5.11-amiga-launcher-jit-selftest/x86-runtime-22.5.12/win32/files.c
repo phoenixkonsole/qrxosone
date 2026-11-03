@@ -592,6 +592,33 @@ FN(f_stat) {
     WR32(a[1] + 24, (uint32_t)st.st_mtime); WR32(a[1] + 28, (uint32_t)st.st_mtime); WR32(a[1] + 32, (uint32_t)st.st_mtime);
     return 0;
 }
+/* struct _stati64: mode 6, nlink 8, size 24 (64-bit), atime 32, mtime 36, ctime 40 */
+static void fill_stati64(qwin *w, uint32_t out, const struct stat *st)
+{
+    uint32_t i;
+    for (i = 0; i < 48; i += 4) WR32(out + i, 0);
+    x86_wr16(C, out + 6, S_ISDIR(st->st_mode) ? 0x41FFu : 0x81B6u);
+    x86_wr16(C, out + 8, 1);
+    WR32(out + 24, (uint32_t)st->st_size);
+    WR32(out + 28, (uint32_t)((uint64_t)st->st_size >> 32));
+    WR32(out + 32, (uint32_t)st->st_mtime); WR32(out + 36, (uint32_t)st->st_mtime); WR32(out + 40, (uint32_t)st->st_mtime);
+}
+FN(f_stati64) {
+    char n[600], host[1200];
+    struct stat st;
+    qw_rd_str(w, a[0], n, sizeof(n));
+    map_path(w, n, host, sizeof(host));
+    if (stat(host, &st)) return 0xFFFFFFFFu;
+    fill_stati64(w, a[1], &st);
+    return 0;
+}
+FN(f_fstati64) {
+    qfile *f = fdf(a[0]);
+    struct stat st;
+    if (!f || fstat(fileno(f->f), &st)) return 0xFFFFFFFFu;
+    fill_stati64(w, a[1], &st);
+    return 0;
+}
 /* _findfirst: struct _finddata_t: attrib 0, time_create 4, time_access 8, time_write 12, size 16, name 20 */
 static int fd_conv(qwin *w, uint32_t tmp, uint32_t out)
 {
@@ -640,6 +667,7 @@ const qhle qw_files[] = {
     M("_open", f_open), M("_wopen", f_wopen), M("_read", f_read), M("_write", f_write), M("_close", f_close), M("_lseek", f_lseek),
     M("_tell", f_tell), M("_eof", f_eof), M("_filelength", f_filelength), M("_access", f_access), M("remove", f_remove),
     M("_unlink", f_remove), M("rename", f_rename), M("_mkdir", f_mkdir), M("_chdir", f_chdir), M("_getcwd", f_getcwd),
+    M("_stati64", f_stati64), M("_fstati64", f_fstati64),
     M("_stat", f_stat), M("_findfirst", f_findfirst), M("_findnext", f_findnext), M("_findclose", f_findclose),
     { NULL, NULL, 0, NULL }
 };

@@ -49,6 +49,7 @@ struct QRXHostFS {
     int dirfd;
     bool mounted, readonly;
     uint32_t name_dma,data_dma,offset,length,status,result,size;
+    struct QRXHostFSCache *cache; /* open files and directory listings */
 };
 typedef struct QRXHostFS QRXHostFS;
 bool qrx_hostfs_mount(QRXHostFS *fs,const char *dir,bool readonly);

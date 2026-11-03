@@ -15,7 +15,7 @@ static bool addr_safe(const QRXVM *v, uint32_t addr, uint32_t stride,
                       uint32_t w, uint32_t h) {
     if (!v || !v->ram.data || !w || !h || stride < (uint64_t)w*4u) return false;
     uint64_t end=(uint64_t)addr+(uint64_t)(h-1u)*stride+(uint64_t)w*4u;
-    if (end>v->ram.size || end>QRX_IO_BASE || (addr & 3u)) return false;
+    if (end>v->ram.size || (end>QRX_IO_BASE && addr<(uint64_t)QRX_IO_BASE+QRX_IO_LENGTH) || (addr & 3u)) return false;
     uint64_t fb_begin=QRX_GFX_FRAMEBUFFER;
     uint64_t fb_end=fb_begin+(uint64_t)QRX_GFX_PITCH*QRX_GFX_HEIGHT;
     return end<=fb_begin || addr>=fb_end; /* no aliasing across rows */

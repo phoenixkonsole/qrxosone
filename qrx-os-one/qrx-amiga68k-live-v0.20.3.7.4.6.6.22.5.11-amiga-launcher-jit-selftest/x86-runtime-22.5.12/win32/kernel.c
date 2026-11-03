@@ -275,6 +275,7 @@ uint32_t qw_data_import(qwin *w, const char *dll, const char *name)
     }
     if (!strcmp(name, "__winitenv")) { if (!g_winitenv) { uint32_t arr = qw_data(w, 8); g_winitenv = qw_data(w, 4); WR32(g_winitenv, arr); } return g_winitenv; }
     if (!strcmp(name, "__initenv") || !strcmp(name, "_environ")) { if (!g_initenv) { uint32_t arr = qw_data(w, 8); g_initenv = qw_data(w, 4); WR32(g_initenv, arr); } return g_initenv; }
+    if (!strcmp(name, "__lc_codepage")) { static uint32_t g_codepage; if (!g_codepage) { g_codepage = qw_data(w, 4); WR32(g_codepage, 1252); } return g_codepage; }
     if (!strcmp(name, "__mb_cur_max")) { static uint32_t g_mbmax; if (!g_mbmax) { g_mbmax = qw_data(w, 4); WR32(g_mbmax, 1); } return g_mbmax; }
     if (!strcmp(name, "_fmode")) { if (!g_fmode) g_fmode = qw_data(w, 4); return g_fmode; }
     if (!strcmp(name, "_commode")) { if (!g_commode) g_commode = qw_data(w, 4); return g_commode; }
@@ -321,6 +322,8 @@ FN(m_initterm_e) {
     return 0;
 }
 FN(m_onexit) { if (w->nonexit < 64) w->onexit[w->nonexit++] = a[0]; return a[0]; }
+/* atexit reports success as 0, unlike _onexit, which returns the function. */
+FN(m_atexit) { if (w->nonexit < 64) w->onexit[w->nonexit++] = a[0]; return 0; }
 FN(m_dllonexit) { return m_onexit(w, a); }
 FN(m_exit) {
     while (w->nonexit > 0) { uint32_t fn = w->onexit[--w->nonexit]; qw_call(w, fn, 0, 0, 0, 0, 0); }
@@ -440,6 +443,7 @@ static double q_fabs(double x) { return __builtin_fabs(x); }
 MATH1(m_sqrt, q_sqrt) MATH1(m_floor, floor) MATH1(m_ceil, ceil) MATH1(m_fabs, q_fabs)
 FN(m_pow) { return retd(w, pow(dbl(a, 0), dbl(a, 2))); }
 FN(m_fmod) { return retd(w, fmod(dbl(a, 0), dbl(a, 2))); }
+FN(m_ldexp) { return retd(w, ldexp(dbl(a, 0), (int)(int32_t)a[2])); }
 FN(m_atan2) { return retd(w, atan2(dbl(a, 0), dbl(a, 2))); }
 FN(m_modf) {
     double ip, fr = modf(dbl(a, 0), &ip); uint64_t u;
@@ -475,6 +479,12 @@ FN(m_qsort) {
 }
 FN(m_errno) { if (!g_errno) g_errno = qw_data(w, 4); UNUSED; return g_errno; }
 FN(m_p_fmode) { return qw_data_import(w, 0, "_fmode"); (void)a; }
+FN(m_p_initenv) { return qw_data_import(w, 0, "__initenv"); (void)a; }
+FN(m_p_mb_cur_max) { return qw_data_import(w, 0, "__mb_cur_max"); (void)a; }
+FN(m_islower) { UNUSED; return (uint32_t)islower((int)(a[0] & 0xFF)); }
+FN(m_isupper) { UNUSED; return (uint32_t)isupper((int)(a[0] & 0xFF)); }
+FN(m_get_osfhandle) { UNUSED; return a[0]; }
+FN(m_setmode) { UNUSED; return 0x8000u; }
 FN(m_p_commode) { return qw_data_import(w, 0, "_commode"); (void)a; }
 FN(m_p_acmdln) { (void)a; return qw_data_import(w, 0, "_acmdln"); }
 FN(m_p_wcmdln) { (void)a; return qw_data_import(w, 0, "_wcmdln"); }
@@ -937,7 +947,7 @@ static uint32_t s_ShellAboutW(qwin *w, uint32_t *a)
 const qhle qw_misc[] = {
     MS("__wgetmainargs", m___wgetmainargs), MS("__getmainargs", m___getmainargs),
     MS("__set_app_type", m_nop), MS("__setusermatherr", m_nop), MS("__lconv_init", m_nop), MS("_fpreset", m_nop),
-    MS("_initterm", m_initterm), MS("_initterm_e", m_initterm_e), MS("_onexit", m_onexit), MS("__dllonexit", m_dllonexit), MS("atexit", m_onexit),
+    MS("_initterm", m_initterm), MS("_initterm_e", m_initterm_e), MS("_onexit", m_onexit), MS("__dllonexit", m_dllonexit), MS("atexit", m_atexit),
     MS("exit", m_exit), MS("_exit", m__exit), MS("_cexit", m_nop), MS("_c_exit", m_nop), MS("abort", m_abort), MS("_amsg_exit", m_amsg_exit),
     MS("_lock", m_nop), MS("_unlock", m_nop), MS("signal", m_signal), MS("_controlfp", m_controlfp), MS("_control87", m_controlfp),
     MS("malloc", m_malloc), MS("calloc", m_calloc), MS("free", m_free), MS("realloc", m_realloc), MS("_msize", m_msize),
@@ -955,12 +965,12 @@ const qhle qw_misc[] = {
     MS("vfprintf", m_vfprintf), MS("fprintf", m_fprintf), MS("printf", m_printf), MS("fwrite", m_fwrite), MS("fputc", m_fputc),
     MS("fflush", m_fflush), MS("puts", m_puts), MS("swscanf", m_swscanf), MS("sscanf", m_sscanf),
     MS("_finite", m_finite), MS("_isnan", m_isnan),
-    MS("sin", m_sin), MS("cos", m_cos), MS("tan", m_tan), MS("asin", m_asin), MS("acos", m_acos), MS("atan", m_atan), MS("atan2", m_atan2),
+    MS("ldexp", m_ldexp), MS("sin", m_sin), MS("cos", m_cos), MS("tan", m_tan), MS("asin", m_asin), MS("acos", m_acos), MS("atan", m_atan), MS("atan2", m_atan2),
     MS("sinh", m_sinh), MS("cosh", m_cosh), MS("tanh", m_tanh), MS("exp", m_exp), MS("log", m_log), MS("log10", m_log10),
     MS("sqrt", m_sqrt), MS("floor", m_floor), MS("ceil", m_ceil), MS("fabs", m_fabs), MS("pow", m_pow), MS("fmod", m_fmod), MS("modf", m_modf),
     MS("_ftol", m_ftol), MS("_CIpow", m_CIpow),
     MS("bsearch", m_bsearch), MS("qsort", m_qsort), MS("_errno", m_errno),
-    MS("__p__fmode", m_p_fmode), MS("__p__acmdln", m_p_acmdln), MS("__p__wcmdln", m_p_wcmdln), MS("_ismbblead", m_ismbblead), MS("__p__commode", m_p_commode), MS("__iob_func", m_iob_func),
+    MS("__p__fmode", m_p_fmode), MS("__p__acmdln", m_p_acmdln), MS("__p__wcmdln", m_p_wcmdln), MS("_ismbblead", m_ismbblead), MS("__p__commode", m_p_commode), MS("__p__iob", m_iob_func), MS("__p___initenv", m_p_initenv), MS("__p___mb_cur_max", m_p_mb_cur_max), MS("islower", m_islower), MS("isupper", m_isupper), MS("_get_osfhandle", m_get_osfhandle), MS("_setmode", m_setmode), MS("__iob_func", m_iob_func),
     AD("RegOpenKeyExW", a_RegOpenKeyExW, 5), AD("RegCreateKeyExW", a_RegCreateKeyExW, 9), AD("RegCloseKey", a_RegCloseKey, 1),
     AD("RegQueryValueExW", a_RegQueryValueExW, 6), AD("RegSetValueExW", a_RegSetValueExW, 6),
     { "comctl32", "CreateStatusWindowW", 4, c_CreateStatusWindowW }, { "comctl32", "CreateStatusWindowA", 4, c_CreateStatusWindowA },

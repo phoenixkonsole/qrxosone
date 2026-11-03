@@ -106,6 +106,7 @@ static x86page *pg(x86cpu *c, uint32_t a)
 
 int x86_map(x86cpu *c, uint32_t addr, uint32_t size, int writable)
 {
+    c->map_serial++;
     uint32_t a = addr & ~X86_PAGE_MASK;
     uint64_t end = (uint64_t)addr + size;
     tlb_flush(c);
@@ -129,6 +130,7 @@ int x86_map(x86cpu *c, uint32_t addr, uint32_t size, int writable)
 
 int x86_map_ext(x86cpu *c, uint32_t addr, uint32_t size, uint8_t *host, int writable)
 {
+    c->map_serial++;
     uint32_t a, off;
     if ((addr | size) & X86_PAGE_MASK) return 0;
     tlb_flush(c);
@@ -151,6 +153,7 @@ int x86_map_ext(x86cpu *c, uint32_t addr, uint32_t size, uint8_t *host, int writ
 
 int x86_protect(x86cpu *c, uint32_t addr, uint32_t size, int writable)
 {
+    c->map_serial++;
     uint32_t a = addr & ~X86_PAGE_MASK;
     uint64_t end = (uint64_t)addr + size;
     tlb_flush(c);
@@ -164,6 +167,7 @@ int x86_protect(x86cpu *c, uint32_t addr, uint32_t size, int writable)
 
 void x86_unmap(x86cpu *c, uint32_t addr, uint32_t size)
 {
+    c->map_serial++;
     uint32_t a = addr & ~X86_PAGE_MASK;
     uint64_t end = (uint64_t)addr + size;
     tlb_flush(c);
@@ -1498,6 +1502,60 @@ static uint32_t budget_refill(x86cpu *c)
     return c->left;
 }
 
+#if defined(__mc68000__) || defined(__m68k__)
+/* ARMithlon host door, see engine/full68k/qrx86_door.h: the Mac runs x86 code
+ * directly from guest RAM until it reaches something only this side can do (an
+ * API thunk, INT n, a fault), which then takes one trip through exec_one. */
+#define DOOR_REG_MAGIC (*(volatile uint32_t *)0xFF000880u)
+#define DOOR_REG_GO    (*(volatile uint32_t *)0xFF000884u)
+#define DOOR_MAGIC 0x51383644u
+#define DOOR_QUANTUM 250000u
+struct door_req {
+    uint32_t r[8], eip, eflags, sreg[6], sbase[6], tls[9];
+    double st[8];
+    uint32_t top, fsw, fcw, ftw;
+    uint32_t dir, map_serial, hle_base, hle_count, stop_eip, limit;
+    uint32_t executed, status;
+} __attribute__((packed, aligned(4)));
+int x86_door_enable(x86cpu *c)
+{
+    if (DOOR_REG_MAGIC != DOOR_MAGIC) return 0;
+    c->door = 1;
+    return 1;
+}
+static void door_quantum(x86cpu *c, uint32_t stop_eip)
+{
+    static struct door_req q;
+    int i;
+    uint32_t limit = c->left < DOOR_QUANTUM ? c->left : DOOR_QUANTUM;
+    for (i = 0; i < 8; i++) { q.r[i] = c->r[i]; q.st[i] = c->st[i]; }
+    q.eip = c->eip;
+    q.eflags = x86_get_flags(c);
+    for (i = 0; i < 6; i++) { q.sreg[i] = c->sreg[i]; q.sbase[i] = c->sbase[i]; }
+    for (i = 0; i < 3; i++) {
+        q.tls[i * 3] = c->tls[i].base; q.tls[i * 3 + 1] = c->tls[i].limit; q.tls[i * 3 + 2] = (uint32_t)c->tls[i].used;
+    }
+    q.top = (uint32_t)c->top; q.fsw = c->fsw; q.fcw = c->fcw; q.ftw = c->ftw;
+    q.dir = (uint32_t)(uintptr_t)c->dir;
+    q.map_serial = c->map_serial;
+    q.hle_base = c->hle_base; q.hle_count = c->hle_count;
+    q.stop_eip = stop_eip;
+    q.limit = limit;
+    q.executed = 0;
+    DOOR_REG_GO = (uint32_t)(uintptr_t)&q;
+    __asm__ volatile("" ::: "memory");
+    for (i = 0; i < 8; i++) { c->r[i] = q.r[i]; c->st[i] = q.st[i]; }
+    c->eip = q.eip;
+    x86_set_flags(c, q.eflags);
+    for (i = 0; i < 6; i++) { c->sreg[i] = (uint16_t)q.sreg[i]; c->sbase[i] = q.sbase[i]; }
+    c->top = (int)q.top; c->fsw = (uint16_t)q.fsw; c->fcw = (uint16_t)q.fcw; c->ftw = (uint16_t)q.ftw;
+    c->left -= q.executed < c->left ? q.executed : c->left;
+}
+#else
+int x86_door_enable(x86cpu *c) { (void)c; return 0; }
+#define door_quantum(c, stop) ((void)0)
+#endif
+
 /* single = 1: exactly one instruction, no budget accounting (x86_step).
  * Preserve the established interpreter path independently of JIT tuning.  The loop tests only eip: faults longjmp out, and the
  * hook call sites in exec_one longjmp out when a hook set fault or stop. */
@@ -1516,6 +1574,11 @@ static int run_loop(x86cpu *c, uint32_t stop_eip, int single)
         while (c->eip != stop_eip) {
             if (!c->left && !budget_refill(c))
                 FAULT(c, X86_FAULT_BUDGET, c->eip, "instruction budget exhausted");
+            if (c->door) {
+                door_quantum(c, stop_eip);
+                if (c->eip == stop_eip) break;
+                if (!c->left) continue;
+            }
             c->left--;                        /* counts the instruction: before exec_one, never wraps */
             exec_one(c);
         }

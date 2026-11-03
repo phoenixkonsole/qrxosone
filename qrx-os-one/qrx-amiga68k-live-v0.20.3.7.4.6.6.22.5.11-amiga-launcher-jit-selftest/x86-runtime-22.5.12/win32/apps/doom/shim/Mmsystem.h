@@ -1,1 +1,1 @@
-#include <mmsystem.h>
+#include_next <mmsystem.h>

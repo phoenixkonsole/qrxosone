@@ -14,10 +14,14 @@ Experimental QRX86 m68k JIT work (default **off**):
 [compatibility](docs/QRX86_COMPATIBILITY_MATRIX.md),
 [cross-build and FS-UAE](docs/QRX86_BUILD.md).
 PrBoom currently runs slower with this experimental QRX86 backend.
+On ARMithlon the [QRX86 host door](docs/armithlon/performance-2026-11-03.md) replaces it.
 FS-UAE’s separate host m68k JIT now works using the
 [patched emulator and validated profile](tools/qrx86/fsuae/README.md).
 
 ARMithlon 1.1 cumulative source and native host integration:
 [build and M1 validation](docs/ARMITHLON_INTEGRATION.md).
+
+ARMithlon on Apple Silicon (68k JIT, Metal RTG, HostFS, AHI, QRX86 host door):
+[measurements, changes and open work](docs/armithlon/performance-2026-11-03.md).
 
 Linux i386 GUI work: [embedded X11 subset and AROS windows](docs/QRX_X11.md).

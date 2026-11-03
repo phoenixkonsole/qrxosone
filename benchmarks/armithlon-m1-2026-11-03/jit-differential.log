@@ -1,0 +1,6 @@
+compared=5000 hung=0 exceptions=47 failures=0 blocks=11270 native=41124 interpreted=829
+PASS
+compared=5000 hung=0 exceptions=50 failures=0 blocks=11331 native=41662 interpreted=838
+PASS
+compared=5000 hung=0 exceptions=33 failures=0 blocks=11368 native=41675 interpreted=845
+PASS

@@ -1,0 +1,8 @@
+baseline binary, 3e9 cycles:
+[BENCH] seconds=10.073 instructions=241818533 mips=24.0 guest_mcycles_per_s=297.8
+[ARMITHLON] result=1 PC=00fe6866 D0=00000000 A0=00c0059c A1=010057d0 instructions=241818533 cycles=3000000164 fault=0 fault_addr=00000000 shutdown=0
+9a233e70e5566e0b
+final interpreter (QRX_JIT=0), 3e9 cycles:
+[BENCH] seconds=3.493 instructions=241818533 mips=69.2 guest_mcycles_per_s=858.8
+[ARMITHLON] result=1 PC=00fe6866 D0=00000000 A0=00c0059c A1=010057d0 instructions=241818533 cycles=3000000164 fault=0 fault_addr=00000000 shutdown=0
+9a233e70e5566e0b

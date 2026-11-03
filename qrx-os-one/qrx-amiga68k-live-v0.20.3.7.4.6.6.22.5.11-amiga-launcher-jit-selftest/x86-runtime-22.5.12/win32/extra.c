@@ -98,6 +98,15 @@ FN(x_SetEnvironmentVariableA) {
 /* ------------------------------------------------------------------ winmm */
 FN(x_timeGetTime) { UNUSED; return (uint32_t)w->be->now(w); }
 FN(x_ok0) { UNUSED; return 0; }
+/* CPINFO: MaxCharSize, DefaultChar[2], LeadByte[12]: single-byte code page. */
+FN(x_GetCPInfo) {
+    uint32_t i;
+    for (i = 0; i < 20; i += 4) x86_wr32(C, a[1] + i, 0);
+    x86_wr32(C, a[1], 1);
+    x86_wr8(C, a[1] + 4, '?');
+    (void)w;
+    return 1;
+}
 FN(x_ok1) { UNUSED; return 1; }
 FN(x_timeSetEvent) { UNUSED; qw_log(w, "timeSetEvent: periodic callbacks need a thread - not available"); return 0; }
 
@@ -277,6 +286,8 @@ FN(x_SetPaletteEntries) { UNUSED; return a[2]; }
 const qhle qw_extra[] = {
     K("GetEnvironmentVariableA", x_GetEnvironmentVariableA, 3), K("GetEnvironmentVariableW", x_GetEnvironmentVariableW, 3),
     K("SetEnvironmentVariableA", x_SetEnvironmentVariableA, 2), K("FormatMessageA", x_ok0, 7), K("GetLocaleInfoA", x_GetLocaleInfoA, 4),
+    K("GetCPInfo", x_GetCPInfo, 2), K("IsDBCSLeadByte", x_ok0, 1), K("GetFileInformationByHandle", x_ok0, 2),
+    U("MapVirtualKeyExA", x_ok0, 3),
     K("IsDBCSLeadByteEx", x_ok0, 2), K("SetHandleInformation", x_ok1, 3), K("SetPriorityClass", x_ok1, 2),
     K("CreatePipe", x_ok0, 4), K("CreateProcessA", x_ok0, 10),
     M("getenv", x_getenv), M("_putenv", x_putenv), M("_stricmp", x_stricmp), M("_strnicmp", x_strnicmp), M("strstr", x_strstr),

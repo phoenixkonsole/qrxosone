@@ -3,16 +3,22 @@
 #include "qrx68100_full.h"
 #include "m68k.h"
 #include "qrx_hostfs.h"
+#include "qrx68100_jit.h"
+#include "qrx86_door.h"
+#include "qrxmedia.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #ifdef __APPLE__
 #include "../macos/qrx_aros_window.h"
 #endif
 static int native_window;
 static uint32_t host_ms(void *ctx){(void)ctx;struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint32_t)((uint64_t)t.tv_sec*1000+t.tv_nsec/1000000);}
-static void putc_host(void *p,uint8_t ch){(void)p;fputc(ch,stdout);fflush(stdout);}
+/* Guest serial debug: stdio's line buffer instead of one write syscall per byte. */
+static void putc_host(void *p,uint8_t ch){(void)p;fputc(ch,stdout);}
 /* FSAGA display sink: rept the RTG framebuffer as P6 PPM. The guest buffer is
  * read straight out of the linear guest RAM; a PPM is written only when the
  * mode or geometry changes and at most 2x per wall-clock second to keep disk
@@ -67,15 +73,16 @@ static void fsaga_host_display(void *arg, const QRXFullCPU *c, uint32_t frame,
     unsigned bpp = fsaga_bytes_pp(fmt);
     if (!bpp || !w || !h) return;
     if ((uint64_t)addr + (uint64_t)w * h * bpp > c->vm.ram.size) return;
+#ifdef __APPLE__
+    /* Zero-copy: the GPU reads guest RAM itself. */
+    if(native_window){qrx_aros_window_publish(addr,w*bpp+(int16_t)c->fsaga_bplhmod,w,h,fmt&0x7Fu,c->fsaga_clut);return;}
+#endif
     if (c->vm.clock_ms) { long long now = c->vm.clock_ms(c->vm.host_ctx);
-        if (s->last_ms > 0 && (uint32_t)(now - s->last_ms) < (native_window?33:500)) return;
+        if (s->last_ms > 0 && (uint32_t)(now - s->last_ms) < 500) return;
         s->last_ms = now; }
     size_t need = (size_t)w * h * 3u;
     uint8_t *rgb = malloc(need); if (!rgb) return;
     fsaga_render(c, addr, w, h, fmt, rgb);
-#ifdef __APPLE__
-    if(native_window){qrx_aros_window_frame(rgb,w,h);free(rgb);return;}
-#endif
     char tmp[256]; snprintf(tmp, sizeof tmp, "%s.tmp", s->path);
     FILE *f = fopen(tmp, "wb");
     if (f) {
@@ -108,9 +115,60 @@ static uint8_t *load_adf(const char *p,size_t *size){
     if(!b||fread(b,1,(size_t)n,f)!=(size_t)n){free(b);fclose(f);return NULL;}
     fclose(f);*size=(size_t)n;return b;
 }
+static atomic_bool stop_requested,cpu_finished;
+/* Headless check of the AHI path: drains the media ring to a raw file at the
+ * rate CoreAudio would (QRX_AUDIO_DUMP, 48 kHz stereo 16-bit host-endian). */
+static QRXMediaDevice dump_media;
+static pthread_t dump_tid;
+static bool dump_running;
+static void *audio_dump_thread(void *arg){
+    FILE *f=arg;
+    int16_t pcm[480*2];
+    while(!atomic_load(&cpu_finished)){
+        struct timespec nap={0,10000000};
+        nanosleep(&nap,NULL);
+        size_t got=qrx_media_pull_audio(&dump_media,pcm,480);
+        if(got)fwrite(pcm,4,got,f);
+    }
+    fclose(f);
+    return NULL;
+}
+static double run_seconds; /* wall-clock limit for headless timing runs */
+struct cpu_run { QRXFullCPU *c; uint64_t budget; int rc; };
+/* The whole emulation loop; on its own thread with a native window so AppKit
+ * tracking loops and display sync never stall the guest. */
+static void *cpu_thread(void *arg){
+    struct cpu_run *r=arg;
+    QRXFullCPU *c=r->c;
+    uint64_t budget=r->budget;
+    int rc=1;
+#ifdef __APPLE__
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE,0);
+#endif
+    struct timespec t0;clock_gettime(CLOCK_MONOTONIC,&t0);
+    while(budget>0&&rc==1&&!atomic_load_explicit(&stop_requested,memory_order_relaxed)){
+        if(run_seconds>0){
+            struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);
+            if((double)(t.tv_sec-t0.tv_sec)+(double)(t.tv_nsec-t0.tv_nsec)*1e-9>=run_seconds)break;
+        }
+        uint64_t step=native_window?200000u:50000000u;
+        uint64_t chunk=budget>step?step:budget;
+        rc=qrx_full_run_cycles(c,chunk);
+        budget-=chunk;
+        if(rc==1 && !native_window && !c->realtime)
+            fprintf(stderr,"[ARMITHLON] ... PC=%08x A7=%08x USP=%08x ISP=%08x SR=%04x instructions=%llu cycles=%llu\n",
+                qrx_full_pc(c),qrx_full_reg(c,15),m68k_get_reg(NULL,M68K_REG_USP),m68k_get_reg(NULL,M68K_REG_ISP),
+                m68k_get_reg(NULL,M68K_REG_SR)&0xFFFFu,(unsigned long long)c->instructions,(unsigned long long)c->cycles);
+    }
+    r->rc=rc;
+    atomic_store(&cpu_finished,true);
+    return NULL;
+}
 int main(int argc,char **argv){
     unsigned cpu=68040;const char *mainrom=NULL,*extrom=NULL,*share=NULL;
-    bool share_rw=false;QRXHostFS hostfs={0};
+    bool share_rw=false;QRXHostFS hostfs={0},appsfs={0};
+    const char *apps=NULL;
+    bool realtime=false;
     uint64_t budget=1000000;
     uint8_t *adf_hold=NULL;
     for(int i=1;i<argc;i++){
@@ -120,9 +178,13 @@ int main(int argc,char **argv){
         else if(!strcmp(argv[i],"--window")){native_window=1;budget=UINT64_MAX;}
         else if(!strcmp(argv[i],"--share")&&i+1<argc)share=argv[++i];
         else if(!strcmp(argv[i],"--share-rw"))share_rw=true;
+        else if(!strcmp(argv[i],"--realtime"))realtime=true;
+        else if(!strcmp(argv[i],"--seconds")&&i+1<argc){run_seconds=strtod(argv[++i],NULL);budget=UINT64_MAX;}
+        else if(!strcmp(argv[i],"--apps")&&i+1<argc)apps=argv[++i];
         else if(!strcmp(argv[i],"--cycles")&&i+1<argc)budget=strtoull(argv[++i],NULL,10);
         else {fprintf(stderr,"usage: qrx68100_full_run [--cpu 68000|68010|68020|68030|68040] [--rom main.bin] [--ext-rom ext.bin] [--share directory] [--share-rw] [--cycles N]\n");return 2;}
     }
+    setvbuf(stdout,NULL,_IOLBF,1u<<16);
     QRXFullCPU c;
     size_t adfsz = 0;
     int rc = 1;
@@ -131,9 +193,14 @@ int main(int argc,char **argv){
         if(!qrx_hostfs_mount(&hostfs,share,!share_rw)){fprintf(stderr,"HostFS mount failed: %s\n",share);qrx_full_destroy(&c);return 2;}
         qrx_hostfs_attach(&c.vm,&hostfs);
     }
+    /* Headless runs need the APPS: door too; the native window mounts its own. */
+    if(apps&&!native_window){
+        if(!qrx_hostfs_mount(&appsfs,apps,false)){fprintf(stderr,"APPS mount failed: %s\n",apps);qrx_full_destroy(&c);return 2;}
+        qrx_hostfs_attach2(&c.vm,&appsfs);
+    }
     qrx_full_set_host(&c,putc_host,host_ms,NULL);
 #ifdef __APPLE__
-    if(native_window){static struct fsaga_sink live;qrx_aros_window_open(&c.vm);qrx_full_set_display(&c,fsaga_host_display,&live);}
+    if(native_window){static struct fsaga_sink live;if(!qrx_aros_window_open(&c.vm)){fprintf(stderr,"native window failed\n");return 2;}qrx_full_set_display(&c,fsaga_host_display,&live);}
 #endif
     {
         const char *ppm = getenv("QRX_FULL_FSAGA_TEST");
@@ -199,26 +266,50 @@ int main(int argc,char **argv){
         free(rom);rom=NULL;
         if(extrom){rom=load(extrom,&sz);if(!rom||!qrx_full_load_rom(&c,QRX_FULL_ROM_EXT_BASE,rom,sz)){fprintf(stderr,"invalid ext ROM\n");goto done;}free(rom);rom=NULL;}
         qrx_full_set_rom_overlay(&c,true);
-        fprintf(stderr,"[ARMITHLON] AROS boot: RTG/HostFS enabled; AHI integration pending\n");
+        fprintf(stderr,"[ARMITHLON] AROS boot: RTG, HostFS and AHI host drivers enabled\n");
     }else if(!qrx_build_boot_monitor(c.ram_owned,c.vm.ram.size)){fprintf(stderr,"monitor generation failed\n");goto done;}
     if(!qrx_full_reset(&c)){fprintf(stderr,"invalid vectors / reset failed\n");goto done;}
+    qrx86_door_attach(&c);
+    /* QRX_JIT=0 keeps Musashi alone. The early-boot delay lets the bus see the
+     * ROM's EClock setup, which translated RAM writes do not pass through. */
+    {const char *je=getenv("QRX_JIT");
+     if(!je||strcmp(je,"0")){
+         bool jit_on=qrx_jit_init(&c,mainrom?20000000u:0u);
+         fprintf(stderr,"[ARMITHLON] JIT %s\n",jit_on?"on":"unavailable");
+     }}
     fprintf(stderr,"[ARMITHLON] model=%u PC=%08x cycles_budget=%llu\n",cpu,qrx_full_pc(&c),(unsigned long long)budget);
     /* Slice long boots so a visible console shows the reset vector, the
      * running PC and retired instructions while AROS initializes. */
-    rc=1;
-    while(budget>0&&rc==1){
-        uint64_t step=native_window?200000u:50000000u;
-        uint64_t chunk=budget>step?step:budget;
-#ifdef __APPLE__
-        if(native_window&&!qrx_aros_window_pump()){rc=0;break;}
-#endif
-        rc=qrx_full_run_cycles(&c,chunk);
-        budget-=chunk;
-        if(rc==1 && !native_window)
-            fprintf(stderr,"[ARMITHLON] ... PC=%08x A7=%08x USP=%08x ISP=%08x SR=%04x instructions=%llu cycles=%llu\n",
-                qrx_full_pc(&c),qrx_full_reg(&c,15),m68k_get_reg(NULL,M68K_REG_USP),m68k_get_reg(NULL,M68K_REG_ISP),
-                m68k_get_reg(NULL,M68K_REG_SR)&0xFFFFu,(unsigned long long)c.instructions,(unsigned long long)c.cycles);
+    /* The guest's input and audio drivers expect the media board in every mode. */
+    if(!native_window){
+        const char *dump=getenv("QRX_AUDIO_DUMP");
+        qrx_media_init(&dump_media,NULL,NULL);qrx_vm_bind_media(&c.vm,&dump_media);
+        if(dump){
+            FILE *f=fopen(dump,"wb");
+            dump_running=f&&pthread_create(&dump_tid,NULL,audio_dump_thread,f)==0;
+        }
     }
+    struct timespec bench_t0;clock_gettime(CLOCK_MONOTONIC,&bench_t0);
+    if(realtime||native_window)qrx_full_set_realtime(&c,qrx_jit_cpu_stopped);
+    {
+        struct cpu_run run={&c,budget,1};
+#ifdef __APPLE__
+        if(native_window){
+            pthread_t tid;
+            if(pthread_create(&tid,NULL,cpu_thread,&run)!=0){fprintf(stderr,"CPU thread failed\n");goto done;}
+            while(!atomic_load(&cpu_finished)&&qrx_aros_window_pump()){}
+            atomic_store(&stop_requested,true);
+            pthread_join(tid,NULL);
+        }else
+#endif
+        cpu_thread(&run);
+        rc=run.rc;
+    }
+    if(dump_running)pthread_join(dump_tid,NULL);
+    {struct timespec t1;clock_gettime(CLOCK_MONOTONIC,&t1);
+     double dt=(double)(t1.tv_sec-bench_t0.tv_sec)+(double)(t1.tv_nsec-bench_t0.tv_nsec)*1e-9;
+     fprintf(stderr,"\n[BENCH] seconds=%.3f instructions=%llu mips=%.1f guest_mcycles_per_s=%.1f\n",dt,
+        (unsigned long long)c.instructions,dt>0?(double)c.instructions/dt/1e6:0.0,dt>0?(double)c.cycles/dt/1e6:0.0);}
     fprintf(stderr,"\n[ARMITHLON] result=%d PC=%08x D0=%08x A0=%08x A1=%08x instructions=%llu cycles=%llu fault=%d fault_addr=%08x shutdown=%u\n",
         rc,qrx_full_pc(&c),qrx_full_reg(&c,0),qrx_full_reg(&c,8),qrx_full_reg(&c,9),
         (unsigned long long)c.instructions,(unsigned long long)c.cycles,
@@ -247,4 +338,8 @@ int main(int argc,char **argv){
 #ifdef __APPLE__
     if(native_window)qrx_aros_window_close();
 #endif
-    free(rom);qrx_hostfs_attach(&c.vm,NULL);qrx_hostfs_unmount(&hostfs);qrx_full_destroy(&c);free(adf_hold);return rc;}
+    qrx86_door_report();
+    qrx_jit_destroy(&c);
+    free(rom);qrx_hostfs_attach(&c.vm,NULL);qrx_hostfs_unmount(&hostfs);
+    if(apps&&!native_window){qrx_hostfs_attach2(&c.vm,NULL);qrx_hostfs_unmount(&appsfs);}
+    qrx_full_destroy(&c);free(adf_hold);return rc;}

@@ -1325,6 +1325,7 @@ static int run_slice(lxproc *p)
     c->budget = lim;
     p->blocked = 0;
     p->xwait = 0;
+    if (getenv("QRX86_HOST")) x86_door_enable(c);
     f = x86_run(c, 0xFFFFFFFFu);
     if (f == X86_FAULT_BUDGET && !(p->o->budget && x86_icount(c) >= p->o->budget)) { c->fault = X86_OK; return 1; }  /* preempted */
     if (f && !p->exited) {

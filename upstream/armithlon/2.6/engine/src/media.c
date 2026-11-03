@@ -119,7 +119,9 @@ bool qrx_media_write(QRXVM *v,uint32_t addr,unsigned width,uint32_t value) {
         m->audio_dma_error=1;
         if (!n || n>4096 || (src&3u) || !v->ram.data ||
             (uint64_t)src+(uint64_t)n*4u>v->ram.size ||
-            (uint64_t)src+(uint64_t)n*4u>QRX_IO_BASE ||
+            /* RAM continues above the I/O window on boards with more than 16 MiB. */
+            ((uint64_t)src<(uint64_t)QRX_IO_BASE+QRX_IO_LENGTH &&
+             (uint64_t)src+(uint64_t)n*4u>QRX_IO_BASE) ||
             (unsigned)(wr-rd)>QRX_AUDIO_RING_SIZE || n>QRX_AUDIO_RING_SIZE-(wr-rd))
             return true;
         for(uint32_t i=0;i<n;i++){

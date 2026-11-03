@@ -91,6 +91,8 @@ AddDataTypes REFRESH QUIET
 Assign LIBS: DEVS:Drivers ADD
 DEVS:Monitors/SAGA
 SetEnv QRXSCREEN rtg
+; QRX86 runs x86 code on the host CPU through the ARMithlon door
+SetEnv QRX86_HOST 1
 Run <NIL: >SYS:input.log C:QRXHostInput
 QRX:C/QRXDesktop >SYS:desktop.log
 

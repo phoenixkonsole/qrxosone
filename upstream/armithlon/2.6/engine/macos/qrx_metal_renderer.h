@@ -8,4 +8,9 @@
                                depthFormat:(MTLPixelFormat)depthFormat;
 - (BOOL)drawFrame:(const QRXAccelFrame *)frame onView:(MTKView *)view
        commandQueue:(id<MTLCommandQueue>)queue;
+/* For targets without an MTKView. A nil drawable leaves presenting to nobody;
+ * wait makes the pixels readable as soon as this returns. */
+- (BOOL)drawFrame:(const QRXAccelFrame *)frame pass:(MTLRenderPassDescriptor *)base
+           drawable:(nullable id<CAMetalDrawable>)drawable
+       commandQueue:(id<MTLCommandQueue>)queue wait:(BOOL)wait;
 @end

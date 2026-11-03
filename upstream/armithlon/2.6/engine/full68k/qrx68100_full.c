@@ -4,6 +4,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <limits.h>
+#include <sys/mman.h>
+#include <time.h>
 
 
 /* Environment options are immutable during one VM run. Cache outside hot paths. */
@@ -72,6 +74,7 @@ static void read_options(void){
 
 /* Musashi is intentionally single-context: no silent CPU-state crossover. */
 static QRXFullCPU *active;
+static void map_low_page_fwd(QRXFullCPU *c);
 static unsigned full_model(unsigned m) {
     switch (m) {
     case 68000: return M68K_CPU_TYPE_68000;
@@ -1004,7 +1007,7 @@ static bool amiga_trap_write(QRXFullCPU *c, uint32_t addr, unsigned width, uint3
         }
         if (addr == 0x00BFE001u && width <= 2) {
             c->ciaa_pra = (uint8_t)(value & 0xFFu);
-            c->rom_overlay = (c->ciaa_pra & 1u) != 0; /* AROS rom_init clears OVL here */
+            c->rom_overlay = (c->ciaa_pra & 1u) != 0; map_low_page_fwd(c); /* AROS rom_init clears OVL here */
         } else if ((addr == QRX_CIA_TAOFF || addr == QRX_CIAA_TALO) && width == 1) {
             if (c->cia_icr_trace)
                 fprintf(stderr, "[TALO] w=%02x PC=%08x instr=%llu\n",
@@ -1130,7 +1133,7 @@ static bool full_internal_write(QRXFullCPU *c,uint32_t a,unsigned n,uint32_t val
         if(val&(1u<<2)) {c->irq_pending=0; if(c->aux_cpu_index==0) m68k_set_irq(c->irq_level);}
         return true;
     }
-    if(a==QRX_FULL_ROM_OVERLAY_CTRL) {c->rom_overlay=(val&1u)!=0;return true;}
+    if(a==QRX_FULL_ROM_OVERLAY_CTRL) {c->rom_overlay=(val&1u)!=0;map_low_page_fwd(c);return true;}
     return false;
 }
 static bool overlap_internal(uint32_t a,unsigned n) {
@@ -1139,6 +1142,7 @@ static bool overlap_internal(uint32_t a,unsigned n) {
 bool qrx_full_bus_read(QRXFullCPU *c, uint32_t addr, unsigned width, uint32_t *out) {
     if (!c || !out || (width!=1&&width!=2&&width!=4)) return false;
     if (upper_io(addr,width)) {
+        if (c->door_read && c->door_read(c, addr, width, out)) return true;
         if (c->aux_read && c->aux_read(c->aux_opaque, addr, width, out)) return true;
         if (overlap_internal(addr,width)) return full_internal_read(c,addr,width,out);
         /* Z3 config header (no boards) floats high; internal regs above win. */
@@ -1271,6 +1275,7 @@ bool qrx_full_bus_write(QRXFullCPU *c, uint32_t addr, unsigned width, uint32_t v
           }
       }
     }    if (upper_io(addr,width)) {
+        if(c->door_write && c->door_write(c,addr,width,value)) return true;
         if(c->aux_write && c->aux_write(c->aux_opaque,addr,width,value)) return true;
         if(overlap_internal(addr,width)) return full_internal_write(c,addr,width,value);
         if(board_hole(c,addr,width)) return true; /* ShutUp to absent Z3 boards */
@@ -1281,6 +1286,8 @@ bool qrx_full_bus_write(QRXFullCPU *c, uint32_t addr, unsigned width, uint32_t v
     if (!ok && amiga_bus(c)) ok = true; /* Kickstart mapped: writes to open bus vanish */
     if (ok && c->ram_write && (uint64_t)addr < c->vm.ram.size)
         c->ram_write(c->aux_opaque,addr,width);
+    if (ok && c->jit_notify && (uint64_t)addr < c->vm.ram.size)
+        c->jit_notify(c,addr,width);
     if (ok && c->vm.cpu.halted && c->reset_done) m68k_end_timeslice();
     return ok;
 }
@@ -1306,7 +1313,76 @@ static void host_ro_probe(QRXFullCPU *c, uint32_t addr, unsigned width, uint32_t
     }
     (void)nolog;
 }
+#define QRX_PAGE_SHIFT 12u
+/* A true active->fast_bus also means the tables exist. Accesses straddling a
+ * page take the full bus, which handles any window boundary correctly. */
+#define LIKELY_FAST(a,w) (__builtin_expect(active&&active->fast_bus,1)&&((a)&0xFFFu)<=0x1000u-(w))
+#define QRX_PAGE_SIZE (1u<<QRX_PAGE_SHIFT)
+#define QRX_PAGE_ENTRIES (1u<<20)
+/* Every bus trap on this board sits inside these two windows. */
+static bool page_is_plain_ram(const QRXFullCPU *c,uint32_t a) {
+    if((uint64_t)a+QRX_PAGE_SIZE>c->vm.ram.size)return false;
+    if(a>=0x00A00000u && a<0x00C00000u)return false;
+    if(a>=0x00DC0000u && a<0x01000000u)return false;
+    return true;
+}
+static void map_rom_pages(QRXFullCPU *c,uint32_t base,const uint8_t *rom,size_t size) {
+    if(!rom)return;
+    for(size_t o=0;o+QRX_PAGE_SIZE<=size;o+=QRX_PAGE_SIZE)
+        c->rpage[(base+o)>>QRX_PAGE_SHIFT]=(uintptr_t)rom-(uintptr_t)base;
+}
+static void set_write_page(QRXFullCPU *c,uint32_t page,uintptr_t v) {
+    uint32_t first=page<<(QRX_PAGE_SHIFT-QRX_WPAGE_SHIFT);
+    for(uint32_t i=0;i<(1u<<(QRX_PAGE_SHIFT-QRX_WPAGE_SHIFT));i++)c->wpage[first+i]=v;
+}
+static void map_low_page(QRXFullCPU *c) {
+    if(!c->fast_bus)return;
+    uintptr_t v=c->rom_overlay?0:(uintptr_t)c->ram_owned;
+    c->rpage[0]=v;set_write_page(c,0,v);
+}
+/* Tracing options need to observe every access, so they keep the full bus. */
+static bool bus_tracing(void) {
+    return env_QRX_FULL_WATCH_PC||env_QRX_FULL_TRACE_HIGH||env_QRX_FULL_TRACE_RAM||
+        env_QRX_FULL_TRACE_VEC||env_QRX_FULL_TRACE_RAMW||env_QRX_FULL_TRACE_RAMW_RANGE;
+}
+static void build_page_maps(QRXFullCPU *c) {
+    if(!c->rpage)return;
+    memset(c->rpage,0,QRX_PAGE_ENTRIES*sizeof(uintptr_t));
+    memset(c->wpage,0,QRX_WPAGE_ENTRIES*sizeof(uintptr_t));
+    c->fast_bus=!bus_tracing()&&!c->aux_opaque;
+    if(!c->fast_bus)return;
+    for(uint32_t a=0;(uint64_t)a+QRX_PAGE_SIZE<=c->vm.ram.size;a+=QRX_PAGE_SIZE)
+        if(page_is_plain_ram(c,a)){
+            c->rpage[a>>QRX_PAGE_SHIFT]=(uintptr_t)c->ram_owned;
+            set_write_page(c,a>>QRX_PAGE_SHIFT,(uintptr_t)c->ram_owned);
+        }
+    map_rom_pages(c,QRX_FULL_ROM_MAIN_BASE,c->rom_main,c->rom_main_size);
+    map_rom_pages(c,QRX_FULL_ROM_EXT_BASE,c->rom_ext,c->rom_ext_size);
+    map_low_page(c);
+}
+static void map_low_page_fwd(QRXFullCPU *c){map_low_page(c);}
+static inline unsigned page_load(const uint8_t *p,unsigned width) {
+    if(width==2){uint16_t v;memcpy(&v,p,2);return __builtin_bswap16(v);}
+    if(width==4){uint32_t v;memcpy(&v,p,4);return __builtin_bswap32(v);}
+    return *p;
+}
+static inline void page_store(uint8_t *p,unsigned width,unsigned value) {
+    if(width==2){uint16_t v=__builtin_bswap16((uint16_t)value);memcpy(p,&v,2);}
+    else if(width==4){uint32_t v=__builtin_bswap32(value);memcpy(p,&v,4);}
+    else *p=(uint8_t)value;
+}
+/* The ROM's EClock setup is the only guest write the full bus inspects by
+ * value; everything else on a plain RAM page bypasses it. */
+static inline bool write_needs_full_bus(const QRXFullCPU *c,uint32_t a,unsigned width,uint32_t v) {
+    if(width!=4)return false;
+    return (v&0xFFFFF000u)==0x00BFE000u||v==709379u||v==715909u||
+           (c->host_tb && a-c->host_tb==0x8Eu);
+}
 static unsigned int core_read(unsigned address,unsigned width) {
+    if(LIKELY_FAST(address,width)) {
+        uintptr_t base=active->rpage[address>>QRX_PAGE_SHIFT];
+        if(base)return page_load((const uint8_t *)(base+address),width);
+    }
     /* Debug watch: count opcode fetches in a guest range (env QRX_FULL_WATCH_PC
      * as "start-end", hex). Used to prove an interrupt server ever executes. */
     if (width == 2) {
@@ -1350,6 +1426,14 @@ static unsigned int core_read(unsigned address,unsigned width) {
     return out;
 }
 static void core_write(unsigned address,unsigned width,unsigned value) {
+    if(__builtin_expect(active&&active->fast_bus,1)&&(address&(QRX_WPAGE_SIZE-1u))<=QRX_WPAGE_SIZE-width) {
+        uintptr_t base=active->wpage[address>>QRX_WPAGE_SHIFT];
+        if(base && !write_needs_full_bus(active,address,width,value)) {
+            page_store((uint8_t *)(base+address),width,value);
+            active->vm.ram_write_epoch++;
+            return;
+        }
+    }
     const char *watch;
     if ((watch = env_QRX_FULL_TRACE_RAM) && address == (unsigned)strtoul(watch, NULL, 16))
         fprintf(stderr, "[RAM] W%d %08x=%08x PC=%08x\n", width * 8, address, value, m68k_get_reg(NULL, M68K_REG_PC));
@@ -1557,6 +1641,13 @@ bool qrx_full_init(QRXFullCPU *c,size_t ram_size,unsigned model) {
     c->cpu_type=(int)model;
     active=c;
     read_options();
+    /* Lazily-zeroed virtual tables; only pages the guest touches get backed. */
+    size_t maps=QRX_PAGE_ENTRIES*sizeof(uintptr_t);
+    void *r=mmap(NULL,maps,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
+    size_t wmaps=QRX_WPAGE_ENTRIES*sizeof(uintptr_t);
+    void *w=mmap(NULL,wmaps,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
+    if(r!=MAP_FAILED&&w!=MAP_FAILED){c->rpage=r;c->wpage=w;}
+    else{if(r!=MAP_FAILED)munmap(r,maps);if(w!=MAP_FAILED)munmap(w,wmaps);}
     /* Musashi init/reset retains general registers across VM lifetimes. */
     void *fresh=calloc(1,m68k_context_size());
     if(!fresh){qrx_full_destroy(c);return false;}
@@ -1572,6 +1663,8 @@ bool qrx_full_init(QRXFullCPU *c,size_t ram_size,unsigned model) {
 void qrx_full_destroy(QRXFullCPU *c){
     if(!c)return;
     if(active==c){m68k_set_irq(0);active=NULL;}
+    if(c->rpage)munmap(c->rpage,QRX_PAGE_ENTRIES*sizeof(uintptr_t));
+    if(c->wpage)munmap(c->wpage,QRX_WPAGE_ENTRIES*sizeof(uintptr_t));
     qrx_vm_destroy(&c->vm);
     free(c->rom_main);free(c->rom_ext);qrx_ram_release(&c->host_allocation);
     memset(c,0,sizeof(*c));
@@ -1588,7 +1681,7 @@ bool qrx_full_load_rom(QRXFullCPU *c,uint32_t base,const void *data,size_t size)
     else {free(c->rom_ext);c->rom_ext=newrom;c->rom_ext_size=size;}
     return true;
 }
-void qrx_full_set_rom_overlay(QRXFullCPU *c,bool enabled){if(c){c->rom_overlay=enabled;if(enabled)c->ciaa_pra|=1u;else c->ciaa_pra&=~1u;}}
+void qrx_full_set_rom_overlay(QRXFullCPU *c,bool enabled){if(c){c->rom_overlay=enabled;map_low_page(c);if(enabled)c->ciaa_pra|=1u;else c->ciaa_pra&=~1u;}}
 void qrx_full_set_host(QRXFullCPU *c,QRXConsoleFn out,QRXClockFn ms,void *arg){if(c)qrx_vm_set_host(&c->vm,out,ms,arg);}
 bool qrx_full_reset(QRXFullCPU *c){
     if (!c || active!=c) return false;
@@ -1622,6 +1715,7 @@ bool qrx_full_reset(QRXFullCPU *c){
       c->fsaga_hvsync=0; c->fsaga_spritex=c->fsaga_spritey=0;
       c->fsaga_frame=0; c->fsaga_width=c->fsaga_height=0; }
     c->vm.cpu.halted=0;c->vm.cpu.fault=0;
+    build_page_maps(c);
     c->irq_level=c->irq_pending=0;
     c->timer_control=c->timer_period=c->timer_remaining=0;
     m68k_set_irq(0);
@@ -2239,11 +2333,30 @@ static void timer_tick(QRXFullCPU *c,unsigned cycles){
     if(!(c->timer_control&QRX_FULL_TIMER_AUTO))c->timer_control&=~QRX_FULL_TIMER_ENABLE;
     m68k_set_irq(c->irq_level>2 ? c->irq_level : 2);
 }
+static uint64_t host_us(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC,&t);
+    return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u;
+}
+void qrx_full_set_realtime(QRXFullCPU *c, bool (*cpu_stopped)(void)) {
+    if(!c)return;
+    c->realtime=true;
+    c->cpu_stopped=cpu_stopped;
+    c->realtime_base_us=host_us();
+}
+/* PAL master rate used by the beam (454 x 313 x 50) and the CIAs (/10). */
+#define QRX_REALTIME_HZ UINT64_C(7105000)
+static inline void realtime_clock(QRXFullCPU *c) {
+    uint64_t now=(host_us()-c->realtime_base_us)*QRX_REALTIME_HZ/1000000u;
+    if(now>c->cycles)c->cycles=now;
+}
 int qrx_full_run_cycles(QRXFullCPU *c,uint64_t budget){
     if(!c||active!=c||!c->reset_done||!budget)return -1;    uint64_t elapsed=0;
+    /* Longer slices without the JIT would change Musashi's deterministic trace. */
+    const uint64_t max_slice=c->jit_exec?4096u:256u;
     while(elapsed<budget && !c->vm.cpu.halted && !c->mem_fault) {
-        int slice=(int)((budget-elapsed)>256?256:(budget-elapsed));
-        int taken=m68k_execute(slice);
+        int slice=(int)((budget-elapsed)>max_slice?max_slice:(budget-elapsed));
+        int taken=c->jit_exec?c->jit_exec(c,slice):m68k_execute(slice);
         if(taken<0) {c->mem_fault=true;break;}
         if(taken==0) {
             /* STOP with no active IRQ: the beam must NOT freeze — advance idle
@@ -2258,11 +2371,19 @@ int qrx_full_run_cycles(QRXFullCPU *c,uint64_t budget){
             vblank_tick(c);
             continue;
         }
-        elapsed+=(unsigned)taken;c->cycles+=(unsigned)taken;
+        elapsed+=(unsigned)taken;
+        if(c->realtime)realtime_clock(c);else c->cycles+=(unsigned)taken;
         if(c->aux_cpu_index==0)timer_tick(c,(unsigned)taken);
         if(amiga_bus(c))boot_cia_tick(c);
         fl_dma_progress(c);
         vblank_tick(c);
+        /* An idle guest waits for the next timer on the host's own clock and
+         * hands the caller its turn, instead of burning a core in STOP. */
+        if(c->realtime&&c->cpu_stopped&&c->cpu_stopped()){
+            struct timespec nap={0,150000};
+            nanosleep(&nap,NULL);
+            break;
+        }
         if(elapsed>budget+4096u)break; /* instruction granularity overshoot guard */
     }
     if(c->mem_fault)return -1;
@@ -2327,4 +2448,5 @@ void qrx_full_set_aux(QRXFullCPU *c, QRXAuxReadFn rd, QRXAuxWriteFn wr,
     if (!c) return;
     c->aux_read=rd; c->aux_write=wr; c->ram_write=ram; c->aux_opaque=opaque;
     c->vm.dma_ram_write=ram; c->vm.dma_opaque=opaque;
+    build_page_maps(c); /* board extensions observe every RAM write */
 }

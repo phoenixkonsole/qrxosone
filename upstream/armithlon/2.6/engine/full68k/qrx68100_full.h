@@ -13,6 +13,9 @@
 #define QRX_FULL_ROM_MAIN_BASE UINT32_C(0x00F80000)
 #define QRX_FULL_ROM_EXT_BASE  UINT32_C(0x00E00000)
 #define QRX_FULL_ROM_MAX (1024u * 1024u)
+#define QRX_WPAGE_SHIFT 8u
+#define QRX_WPAGE_SIZE (1u<<QRX_WPAGE_SHIFT)
+#define QRX_WPAGE_ENTRIES (1u<<24)
 #define QRX_FULL_IO_BASE UINT32_C(0xFF000000) /* disjoint from Kickstart ROM */
 #define QRX_FULL_TIMER_CTRL  (QRX_FULL_IO_BASE+0x20u)
 #define QRX_FULL_TIMER_PERIOD (QRX_FULL_IO_BASE+0x24u)
@@ -151,6 +154,24 @@ typedef struct QRXFullCPU {
     uint16_t dmacon_shadow; /* DMACON data shadow (DSKEN bit checked on read) */
     uint64_t dsk_start; /* cycles at DMA start */
     uint64_t cycles, instructions;
+    /* Host-pointer maps: entry+addr is the host byte, 0 means "take the full
+     * bus". Shared by the interpreter and the JIT. rpage has 4 KiB granules,
+     * wpage 256 bytes so data sharing a page with translated code stays fast;
+     * wpage stays 0 for ROM, I/O and granules holding translated code. */
+    uintptr_t *rpage, *wpage;
+    bool fast_bus;
+    /* Set by qrx_jit_init; left NULL the interpreter runs alone. */
+    void *jit;
+    int (*jit_exec)(struct QRXFullCPU *, int cycles);
+    void (*jit_notify)(struct QRXFullCPU *, uint32_t addr, uint32_t len);
+    /* Guest timers follow the host clock at the PAL 7.09 MHz rate instead of
+     * retired cycles: a faster CPU then gets more done per guest second. */
+    /* Optional host services inside the board's I/O window. */
+    bool (*door_read)(struct QRXFullCPU *, uint32_t addr, unsigned width, uint32_t *out);
+    bool (*door_write)(struct QRXFullCPU *, uint32_t addr, unsigned width, uint32_t value);
+    bool realtime;
+    bool (*cpu_stopped)(void);
+    uint64_t realtime_base_us;
     uint32_t pc_ring[16];
     unsigned pc_ring_i;
     bool vec_trace;
@@ -174,6 +195,9 @@ void qrx_full_fsaga_present(QRXFullCPU *c);
 /* Hooks are owned by the board extension; only one extension per board. */
 void qrx_full_set_aux(QRXFullCPU *c, QRXAuxReadFn readfn,
                       QRXAuxWriteFn writefn, QRXRamWriteFn ramfn, void *opaque);
+
+/* See the realtime field; call after reset, before the first run. */
+void qrx_full_set_realtime(QRXFullCPU *c, bool (*cpu_stopped)(void));
 
 /* Fatal if a second live context is already bound: returns false. */
 bool qrx_full_init(QRXFullCPU *c, size_t ram_size, unsigned model);
