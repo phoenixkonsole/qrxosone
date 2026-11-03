@@ -16,6 +16,7 @@
 #define QRX_FEATURE_BLOCK    UINT32_C(8)
 #define QRX_FEATURE_HOSTFS   UINT32_C(16)
 #define QRX_FEATURE_RAMSIZE  UINT32_C(32)
+#define QRX_FEATURE_HOSTFS2  UINT32_C(64)
 /* 32-bit guests read each word separately; reports bytes, not host pointers. */
 #define QRX_IO_RAM_BYTES_LO (QRX_IO_BASE + UINT32_C(0x34))
 #define QRX_IO_RAM_BYTES_HI (QRX_IO_BASE + UINT32_C(0x38))
@@ -40,6 +41,7 @@ typedef struct {
     struct QRXMediaDevice *media;
     struct QRXBlock *block;
     struct QRXHostFS *hostfs;
+    struct QRXHostFS *hostfs2; /* optional second share, guest name TEST: */
     void (*dma_ram_write)(void *context,uint32_t addr,unsigned width);
     void *dma_opaque;
     struct QRXShell *system; /* optional QRX 1.8 firmware peripheral */

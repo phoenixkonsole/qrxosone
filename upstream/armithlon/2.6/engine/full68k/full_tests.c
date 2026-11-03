@@ -14,7 +14,7 @@ static int test_monitor(void){
     CHECK(qrx_build_boot_monitor(c.ram_owned,c.vm.ram.size));
     qrx_full_set_host(&c,console,NULL,&out);
     CHECK(qrx_full_reset(&c));
-    CHECK(qrx_full_run_cycles(&c,100000)==0);
+    CHECK(qrx_full_run_cycles(&c,100000)==0); /* QUIT monitor -> shutdown=1 */
     CHECK(strcmp(out.text,"QRX68100 qrxvirt board READY\n")==0);
     CHECK(!c.mem_fault && c.vm.cpu.halted);
     CHECK(c.instructions>=30 && c.instructions<200);
@@ -75,7 +75,10 @@ static int test_rom_and_mmio(void){
     CHECK(qrx_full_bus_read(&c,QRX_FULL_ROM_MAIN_BASE+0x100,2,&value)&&value==0x4e72);
     CHECK(qrx_full_bus_write(&c,0x1000,4,0x12345678));
     CHECK(qrx_full_bus_read(&c,0x1001,2,&value)&&value==0x3456);
-    CHECK(!qrx_full_bus_read(&c,0x80000000u,4,&value));
+    /* Open guest bus floats high (Amiga-faithful): motherboard-RAM probes
+     * must fail their compare instead of faulting. ROM writes still fail. */
+    CHECK(qrx_full_bus_read(&c,0x80000000u,4,&value)&&value==0xFFFFFFFFu);
+    CHECK(qrx_full_bus_write(&c,0x80000000u,4,0x12345678));
     qrx_full_destroy(&c);return 0;
 }
 static int test_timer(void){
@@ -98,9 +101,54 @@ static int test_timer(void){
     CHECK(qrx_full_bus_read(&c,QRX_FULL_IRQ_PENDING,4,&pend)&&pend==0);
     qrx_full_destroy(&c);return 0;
 }
+static uint32_t rd(QRXFullCPU *c,uint32_t a,unsigned n){uint32_t v=0;qrx_full_bus_read(c,a,n,&v);return v;}
+static void wr(QRXFullCPU *c,uint32_t a,unsigned n,uint32_t v){qrx_full_bus_write(c,a,n,v);}
+static uint32_t be32(const uint8_t *p){return (uint32_t)p[0]<<24|(uint32_t)p[1]<<16|(uint32_t)p[2]<<8|p[3];}
+static int test_amiga_devices(void){
+    QRXFullCPU c;CHECK(qrx_full_init(&c,32*1024*1024,68040));
+    uint8_t *rom=calloc(512*1024,1),*adf=malloc(1802240);CHECK(rom&&adf);
+    w32(rom,0,0x80000);w32(rom,4,0xf80100);w16(rom,0x100,0x4e72);w16(rom,0x102,0x2700);
+    CHECK(qrx_full_load_rom(&c,0xf80000,rom,512*1024));free(rom);
+    for(unsigned i=0;i<1802240;i++)adf[i]=(uint8_t)(i*13+(i>>9));
+    qrx_full_load_adf(&c,adf,1802240);qrx_full_set_rom_overlay(&c,true);CHECK(qrx_full_reset(&c));
+    wr(&c,0xbfe001,1,0);CHECK(!c.rom_overlay);
+    wr(&c,0xbfd100,1,0x75);CHECK(rd(&c,0xbfd100,1)==0x75);CHECK(!(rd(&c,0xbfe001,1)&0x10));
+    wr(&c,0xbfd100,1,0x74);wr(&c,0xbfd100,1,0x75);CHECK(c.fl_cyl[0]==1);CHECK(rd(&c,0xbfe001,1)&0x10);
+    wr(&c,0xbfd100,1,0x76);wr(&c,0xbfd100,1,0x77);CHECK(c.fl_cyl[0]==0);
+    wr(&c,0xdff09a,2,0xc00a);CHECK(rd(&c,0xdff01c,2)==0x400a);
+    wr(&c,0xbfed01,1,0x81);wr(&c,0xbfee01,1,8);wr(&c,0xbfe401,1,99);wr(&c,0xbfe501,1,0);
+    CHECK(rd(&c,0xbfee01,1)&1);CHECK(qrx_full_run_cycles(&c,2000)==1);
+    CHECK(!(rd(&c,0xbfee01,1)&1));CHECK((rd(&c,0xbfed01,1)&0x81)==0x81);CHECK(rd(&c,0xbfed01,1)==0);
+    CHECK(rd(&c,0xdff01e,2)&8);wr(&c,0xdff09c,2,8);CHECK(!(rd(&c,0xdff01e,2)&8));
+    wr(&c,0xdff1f4,2,0x0d04);CHECK(c.fsaga_width==1024 && c.fsaga_height==768);
+    wr(&c,0xdff1f4,2,0x0c02);CHECK(c.fsaga_width==800 && c.fsaga_height==600);
+    /* This interval was incorrectly swallowed by an absent Gayle device. */
+    for(uint32_t addr=0xda8000;addr<0xdb0000;addr+=4){
+        wr(&c,addr,4,addr^0x5a123456u);CHECK(rd(&c,addr,4)==(addr^0x5a123456u));
+    }
+    c.fl_cyl[0]=40;wr(&c,0xbfd100,1,0x77);wr(&c,0xdff096,2,0x8210);wr(&c,0xdff020,4,0x10000);
+    wr(&c,0xdff024,2,0x8000|13630);CHECK(!c.dsk_active);wr(&c,0xdff024,2,0x8000|13630);CHECK(c.dsk_active);
+    CHECK(qrx_full_run_cycles(&c,1500000)==1);CHECK(!c.dsk_active);CHECK(rd(&c,0xdff01e,2)&2);
+    const uint8_t *m=c.ram_owned+0x10000;
+    for(unsigned sec=0;sec<22;sec++){
+        const uint8_t *p=m+3320+8+sec*1088;
+        uint32_t id=((be32(p)&0x55555555)<<1)|(be32(p+4)&0x55555555);
+        CHECK(id==(0xff500000u|(sec<<8)|(22-sec)));
+        uint32_t sum=0;for(unsigned j=0;j<10;j++)sum^=be32(p+j*4)&0x55555555;
+        uint32_t hs=((be32(p+40)&0x55555555)<<1)|(be32(p+44)&0x55555555);CHECK(sum==hs);
+        uint32_t ds=((be32(p+48)&0x55555555)<<1)|(be32(p+52)&0x55555555);
+        for(unsigned j=0;j<128;j++){
+            uint32_t o=be32(p+56+j*4)&0x55555555,e=be32(p+568+j*4)&0x55555555;
+            CHECK(((o<<1)|e)==be32(adf+(80*22+sec)*512+j*4));ds^=o^e;
+        }
+        CHECK(ds==0);
+    }
+    wr(&c,0xdff09c,2,2);CHECK(!(rd(&c,0xdff01e,2)&2));
+    free(adf);qrx_full_destroy(&c);return 0;
+}
 int main(void){
-    int (*tests[])(void)={test_monitor,test_real_opcodes,test_trap,test_rom_and_mmio,test_timer};
-    const char *labels[]={"boot monitor", "DBRA/MULU/STOP", "TRAP/RTE", "ROM+MMIO bus", "cycle timer IRQ"};
+    int (*tests[])(void)={test_monitor,test_real_opcodes,test_trap,test_rom_and_mmio,test_timer,test_amiga_devices};
+    const char *labels[]={"boot monitor", "DBRA/MULU/STOP", "TRAP/RTE", "ROM+MMIO bus", "cycle timer IRQ", "ROM timers and HD disk DMA data/checksums"};
     for(unsigned i=0;i<sizeof(tests)/sizeof(tests[0]);i++){
         if(tests[i]())return 1;
         printf("PASS Musashi full68k: %s\n",labels[i]);

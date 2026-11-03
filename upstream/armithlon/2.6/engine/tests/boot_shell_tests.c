@@ -1,5 +1,9 @@
 /* Real QRX68100 guest firmware boot and persistence tests, no mock CPU. */
+#ifndef __APPLE__
 #define _POSIX_C_SOURCE 200809L
+#else
+#define _DARWIN_C_SOURCE
+#endif
 #include "qrx_bootshell.h"
 #include <assert.h>
 #include <stdio.h>

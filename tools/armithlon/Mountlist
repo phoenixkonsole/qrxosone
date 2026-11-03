@@ -1,0 +1,14 @@
+HOSTSYS:
+Handler = L:QRXHostFS
+StackSize = 32768
+Priority = 5
+GlobVec = -1
+Mount = 1
+#
+APPS:
+Handler = L:QRXAppsFS
+StackSize = 32768
+Priority = 5
+GlobVec = -1
+Mount = 1
+#

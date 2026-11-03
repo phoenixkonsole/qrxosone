@@ -1,4 +1,8 @@
+#ifndef __APPLE__
 #define _POSIX_C_SOURCE 200809L
+#else
+#define _DARWIN_C_SOURCE
+#endif
 #include "qrx86_ipc.h"
 #include "qrx_gl_compat.h"
 #include <assert.h>

@@ -2,7 +2,11 @@
  * ARMITHLON original, independently buildable API benchmark.
  * Encoder numbers are NOT GPU FPS. CPU numbers are NOT Metal/Vulkan FPS.
  */
+#ifndef __APPLE__
 #define _POSIX_C_SOURCE 200809L
+#else
+#define _DARWIN_C_SOURCE
+#endif
 #include "qrx_bench.h"
 #include "qrx_gl_compat.h"
 #include "qrxmedia.h"

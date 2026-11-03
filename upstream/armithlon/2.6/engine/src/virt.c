@@ -54,6 +54,7 @@ bool qrx_vm_read(QRXVM *v, uint32_t addr, unsigned width, uint32_t *out) {
             case 0x08: *out = QRX_FEATURE_UART|QRX_FEATURE_TIMER|QRX_FEATURE_SHUTDOWN|QRX_FEATURE_RAMSIZE |
                            (v->block ? QRX_FEATURE_BLOCK : 0) |
                            (v->hostfs ? QRX_FEATURE_HOSTFS : 0) |
+                           (v->hostfs2 ? QRX_FEATURE_HOSTFS2 : 0) |
                            (v->media ? QRX_MEDIA_FEATURE_GFX|QRX_MEDIA_FEATURE_AUDIO|QRX_MEDIA_FEATURE_INPUT|QRX_MEDIA_FEATURE_GPU2D|QRX_MEDIA_FEATURE_3D : 0); return true;
             case 0x10: *out = v->clock_ms ? v->clock_ms(v->host_ctx) : 0; return true;
             case 0x14: *out = QRX_VCPU_ONLINE; return true;
@@ -63,6 +64,7 @@ bool qrx_vm_read(QRXVM *v, uint32_t addr, unsigned width, uint32_t *out) {
             case 0x3c: *out = QRX_IO_BASE; return true;
         }
     }
+    if (addr >= QRX_HOSTFS2_BASE && addr <= QRX_HOSTFS2_SIZE) return qrx_hostfs2_read(v,addr,width,out);
     if (addr >= QRX_HOSTFS_BASE) return qrx_hostfs_read(v,addr,width,out);
     if (addr >= QRX_BLOCK_BASE) return qrx_block_read(v,addr,width,out);
     if (addr >= QRX_3D_BASE) return qrx_glide_read(v,addr,width,out);
@@ -87,6 +89,7 @@ bool qrx_vm_write(QRXVM *v, uint32_t addr, unsigned width, uint32_t value) {
     if (addr == QRX_IO_BASE+0x1c && width == 4) {
         if (value == 1) { v->cpu.halted = 1; return true; }
     }
+    if (addr >= QRX_HOSTFS2_BASE && addr <= QRX_HOSTFS2_SIZE) return qrx_hostfs2_write(v,addr,width,value);
     if (addr >= QRX_HOSTFS_BASE) return qrx_hostfs_write(v,addr,width,value);
     if (addr >= QRX_BLOCK_BASE) return qrx_block_write(v,addr,width,value);
     if (addr >= QRX_3D_BASE) return qrx_glide_write(v,addr,width,value);
@@ -107,6 +110,7 @@ bool qrx_vm_reset(QRXVM *v) {
     struct QRXMediaDevice *media = v->media;
     struct QRXBlock *block = v->block;
     struct QRXHostFS *hostfs = v->hostfs;
+    struct QRXHostFS *hostfs2 = v->hostfs2;
     void (*dma_write)(void *,uint32_t,unsigned)=v->dma_ram_write;
     void *dma_opaque=v->dma_opaque;
     struct QRXShell *system = v->system;
@@ -115,6 +119,7 @@ bool qrx_vm_reset(QRXVM *v) {
     qrx_vm_bind_media(v,media);
     qrx_block_attach(v,block);
     qrx_hostfs_attach(v,hostfs);
+    qrx_hostfs_attach2(v,hostfs2);
     v->dma_ram_write=dma_write;v->dma_opaque=dma_opaque;
     v->system=system;
     v->jit_enabled=jit_enabled;

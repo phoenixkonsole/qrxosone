@@ -17,6 +17,19 @@
 #define QRX_HOSTFS_STATUS (QRX_HOSTFS_BASE+0x1cu)
 #define QRX_HOSTFS_RESULT (QRX_HOSTFS_BASE+0x20u)
 #define QRX_HOSTFS_SIZE (QRX_HOSTFS_BASE+0x24u)
+/* Second host share (TEST:) for multi-drive setups, e.g. Test-Apps folder.
+ * Same register layout, rebased inside QRX_IO_LENGTH (0x840+0x24 < 0x900). */
+#define QRX_HOSTFS2_BASE (QRX_IO_BASE+0x840u)
+#define QRX_HOSTFS2_MAGIC (QRX_HOSTFS2_BASE+0x00u)
+#define QRX_HOSTFS2_FEATURES (QRX_HOSTFS2_BASE+0x04u)
+#define QRX_HOSTFS2_NAME_DMA (QRX_HOSTFS2_BASE+0x08u)
+#define QRX_HOSTFS2_DATA_DMA (QRX_HOSTFS2_BASE+0x0cu)
+#define QRX_HOSTFS2_OFFSET (QRX_HOSTFS2_BASE+0x10u)
+#define QRX_HOSTFS2_LENGTH (QRX_HOSTFS2_BASE+0x14u)
+#define QRX_HOSTFS2_COMMAND (QRX_HOSTFS2_BASE+0x18u)
+#define QRX_HOSTFS2_STATUS (QRX_HOSTFS2_BASE+0x1cu)
+#define QRX_HOSTFS2_RESULT (QRX_HOSTFS2_BASE+0x20u)
+#define QRX_HOSTFS2_SIZE (QRX_HOSTFS2_BASE+0x24u)
 #define QRX_HOSTFS_CMD_LIST 1u
 #define QRX_HOSTFS_CMD_STAT 2u
 #define QRX_HOSTFS_CMD_READ 3u
@@ -41,6 +54,9 @@ typedef struct QRXHostFS QRXHostFS;
 bool qrx_hostfs_mount(QRXHostFS *fs,const char *dir,bool readonly);
 void qrx_hostfs_unmount(QRXHostFS *fs);
 void qrx_hostfs_attach(QRXVM *vm, QRXHostFS *fs);
+void qrx_hostfs_attach2(QRXVM *vm, QRXHostFS *fs);
 bool qrx_hostfs_read(QRXVM *vm,uint32_t addr,unsigned width,uint32_t *out);
 bool qrx_hostfs_write(QRXVM *vm,uint32_t addr,unsigned width,uint32_t value);
+bool qrx_hostfs2_read(QRXVM *vm,uint32_t addr,unsigned width,uint32_t *out);
+bool qrx_hostfs2_write(QRXVM *vm,uint32_t addr,unsigned width,uint32_t value);
 #endif

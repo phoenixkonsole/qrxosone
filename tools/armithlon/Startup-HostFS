@@ -1,0 +1,14 @@
+FailAt 21
+C:QRXHostMemory
+C:Mount HOSTSYS: FROM DEVS:Mountlist
+C:Mount APPS: FROM DEVS:Mountlist
+Echo "HostFS mounted" >HOSTSYS:hostfs-boot-marker.txt
+C:Assign SYS: HOSTSYS:
+C:Assign C: SYS:C
+C:Assign S: SYS:S
+C:Assign L: SYS:L
+C:Assign DEVS: SYS:Devs
+C:Assign LIBS: SYS:Libs
+C:MakeDir RAM:T
+C:Assign T: RAM:T
+Execute S:Startup-Sequence

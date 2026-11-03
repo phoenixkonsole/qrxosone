@@ -65,3 +65,28 @@ patch was present here. Other chats and the failed session's filesystem are not
 accessible from this session; the pasted conversation does not contain a source
 diff from which those changes could safely be reconstructed. No old environment
 was deleted or reset. Keep it available for recovery.
+
+## QRX68 bitmap text extension
+
+The repository extends the imported 2.6 sources with graphics.library SetFont (-66), TextLength (-54) and Text (-60), using guest-owned classic 52-byte TextFont structures. Monochrome glyphs support baseline, character locations, signed spacing/kerning, fallback glyph and clipping through the existing window renderer. Invalid font memory and color-font structures fail closed. Tests check actual guest ABI calls, width, cursor movement and pixels. This does not implement OpenFont, diskfont, styled/color fonts, JAM2/complement modes, TextExtent or the remaining AmigaOS compatibility subsystems. The original upstream SHA256SUMS remains the import provenance; it is not a checksum manifest for these subsequent source edits.
+
+## QRX68 DOS locks and directory inspection
+
+Lock (-84), UnLock (-90), DupLock (-96), Examine (-102) and ExNext (-108)
+now operate on the configured HOST share. FileLock handles are allocated guest
+BPTRs; FileInfoBlock is written using the classic 260-byte layout. Shared and
+exclusive locks use nonblocking advisory host flock; Open also cooperates and
+truncates a new-file target only after acquiring its lock. DupLock duplicates
+the descriptor, preserving object identity across host renames. Runtime teardown
+releases descriptors and enumeration state. Read-only shares remain read-only.
+
+Scope: one HOST share, root and single-component paths, bounded lock table,
+no symlink traversal. This is not complete DOS locking: CurrentDir/ParentDir,
+DOS packets, nested paths, case-insensitive name resolution and arbitrary
+filesystem handlers remain absent. Host programs ignoring advisory locks can
+still modify files. DateStamp uses a UTC-based host timestamp conversion.
+
+All 52 portable tests pass, including real host-lock contention, duplication,
+release, stale handles, metadata and enumeration end. macOS and real Amiga
+application binaries have not been tested. Full Layers, GadTools, BOOPSI,
+font loading, Workbench startup, ASL and real DOS child processes remain open.

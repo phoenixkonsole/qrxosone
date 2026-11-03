@@ -1,4 +1,8 @@
+#ifndef __APPLE__
 #define _POSIX_C_SOURCE 200809L
+#else
+#define _DARWIN_C_SOURCE
+#endif
 #include "qrx_hostfs.h"
 #include "qrx_bootshell.h"
 #include <assert.h>
@@ -27,7 +31,7 @@ int main(void){
  vm.dma_ram_write=dma;
  write32(&vm,QRX_HOSTFS_DATA_DMA,0x3000);
  assert(rd32(&vm,QRX_HOSTFS_MAGIC)==0x51525846u);
- assert(rd32(&vm,QRX_HOSTFS_FEATURES)==1);
+ assert(rd32(&vm,QRX_HOSTFS_FEATURES)==0x11);
  name(&vm,"hello.txt");assert(operation(&vm,QRX_HOSTFS_CMD_STAT,0,0)==0);
  assert(rd32(&vm,QRX_HOSTFS_SIZE)==5);
  assert(operation(&vm,QRX_HOSTFS_CMD_READ,1,4)==0);
@@ -45,7 +49,7 @@ int main(void){
  assert(!strstr((char *)ram+0x3000,"sub"));
  qrx_hostfs_unmount(&fs);qrx_hostfs_attach(&vm,NULL);
  assert(qrx_hostfs_mount(&fs,folder,false));qrx_hostfs_attach(&vm,&fs);
- assert(rd32(&vm,QRX_HOSTFS_FEATURES)==3);
+ assert(rd32(&vm,QRX_HOSTFS_FEATURES)==0x13);
  write32(&vm,QRX_HOSTFS_DATA_DMA,0x3000);
  name(&vm,"new.txt");memcpy(ram+0x3000,"ABC",3);
  assert(operation(&vm,QRX_HOSTFS_CMD_WRITE,0,3)==0);
@@ -58,9 +62,46 @@ int main(void){
  assert(operation(&vm,QRX_HOSTFS_CMD_STAT,0,0)==QRX_HOSTFS_NOENT);
  name(&vm,"secret");assert(operation(&vm,QRX_HOSTFS_CMD_WRITE,0,3)==QRX_HOSTFS_ACCESS);
  assert(operation(&vm,QRX_HOSTFS_CMD_DELETE,0,0)==QRX_HOSTFS_ACCESS);
+ assert(operation(&vm,0x10a,0,0)==0);
+ assert(rd32(&vm,QRX_HOSTFS_SIZE)>0);
+ assert(rd32(&vm,QRX_HOSTFS_RESULT)<=rd32(&vm,QRX_HOSTFS_SIZE));
+ name(&vm,"missing/subdir/file");assert(operation(&vm,0x102,0,0)==QRX_HOSTFS_NOENT);
+ /* Tree ABI: nested, case-insensitive paths, persistence, and confinement. */
+ name(&vm,"Nested");assert(operation(&vm,0x107,0,0)==0);
+ name(&vm,"Nested/hello.bin");assert(operation(&vm,0x109,0,0)==0);
+ memcpy(ram+0x3000,"TREE",4);assert(operation(&vm,0x104,0,4)==0);
+ name(&vm,"nested/HELLO.BIN");assert(operation(&vm,0x103,0,4)==0);assert(!memcmp(ram+0x3000,"TREE",4));
+ name(&vm,"Nested");assert(operation(&vm,0x101,0,256)==0);assert(!strcmp((char*)ram+0x3000,"hello.bin"));
+ name(&vm,"Nested/../hello.txt");assert(operation(&vm,0x102,0,0)!=0);
+ name(&vm,"secret");assert(operation(&vm,0x102,0,0)==QRX_HOSTFS_ACCESS);
+ name(&vm,"Nested/hello.bin");assert(operation(&vm,0x105,0,0)==0);
+ name(&vm,"Nested");assert(operation(&vm,0x105,0,0)==0);
  /* 32-bit full 68040 MMIO alias normalizes these addresses upstream. */
  assert((QRX_HOSTFS_BASE-QRX_IO_BASE)==0x800);
  assert(!qrx_vm_read(&vm,QRX_HOSTFS_SIZE+4,4,&(uint32_t){0}));
+ /* Second share (TEST:) is an independent register block: drives stay isolated. */
+ {
+  char folder2[]="/tmp/qrx-hostfs2-XXXXXX";char file2[512];QRXHostFS fs2;
+  assert(mkdtemp(folder2));
+  snprintf(file2,sizeof(file2),"%s/world.txt",folder2);
+  FILE *f2=fopen(file2,"wb");assert(f2);assert(fwrite("WORLD",1,5,f2)==5);fclose(f2);
+  assert(qrx_hostfs_mount(&fs2,folder2,true));qrx_hostfs_attach2(&vm,&fs2);
+  { uint32_t feat=0;assert(qrx_vm_read(&vm,QRX_IO_BASE+0x08,4,&feat));
+    assert(feat&(QRX_FEATURE_HOSTFS|QRX_FEATURE_HOSTFS2)); }
+  assert(rd32(&vm,QRX_HOSTFS2_MAGIC)==0x51525846u);
+  assert(rd32(&vm,QRX_HOSTFS2_FEATURES)==0x11);
+  memset(ram+0x2000,0,128);memcpy(ram+0x2000,"world.txt",9);
+  assert(qrx_vm_write(&vm,QRX_HOSTFS2_NAME_DMA,4,0x2000));
+  assert(qrx_vm_write(&vm,QRX_HOSTFS2_DATA_DMA,4,0x3000));
+  assert(qrx_vm_write(&vm,QRX_HOSTFS2_OFFSET,4,0)==true);
+  assert(qrx_vm_write(&vm,QRX_HOSTFS2_LENGTH,4,0)==true);
+  assert(qrx_vm_write(&vm,QRX_HOSTFS2_COMMAND,4,QRX_HOSTFS_CMD_STAT)==true);
+  assert(rd32(&vm,QRX_HOSTFS2_STATUS)==0);assert(rd32(&vm,QRX_HOSTFS2_SIZE)==5);
+  /* First share still answers on its own base. */
+  name(&vm,"new.txt");assert(operation(&vm,QRX_HOSTFS_CMD_STAT,0,0)==QRX_HOSTFS_NOENT);
+  qrx_hostfs_unmount(&fs2);qrx_hostfs_attach2(&vm,NULL);
+  unlink(file2);rmdir(folder2);
+ }
  qrx_hostfs_unmount(&fs);qrx_vm_destroy(&vm);
  unlink(linkpath);unlink(file);rmdir(dirpath);rmdir(folder);
  puts("PASS QRXHostFS: real directory, DMA, offset, RW, readonly, symlink+traversal denial, persistence");

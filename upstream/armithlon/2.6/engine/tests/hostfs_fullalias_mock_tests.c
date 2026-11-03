@@ -1,4 +1,8 @@
+#ifndef __APPLE__
 #define _POSIX_C_SOURCE 200809L
+#else
+#define _DARWIN_C_SOURCE
+#endif
 /* This tests qrx_full_bus 68040 upper alias with Musashi STUB; never claims
  * actual guest FPU/ISA execution. */
 #include "qrx68100_full.h"

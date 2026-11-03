@@ -97,7 +97,11 @@ def main():
     runtime = bindir / 'int64-runtime.o'
     runtime_source = repo / 'qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/core/qrx_int64_runtime.c'
     subprocess.run([paths['gcc'], '-m68060', '-O2', '-fno-builtin', '-fno-pic', '-fno-PIC',
-                    '-fno-optimize-sibling-calls', '-c', str(runtime_source), '-o', str(runtime)], check=True)
+                    '-fno-optimize-sibling-calls', '-nostdinc',
+                    '-isystem', str(sdkdir / 'include/aros/stdc'),
+                    '-isystem', str(sdkdir / 'include'),
+                    '-isystem', query('-print-file-name=include'),
+                    '-c', str(runtime_source), '-o', str(runtime)], check=True)
     cfg = dict(kind='qrx-experimental-aros-sdk', sdk=str(sdkdir), abi_header=str(abi), **paths,
                gcc_include=str(Path(query('-print-file-name=include')).resolve()),
                gcc_lib=str(Path(query('-print-libgcc-file-name')).resolve().parent),
