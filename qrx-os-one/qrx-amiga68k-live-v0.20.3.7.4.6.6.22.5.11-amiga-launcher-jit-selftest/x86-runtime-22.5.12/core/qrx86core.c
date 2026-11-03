@@ -49,7 +49,11 @@ const char *x86_fault_name(int f)
 }
 
 /* ======================================================================= memory */
-static void tlb_flush(x86cpu *c) { memset(c->tlb_rtag, 0, sizeof(c->tlb_rtag)); memset(c->tlb_wtag, 0, sizeof(c->tlb_wtag)); c->f_lim = 0; }
+static void tlb_flush(x86cpu *c) {
+#if QRX_JIT_PAGE_CACHE
+    ++c->memory_serial;
+#endif
+    memset(c->tlb_rtag, 0, sizeof(c->tlb_rtag)); memset(c->tlb_wtag, 0, sizeof(c->tlb_wtag)); c->f_lim = 0; }
 
 /* little-endian guest words: on big-endian hosts one (unaligned) host load + byte swap;
  * every CPU QRX targets (x86, 68020+, PPC) allows unaligned word/long accesses */
@@ -82,6 +86,7 @@ void x86_init(x86cpu *c)
 void x86_free(x86cpu *c)
 {
     int i, j;
+    x86_jit_disable(c);
     tlb_flush(c);
     for (i = 0; i < 1024; i++) {
         if (!c->dir[i]) continue;
@@ -287,7 +292,7 @@ int x86_push(x86cpu *c, uint32_t v) { c->r[X86_ESP] -= 4; return x86_wr32(c, c->
 uint32_t x86_pop(x86cpu *c) { uint32_t v = x86_rd32(c, c->r[X86_ESP]); c->r[X86_ESP] += 4; return v; }
 
 /* ======================================================================= flags */
-enum { LF_NONE = 0, LF_ADD, LF_ADC, LF_SUB, LF_SBB, LF_LOGIC, LF_INC, LF_DEC, LF_NEG, LF_SHL, LF_SHR, LF_SAR };
+enum { LF_NONE = 0, LF_ADD, LF_ADC, LF_SUB, LF_SBB, LF_LOGIC, LF_INC, LF_DEC, LF_NEG, LF_SHL, LF_SHR, LF_SAR, LF_IMUL };
 
 static const uint8_t parity_tab[256] = {
 #define P2(n) n, n ^ 1, n ^ 1, n
@@ -336,6 +341,11 @@ static uint32_t flags_compute(x86cpu *c)
         if ((a ^ b) & (a ^ r) & s) f |= X86_OF;
         f |= (a ^ b ^ r) & X86_AF;
         break;
+#if QRX_JIT_NATIVE_IMUL
+    case LF_IMUL:
+        if(b)f |= X86_CF|X86_OF;
+        break;
+#endif
     case LF_LOGIC:
         break;
     case LF_INC:
@@ -505,6 +515,9 @@ static void decode_modrm(x86cpu *c, const prefix_t *p, modrm_t *m)
     uint32_t a = 0;
     int def = X86_DS;
     m->mod = b >> 6; m->reg = (b >> 3) & 7; m->rm = b & 7;
+#ifdef QRX_EXEC_PROFILE
+    c->prof_operands[c->prof_active_op][m->reg+(m->mod==3?0:8)]++;
+#endif
     m->isreg = (m->mod == 3);
     if (m->isreg) { m->addr = 0; return; }
     if (p->asz == 16) {
@@ -1066,8 +1079,10 @@ static const uint8_t prefix_tab[256] = {
     [0x66] = 1, [0x67] = 1, [0xF0] = 1, [0xF2] = 1, [0xF3] = 1
 };
 
+#include "qrx86jit.h"
+
 /* inlined into run_loop only: keeps the CPU pointer and the loop state in registers */
-X86_INLINE void exec_one(x86cpu *c)
+X86_INLINE void exec_one_mode(x86cpu *c,uint32_t stop_eip,int jit,int *did_native)
 {
     prefix_t p;
     uint8_t op;
@@ -1085,6 +1100,14 @@ X86_INLINE void exec_one(x86cpu *c)
     }
     p.osz = 32; p.asz = 32; p.rep = 0; p.seg = -1;
     op = fetch8(c);
+#if XJ_NATIVE && QRX_JIT_FUSED_FETCH
+    /* Reuse the already charged/fetched opcode. A failed probe leaves the
+     * original decoder immediately after its opcode, with no state rollback. */
+    if(jit && c->jit && (!QRX_JIT_BACKEDGE_DISCOVERY || !c->jit->backedge_only || c->jit->loop_header==start) && !prefix_tab[op] && xj_candidate_op(c,start,op) && xj_try(c,stop_eip,start,1)) {
+        if(did_native)*did_native=1;
+        return;
+    }
+#endif
     while (prefix_tab[op]) {                /* one table test for the common no-prefix case */
         switch (op) {
         case 0x66: p.osz = 16; break;
@@ -1100,6 +1123,17 @@ X86_INLINE void exec_one(x86cpu *c)
         }
         op = fetch8(c);
     }
+#ifdef QRX_EXEC_PROFILE
+    c->prof_ops[op]++;c->prof_active_op=op;
+    if (!c->prof_sample_left--) {
+        unsigned slot = ((start >> 4) ^ (start >> 16)) & 4095u;
+        uint32_t group = start & ~15u;
+        c->prof_sample_left = 1023;
+        if (!c->prof_pc_hits[slot]) c->prof_pc[slot] = group;
+        if (c->prof_pc[slot] == group) c->prof_pc_hits[slot]++;
+        else c->prof_pc_collisions++;
+    }
+#endif
     sz = p.osz;
 
     /* one switch for every one-byte opcode: a single jump table instead of range tests */
@@ -1151,7 +1185,7 @@ X86_INLINE void exec_one(x86cpu *c)
     case 0x40 ... 0x4F: { int r = op & 7; reg_set(c, r, sz, incdec(c, reg_get(c, r, sz), sz, op >= 0x48)); return; }
     case 0x50 ... 0x57: if (sz == 32) push(c, c->r[op & 7], 32); else push(c, reg_get(c, op & 7, 16), 16); return;
     case 0x58 ... 0x5F: { uint32_t v; if (sz == 32) { v = pop(c, 32); c->r[op & 7] = v; } else { v = pop(c, 16); reg_set(c, op & 7, 16, v); } return; }
-    case 0x70 ... 0x7F: { int8_t d = (int8_t)fetch8(c); if (cond(c, op & 15)) c->eip += (uint32_t)(int32_t)d; return; }
+    case 0x70 ... 0x7F: { int8_t d = (int8_t)fetch8(c); if (cond(c, op & 15)) {c->eip += (uint32_t)(int32_t)d;xj_note_backedge(c,start);} return; }
     case 0x91 ... 0x97: { uint32_t t = reg_get(c, X86_EAX, sz); reg_set(c, X86_EAX, sz, reg_get(c, op & 7, sz)); reg_set(c, op & 7, sz, t); return; }
     case 0xB0 ... 0xB7: reg_set(c, op & 7, 8, fetch8(c)); return;
     case 0xB8 ... 0xBF: reg_set(c, op & 7, sz, fetchimm(c, sz)); return;
@@ -1350,7 +1384,10 @@ X86_INLINE void exec_one(x86cpu *c)
 
     /* ------------------------------------------------------------- 0F map */
     op = fetch8(c);
-    if (op >= 0x80 && op <= 0x8F) { uint32_t d = fetchimm(c, sz); if (cond(c, op & 15)) { c->eip += d; if (sz == 16) c->eip &= 0xFFFF; } return; }
+#ifdef QRX_EXEC_PROFILE
+    c->prof_ops[256u + op]++;c->prof_active_op=256u+op;
+#endif
+    if (op >= 0x80 && op <= 0x8F) { uint32_t d = fetchimm(c, sz); if (cond(c, op & 15)) { c->eip += d; if (sz == 16) c->eip &= 0xFFFF; xj_note_backedge(c,start); } return; }
     if (op >= 0x90 && op <= 0x9F) { decode_modrm(c, &p, &m); rm_set(c, &m, 8, (uint32_t)cond(c, op & 15)); return; }
     if (op >= 0x40 && op <= 0x4F) { uint32_t v; decode_modrm(c, &p, &m); v = rm_get(c, &m, sz); if (cond(c, op & 15)) reg_set(c, m.reg, sz, v); else if (sz == 32) reg_set(c, m.reg, 32, c->r[m.reg]); return; }
     if (op >= 0xC8 && op <= 0xCF) { uint32_t v = c->r[op & 7]; c->r[op & 7] = (v >> 24) | ((v >> 8) & 0xFF00u) | ((v << 8) & 0xFF0000u) | (v << 24); return; }
@@ -1444,6 +1481,10 @@ X86_INLINE void exec_one(x86cpu *c)
 }
 
 
+
+X86_INLINE void exec_one(x86cpu *c)
+{ exec_one_mode(c,0,0,NULL); }
+
 /* bring icount up to date, then reload left with the instructions until the budget is
  * reached, capped to 32 bits (refreshed when it runs out) */
 static uint32_t budget_refill(x86cpu *c)
@@ -1457,8 +1498,8 @@ static uint32_t budget_refill(x86cpu *c)
     return c->left;
 }
 
-/* single = 1: exactly one instruction, no budget accounting (x86_step).  exec_one is
- * inlined here exactly once.  The loop tests only eip: faults longjmp out, and the
+/* single = 1: exactly one instruction, no budget accounting (x86_step).
+ * Preserve the established interpreter path independently of JIT tuning.  The loop tests only eip: faults longjmp out, and the
  * hook call sites in exec_one longjmp out when a hook set fault or stop. */
 static int run_loop(x86cpu *c, uint32_t stop_eip, int single)
 {
@@ -1483,8 +1524,74 @@ static int run_loop(x86cpu *c, uint32_t stop_eip, int single)
     return c->fault;
 }
 
+
+#if XJ_NATIVE
+/* Separate hot loops: interpreter-only mode keeps the original decoder loop
+ * without per-instruction cache checks, counters or profiling branches. */
+/* Global -Os regressed the AROS interpreter. Restrict size optimization to
+ * this dispatch loop; normal interpretation keeps the established -O2 build. */
+#if QRX_JIT_SIZE_LOOP && defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("Os")))
+#endif
+static int run_loop_jit(x86cpu *c, uint32_t stop_eip)
+{
+    jmp_buf jb, *old = c->jb;
+    if (c->fault || c->stop) return c->fault;
+    c->jb = &jb;
+    if (setjmp(jb)) { c->jb = old; return c->fault; }
+    budget_refill(c);
+    if(!c->jit->stats.timing) {
+        while(c->eip!=stop_eip) {
+            if(!c->left && !budget_refill(c))
+                FAULT(c,X86_FAULT_BUDGET,c->eip,"instruction budget exhausted");
+            #if QRX_JIT_FUSED_FETCH
+            c->left--;exec_one_mode(c,stop_eip,1,NULL);
+#else
+            if(c->jit && xj_candidate(c) && xj_try(c,stop_eip,c->eip,0))continue;
+            c->left--;exec_one(c);
+#endif
+        }
+        c->jb=old;return c->fault;
+    }
+    while (c->eip != stop_eip) {
+        clock_t t = 0;
+        if (!c->left && !budget_refill(c))
+            FAULT(c, X86_FAULT_BUDGET, c->eip, "instruction budget exhausted");
+        #if !QRX_JIT_FUSED_FETCH
+        if (c->jit && xj_candidate(c) && xj_try(c, stop_eip,c->eip,0)) continue;
+#endif
+        c->left--;
+        if (c->jit) {
+            if (c->jit->stats.timing) t = clock();
+        }
+#if QRX_JIT_FUSED_FETCH
+        int native_done=0;
+        exec_one_mode(c,stop_eip,1,&native_done);
+#else
+        exec_one(c);
+#endif
+        /* execve may destroy the old CPU/JIT inside a hook. */
+        if (c->jit && c->jit->stats.timing
+#if QRX_JIT_FUSED_FETCH
+            && !native_done
+#endif
+            )
+            c->jit->stats.interpreter_ticks += xj_elapsed(&c->jit->stats,t);
+    }
+    c->jb = old;
+    return c->fault;
+}
+#endif
+
+
 int x86_step(x86cpu *c) { c->fault = X86_OK; c->stop = 0; return run_loop(c, c->eip + 1u, 1); }
-int x86_run(x86cpu *c, uint32_t stop_eip) { return run_loop(c, stop_eip, 0); }
+int x86_run(x86cpu *c, uint32_t stop_eip)
+{
+#if XJ_NATIVE
+    if (c->jit) return run_loop_jit(c, stop_eip);
+#endif
+    return run_loop(c, stop_eip, 0);
+}
 
 uint32_t x86_call(x86cpu *c, uint32_t addr, int nargs, const uint32_t *args, int *ok)
 {

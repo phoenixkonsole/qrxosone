@@ -1,0 +1,27 @@
+{
+  "argv": [
+    "tools/qrx86/bench-aros-doom.py",
+    "/workspace/qrx-bench/target/aros",
+    "/workspace/qrxosone/upstream/aros-deadwood/m68k-build-5b5fd4c",
+    "/workspace/qrx-bench/doom",
+    "/workspace/qrx-fsuae-jit/optimization-32/deopt-profile-on",
+    "/workspace/qrx-fsuae-jit/optimization-32/deopt-profile/hunk/qrx-win32",
+    "--fsuae-jit",
+    "on",
+    "--jit",
+    "experimental",
+    "--guest-env",
+    "QRX86_JIT_CACHE_PROFILE=1",
+    "--no-wipe",
+    "--runs",
+    "1",
+    "--timeout",
+    "600"
+  ],
+  "environment": {
+    "QRX_FSUAE_BIN": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+    "QRX_FSUAE_EXTRA": "\nuae_comp_trustnaddr = indirect\nuae_compfpu = false\nuae_cpu_speed = max\nuae_cpu_cycle_exact = false\nuae_blitter_cycle_exact = false\naudio_driver = dummy",
+    "QRX_FSUAE_WARP": "0",
+    "QRX_FSUAE_MMU": null
+  }
+}

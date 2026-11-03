@@ -1,0 +1,20 @@
+PASS basic DllMain return
+PASS watchdog counts every single guest instruction (6 insns -> steps=6)
+PASS REP STOSB with ECX>1e6 completes architecturally (ECX=0)
+PASS 1,000,016 REP iterations exceed a 100-step budget (deterministic accounting)
+PASS MOV r8,imm8 (B0-B7) incl. AH
+PASS QRXVM (~1.7 MB) is not a stack local in main()
+PASS REP iterations are charged to the watchdog budget (4 ms)
+PASS endless loop stopped by --max-steps
+PASS wintrace terminates (5 ms), trace capped at 2000 block lines, JIT off
+PASS wintrace on REP-heavy endless guest terminates (5 ms)
+PASS --jit=on stays quarantined (interpreter, 0 native runs)
+PASS unsupported opcode fails closed
+PASS usage without handoff returns 2
+PASS unknown option rejected
+PASS corrupt handoff rejected
+QRX86 interpreter host tests: 15 passed, 0 failed
+amiga launcher host tests: 185 passed, 0 failed, real HUNK files checked: 0
+SKIP: no m68k assembler (install binutils-m68k-linux-gnu)
+22.5.11 SOURCE/INTEGRATION GATES: PASS
+22.5.11 HOST TESTS: PASS (host GCC only; not evidence for Deadwood m68k)

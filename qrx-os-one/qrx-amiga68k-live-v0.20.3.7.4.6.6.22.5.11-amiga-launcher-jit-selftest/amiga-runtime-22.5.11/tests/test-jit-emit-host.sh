@@ -29,7 +29,7 @@ qe_moveq(&e,42,0);qe_moveq(&e,-1,3);qe_move_l_imm(&e,0x51525354UL,0);qe_move_l_i
 qe_addq_l(&e,1,0);qe_addq_l(&e,8,2);qe_jsr_abs(&e,0x12345678UL);qe_nop(&e);qe_rts(&e);
 if(e.overflow)return 3;
 fwrite(b,1,e.len,stdout);
-{unsigned char s[3];struct qrx_emit o;qe_init(&o,s,sizeof s);qe_w32(&o,0x11223344UL);if(!o.overflow)return 4;}
+{unsigned char s[3]={0xaa,0xbb,0xcc};struct qrx_emit o;qe_init(&o,s,sizeof s);qe_w32(&o,0x11223344UL);if(!o.overflow||o.len||s[0]!=0xaa||s[1]!=0xbb||s[2]!=0xcc)return 4;qe_w16(&o,0x1234);if(o.len)return 5;}
 return 0;}
 C
 cc -std=c99 -Wall -Wextra -Werror -Wno-unused-function -I"$HERE/../src" -o "$T/emit" "$T/emit.c"

@@ -1,0 +1,30 @@
+QMATH /workspace/qrx-jit-work/target-current/libqmath.a (44 objects)
+In file included from /workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/core/qrx86core.c:1448:
+/workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/core/qrx86jit.h: In function ‘xj_fresh’:
+/workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/core/qrx86jit.h:249:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  249 |         if(a!=z)return 0;i+=4;
+      |         ^~
+/workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/core/qrx86jit.h:249:26: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  249 |         if(a!=z)return 0;i+=4;
+      |                          ^
+ELF-PROOF qrx-i386.elf machine=4 (m68k)
+HUNK-PROOF qrx-i386 size=216956 sha256=51a92b8346b7b8a5a08cdcf456e49066a1adcc3d0d97a40b9f7928b3e828010c
+ELF-PROOF QRXInput.elf machine=4 (m68k)
+HUNK-PROOF QRXInput size=9080 sha256=be8dcb612f7d3560682f733c4837b2e18a2487690c81f03987d6de5d2269cd63
+In file included from /workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/core/qrx86core.c:1448:
+/workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/core/qrx86jit.h: In function ‘xj_fresh’:
+/workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/core/qrx86jit.h:249:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  249 |         if(a!=z)return 0;i+=4;
+      |         ^~
+/workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/core/qrx86jit.h:249:26: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  249 |         if(a!=z)return 0;i+=4;
+      |                          ^
+/workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/win32/kernel.c:27:17: warning: ‘host_ms’ defined but not used [-Wunused-function]
+   27 | static uint64_t host_ms(void)
+      |                 ^~~~~~~
+/workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/win32/gdi.c: In function ‘qw_bitmap_from_dib’:
+/workspace/qrxosone/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12/win32/gdi.c:461:66: warning: suggest parentheses around ‘&&’ within ‘||’ [-Wparentheses]
+  461 |     if (bw <= 0 || bh <= 0 || bw > 4096 || bh > 4096 || comp > 0 && comp != 3) { qw_log(w, "unsupported DIB (%dx%d %dbpp comp %u)", bw, bh, bpp, comp); return 0; }
+      |                                                         ~~~~~~~~~^~~~~~~~~~~~
+ELF-PROOF qrx-win32.elf machine=4 (m68k)
+HUNK-PROOF qrx-win32 size=570716 sha256=fb893697e8dd7a23d232970896f6de1d0a39bff0f1574a36ddeea0639362fb81

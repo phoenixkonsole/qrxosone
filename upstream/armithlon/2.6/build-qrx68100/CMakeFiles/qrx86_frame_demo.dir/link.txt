@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -Wl,--dependency-file=CMakeFiles/qrx86_frame_demo.dir/link.d CMakeFiles/qrx86_frame_demo.dir/src/qrx86_frame_demo.c.o -o qrx86_frame_demo  libqrx68100_core.a -lm

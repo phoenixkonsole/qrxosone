@@ -1,0 +1,11 @@
+# Actual 68k guest commands, passed via virtual UART and QRXFS peripheral.
+help
+cpu
+ls
+cat README.TXT
+run HELLO.QEX
+bench
+write FIRST.TXT First boot completed on QRX68100!
+cat FIRST.TXT
+stats
+shutdown

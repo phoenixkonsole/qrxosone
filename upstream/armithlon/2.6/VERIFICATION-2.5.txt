@@ -1,0 +1,25 @@
+ARMITHLON 2.5 – QRX68/2 – Verifizierungsbericht, 01.11.2026
+
+Quelle: ARMITHLON 2.4 cumulative release, inkrementell geaendert.
+Lokal: Linux x86_64 GCC/CMake; keine macOS/Apple-M1- oder FS-UAE-Hardware.
+GitHub des Nutzers wurde weder veraendert noch gepusht.
+
+PASS – Build portable qrx68100-Engine/qrx68-run.
+PASS – CTest Debug, 51 von 51 Tests (real 68k HUNK inkludiert).
+PASS – qrx68-live25 Host-End-to-End: zwei parallele HUNK-Prozesse,
+       WaitPort/GetMsg/ReplyMsg, Mausklick aendert nur eigenes Bild,
+       sauberes IDCMP_CLOSEWINDOW, falsche Ereignisse werden abgelehnt.
+PASS – AddressSanitizer + UBSan fuer den neuen QRX68-Live-CTest und den
+       bestehenden realen HUNK/Exec/DOS-ABI-Test: 2/2.
+HINWEIS – Durchlauf der gesamten ASan/UBSan-Suite unterbrach bei Test 48
+          wegen Laufzeitlimit; KEIN Anspruch auf 51/51 Sanitizer-Tests.
+
+NICHT VERIFIZIERT – AROS-68k QRX68Run Cross-Compile und echter Doppelklick
+                   in QRXDesktop/FS-UAE; AROS-SDK/FS-UAE fehlt hier.
+NICHT VERIFIZIERT – Realer externer Musashi-68040/FPU-Gastbetrieb im
+                   neuen Sitzungspfad; der Hosttest verwendet die kleine
+                   portable 68k-CPU.
+NICHT IMPLEMENTIERT – nativer AROS-Kernelboot auf QRX68100, vollstaendige
+                     Intuition/Gadgets/Layers und beliebige AmigaOS-Apps.
+
+Keine fiktiven FPS, keine Behauptung voller AmigaOS-3.x-Kompatibilitaet.

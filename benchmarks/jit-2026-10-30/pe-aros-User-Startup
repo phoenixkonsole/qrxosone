@@ -1,0 +1,9 @@
+FailAt 1000
+SetEnv QRX_WIN_STATS 1
+SetEnv QRX86_JIT off
+C:qrx-win32 -L QRXOUT:off.log SYS:X86/jit-pe-loop.exe >QRXOUT:off.stdout
+Echo "off rc=$RC" >QRXOUT:off.rc
+SetEnv QRX86_JIT experimental
+C:qrx-win32 -L QRXOUT:on.log SYS:X86/jit-pe-loop.exe >QRXOUT:on.stdout
+Echo "on rc=$RC" >QRXOUT:on.rc
+Echo "done" >QRXOUT:DONE

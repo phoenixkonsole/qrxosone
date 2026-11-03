@@ -1,0 +1,666 @@
+#!/usr/bin/env bash
+# ARMITHLON 2.6: QRX68 AmigaOS 3.x ABI compatibility expansion (partial).
+set -Eeuo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DATA="${ARMITHLON_DATA_DIR:-$ROOT/data}"
+REPO_DIR="$DATA/qrxosone"
+AROS_ASSETS="upstream/aros-deadwood/m68k-build-5b5fd4c"
+PINNED_SHA="cc2ba06a0cc76a87bdd49edcd4b475df4227e716"
+QRX_BRANCH="claude/qrx-22.5.11"
+BASE_ISO="$DATA/images/aros-amiga-m68k.iso"
+PREVIEW_ISO="$DATA/images/ARMITHLON-AROS-QRX-tools-preview.iso"
+QRX_ISO="$DATA/images/QRX-OS-One.iso"
+ROM="$REPO_DIR/$AROS_ASSETS/aros-amiga-m68k-rom.bin"
+EXT="$REPO_DIR/$AROS_ASSETS/aros-amiga-m68k-ext.bin"
+ADF="$REPO_DIR/$AROS_ASSETS/bootdisk-amiga-m68k-3520.adf"
+EXPECTED_XZ=11569c3364032a33b4e12b9c0cebadcaec2ea3a8decf7849d4a9d92bb763fded
+EXPECTED_ISO=352a87fa2a1e378dbe879cac3ac15feb42088906ee0a8c480f3b22e136ea13bb
+EXPECTED_HUNK=51ceca2ba8ac0e3e75947836d695061d581829e46daa15d8bad481e4c6907299
+say(){ printf '[ARMITHLON] %s\n' "$*" >&2; }
+die(){ say "ERROR: $*"; exit 1; }
+need(){ command -v "$1" >/dev/null 2>&1 || die "Missing '$1'. See README-DE.md for installation."; }
+sha256(){ if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'; elif command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'; else die 'Need shasum or sha256sum'; fi; }
+verify_file(){ [[ -f "$1" ]] || die "Missing file: $1"; local got; got="$(sha256 "$1")"; [[ "$got" == "$2" ]] || die "SHA-256 mismatch for $1: got $got expected $2"; }
+usage(){ cat <<'EOF'
+ARMITHLON 2.6 macOS/ARM64 QRX OS One integration development kit
+  ./armithlon qrx68 APP.HUNK [--share DIR] [--share-rw]  isolated AmigaOS 3.x Exec/DOS HLE
+  ./armithlon qrx68-service            run QRX68/1 host service on QRXBRIDGE: share
+  ./armithlon qrx68-aros-build          cross-compile AROS/68k QRX68Run via QRX_AROS_CC
+  ./armithlon qrx68-aros-install SYS_DIR  install QRX68Run in extracted AROS SYS:
+  ./armithlon qrx68-aros-start [SYS_DIR]   QRX68/2 live service + FS-UAE (requires AROS toolchain)
+  ./armithlon qrx68-demo               run real Amiga HUNK/Exec/DOS-HLE demo offline
+  ./armithlon qrx68-live-test          verify two concurrent interactive HUNK apps + IDCMP frames
+  ./armithlon qrx68-compat-test        test Exec signals/ports, menus/gadgets, layered GUI + DOS ABI
+  ./armithlon qrx68-compat-scan DIR    bounded batch scan of owned Amiga HUNK programs
+  ./armithlon qrx68-musashi APP.HUNK     use the complete, pinned Musashi 68040 engine
+  ./armithlon qrx68-gui-demo [IMAGE.ppm] opt-in Intuition+graphics offscreen demo
+  ./armithlon qrx68-test               verify Amiga HUNK, Exec/DOS ABI, host files and strict failure
+  ./armithlon workstation              boot one-click QRX workspace (native firmware; Mac GUI or CLI)
+  ./armithlon amigaos3 --kickstart ROM --system-dir FOLDER [--share DIR]  real AmigaOS3 guest in FS-UAE
+  ./armithlon gui                     boot QRX68100 firmware in a Cocoa desktop window (Mac)
+  ./armithlon build-qrx-app           build Finder-launchable QRX OS One .app (Mac)
+  ./armithlon boot                    boot usable QRX68100 68k firmware shell (offline)
+  ./armithlon boot --share DIR        mount a real host directory read-only as HOST:
+  ./armithlon boot --volatile-disk --share DIR  boot with no disk image at all
+  ./armithlon boot --share DIR --share-rw  explicitly opt in to guest writes
+  ./armithlon boot --ram auto         default: min(host/4, 3840 MiB); sparse reservation
+  ./armithlon boot --ram-mib 2048     manual guest 32-bit RAM size up to 3840 MiB
+  ./armithlon boot --script FILE      run commands through the actual 68k guest
+  ./armithlon boot-full               same shell with optional Musashi 68040 backend
+  ./armithlon boot-full --dual        two real Musashi guest CPU contexts (diagnostic, not OS SMP)
+  ./armithlon app-inspect PATH        recognize PE32/ELF32/QEX1/HUNK by binary header
+  ./armithlon app-launch PATH         launch PE32/i386 or Linux/i386 through built QRX86 runtime
+  ./armithlon qrxdesktop-patch       patch existing QRXDesktop source (does not replace GUI)
+  ./armithlon qrxdesktop-qrx68-patch guarded QRXMODE=QRX68 ToolType extension (needs AROS guest handler)
+  ./armithlon aros-native-status     machine-readable missing prerequisites for native AROS on QRX68100
+  ./armithlon hostfs-test            test real shared filesystem MMIO and safety
+  ./armithlon smp-ready-test         test affinity/shared ready queue (not AROS Exec SMP)
+  ./armithlon boot-rom                create reproducible 256-KB guest boot-RAM image
+  ./armithlon boot-test               boot and exercise shell + persistent disk offline
+  ./armithlon desktop                 start AROS GUI via FS-UAE (verified external files required)
+  ./armithlon vampire-test            68080-inspired L1/vector64/legacy tests (CPU mock)
+  ./armithlon vampire-bench [N]       native host SIMD API microbenchmark, not 68k MHz
+  ./armithlon dualcore-demo [dual]   2x 68040 demo (dual requires QRX mode; default 1 core)
+  ./armithlon dualcore-test          68040 SMP + cache tests (Musashi required)
+  ./armithlon dualcore-parallel-test  2 host workers fast 68k loops (stub-based portable check)
+  ./armithlon dualcore-parallel-bench [N]  real Musashi contexts + 2 native ARM64 JIT loops (Mac)
+  ./armithlon full68k-setup          fetch SHA-pinned open-source Musashi 68000–68040 CPU
+  ./armithlon full68k-build          compile full 680x0 backend with QRX bus and IRQ
+  ./armithlon full68k-test           run real 680x0 instruction, ROM, timer and IRQ tests
+  ./armithlon full68k-run [ARGS]    run QRX monitor on Musashi CPU (default 68040)
+  ./armithlon full68k-probe-rom ROM  diagnostic ROM probe ONLY (no AROS boot claim)
+  ./armithlon build-crossbench        compile matching native/ELF32/PE32 workload
+  ./armithlon benchmark-qrx86 [N]    compare actual PE32 and ELF32 QRX86 execution (median N runs)
+  ./armithlon bench-prboom [args...]  launch real guest Windows/Linux PrBoom tests (requires game files)
+  ./armithlon boot-qrx-compat        boot real AROS 68k with checked QRX 22.5.12 tools under FS-UAE
+  ./armithlon x11-input-test        check new bidirectional Linux/X11 input patch
+  ./armithlon doctor              inspect local tools
+  ./armithlon build               build experimental QRX68100 CPU/JIT with CMake
+  ./armithlon test                run CTest and QRX CPU boot-monitor smoke
+  ./armithlon demo                run chipset-less monitor with JIT enabled
+  ./armithlon run-native          START Metal/CoreAudio/Cocoa diagnostic window (macOS only)
+  ./armithlon build-app           build a Finder-launchable ARMITHLON-Native.app (macOS only)
+  ./armithlon run-app             open ARMITHLON-Native.app in Finder
+  ./armithlon gpu-test            dedicated 68k GPU mailbox + DMA test
+  ./armithlon glide-test          QRX3D 3dfx-style triangle/texture/depth/alpha tests
+  ./armithlon qrx86-gpu-test      native QRX86 Win32 DirectDraw surface -> Metal packet tests
+  ./armithlon build-qrx86-host    compile QRX86 22.5.12 PE interpreter with GPU + input hooks
+  ./armithlon build-qrx86-linux-host    NEW compile latest QRX i386+X11 host GPU bridge
+  ./armithlon run-linux-x11 PROGRAM [ARGS]  NEW run Linux i386 GUI -> macOS Metal
+  ./armithlon x11-bridge-test      X11 native GPU socket and patch checks
+  ./armithlon run-native-qrx86    start Metal window and receive QRX86 Win32 frames via Unix socket
+  ./armithlon run-qrx86 EXE ...  run PE through QRX86 host GDI/DirectDraw + interactive input
+  ./armithlon send-qrx86-demo    send animated synthetic Win32 surface to the Metal window
+  ./armithlon vulkan-test         Vulkan 0.8 transfer-only 2D clear/rect/image + GPU readback
+  ./armithlon vulkan3d-test       NEW Vulkan offscreen actual triangle graphics pipeline + depth/blend state
+  ./armithlon qrx86-gl-test       NEW OpenGL 1.x subset and Q86C command socket regression tests
+  ./armithlon benchmark [N]     QRX3D/GL/CPU + actual Metal/Vulkan GPU comparisons;
+                                  report in reports/latest (N=frames, default 60)
+  ./armithlon benchmark-quick   fast diagnostic, 10 measured frames
+  ./armithlon benchmark-all [N]  internal suite + glmark2/vkmark if installed, keep Geekbench manual
+  ./armithlon build-pe32-gl-benchmark    compile new real PE32 OpenGL guest benchmark (MinGW)
+  ./armithlon run-pe32-gl-benchmark [N]  send real guest OpenGL commands to Metal (Mac, server required)
+  ./armithlon benchmark-tools status                 list glmark2/vkmark/Geekbench state
+  ./armithlon benchmark-tools fetch [all|glmark2|vkmark]  opt-in upstream source checkout
+  ./armithlon benchmark-tools build [all|glmark2|vkmark]  build sources (Linux only)
+  ./armithlon benchmark-tools run [all|glmark2|vkmark]    native host GPU tests
+  ./armithlon benchmark-geekbench            launch installed Geekbench 7 GUI (Mac)
+  ./armithlon benchmark-import-geekbench [--cpu-single N --cpu-multi N --gpu-metal N --gpu-vulkan N --source "note or URL"]
+  ./armithlon vulkan-probe        dynamically open Vulkan loader and create a device (legacy probe)
+  ./armithlon glide-demo          run the native 68k demo with a colored 3D triangle
+  ./armithlon media-test          headless 68k media-MMIO demo and optional PPM dump
+  ./armithlon fetch               authenticated sparse checkout of pinned private QRX branch, prepare AROS ISO
+  ./armithlon run-aros            launch REAL m68k AROS LiveCD + AROS ROMs in FS-UAE (NOT QRX desktop)
+  ./armithlon preview-iso         create AROS LiveCD copy with QRX 22.5.11 tools attached (NOT full QRX)
+  ./armithlon run-preview         launch preview ISO in FS-UAE
+  ./armithlon run-qrx             launch a REAL QRX build supplied at data/images/QRX-OS-One.iso
+  ./armithlon status              show checked artifacts
+
+Important: QRX68100 with optional Musashi expands CPU ISA to 68040; AROS desktop still needs an Amiga-compatible machine.
+Full QRX ISO requires external v0.20 payload builder + verified Deadwood reference tar;
+see docs/QRX-RELEASE-BUILD.md. No bogus release ISO is generated.
+EOF
+}
+doctor(){
+  printf 'Platform: %s / %s\n' "$(uname -s)" "$(uname -m)"
+  for c in cmake clang ctest gh git xz unzip fs-uae xorriso python3 meson ninja glmark2 vkmark; do
+    if command -v "$c" >/dev/null 2>&1; then printf 'OK      %-12s %s\n' "$c" "$(command -v "$c")";
+    else printf 'MISSING %-12s\n' "$c"; fi
+  done
+  [[ -f "$ROM" ]] && echo 'AROS ROM: present' || echo 'AROS ROM: not fetched'
+  [[ -f "$BASE_ISO" ]] && echo 'AROS ISO: present' || echo 'AROS ISO: not fetched'
+  printf 'Engine: %s\n' "$ROOT/engine"
+  [[ "$(uname -s)" == Darwin ]] && printf 'Native Metal/CoreAudio backend: available for build\n' || printf 'Native Metal/CoreAudio backend: macOS only\n'
+}
+build(){
+  need cmake
+  cmake -S "$ROOT/engine" -B "$ROOT/build-qrx68100" -DCMAKE_BUILD_TYPE=RelWithDebInfo
+  cmake --build "$ROOT/build-qrx68100" --parallel
+  say 'QRX68100 engine built (restricted ARM64 dual-worker fast loop + partial CPU; NOT AROS-compatible).'
+}
+native_run(){
+  [[ "$(uname -s)" == Darwin ]] || die 'The Metal/Cocoa native window requires macOS. Linux has the headless MMIO tests.'
+  [[ -x "$ROOT/build-qrx68100/armithlon_native" ]] || build
+  exec "$ROOT/build-qrx68100/armithlon_native"
+}
+make_app(){
+  [[ "$(uname -s)" == Darwin ]] || die 'App bundles can only be built on macOS.'
+  build
+  local app="$ROOT/ARMITHLON-Native.app" dest="$ROOT/ARMITHLON-Native.app/Contents/MacOS"
+  mkdir -p "$dest"
+  cp "$ROOT/build-qrx68100/armithlon_native" "$dest/armithlon_native"
+  chmod +x "$dest/armithlon_native"
+  cat > "$app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>armithlon_native</string>
+<key>CFBundleIdentifier</key><string>org.qrxosone.armithlon.nativepreview</string>
+<key>CFBundleName</key><string>ARMITHLON Native</string>
+<key>CFBundleDisplayName</key><string>ARMITHLON 1.2 Native</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>1.2.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>12.0</string>
+<key>NSHighResolutionCapable</key><true/>
+</dict></plist>
+PLIST
+  if command -v codesign >/dev/null 2>&1; then codesign --force --sign - "$app" || die 'Local app signing failed'; fi
+  say "Finder application built: $app"
+}
+test_vm(){
+  [[ -x "$ROOT/build-qrx68100/qrx68100_vm" ]] || build
+  need ctest
+  ctest --test-dir "$ROOT/build-qrx68100" --output-on-failure
+  "$ROOT/build-qrx68100/qrx68100_vm" --jit
+  python3 "$ROOT/tools/test-patch-qrx86-x11.py"
+}
+fetch_assets(){
+  need git; need gh; need xz; need unzip
+  gh auth status >/dev/null 2>&1 || die 'Private repository: run gh auth login first.'
+  # gh auth setup-git configures git to use the already-authenticated gh account; no token bundled.
+  gh auth setup-git >/dev/null
+  mkdir -p "$DATA" "$DATA/images"
+  if [[ ! -d "$REPO_DIR/.git" ]]; then
+    say 'Creating sparse checkout of audited latest QRX branch cc2ba06a (source + AROS build artifacts).'
+    git clone --no-checkout --depth 1 --filter=blob:none --single-branch \
+      --branch "$QRX_BRANCH" "https://github.com/phoenixkonsole/qrxosone.git" "$REPO_DIR"
+    git -C "$REPO_DIR" sparse-checkout init --cone
+    git -C "$REPO_DIR" sparse-checkout set "$AROS_ASSETS" dist
+    git -C "$REPO_DIR" checkout "$QRX_BRANCH"
+  fi
+  local got
+  got="$(git -C "$REPO_DIR" rev-parse HEAD)"
+  [[ "$got" == "$PINNED_SHA" ]] || die "QRX branch differs from audited version: $got != $PINNED_SHA; no unsigned auto-update."
+  local a="$REPO_DIR/$AROS_ASSETS" d="$REPO_DIR/dist"
+  verify_file "$a/aros-amiga-m68k-5b5fd4c.iso.xz" "$EXPECTED_XZ"
+  verify_file "$a/aros-amiga-m68k-rom.bin" 21b58d6f28277df2609e6d9536d8a7150a4be628ea05de3b2c46a49847b7859b
+  verify_file "$a/aros-amiga-m68k-ext.bin" 76ed0506c7e3af39b09aa7266423b05a379edc64f9710201731f8b625909c7b7
+  verify_file "$a/bootdisk-amiga-m68k-3520.adf" f8bf71bc968f9774caefb9eae4aad078c2c304f2cb6bc459e1a569a665460e2a
+  verify_file "$d/QRX-OS-One-22.5.11-m68k-HUNK-binaries.zip" "$EXPECTED_HUNK"
+  verify_file "$d/QRX-OS-One-22.5.11-CUMULATIVE-SOURCE.zip" f10f4c699eba01e27c8e9eded4f1f0e47ff962a22254a7effb89b3b80434accf
+  if [[ ! -f "$BASE_ISO" ]]; then
+    say 'Decompressing verified AROS base LiveCD (not QRX release).'
+    xz -dc "$a/aros-amiga-m68k-5b5fd4c.iso.xz" > "$BASE_ISO.tmp"
+    mv "$BASE_ISO.tmp" "$BASE_ISO"
+  fi
+  verify_file "$BASE_ISO" "$EXPECTED_ISO"
+  say 'Source, ROM/ADF and base AROS ISO validated. The full QRX ISO is NOT in the repository.'
+}
+config_fsuae(){
+  local iso="$1" config="$DATA/config/armithlon.fs-uae"
+  mkdir -p "$DATA/config" "$DATA/home" "$DATA/work"
+  [[ -f "$ROM" && -f "$EXT" && -f "$ADF" && -f "$iso" ]] || die 'Missing ROM, floppy, or ISO; run fetch first.'
+  cat > "$config" <<CONF
+[fs-uae]
+amiga_model = A4000/040
+cpu = 68040
+kickstart_file = $ROM
+kickstart_ext_file = $EXT
+chip_memory = 2048
+motherboard_ram = 16384
+zorro_iii_memory = 262144
+graphics_card = uaegfx
+graphics_memory = 131072
+uae_gfxcard_size = 128
+floppy_drive_0 = $ADF
+floppy_drive_count = 1
+cdrom_drive_0 = $iso
+hard_drive_0 = $DATA/work
+hard_drive_0_label = QRXDATA
+hard_drive_0_priority = -128
+$( if [[ -n "${QRX68_BRIDGE_DIR:-}" ]]; then
+     [[ "$QRX68_BRIDGE_DIR" != *$'\n'* && "$QRX68_BRIDGE_DIR" != *$'\r'* ]] || die 'Invalid QRX68_BRIDGE_DIR newline'
+     printf 'hard_drive_1 = %s\nhard_drive_1_label = QRXBRIDGE\nhard_drive_1_priority = -128\n' "$QRX68_BRIDGE_DIR"
+   fi )
+$( if [[ -n "${QRX68_AROS_SYS_DIR:-}" ]]; then
+     [[ "$QRX68_AROS_SYS_DIR" != *$'\n'* && "$QRX68_AROS_SYS_DIR" != *$'\r'* ]] || die 'Invalid QRX68_AROS_SYS_DIR newline'
+     printf 'hard_drive_2 = %s\nhard_drive_2_label = AROSSYS\nhard_drive_2_priority = 6\n' "$QRX68_AROS_SYS_DIR"
+   fi )
+jit_compiler = 0
+sound_card = none
+warp_mode = 0
+automatic_input_grab = 0
+fullscreen = 0
+uae_mmu_model = 0
+base_dir = $DATA/home
+log_flush = 1
+CONF
+  printf '%s\n' "$config"
+}
+run_fsuae(){
+  local iso="$1" cfg
+  need fs-uae
+  cfg="$(config_fsuae "$iso")"
+  say 'Starting FS-UAE compatibility mode (AROS/68k; NO ARM64 JIT and NO chipsetless QRX68100).'
+  fs-uae "$cfg"
+}
+preview(){
+  [[ -f "$BASE_ISO" ]] || fetch_assets
+  need xorriso; need unzip
+  local archive="$REPO_DIR/dist/QRX-OS-One-22.5.11-m68k-HUNK-binaries.zip"
+  verify_file "$archive" "$EXPECTED_HUNK"
+  "$ROOT/tools/make-preview-iso.sh" "$BASE_ISO" "$archive" "$PREVIEW_ISO"
+}
+status(){
+  printf 'Pinned source: %s @ %s\n' "$QRX_BRANCH" "$PINNED_SHA"
+  for pair in "Engine:$ROOT/build-qrx68100/qrx68100_vm" "AROS base ISO:$BASE_ISO" "QRX tools preview ISO:$PREVIEW_ISO" "Actual QRX release ISO:$QRX_ISO"; do
+    label="${pair%%:*}"; file="${pair#*:}"
+    [[ -f "$file" ]] && printf 'PRESENT %s (%s bytes)\n' "$label" "$(wc -c < "$file" | tr -d ' ')" || printf 'ABSENT  %s\n' "$label"
+  done
+}
+# Keep user data outside the extracted source folder so upgrading does not wipe it.
+boot_disk_default(){
+  if [[ -n "${QRX_BOOT_DISK:-}" ]]; then printf '%s\n' "$QRX_BOOT_DISK"; return; fi
+  if [[ "$(uname -s)" == Darwin ]]; then
+    printf '%s\n' "${HOME}/Library/Application Support/QRX OS One/qrxfs-1.img"
+  else
+    printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/qrxosone/qrxfs-1.img"
+  fi
+}
+launch_boot(){
+  local exe="$1";shift
+  local disk
+  disk="$(boot_disk_default)"
+  mkdir -p "$(dirname "$disk")"
+  export QRX_BOOT_DISK="$disk"
+  if [[ ! -x "$exe" ]]; then
+    if [[ "$exe" == *boot_shell_full ]]; then "$ROOT/armithlon" full68k-build
+    else build; fi
+  fi
+  say "Starting CPU-executed QRX68100 firmware shell. Default persistent QRXFS: $disk"
+  exec "$exe" "$@"
+}
+case "${1:-help}" in
+  qrx68)
+    shift
+    [[ $# -ge 1 ]] || die 'Usage: ./armithlon qrx68 [--share DIR] [--share-rw] PROGRAM.HUNK'
+    if [[ -x "$ROOT/build-qrx68100-full/qrx68-musashi-run" ]]; then
+      exec "$ROOT/build-qrx68100-full/qrx68-musashi-run" "$@"
+    fi
+    [[ -x "$ROOT/build-qrx68100/qrx68-run" ]] || build
+    say 'QRX68 fallback: portable 68k subset. Run full68k-setup, full68k-build for complete Musashi 68040.'
+    exec "$ROOT/build-qrx68100/qrx68-run" "$@";;
+  qrx68-musashi)
+    shift
+    [[ -x "$ROOT/build-qrx68100-full/qrx68-musashi-run" ]] || "$ROOT/armithlon" full68k-build
+    exec "$ROOT/build-qrx68100-full/qrx68-musashi-run" "$@";;
+  qrx68-compat-scan)
+    shift
+    [[ $# -ge 1 ]] || die 'Usage: ./armithlon qrx68-compat-scan FOLDER [--out JSON]'
+    [[ -x "$ROOT/build-qrx68100/qrx68-run" ]] || build
+    folder="$1";shift
+    local_runtime="$ROOT/build-qrx68100/qrx68-run"
+    [[ ! -x "$ROOT/build-qrx68100-full/qrx68-musashi-run" ]] || local_runtime="$ROOT/build-qrx68100-full/qrx68-musashi-run"
+    exec python3 "$ROOT/tools/qrx68-compat-scan.py" "$folder" --runtime "$local_runtime" "$@";;
+  qrx68-gui-demo)
+    shift
+    [[ -x "$ROOT/build-qrx68100/qrx68-run" ]] || build
+    exe="$ROOT/build-qrx68100/qrx68-run"
+    [[ ! -x "$ROOT/build-qrx68100-full/qrx68-musashi-run" ]] || exe="$ROOT/build-qrx68100-full/qrx68-musashi-run"
+    target="${1:-$ROOT/qrx68-screen.ppm}"
+    extra=()
+    if [[ -n "${ARMITHLON_QRX86_SOCKET:-}" && -S "$ARMITHLON_QRX86_SOCKET" ]]; then
+      extra=(--gpu-socket "$ARMITHLON_QRX86_SOCKET")
+    fi
+    "$exe" --experimental-gui --snapshot "$target" "${extra[@]}" "$ROOT/data/qrx68/QRX68-GUI.hunk" || exit $?
+    say "QRX68 snapshot: $target";;
+  qrx68-demo)
+    [[ -x "$ROOT/build-qrx68100/qrx68-run" ]] || build
+    exec "$ROOT/build-qrx68100/qrx68-run" "$ROOT/data/qrx68/QRX68-Hello.hunk";;
+  qrx68-test)
+    [[ -x "$ROOT/build-qrx68100/qrx68_hle_tests" ]] || build
+    exec "$ROOT/build-qrx68100/qrx68_hle_tests";;
+  help|--help|-h) usage;;
+  amigaos3)
+    shift
+    need python3
+    exec python3 "$ROOT/tools/amigaos3-profile.py" "$@";;
+  workstation)
+    shift
+    mkdir -p "$HOME/QRX-Share"
+    if [[ "$(uname -s)" == Darwin ]]; then
+      export QRX_HOST_SHARE="$HOME/QRX-Share"
+      exec "$ROOT/armithlon" gui "$@"
+    else
+      exec "$ROOT/armithlon" boot --share "$HOME/QRX-Share" "$@"
+    fi;;
+  gui)
+    [[ "$(uname -s)" == Darwin ]] || die 'QRX firmware GUI is macOS-only (CLI: ./armithlon boot).'
+    [[ -x "$ROOT/build-qrx68100/qrx68100_desktop_qrx" ]] || build
+    exec "$ROOT/build-qrx68100/qrx68100_desktop_qrx";;
+  build-qrx-app)
+    [[ "$(uname -s)" == Darwin ]] || die 'AppKit .app build requires macOS.'
+    [[ -x "$ROOT/build-qrx68100/qrx68100_desktop_qrx" ]] || build
+    app="$ROOT/QRX OS One.app"; exe="$app/Contents/MacOS"
+    mkdir -p "$exe"
+    cp "$ROOT/build-qrx68100/qrx68100_desktop_qrx" "$exe/QRX OS One"
+    cat > "$app/Contents/Info.plist" <<'QRXPLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>QRX OS One</string>
+<key>CFBundleIdentifier</key><string>org.qrxosone.firmware</string>
+<key>CFBundleName</key><string>QRX OS One</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>2.2.0</string>
+<key>LSMinimumSystemVersion</key><string>12.0</string>
+<key>NSHighResolutionCapable</key><true/>
+</dict></plist>
+QRXPLIST
+    if command -v codesign >/dev/null 2>&1; then codesign --force --sign - "$app"; fi
+    say "Native firmware GUI app ready: $app";;
+  boot|boot-cli)
+    shift
+    launch_boot "$ROOT/build-qrx68100/qrx68100_boot_shell" "$@";;
+  boot-full)
+    shift
+    launch_boot "$ROOT/build-qrx68100-full/qrx68100_boot_shell_full" "$@";;
+  boot-rom)
+    [[ -x "$ROOT/build-qrx68100/qrx68100_boot_shell" ]] || build
+    mkdir -p "$DATA/boot"
+    exec "$ROOT/build-qrx68100/qrx68100_boot_shell" --rom "$DATA/boot/QRX68100-bootram-v1.8.bin";;
+  hostfs-test)
+    [[ -x "$ROOT/build-qrx68100/qrx_hostfs_tests" ]] || build
+    exec "$ROOT/build-qrx68100/qrx_hostfs_tests";;
+  smp-ready-test)
+    [[ -x "$ROOT/build-qrx68100/qrx_smp_ready_tests" ]] || build
+    exec "$ROOT/build-qrx68100/qrx_smp_ready_tests";;
+  boot-test)
+    [[ -x "$ROOT/build-qrx68100/qrx68100_boot_shell_tests" ]] || build
+    exec "$ROOT/build-qrx68100/qrx68100_boot_shell_tests";;
+  desktop)
+    [[ -f "$BASE_ISO" ]] || fetch_assets
+    run_fsuae "$BASE_ISO";;
+  doctor) doctor;;
+  build) build;;
+  test) test_vm;;
+  demo) [[ -x "$ROOT/build-qrx68100/qrx68100_vm" ]] || build; exec "$ROOT/build-qrx68100/qrx68100_vm" --jit;;
+  run-native) native_run;;
+  build-app) make_app;;
+  run-app) [[ -d "$ROOT/ARMITHLON-Native.app" ]] || make_app; exec open "$ROOT/ARMITHLON-Native.app";;
+  gpu-test) [[ -x "$ROOT/build-qrx68100/qrx_gpu_bridge_tests" ]] || build; exec "$ROOT/build-qrx68100/qrx_gpu_bridge_tests";;
+  glide-test) [[ -x "$ROOT/build-qrx68100/qrx_glide3d_tests" ]] || build; exec "$ROOT/build-qrx68100/qrx_glide3d_tests";;
+  qrx86-gpu-test) [[ -x "$ROOT/build-qrx68100/qrx_accel_tests" ]] || build; exec "$ROOT/build-qrx68100/qrx_accel_tests";;
+  x11-input-test)
+    python3 "$ROOT/tools/test-patch-qrx86-x11-input.py"
+    [[ -x "$ROOT/build-qrx68100/qrx86_input_tests" ]] || build
+    "$ROOT/build-qrx68100/qrx86_input_tests";;
+  vampire-test)
+    [[ -x "$ROOT/build-qrx68100/qrx68100_vampire_mock_tests" ]] || build
+    exec "$ROOT/build-qrx68100/qrx68100_vampire_mock_tests";;
+  vampire-bench)
+    shift
+    [[ -x "$ROOT/build-qrx68100/qrx68100_vampire_microbench" ]] || build
+    exec "$ROOT/build-qrx68100/qrx68100_vampire_microbench" "${1:-500000}";;
+  dualcore-demo)
+    shift
+    [[ -x "$ROOT/build-qrx68100-full/qrx68100_dual_demo" ]] || "$ROOT/armithlon" full68k-build
+    exec "$ROOT/build-qrx68100-full/qrx68100_dual_demo" "$@";;
+  dualcore-parallel-test)
+    [[ -x "$ROOT/build-qrx68100/qrx68100_parallel_fast_tests" ]] || build
+    exec "$ROOT/build-qrx68100/qrx68100_parallel_fast_tests";;
+  dualcore-parallel-bench)
+    shift
+    [[ -x "$ROOT/build-qrx68100-full/qrx68100_parallel_bench" ]] || "$ROOT/armithlon" full68k-build
+    exec "$ROOT/build-qrx68100-full/qrx68100_parallel_bench" "${1:-10000000}";;
+  dualcore-test)
+    [[ -x "$ROOT/build-qrx68100-full/qrx68100_dual_real_tests" ]] || "$ROOT/armithlon" full68k-build
+    exec "$ROOT/build-qrx68100-full/qrx68100_dual_real_tests";;
+  full68k-setup)
+    bash "$ROOT/tools/fetch-musashi.sh";;
+  full68k-build)
+    need cmake
+    [[ -s "$ROOT/engine/third_party/Musashi/m68kcpu.c" ]] || die 'Run ./armithlon full68k-setup first'
+    cmake -S "$ROOT/engine" -B "$ROOT/build-qrx68100-full" -DQRX_ENABLE_MUSASHI=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    cmake --build "$ROOT/build-qrx68100-full" --parallel 4
+    say 'Musashi CPU core built (68000/010/020/030/040). Native AROS boot still not supported.';;
+  full68k-test)
+    [[ -x "$ROOT/build-qrx68100-full/qrx68100_full_tests" ]] || "$ROOT/armithlon" full68k-build
+    ctest --test-dir "$ROOT/build-qrx68100-full" --output-on-failure
+    "$ROOT/build-qrx68100-full/qrx68100_full_tests";;
+  full68k-run)
+    shift
+    [[ -x "$ROOT/build-qrx68100-full/qrx68100_full_run" ]] || "$ROOT/armithlon" full68k-build
+    exec "$ROOT/build-qrx68100-full/qrx68100_full_run" "$@";;
+  full68k-probe-rom)
+    shift
+    [[ $# -ge 1 ]] || die 'Usage: ./armithlon full68k-probe-rom /path/to/aros-main.rom [--cpu 68040]'
+    rom_path="$1";shift
+    [[ -f "$rom_path" ]] || die "Cannot read ROM: $rom_path"
+    [[ -x "$ROOT/build-qrx68100-full/qrx68100_full_run" ]] || "$ROOT/armithlon" full68k-build
+    say 'CPU+ROM probe only; no Amiga chipset, drivers, GUI or validated QRX boot.'
+    exec "$ROOT/build-qrx68100-full/qrx68100_full_run" --rom "$rom_path" "$@";;
+  build-crossbench)
+    bash "$ROOT/tools/build-crossbench.sh";;
+  benchmark-qrx86)
+    shift; n="${1:-3}"
+    [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=10 )) || die 'Repeats must be 1..10'
+    bash "$ROOT/tools/build-crossbench.sh"
+    # Reuse the versioned freestanding Linux/i386 payload when macOS has no cross-compiler.
+    if [[ ! -f "$ROOT/build-benchmarks/qrx-cross-linux-i386.elf" ]]; then
+       cp "$ROOT/benchmarks/qrx86-cross/qrx-cross-linux-i386.elf" "$ROOT/build-benchmarks/qrx-cross-linux-i386.elf"
+    fi
+    python3 "$ROOT/tools/bench-qrx86-execution.py" --runs "$n";;
+  bench-prboom)
+    shift; exec python3 "$ROOT/tools/bench-qrx86-prboom.py" "$@";;
+  app-inspect)
+    shift
+    [[ $# -eq 1 ]] || die 'Usage: ./armithlon app-inspect PATH'
+    [[ -x "$ROOT/build-qrx68100/qrx-app" ]] || build
+    exec "$ROOT/build-qrx68100/qrx-app" inspect "$1";;
+  app-launch)
+    shift
+    [[ $# -eq 1 ]] || die 'Usage: ./armithlon app-launch PATH'
+    [[ -x "$ROOT/build-qrx68100/qrx-app" ]] || build
+    [[ -x "$ROOT/build-qrx86-host/qrx-win32" ]] && export QRX_HOST_WIN32="$ROOT/build-qrx86-host/qrx-win32"
+    [[ -x "$ROOT/build-qrx86-linux-host/qrx-i386" ]] && export QRX_HOST_LINUX="$ROOT/build-qrx86-linux-host/qrx-i386"
+    if [[ -x "$ROOT/build-qrx68100-full/qrx68-musashi-run" ]]; then
+      export QRX_HOST_68K="$ROOT/build-qrx68100-full/qrx68-musashi-run"
+    elif [[ -x "$ROOT/build-qrx68100/qrx68-run" ]]; then
+      export QRX_HOST_68K="$ROOT/build-qrx68100/qrx68-run"
+    fi
+    export ARMITHLON_QRX86_SOCKET="${ARMITHLON_QRX86_SOCKET:-${TMPDIR:-/tmp}/armithlon-qrx86-$(id -u).sock}"
+    exec "$ROOT/build-qrx68100/qrx-app" launch "$1";;
+  aros-native-status)
+    shift; exec python3 "$ROOT/tools/aros-native-boot-gate.py" --root "$ROOT" "$@";;
+  qrx68-service)
+    shift
+    runtime="${QRX68_RUNTIME:-$ROOT/build-qrx68100-full/qrx68-musashi-run}"
+    [[ -x "$runtime" ]] || die 'Full Musashi runtime not found. Use ./armithlon full68k-setup; ./armithlon full68k-build (or explicitly set QRX68_RUNTIME for development).'
+    bridge="${QRX68_BRIDGE_DIR:-$HOME/QRX68-Bridge}"
+    exec python3 "$ROOT/integration/qrx68-bridge/qrx68_service.py" \
+      --bridge "$bridge" --runner "$runtime" --interactive "$@";;
+  qrx68-compat-test)
+    [[ -x "$ROOT/build-qrx68100/qrx68_compat26_tests" ]] || build
+    exec "$ROOT/build-qrx68100/qrx68_compat26_tests";;
+  qrx68-live-test)
+    [[ -x "$ROOT/build-qrx68100/qrx68-run" ]] || build
+    exec python3 "$ROOT/tools/test-qrx68-live25.py" "$ROOT/build-qrx68100/qrx68-run";;
+  qrx68-aros-build)
+    shift
+    : "${QRX_AROS_CC:?Set QRX_AROS_CC to your real AROS/m68k cross compiler}"
+    "$ROOT/engine/guest/aros/qrx68/build-guest.sh" "$ROOT/data/qrx68/guest";;
+  qrx68-aros-install)
+    shift
+    [[ $# -eq 1 ]] || die 'Usage: ./armithlon qrx68-aros-install /path/to/extracted/AROS-SYS'
+    python3 "$ROOT/tools/install-qrx68-aros.py" \
+      "$ROOT/data/qrx68/guest/QRX68Run" "$1";;
+  qrx68-aros-start)
+    shift
+    [[ $# -le 1 ]] || die 'Usage: ./armithlon qrx68-aros-start [extracted AROS system directory]'
+    need fs-uae
+    bridge="${QRX68_BRIDGE_DIR:-$HOME/QRX68-Bridge}"
+    bridge="$(mkdir -p "$bridge" && cd "$bridge" && pwd -P)"
+    export QRX68_BRIDGE_DIR="$bridge"
+    if [[ $# -eq 1 ]]; then
+      [[ -d "$1/S" ]] || die 'AROS SYS_DIR must be an extracted directory with S/'
+      export QRX68_AROS_SYS_DIR="$(cd "$1" && pwd -P)"
+    fi
+    runtime="${QRX68_RUNTIME:-$ROOT/build-qrx68100-full/qrx68-musashi-run}"
+    [[ -x "$runtime" ]] || die 'Build Musashi runtime first (full68k-build) or set QRX68_RUNTIME explicitly.'
+    [[ -f "$BASE_ISO" ]] || fetch_assets
+    python3 "$ROOT/integration/qrx68-bridge/qrx68_service.py" --bridge "$bridge" --runner "$runtime" --interactive &
+    qrxd=$!
+    trap 'kill "$qrxd" 2>/dev/null || true' EXIT
+    run_fsuae "$BASE_ISO";;
+  qrxdesktop-qrx68-patch)
+    src="$REPO_DIR/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/base-v5.9/tools/qrx_desktop.canonical-6.6.20.c"
+    [[ -d "$REPO_DIR/.git" ]] || fetch_assets
+    [[ "$(git -C "$REPO_DIR" rev-parse HEAD)" == "$PINNED_SHA" ]] || die 'Unexpected QRX Git revision; desktop patch refused.'
+    git -C "$REPO_DIR" sparse-checkout add qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/base-v5.9/tools
+    [[ -f "$src" ]] || die 'Canonical QRXDesktop source missing.'
+    mkdir -p "$ROOT/data/qrxdesktop"
+    python3 "$ROOT/tools/patch-qrxdesktop-qrx68-24.py" "$src" "$ROOT/data/qrxdesktop/qrx_desktop-2.4.c"
+    say 'QRXDesktop QRXMODE=QRX68 / .qrx68 patch ready. Compile patched guest desktop and install QRX68Run before use.';;
+  qrxdesktop-patch)
+    need python3
+    src="$REPO_DIR/qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/base-v5.9/tools/qrx_desktop.canonical-6.6.20.c"
+    [[ -d "$REPO_DIR/.git" ]] || fetch_assets
+    [[ "$(git -C "$REPO_DIR" rev-parse HEAD)" == "$PINNED_SHA" ]] || die 'Unexpected QRX Git revision; desktop patch refused.'
+    git -C "$REPO_DIR" sparse-checkout add qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/base-v5.9/tools
+    [[ -f "$src" ]] || die 'Pinned QRXDesktop canonical source not available after sparse checkout.'
+    mkdir -p "$ROOT/data/qrxdesktop"
+    python3 "$ROOT/tools/patch-qrxdesktop-launch19.py" "$src" "$ROOT/data/qrxdesktop/qrx_desktop-1.9.c"
+    say 'Patched source ready for existing AROS/QRXDesktop SDK build. NOT a working standalone native QRX guest Workbench.';;
+  boot-qrx-compat)
+    need python3; need xorriso; need fs-uae
+    [[ -f "$BASE_ISO" ]] || fetch_assets
+    hunk="$REPO_DIR/dist/QRX-OS-One-22.5.12-m68k-HUNK-binaries.zip"
+    verify_file "$hunk" e0d79439711cfeb6b44ec43e5f50b60c94dedec6ba1b7ab9e77f54e4cf6eccaf
+    bootdir="$DATA/compat-boot-22.5.12"
+    if [[ ! -f "$bootdir/boot-manifest.json" ]]; then
+       python3 "$ROOT/tools/prepare-qrx-compat-boot.py" --iso "$BASE_ISO" --hunk-zip "$hunk" --out "$bootdir"
+    fi
+    system_root="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["system_root"])' "$bootdir/boot-manifest.json")"
+    python3 "$ROOT/tools/run-qrx-compat-boot.py" --system "$system_root" --rom "$ROM" --ext "$EXT" --out "$bootdir/result";;
+  x11-bridge-test)
+    [[ -x "$ROOT/build-qrx68100/qrx_x11_bridge_tests" ]] || build
+    "$ROOT/build-qrx68100/qrx_x11_bridge_tests"
+    python3 "$ROOT/tools/test-patch-qrx86-x11.py";;
+  build-qrx86-linux-host)
+    [[ -d "$REPO_DIR/.git" ]] || fetch_assets
+    git -C "$REPO_DIR" sparse-checkout add qrx-os-one
+    [[ -x "$ROOT/build-qrx68100/qrx68100_vm" ]] || build
+    bash "$ROOT/tools/build-qrx86-linux-host.sh" "$REPO_DIR";;
+  run-linux-x11)
+    shift
+    [[ $# -ge 1 ]] || die 'Usage: ./armithlon run-linux-x11 /path/to/linux-i386-ELF [ARGS...]'
+    [[ -x "$ROOT/build-qrx86-linux-host/qrx-i386" ]] || die 'Run ./armithlon build-qrx86-linux-host first.'
+    export ARMITHLON_QRX86_SOCKET="${ARMITHLON_QRX86_SOCKET:-${TMPDIR:-/tmp}/armithlon-qrx86-$(id -u).sock}"
+    [[ -S "$ARMITHLON_QRX86_SOCKET" ]] || die 'Start ./armithlon run-native-qrx86 in another Terminal first.'
+    exec "$ROOT/build-qrx86-linux-host/qrx-i386" -e DISPLAY=:0 "$@";;
+  build-qrx86-host)
+    [[ -d "$REPO_DIR/.git" ]] || fetch_assets
+    git -C "$REPO_DIR" sparse-checkout add qrx-os-one
+    [[ -x "$ROOT/build-qrx68100/qrx68100_vm" ]] || build
+    bash "$ROOT/tools/build-qrx86-host.sh" "$REPO_DIR";;
+  run-native-qrx86)
+    [[ "$(uname -s)" == Darwin ]] || die 'Metal GUI requires a Mac.'
+    export ARMITHLON_QRX86_SOCKET="${ARMITHLON_QRX86_SOCKET:-${TMPDIR:-/tmp}/armithlon-qrx86-$(id -u).sock}"
+    export ARMITHLON_QRX86_INPUT_SOCKET="${ARMITHLON_QRX86_INPUT_SOCKET:-${TMPDIR:-/tmp}/armithlon-qrx86-input-$(id -u).sock}"
+    native_run;;
+  send-qrx86-demo)
+    [[ -x "$ROOT/build-qrx68100/qrx86_frame_demo" ]] || build
+    export ARMITHLON_QRX86_SOCKET="${ARMITHLON_QRX86_SOCKET:-${TMPDIR:-/tmp}/armithlon-qrx86-$(id -u).sock}"
+    exec "$ROOT/build-qrx68100/qrx86_frame_demo" "$ARMITHLON_QRX86_SOCKET";;
+  run-qrx86)
+    shift
+    [[ $# -ge 1 ]] || die 'Usage: ./armithlon run-qrx86 [-s script] /path/to/EXE'
+    [[ -x "$ROOT/build-qrx86-host/qrx-win32" ]] || die 'Run ./armithlon build-qrx86-host first.'
+    export ARMITHLON_QRX86_SOCKET="${ARMITHLON_QRX86_SOCKET:-${TMPDIR:-/tmp}/armithlon-qrx86-$(id -u).sock}"
+    export ARMITHLON_QRX86_INPUT_SOCKET="${ARMITHLON_QRX86_INPUT_SOCKET:-${TMPDIR:-/tmp}/armithlon-qrx86-input-$(id -u).sock}"
+    exec "$ROOT/build-qrx86-host/qrx-win32" "$@";;
+  build-pe32-gl-benchmark)
+    bash "$ROOT/tools/build-pe32-opengl-benchmark.sh";;
+  run-pe32-gl-benchmark)
+    shift
+    n="${1:-20}"
+    [[ "$n" =~ ^[0-9]+$ ]] && ((n>=1 && n<=500)) || die 'Frames must be integer 1..500'
+    [[ -x "$ROOT/build-benchmarks/qrx-gl-pe32.exe" ]] || bash "$ROOT/tools/build-pe32-opengl-benchmark.sh"
+    [[ -x "$ROOT/build-qrx86-host/qrx-win32" ]] || die 'Compile QRX86 first: ./armithlon fetch && ./armithlon build-qrx86-host'
+    export ARMITHLON_QRX86_SOCKET="${ARMITHLON_QRX86_SOCKET:-${TMPDIR:-/tmp}/armithlon-qrx86-$(id -u).sock}"
+    [[ -S "$ARMITHLON_QRX86_SOCKET" ]] || die 'No active display socket; run ./armithlon run-native-qrx86 in another Terminal first'
+    say 'This benchmark measures PE32 guest command SUBMISSION only, NOT finished GPU FPS.'
+    exec "$ROOT/build-qrx86-host/qrx-win32" "$ROOT/build-benchmarks/qrx-gl-pe32.exe" "$n";;
+  benchmark-tools)
+    shift
+    need python3
+    exec python3 "$ROOT/tools/external-benchmarks.py" "${@:-status}";;
+  benchmark-geekbench)
+    need python3
+    exec python3 "$ROOT/tools/external-benchmarks.py" geekbench;;
+  benchmark-import-geekbench)
+    shift
+    need python3
+    exec python3 "$ROOT/tools/external-benchmarks.py" import-geekbench "$@";;
+  benchmark-all)
+    shift
+    n="${1:-60}"
+    [[ -x "$ROOT/build-qrx68100/qrx_bench_api" ]] || build
+    need python3
+    internal=0; external=0
+    python3 "$ROOT/tools/run-benchmarks.py" --frames "$n" --out "$ROOT/reports/latest" || internal=$?
+    python3 "$ROOT/tools/external-benchmarks.py" run all --out "$ROOT/reports/latest" || external=$?
+    say "Internal benchmark status=$internal; external benchmark status=$external"
+    say 'Geekbench 7 is licensed separately; launch with benchmark-geekbench and import actual results manually.'
+    [[ "$internal" -eq 0 && "$external" -eq 0 ]];;
+  benchmark|benchmark-quick)
+    cmd="$1"; shift
+    n="${1:-60}"; [[ "$cmd" == "benchmark-quick" ]] && n=10
+    [[ -x "$ROOT/build-qrx68100/qrx_bench_api" ]] || build
+    need python3
+    exec python3 "$ROOT/tools/run-benchmarks.py" --frames "$n" --out "$ROOT/reports/latest";;
+  vulkan3d-test)
+    [[ -f "$ROOT/build-qrx68100/CMakeCache.txt" ]] || build
+    if [[ ! -x "$ROOT/build-qrx68100/qrx_vulkan_3d" ]]; then
+      die 'Vulkan3D requires Vulkan SDK headers/loader AND glslangValidator; install SDK, then run ./armithlon build.'
+    fi
+    mkdir -p "$ROOT/data/vulkan"
+    "$ROOT/build-qrx68100/qrx_vulkan_3d" "$ROOT/data/vulkan/qrx-vulkan3d-0.9.ppm"
+    python3 "$ROOT/tools/check-vulkan3d-result.py" "$ROOT/data/vulkan/qrx-vulkan3d-0.9.ppm";;
+  qrx86-gl-test)
+    [[ -x "$ROOT/build-qrx68100/qrx86_command_ipc_tests" ]] || build
+    "$ROOT/build-qrx68100/qrx_gl_compat_tests"
+    "$ROOT/build-qrx68100/qrx86_command_ipc_tests"
+    python3 "$ROOT/tools/test-patch-qrx86-opengl.py";;
+  vulkan-test)
+    [[ -f "$ROOT/build-qrx68100/CMakeCache.txt" ]] || build
+    if [[ ! -x "$ROOT/build-qrx68100/qrx_vulkan_offscreen" ]]; then
+      echo 'No Vulkan SDK/header detected at CMake configure time; install Vulkan SDK and rebuild.' >&2
+      exit 2
+    fi
+    mkdir -p "$ROOT/data/vulkan"
+    "$ROOT/build-qrx68100/qrx_vulkan_offscreen" "$ROOT/data/vulkan/qrx-vulkan-0.8.ppm"
+    python3 "$ROOT/tools/check-vulkan-result.py" "$ROOT/data/vulkan/qrx-vulkan-0.8.ppm";;
+  vulkan-probe) [[ -x "$ROOT/build-qrx68100/qrx_vulkan_probe" ]] || build; exec "$ROOT/build-qrx68100/qrx_vulkan_probe";;
+  glide-demo) [[ -x "$ROOT/build-qrx68100/qrx68100_media_demo" ]] || build; exec "$ROOT/build-qrx68100/qrx68100_media_demo" --ppm "$ROOT/media-frame-3d.ppm";;
+  media-test) [[ -x "$ROOT/build-qrx68100/qrx68100_media_demo" ]] || build; "$ROOT/build-qrx68100/qrx68100_media_demo" --ppm "$ROOT/media-frame.ppm";;
+  fetch) fetch_assets;;
+  run-aros) [[ -f "$BASE_ISO" ]] || fetch_assets; run_fsuae "$BASE_ISO";;
+  preview-iso) preview;;
+  run-preview) [[ -f "$PREVIEW_ISO" ]] || preview; run_fsuae "$PREVIEW_ISO";;
+  run-qrx) [[ -f "$QRX_ISO" ]] || die "No verified QRX ISO at $QRX_ISO. See docs/QRX-RELEASE-BUILD.md"; run_fsuae "$QRX_ISO";;
+  status) status;;
+  *) usage; die "Unknown command '$1'";;
+esac

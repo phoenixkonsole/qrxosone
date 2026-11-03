@@ -16,6 +16,18 @@
 #include <stddef.h>
 #include <setjmp.h>
 
+#ifndef QRX_JIT_BACKEDGE_DISCOVERY
+#define QRX_JIT_BACKEDGE_DISCOVERY 0
+#endif
+
+#ifndef QRX_JIT_NATIVE_IMUL
+#define QRX_JIT_NATIVE_IMUL 0
+#endif
+
+#ifndef QRX_JIT_PAGE_CACHE
+#define QRX_JIT_PAGE_CACHE 0
+#endif
+
 #define X86_PAGE_SHIFT 12
 #define X86_PAGE_SIZE  4096u
 #define X86_PAGE_MASK  (X86_PAGE_SIZE - 1u)
@@ -46,6 +58,26 @@ enum x86_fault {
 };
 
 typedef struct x86cpu x86cpu;
+struct x86jit;
+typedef struct x86jit_stats {
+    uint64_t lookups, hits, misses, invalidations, evictions, compilations;
+    uint64_t native_blocks, native_instructions, fallback_instructions, code_bytes;
+    uint64_t live_code_bytes, peak_code_bytes;
+    uint64_t compile_ticks, native_ticks, interpreter_ticks,clock_invalid;
+    uint32_t profile,features,max_ops,code_cap;
+    int timing,cache_profile;
+#ifdef QRX_JIT_PROFILE_DEOPT
+    uint32_t deopts,zero_deopts;
+#endif
+} x86jit_stats;
+/* Opt-in experimental backend. OFF is the default. Profiles: 20/30/40/60,
+ * or 0 for AROS hardware detection. Returns 0 if unavailable; never executes
+ * generated code on a non-m68k host. Timing is optional (clock() overhead).
+ * High-frequency hit/lookup counters require QRX86_JIT_CACHE_PROFILE; zero with
+ * cache_profile==0 means unmeasured. Native/fallback instruction counts remain exact. */
+int x86_jit_enable(x86cpu *c, unsigned profile, int timing);
+void x86_jit_disable(x86cpu *c);
+void x86_jit_snapshot(const x86cpu *c, x86jit_stats *out);
 typedef int (*x86_int_fn)(x86cpu *c, int vector);      /* return 0 to fault */
 typedef int (*x86_hle_fn)(x86cpu *c, uint32_t index);  /* return 0 to fault */
 
@@ -72,6 +104,9 @@ struct x86cpu {
     x86page *dir[1024];
     /* direct-mapped translation cache (tag = page address | 1); flushed on every
      * map/unmap/protect so it never outlives a page */
+#if QRX_JIT_PAGE_CACHE
+    uint64_t memory_serial; /* All mapping/permission/TLB invalidations. */
+#endif
     uint32_t tlb_rtag[64], tlb_wtag[64];
     uint8_t *tlb_rptr[64], *tlb_wptr[64];
     /* instruction fetch window: host = f_base + (eip - f_lo) while eip - f_lo < f_lim
@@ -93,6 +128,13 @@ struct x86cpu {
     int depth;                           /* nested guest calls */
     uint32_t cur_eip;                    /* eip of the instruction being executed */
     jmp_buf *jb;
+    struct x86jit *jit;                 /* owned; NEVER share in a CPU clone */
+#ifdef QRX_EXEC_PROFILE
+    /* Diagnostic build only: dispatcher counts; native block interiors excluded. */
+    uint32_t prof_ops[512], prof_pc[4096], prof_pc_hits[4096];
+    uint32_t prof_sample_left, prof_pc_collisions;
+    uint32_t prof_active_op,prof_operands[512][16];
+#endif
 };
 
 /* --- setup / memory --- */

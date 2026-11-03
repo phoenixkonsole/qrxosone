@@ -1,0 +1,2 @@
+/usr/bin/ar qc libqrx_app_router.a CMakeFiles/qrx_app_router.dir/launcher/qrx_app.c.o
+/usr/bin/ranlib libqrx_app_router.a

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libqrx_full_bus_mock.a CMakeFiles/qrx_full_bus_mock.dir/full68k/qrx68100_full.c.o CMakeFiles/qrx_full_bus_mock.dir/full68k/qrx68100_dual.c.o CMakeFiles/qrx_full_bus_mock.dir/full68k/qrx68100_parallel.c.o CMakeFiles/qrx_full_bus_mock.dir/full68k/qrx68100_vampire.c.o CMakeFiles/qrx_full_bus_mock.dir/tests/musashi_stub/m68k_stub.c.o
+/usr/bin/ranlib libqrx_full_bus_mock.a

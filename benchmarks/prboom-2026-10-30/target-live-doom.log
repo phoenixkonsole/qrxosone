@@ -1,0 +1,33 @@
+qrx-win32: AROS backend: screen 640x480, pen-mapped WriteChunkyPixels output
+qrx-win32: import msvcrt.dll!islower is not implemented (fails only if called)
+qrx-win32: import msvcrt.dll!isupper is not implemented (fails only if called)
+qrx-win32: import msvcrt.dll!ldexp is not implemented (fails only if called)
+qrx-win32: import USER32.dll!MapVirtualKeyExA is not implemented (fails only if called)
+qrx-win32: fopen(C:\/prboom-plus.cfg, r) -> AROS:DOOM/prboom-plus.cfg: failed
+qrx-win32: DirectDrawCreate -> 100081c0
+qrx-win32: DirectDraw: cooperative level 00000008 window 00000000
+qrx-win32: DirectDraw: primary 640x480x16
+qrx-win32: DirectDrawCreate -> 10012b60
+qrx-win32: fopen(C:\freedoom1.wad, rb) -> AROS:DOOM/freedoom1.wad
+qrx-win32: fopen(C:\/tranmap.dat, rb) -> AROS:DOOM/tranmap.dat
+qrx-win32: DirectDraw: cooperative level 00000013 window 00010004
+qrx-win32: AROS backend: window 00010004 opened at 0,0 inner 1024x768 (+0 menu bar)
+qrx-win32: DirectDraw: display mode 320x200x8
+qrx-win32: AROS backend: window 00010004 opened at 0,0 inner 320x200 (+0 menu bar)
+qrx-win32: AROS backend: reopening window 00010004 (own screen)
+qrx-win32: AROS backend: old window closed
+qrx-win32: AROS backend: looking for a 320x200x8 display mode
+qrx-win32: AROS backend: mode 10001100, opening screen
+qrx-win32: AROS backend: screen open, opening backdrop window
+qrx-win32: AROS backend: own screen 320x200x8 (mode 10001100, CLUT) for window 00010004
+qrx-win32: DirectDraw: primary 320x200x8 + back buffer
+qrx-win32: AROS backend: screen buffer 0 at 80073ca0, 320 bytes per row
+qrx-win32: AROS backend: screen buffer 1 at 800a6740, 320 bytes per row
+qrx-win32: DirectDraw: RTG direct, 2 display buffer(s) 320x200 pitch 320 mapped at 30000000
+qrx-win32: GetProcAddress(msvcrt, ___lc_codepage_func): not implemented
+qrx-win32: GetProcAddress(msvcrt, __lc_codepage): not implemented
+qrx-win32: AROS backend: display buffer captured after 30 frames -> QRXOUT:doom-screen.ppm
+qrx-win32: program stopped: instruction budget exhausted at eip=0049a96e addr=0049a970 bytes=39ca7f068d510189 (instruction budget exhausted) eax=00000060 ebx=002ffa80 ecx=ffffffff edx=00000049 esi=00000000 edi=102fbb4c ebp=10045cf0 esp=002ffa00
+qrx-win32: 150000000 guest instructions in 358112 ms (418863 per second), 43 DirectDraw frames, 435 HLE imports
+qrx-win32: DirectDraw: RTG direct buffers released
+qrx-win32: AROS backend: RTG display buffers unlocked

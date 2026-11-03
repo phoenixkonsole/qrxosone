@@ -1,0 +1,4 @@
+PASS: sidecar base-v5.9/tools/qrx_desktop.canonical-6.6.20.c
+PASS: sidecar x86-runtime-22.5.12/win32/apps/prebuilt/qrxclock.exe
+SKIP: gcc -m32 not available (differential tests)
+22.5.12 VALIDATION: PASS (host checks; m68k evidence in test-evidence-22.5.12/)

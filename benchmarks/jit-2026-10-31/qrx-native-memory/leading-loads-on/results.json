@@ -1,0 +1,29 @@
+{
+  "inputs": {
+    "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+    "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+    "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+    "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+  },
+  "runs": [
+    {
+      "game_config": "render_wipescreen 0\n",
+      "fsuae_jit": "on",
+      "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+      "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+      "jit": "experimental",
+      "runtime": "/workspace/qrx-fsuae-jit/optimization-32/leading-loads/hunk/qrx-win32",
+      "runtime_sha256": "b460130f6af8a0f62960d0a5e9c4465513651c61197fa852f47fc538180774f3",
+      "repeat": 0,
+      "cpu": "68060",
+      "backend": "AROS RTG",
+      "instructions": 100000000,
+      "frames": 32,
+      "backend_ms": 18017,
+      "wall_seconds": 18.447970212000655,
+      "wall_fps": 1.7346081781497873,
+      "capture_frame": 10,
+      "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+M_LoadDefaults: Load system defaults.
+ default file: qrx-benchmark.cfg
+ found C:\prboom-plus.wad
+
+PrBoom-Plus v2.5.1.4 (http://prboom-plus.sourceforge.net/)
+ found C:\freedoom1.wad
+IWAD found: C:\freedoom1.wad
+PrBoom-Plus (built Oct 30 2026 19:04:33), playing: The Ultimate DOOM
+PrBoom-Plus is released under the GNU General Public license v2.0.
+You are welcome to redistribute it under certain conditions.
+It comes with ABSOLUTELY NO WARRANTY. See the file COPYING for details.
+V_Init: allocate screens.
+V_InitMode: using 8 bit video mode
+I_CalculateRes: trying to optimize screen pitch
+ test case for pitch=320 is processed 1887 times for 100 msec
+ test case for pitch=352 is processed 2060 times for 100 msec
+ optimized screen pitch is 352
+I_InitScreenResolution: Using resolution 320x200
+ found C:\prboom-plus.wad
+Playing demo demo1.lmp
+D_InitNetGame: Checking for network game.
+W_Init: Init WADfiles.
+ adding C:\freedoom1.wad
+ adding C:\prboom-plus.wad
+W_InitCache
+
+Loading DEH lump from C:\freedoom1.wad
+M_Init: Init miscellaneous info.
+R_Init: Init DOOM refresh daemon - 
+R_LoadTrigTables: Endianness...ok.
+R_InitData: Textures Flats Sprites 
+R_Init: R_InitPlanes R_InitLightTables R_InitSkyMap R_InitTranslationsTables R_InitPatches 
+P_Init: Init Playloop state.
+I_Init: Setting up machine state.
+S_Init: Setting up sound.
+HU_Init: Setting up heads up display.
+I_InitGraphics: 320x200
+I_UpdateVideoMode: 0xe0000000, own buffer, lock-and-copy
+SetRatio: width/height parameters 320x200
+SetRatio: storage aspect ratio 8:5
+SetRatio: recognized VGA mode with pixel aspect ratio 5:6
+SetRatio: display aspect ratio 4:3
+SetRatio: gl_ratio 1.600000
+SetRatio: multiplier 1/1
+ST_Init: Init status bar.
+G_DoPlayDemo: playing demo with Ultimate Doom/Doom95 compatibility
+P_GetNodesVersion: using normal BSP nodes

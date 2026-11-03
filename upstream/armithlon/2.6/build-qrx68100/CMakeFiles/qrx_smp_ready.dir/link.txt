@@ -1,0 +1,2 @@
+/usr/bin/ar qc libqrx_smp_ready.a CMakeFiles/qrx_smp_ready.dir/bsp/qrx_smp_ready.c.o
+/usr/bin/ranlib libqrx_smp_ready.a

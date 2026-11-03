@@ -1,0 +1,53 @@
+diff --git a/src/expansion.cpp b/src/expansion.cpp
+index 5e739a6..7a841db 100644
+--- a/src/expansion.cpp
++++ b/src/expansion.cpp
+@@ -1004,13 +1004,30 @@ DECLARE_MEMORY_FUNCTIONS(filesys);
+ addrbank filesys_bank = {
+ 	filesys_lget, filesys_wget, filesys_bget,
+ 	filesys_lput, filesys_wput, filesys_bput,
+-	default_xlate, default_check, NULL, _T("filesys"), _T("Filesystem autoconfig"),
+-	dummy_lgeti, dummy_wgeti,
++	filesys_xlate, filesys_check, NULL, _T("filesys"), _T("Filesystem autoconfig"),
++	filesys_lget, filesys_wget,
+ 	ABFLAG_IO | ABFLAG_SAFE | ABFLAG_PPCIOSPACE, S_READ, S_WRITE
+ };
+ 
+ static uae_u32 filesys_start; /* Determined by the OS */
+ 
++/* AROS executes the board's diagnostic ROM directly. The JIT needs a
++ * translation for that initialized ROM, while writes must keep using the
++ * existing I/O callbacks. Do not expose uninitialized bank space. */
++static int REGPARAM2 filesys_check (uaecptr addr, uae_u32 size)
++{
++    addr = (addr - (filesys_start & 65535)) & 65535;
++    return filesys_bank.baseaddr && addr < 0x3000 && size <= 0x3000 - addr;
++}
++
++static uae_u8 *REGPARAM2 filesys_xlate (uaecptr addr)
++{
++    if (!filesys_check (addr, 1))
++        return default_xlate (addr);
++    addr = (addr - (filesys_start & 65535)) & 65535;
++    return filesys_bank.baseaddr + addr;
++}
++
+ static uae_u32 REGPARAM2 filesys_lget (uaecptr addr)
+ {
+ 	uae_u8 *m;
+diff --git a/src/od-fs/mman.cpp b/src/od-fs/mman.cpp
+index 9353682..d50cb5b 100644
+--- a/src/od-fs/mman.cpp
++++ b/src/od-fs/mman.cpp
+@@ -87,7 +87,10 @@ static void *VirtualAlloc(void *lpAddress, size_t dwSize, int flAllocationType,
+ 
+ 	if (flAllocationType == MEM_COMMIT && lpAddress == NULL) {
+ 		write_log("NATMEM: Allocated non-reserved memory size %zu\n", dwSize);
+-		void *memory = uae_vm_alloc(dwSize, 0, UAE_VM_READ_WRITE);
++		/* JIT address registers carry 32-bit host pointers, including
++         * translated expansion ROM addresses outside the NATMEM reservation. */
++        int flags = currprefs.cachesize ? UAE_VM_32BIT : 0;
++        void *memory = uae_vm_alloc(dwSize, flags, UAE_VM_READ_WRITE);
+ 		if (memory == NULL) {
+ 			write_log("memory allocated failed errno %d\n", errno);
+ 		}

@@ -1,0 +1,526 @@
+[
+  {
+    "trial": "leading-loads-on",
+    "diagnostic_only": false,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/leading-loads/hunk/qrx-win32",
+          "runtime_sha256": "b460130f6af8a0f62960d0a5e9c4465513651c61197fa852f47fc538180774f3",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 32,
+          "backend_ms": 18017,
+          "wall_seconds": 18.447970212000655,
+          "wall_fps": 1.7346081781497873,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "leading-loads-enabled",
+    "diagnostic_only": false,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "guest_env": [
+            "QRX86_JIT_LOADS=1"
+          ],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/leading-loads/hunk/qrx-win32",
+          "runtime_sha256": "b460130f6af8a0f62960d0a5e9c4465513651c61197fa852f47fc538180774f3",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 32,
+          "backend_ms": 23544,
+          "wall_seconds": 24.04783886599762,
+          "wall_fps": 1.3306809056029696,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "native-memory-on",
+    "diagnostic_only": false,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "guest_env": [],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/native-memory/hunk/qrx-win32",
+          "runtime_sha256": "2acdfd907e35fa09fcdfbe3ca51dcc8b62d3a7f14b68cb4020b6745519e4cebd",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 31,
+          "backend_ms": 33058,
+          "wall_seconds": 33.58188018200599,
+          "wall_fps": 0.9231168663573094,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "native-memory-min8-hot64",
+    "diagnostic_only": false,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "guest_env": [
+            "QRX86_JIT_MIN_OPS=8",
+            "QRX86_JIT_THRESHOLD=64"
+          ],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/native-memory/hunk/qrx-win32",
+          "runtime_sha256": "2acdfd907e35fa09fcdfbe3ca51dcc8b62d3a7f14b68cb4020b6745519e4cebd",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 32,
+          "backend_ms": 16677,
+          "wall_seconds": 16.86323874699883,
+          "wall_fps": 1.8976188667016929,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "native-keep-on",
+    "diagnostic_only": false,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "guest_env": [],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/native-keep/hunk/qrx-win32",
+          "runtime_sha256": "dbe4791ebdabd20fdd74066128f19ffdea8ca50bf4686d1431acd9385158e28a",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 31,
+          "backend_ms": 18857,
+          "wall_seconds": 19.3253404759962,
+          "wall_fps": 1.6041114534827872,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "keep-only-on",
+    "diagnostic_only": false,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "guest_env": [],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/keep-only/hunk/qrx-win32",
+          "runtime_sha256": "8fd30c7aedf527b23960b7b76a3c0480c42f83fb84e93bb32e7dfa7831e1fd0c",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 32,
+          "backend_ms": 16646,
+          "wall_seconds": 17.132001403995673,
+          "wall_fps": 1.8678494850307847,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "write-continue-on",
+    "diagnostic_only": false,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "guest_env": [],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/write-continue/hunk/qrx-win32",
+          "runtime_sha256": "d98b42d44931561569365c6243e0d2f9c9e5fc9d58029c10d4b88a01cada15c6",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 31,
+          "backend_ms": 22679,
+          "wall_seconds": 23.236487528003636,
+          "wall_fps": 1.3341086927462726,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "liveness-on",
+    "diagnostic_only": false,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "guest_env": [],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/liveness/hunk/qrx-win32",
+          "runtime_sha256": "48850b8641cc0eca3883d05c0750d8376e15629c2a1bf2ea65b42c27f84ee05a",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 31,
+          "backend_ms": 21041,
+          "wall_seconds": 21.54666298200027,
+          "wall_fps": 1.438737869798998,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "memory-cmp-on",
+    "diagnostic_only": false,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "jit_features": 63,
+          "guest_env": [],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/memory-cmp/hunk/qrx-win32",
+          "runtime_sha256": "9ec5dcb107796d8b31080304dd6336b5a1a73033388430f6286312f161618080",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 31,
+          "backend_ms": 22499,
+          "wall_seconds": 23.074340724997455,
+          "wall_fps": 1.3434836717313585,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "carry-chain-on",
+    "diagnostic_only": false,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "jit_features": 831,
+          "guest_env": [],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/carry-chain/hunk/qrx-win32",
+          "runtime_sha256": "c50d41b63e5bc65f7496dc5961197949eaa19ec2259ccb655148d2b9cbcd09a0",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 31,
+          "backend_ms": 22869,
+          "wall_seconds": 23.461578255009954,
+          "wall_fps": 1.3213092343171884,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "loop-batch-on",
+    "diagnostic_only": false,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "jit_features": 1855,
+          "guest_env": [],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/loop-batch/hunk/qrx-win32",
+          "runtime_sha256": "e45cc329352be02e7ba4da868ec054037bb1184e4d3ea5924bd7d219b539563c",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 31,
+          "backend_ms": 23213,
+          "wall_seconds": 23.835407913997187,
+          "wall_fps": 1.3005860907375306,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "page-cache-on",
+    "diagnostic_only": false,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "jit_features": 3903,
+          "guest_env": [],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/page-cache/hunk/qrx-win32",
+          "runtime_sha256": "cdfb0f8bb60a99512794e7e0d4279f07d4ba25cdd7a3b356223df301634117ee",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 31,
+          "backend_ms": 25577,
+          "wall_seconds": 26.19422596100776,
+          "wall_fps": 1.1834669230595334,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "page-cache-min8-hot64",
+    "diagnostic_only": false,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "jit_features": 3903,
+          "guest_env": [
+            "QRX86_JIT_MIN_OPS=8",
+            "QRX86_JIT_THRESHOLD=64"
+          ],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/page-cache/hunk/qrx-win32",
+          "runtime_sha256": "cdfb0f8bb60a99512794e7e0d4279f07d4ba25cdd7a3b356223df301634117ee",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 32,
+          "backend_ms": 15810,
+          "wall_seconds": 16.164340231000097,
+          "wall_fps": 1.9796663236913408,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "deopt-profile-on",
+    "diagnostic_only": true,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "guest_env": [
+            "QRX86_JIT_CACHE_PROFILE=1"
+          ],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "experimental",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/deopt-profile/hunk/qrx-win32",
+          "runtime_sha256": "030a7a900126efa6d9ec567aab86bf479bf1ab9820da745dc2c9f3d15bf122ae",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 31,
+          "backend_ms": 22059,
+          "wall_seconds": 22.601606513999286,
+          "wall_fps": 1.3715839173113116,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  },
+  {
+    "trial": "operand-profile-off",
+    "diagnostic_only": true,
+    "results": {
+      "inputs": {
+        "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+        "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+        "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+        "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+      },
+      "runs": [
+        {
+          "guest_env": [],
+          "game_config": "render_wipescreen 0\n",
+          "fsuae_jit": "on",
+          "fsuae_binary": "/workspace/qrx-fsuae-jit/install/bin/fs-uae",
+          "fsuae_sha256": "468b2bc4c871120615f6c19bba13ea0b5c83672e64839d9daa5c7030af52acc3",
+          "jit": "off",
+          "runtime": "/workspace/qrx-fsuae-jit/optimization-32/operand-profile/hunk/qrx-win32",
+          "runtime_sha256": "f6f361401b9f7c85a1a4698f203303f342ee83342ddd4c579b570396f12df565",
+          "repeat": 0,
+          "cpu": "68060",
+          "backend": "AROS RTG",
+          "instructions": 100000000,
+          "frames": 32,
+          "backend_ms": 21066,
+          "wall_seconds": 21.388751464008237,
+          "wall_fps": 1.4961135087219917,
+          "capture_frame": 10,
+          "frame_sha256": "6cea8144e940b8f60ce5a2340f9d1459047c9f3230260b6890587c15e48520e1"
+        }
+      ]
+    }
+  }
+]

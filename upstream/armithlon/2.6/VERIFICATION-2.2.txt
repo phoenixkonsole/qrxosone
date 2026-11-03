@@ -1,0 +1,22 @@
+ARMITHLON 2.2 verification — November 1, 2026
+Host: Linux x86_64, not macOS M1 or actual Amiga hardware.
+
+Build: CMake Debug, portable QRX68100/QRX68 runtime built, success.
+42/42 CTest tests: PASSED.
+42/42 CTest tests with -fsanitize=address,undefined: PASSED.
+New QRX68 tested:
+ - REAL HUNK program executes 68k MOVEA/JSR/RTS instructions.
+ - Exec OpenLibrary and DOS Output/Write/Read/PutStr ABI intercept work.
+ - Isolation, version request, failure on unknown LVO, Exec AllocVec/FreeVec.
+ - Direct HOST: file read with explicit read-only shared directory.
+ - qrx-app HUNK routing into QRX68 via QRX_HOST_68K.
+ - Bounded HUNK scanner handles malformed/non-HUNK/symlink safely.
+ - HUNK_RELOC32SHORT, transaction safety verified.
+
+NOT RUN / NOT QUALIFIED:
+ - macOS Apple Silicon execution or Metal rendering.
+ - Full Musashi-backed QRX68 integration (third-party source absent).
+ - Full AmigaOS 3.x, AROS Exec process, Intuition, graphics, WBStartup.
+ - Native QRX68100 AROS boot/QRXDesktop, Amiga chipset, games, PPC.
+
+Do not interpret CTest success as wide AmigaOS application compatibility.

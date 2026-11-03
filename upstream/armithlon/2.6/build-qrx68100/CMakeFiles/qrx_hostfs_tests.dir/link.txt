@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -Wl,--dependency-file=CMakeFiles/qrx_hostfs_tests.dir/link.d CMakeFiles/qrx_hostfs_tests.dir/tests/hostfs_tests.c.o -o qrx_hostfs_tests  libqrx68100_core.a -lm

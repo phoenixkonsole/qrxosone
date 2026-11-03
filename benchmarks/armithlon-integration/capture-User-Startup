@@ -1,0 +1,7 @@
+FailAt 1000
+Run >NIL: Execute SYS:S/X11ClientTest
+Wait 10 SECS
+C:QRXScreenGrab QRXOUT:x11-screen.ppm >QRXOUT:screen.log
+Echo "grab rc=$RC" >QRXOUT:screen.rc
+Wait 15 SECS
+Echo "done" >QRXOUT:DONE

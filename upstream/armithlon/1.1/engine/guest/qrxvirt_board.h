@@ -1,0 +1,18 @@
+#ifndef QRXVIRT_GUEST_BOARD_H
+#define QRXVIRT_GUEST_BOARD_H
+/* For future 68k guest BSP code ONLY: do not include in native macOS programs. */
+#define QRXVIRT_MMIO_BASE      0x00FF0000UL
+#define QRXVIRT_REG_MAGIC      0x00UL
+#define QRXVIRT_REG_VERSION    0x04UL
+#define QRXVIRT_REG_FEATURES   0x08UL
+#define QRXVIRT_REG_CONSOLE    0x0CUL
+#define QRXVIRT_REG_TICKS      0x10UL
+#define QRXVIRT_REG_ONLINE_CPU 0x14UL
+#define QRXVIRT_REG_TOTAL_CPU  0x18UL
+#define QRXVIRT_REG_SHUTDOWN   0x1CUL
+#define QRXVIRT_MAGIC          0x51525831UL
+#define QRXVIRT_VERSION        0x00010000UL
+#define QRXVIRT_FEAT_UART      1UL
+#define QRXVIRT_FEAT_TIMER     2UL
+#define QRXVIRT_FEAT_SHUTDOWN  4UL
+#endif

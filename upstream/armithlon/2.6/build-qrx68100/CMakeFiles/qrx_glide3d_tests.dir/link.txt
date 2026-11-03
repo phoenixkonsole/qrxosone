@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -Wl,--dependency-file=CMakeFiles/qrx_glide3d_tests.dir/link.d CMakeFiles/qrx_glide3d_tests.dir/tests/glide3d_tests.c.o -o qrx_glide3d_tests  libqrx68100_core.a -lm

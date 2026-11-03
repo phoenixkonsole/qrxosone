@@ -1,0 +1,10 @@
+ARMITHLON 1.9 release verification (2026-11-01)
+Linux/x86-64 source CMake Debug: 29/29 CTests PASS
+Linux/x86-64 AddressSanitizer+UndefinedBehaviorSanitizer Debug: 29/29 PASS (ASAN_OPTIONS=detect_leaks=0)
+Real 68k restricted firmware: booted and ran HELLO.QEX with separate 8192-byte raw disk mounted.
+Rawmapped 512-byte disk device: WRITE sector, READ, mount readonly and persistent across process restart; PASS.
+Existing QRXDesktop source: reviewed GitHub canonical 6.6.20, pinned SHA256 for guarded transformation; fixture/idempotence test PASS.
+Strict executable PE32/ELF32/QEX/HUNK classifier: C unit tests PASS. No actual QRX86 PE/ELF guest app executed this release.
+Musashi real source NOT available to execute in this cloud session. Optional tests and firmware trampoline compile only with real Musashi installed on user's machine.
+Native QRX68100 AROS/AmigaOS3 GUI boot NOT ACHIEVED. FS-UAE is separate known existing compatibility boot path.
+No Apple M1 GPU or QRXDesktop AROS SDK build executed in this session.

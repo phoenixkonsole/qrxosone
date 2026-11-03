@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "../core/qrx_bigstack.h"
 #include "qrxwin.h"
 
@@ -41,24 +42,80 @@ static int real_main(int argc, char **argv)
         i++;
     }
     if (i >= argc) { usage(); return 2; }
+    if(getenv("QRX_WIN_FRAME_MARKERS")){
+        const char *first=getenv("QRX_WIN_FRAME_START"),*last=getenv("QRX_WIN_FRAME_END");
+        char *aend,*bend;unsigned long a,b;
+        if(!first||!last){fprintf(stderr,"frame markers require start/end frame numbers\n");return 2;}
+        a=strtoul(first,&aend,10);b=strtoul(last,&bend,10);
+        if(*aend||*bend||!a||a>=b||b>0x7fffffffu){fprintf(stderr,"invalid frame marker interval\n");return 2;}
+        w->bench_frame_start=(unsigned)a;w->bench_frame_end=(unsigned)b;
+        snprintf(w->bench_marker_dir,sizeof w->bench_marker_dir,"%s",getenv("QRX_WIN_FRAME_MARKERS"));
+    }
+
 #ifdef __AROS__
     w->be = script ? &qw_headless : &qw_aros;
 #else
     w->be = &qw_headless;
 #endif
+    if (getenv("QRX86_JIT") && strcmp(getenv("QRX86_JIT"), "off") &&
+        strcmp(getenv("QRX86_JIT"), "experimental")) {
+        fprintf(stderr,"qrx-win32: QRX86_JIT must be off or experimental\n");return 2;
+    }
     if (script && !headless_set_script(w, script)) { fprintf(stderr, "qrx-win32: cannot open script %s\n", script); return 2; }
     if (!w->be->init(w)) { fprintf(stderr, "qrx-win32: backend %s unavailable\n", w->be->name); return 20; }
     if (!qw_load(w, argv[i], argc - i, argv + i)) return 127;
     if (getenv("QRX_WIN_BUDGET")) w->cpu.budget = strtoull(getenv("QRX_WIN_BUDGET"), NULL, 0);   /* profiling: stop after N instructions */
+    if (getenv("QRX86_JIT") && strcmp(getenv("QRX86_JIT"), "off")) {
+        unsigned profile = 0;
+        const char *p = getenv("QRX86_JIT_CPU");
+        if (p && strcmp(p,"auto")) {
+            char *end; unsigned long n = strtoul(p,&end,0);
+            profile = (end==p || *end || (n!=0 && n!=20 && n!=30 && n!=40 && n!=60)) ? 99u : (unsigned)n;
+        }
+        if (strcmp(getenv("QRX86_JIT"), "experimental")) {
+            fprintf(stderr, "qrx-win32: QRX86_JIT must be off or experimental\n"); return 2;
+        }
+        fprintf(stderr, "qrx-win32: experimental m68k JIT %s (default remains interpreter)\n",
+                x86_jit_enable(&w->cpu, profile, getenv("QRX86_JIT_TIMING") != NULL) ? "enabled" : "unavailable; interpreter fallback");
+    }
     t0 = w->be->now(w);
     rc = qw_run(w);
     if (getenv("QRX_WIN_STATS")) {      /* backend clock: real time on AROS, virtual time headless */
         uint64_t ms = w->be->now(w) - t0, n = x86_icount(&w->cpu);
         char m[200];
-        snprintf(m, sizeof(m), "%llu guest instructions in %llu ms (%llu per second), %d DirectDraw frames, %u HLE imports",
-                 (unsigned long long)n, (unsigned long long)ms, (unsigned long long)(ms ? n * 1000u / ms : 0), w->frames, w->nthunk);
+        snprintf(m, sizeof(m), "%llu guest instructions in %llu ms (%llu per second), %d DirectDraw frames, %u HLE imports, %llu API transitions",
+                 (unsigned long long)n, (unsigned long long)ms, (unsigned long long)(ms ? n * 1000u / ms : 0), w->frames, w->nthunk, (unsigned long long)w->api_calls);
         fprintf(stderr, "qrx-win32: %s\n", m);
         qw_log(w, "%s", m);
+    }
+#ifdef QRX_EXEC_PROFILE
+    qw_log(w, "PROFILE diagnostic-only: timings include instrumentation; API time is inclusive; PC groups sampled every1024 dispatches, collisions=%u", w->cpu.prof_pc_collisions);
+    for (i=0;i<512;i++) if(w->cpu.prof_ops[i])
+        qw_log(w,"PROFILE opcode=%03x dispatches=%u",i,w->cpu.prof_ops[i]);
+    for(i=0;i<512;i++)for(unsigned g=0;g<16;g++)if(w->cpu.prof_operands[i][g])
+        qw_log(w,"PROFILE operand=%03x type=%s group=%u dispatches=%u",i,g<8?"reg":"mem",g&7,w->cpu.prof_operands[i][g]);
+    for (i=0;i<4096;i++) if(w->cpu.prof_pc_hits[i])
+        qw_log(w,"PROFILE pc=%08x samples=%u",w->cpu.prof_pc[i],w->cpu.prof_pc_hits[i]);
+    for (i=0;i<(int)w->nthunk;i++) if(w->prof_api_hits[i])
+        qw_log(w,"PROFILE api=%s calls=%u inclusive_ms=%llu",w->thunk_name[i],w->prof_api_hits[i],(unsigned long long)w->prof_api_ms[i]);
+#endif
+    if (w->cpu.jit) {
+        x86jit_stats s; x86_jit_snapshot(&w->cpu, &s);
+        qw_log(w,"QRX86-JIT-FEATURES mask=%u max_ops=%u code_cap=%u (memory=1 write_continue=2 flag_liveness=4 keep_positive=8 compact_deopt=16 memory_cmp=32 compiled_loads=64 enabled_loads=128 carry_chain=256 persist_cc=512 loop_batch=1024 page_cache=2048 gp_cache=4096 range_cache=8192 loops_only=16384 native_imul=32768 hoist_alias=65536 immediate_alu=131072 compiled_backedges=262144 backedge_only=524288 cf_liveness=1048576 loop_carry=2097152)",s.features,s.max_ops,s.code_cap);
+        char line[768];
+        snprintf(line, sizeof(line), "QRX86-JIT profile=680%u native_blocks=%llu native_insns=%llu fallback=%llu compile=%llu hits=%llu misses=%llu invalidations=%llu evictions=%llu code_bytes=%llu live_code_bytes=%llu peak_code_bytes=%llu compile_ticks=%llu native_ticks=%llu interpreter_ticks=%llu ticks_per_second=%lu timing=%d cache_profile=%d clock_invalid=%llu\n",
+            s.profile, (unsigned long long)s.native_blocks, (unsigned long long)s.native_instructions,
+            (unsigned long long)s.fallback_instructions, (unsigned long long)s.compilations,
+            (unsigned long long)s.hits, (unsigned long long)s.misses, (unsigned long long)s.invalidations,
+            (unsigned long long)s.evictions, (unsigned long long)s.code_bytes,
+            (unsigned long long)s.live_code_bytes, (unsigned long long)s.peak_code_bytes,
+            (unsigned long long)s.compile_ticks, (unsigned long long)s.native_ticks,
+            (unsigned long long)s.interpreter_ticks, (unsigned long)CLOCKS_PER_SEC, s.timing,s.cache_profile,(unsigned long long)s.clock_invalid);
+        fputs(line,stderr); qw_log(w,"%s",line);
+#ifdef QRX_JIT_PROFILE_DEOPT
+        qw_log(w,"QRX86-DEOPT total=%u zero=%u partial=%u",s.deopts,s.zero_deopts,s.deopts-s.zero_deopts);
+#endif
+        x86_jit_disable(&w->cpu);
     }
     if (w->be->shutdown) w->be->shutdown(w);
     if (w->expect_ok || w->expect_fail) printf("QRXWIN-RESULT expect_ok=%d expect_fail=%d exit=%d\n", w->expect_ok, w->expect_fail, rc);

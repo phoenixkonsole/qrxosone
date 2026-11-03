@@ -1,0 +1,38 @@
+[
+  {
+    "mode": "interpreter-final",
+    "repeat": 0,
+    "seconds": 1.3334191140002076,
+    "exit_code": 42
+  },
+  {
+    "mode": "jit-final",
+    "repeat": 0,
+    "seconds": 0.4530269719998614,
+    "exit_code": 42
+  },
+  {
+    "mode": "jit-final",
+    "repeat": 1,
+    "seconds": 0.44897609999861743,
+    "exit_code": 42
+  },
+  {
+    "mode": "interpreter-final",
+    "repeat": 1,
+    "seconds": 1.3429391870013205,
+    "exit_code": 42
+  },
+  {
+    "mode": "interpreter-final",
+    "repeat": 2,
+    "seconds": 1.3215739309998753,
+    "exit_code": 42
+  },
+  {
+    "mode": "jit-final",
+    "repeat": 2,
+    "seconds": 0.47385484900041774,
+    "exit_code": 42
+  }
+]

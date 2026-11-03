@@ -1,0 +1,11 @@
+ARMITHLON 1.7 source verification (2026-11-01)
+Base: ARMITHLON 1.6 cumulative source, locally modified (GitHub repo unchanged).
+Linux x86_64: CMake build PASS; CTest 25/25 PASS; ASan+UBSan 25/25 PASS.
+Actual new tests: 64-bit vector operations, zero-divisor / bad-command handling,
+coherent 4-way 64-byte line caches, crossline invalidation, RAM/DMA invalidation,
+per-core isolation, mode-based legacy gating, 2-bit branch predictor, permissions,
+QRX-specific MMIO, QRX parallel ADDQ/SUBQ loop and 68k CCR state on portable host.
+Only the Musashi stub was available: NOT real 68040 instruction execution,
+not genuine Apollo AMMX, nor 68080 timing, nor native M1 JIT execution.
+Additional local host-only vector microbenchmark: PASS (not a guest benchmark).
+No QRX/AmigaOS3.x OS boot, SAGA/Maggie graphics, x86/PPC JIT or PrBoom run.

@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -Wl,--dependency-file=CMakeFiles/qrx68-run.dir/link.d "CMakeFiles/qrx68-run.dir/qrx68/qrx68_main.c.o" -o qrx68-run  libqrx68_hle.a libqrx68100_core.a -lm

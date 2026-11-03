@@ -1,0 +1,874 @@
+Start testing: Nov 01 11:05 UTC
+----------------------------------------------------------
+1/52 Testing: foundation_smoke
+1/52 Test: foundation_smoke
+Command: "/workspace/armithlon26-build/engine/qrx68100_smoke"
+Directory: /workspace/armithlon26-build/engine
+"foundation_smoke" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+Interpreter: PASS (D0=42 D1=-5 SR=2018 PC=8)
+ARM64 JIT: SKIPPED (non-AArch64 host or JIT mapping unavailable)
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"foundation_smoke" end time: Nov 01 11:05 UTC
+"foundation_smoke" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/52 Testing: vm_unit_tests
+2/52 Test: vm_unit_tests
+Command: "/workspace/armithlon26-build/engine/qrx68100_tests"
+Directory: /workspace/armithlon26-build/engine
+"vm_unit_tests" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS RAM / MMIO / endianness
+PASS boot monitor
+PASS flags / conditional branches
+PASS JSR / RTS / guest memory
+PASS user to supervisor exception / RTE
+PASS unsupported opcode fault
+PASS TRAP vector delivery
+PASS JIT differential / code invalidation
+PASS MMIO hole in large RAM
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"vm_unit_tests" end time: Nov 01 11:05 UTC
+"vm_unit_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/52 Testing: virtual_boot_monitor
+3/52 Test: virtual_boot_monitor
+Command: "/workspace/armithlon26-build/engine/qrx68100_vm"
+Directory: /workspace/armithlon26-build/engine
+"virtual_boot_monitor" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+[qrxvirt] result=halt steps=32 PC=00000186 exception=0 vCPU=1/2 JIT_blocks=0 compiled=0
+QRX68100 qrxvirt board READY
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"virtual_boot_monitor" end time: Nov 01 11:05 UTC
+"virtual_boot_monitor" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/52 Testing: guest_gpu_bridge_and_pcm_dma
+4/52 Test: guest_gpu_bridge_and_pcm_dma
+Command: "/workspace/armithlon26-build/engine/qrx_gpu_bridge_tests"
+Directory: /workspace/armithlon26-build/engine
+"guest_gpu_bridge_and_pcm_dma" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+GPU mailbox + 68k guest program + framebuffer DMA + PCM DMA: PASS
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"guest_gpu_bridge_and_pcm_dma" end time: Nov 01 11:05 UTC
+"guest_gpu_bridge_and_pcm_dma" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/52 Testing: guest_glide3d_triangle_texture
+5/52 Test: guest_glide3d_triangle_texture
+Command: "/workspace/armithlon26-build/engine/qrx_glide3d_tests"
+Directory: /workspace/armithlon26-build/engine
+"guest_glide3d_triangle_texture" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+QRX3D: clear, Gouraud triangle, depth, alpha, texture, bounds, 68k MMIO and swap PASS
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"guest_glide3d_triangle_texture" end time: Nov 01 11:05 UTC
+"guest_glide3d_triangle_texture" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/52 Testing: mmio_media_devices
+6/52 Test: mmio_media_devices
+Command: "/workspace/armithlon26-build/engine/qrx_media_tests"
+Directory: /workspace/armithlon26-build/engine
+"mmio_media_devices" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+QRX media MMIO: framebuffer, input FIFO, audio FIFO, reset, bounds: PASS
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"mmio_media_devices" end time: Nov 01 11:05 UTC
+"mmio_media_devices" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/52 Testing: native_media_68k_demo
+7/52 Test: native_media_68k_demo
+Command: "/workspace/armithlon26-build/engine/qrx68100_media_demo"
+Directory: /workspace/armithlon26-build/engine
+"native_media_68k_demo" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+native 68k media demo: frames=5 input=0x010c0000 audio_frames=800 first_pixel=37b3ee
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"native_media_68k_demo" end time: Nov 01 11:05 UTC
+"native_media_68k_demo" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/52 Testing: native_metal_command_stream_and_qrx86_surface
+8/52 Test: native_metal_command_stream_and_qrx86_surface
+Command: "/workspace/armithlon26-build/engine/qrx_accel_tests"
+Directory: /workspace/armithlon26-build/engine
+"native_metal_command_stream_and_qrx86_surface" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+QRX 0.7: real 68k -> GPU command stream and QRX86 Win32 GDI/DirectDraw 8/16/32 upload PASS
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"native_metal_command_stream_and_qrx86_surface" end time: Nov 01 11:05 UTC
+"native_metal_command_stream_and_qrx86_surface" time elapsed: 00:00:00
+----------------------------------------------------------
+
+9/52 Testing: qrx86_hle_guest_frame_host_ipc
+9/52 Test: qrx86_hle_guest_frame_host_ipc
+Command: "/workspace/armithlon26-build/engine/qrx86_ipc_tests"
+Directory: /workspace/armithlon26-build/engine
+"qrx86_hle_guest_frame_host_ipc" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+QRX86 host POSIX socket frame protocol, bounded decoder and Metal command transfer PASS
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"qrx86_hle_guest_frame_host_ipc" end time: Nov 01 11:05 UTC
+"qrx86_hle_guest_frame_host_ipc" time elapsed: 00:00:00
+----------------------------------------------------------
+
+10/52 Testing: qrx86_host_interactive_input_protocol
+10/52 Test: qrx86_host_interactive_input_protocol
+Command: "/workspace/armithlon26-build/engine/qrx86_input_tests"
+Directory: /workspace/armithlon26-build/engine
+"qrx86_host_interactive_input_protocol" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+QRX86 bidirectional input protocol PASS
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"qrx86_host_interactive_input_protocol" end time: Nov 01 11:05 UTC
+"qrx86_host_interactive_input_protocol" time elapsed: 00:00:00
+----------------------------------------------------------
+
+11/52 Testing: qrx86_opengl_subset_to_gpu_commands
+11/52 Test: qrx86_opengl_subset_to_gpu_commands
+Command: "/workspace/armithlon26-build/engine/qrx_gl_compat_tests"
+Directory: /workspace/armithlon26-build/engine
+"qrx86_opengl_subset_to_gpu_commands" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+QRXGL immediate-mode subset translated to QRXGPU: PASS
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"qrx86_opengl_subset_to_gpu_commands" end time: Nov 01 11:05 UTC
+"qrx86_opengl_subset_to_gpu_commands" time elapsed: 00:00:00
+----------------------------------------------------------
+
+12/52 Testing: qrx86_opengl_command_ipc_to_metal_stream
+12/52 Test: qrx86_opengl_command_ipc_to_metal_stream
+Command: "/workspace/armithlon26-build/engine/qrx86_command_ipc_tests"
+Directory: /workspace/armithlon26-build/engine
+"qrx86_opengl_command_ipc_to_metal_stream" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+QRX86 Q86C command stream -> QRXGPU socket: PASS
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"qrx86_opengl_command_ipc_to_metal_stream" end time: Nov 01 11:05 UTC
+"qrx86_opengl_command_ipc_to_metal_stream" time elapsed: 00:00:00
+----------------------------------------------------------
+
+13/52 Testing: qrx_bench_reference_scene
+13/52 Test: qrx_bench_reference_scene
+Command: "/workspace/armithlon26-build/engine/qrx_bench_scene_tests"
+Directory: /workspace/armithlon26-build/engine
+"qrx_bench_reference_scene" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+QRXBENCH scene: 257 commands / 126144 painted pixels / FNV64 ac7a4785457e07c9
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"qrx_bench_reference_scene" end time: Nov 01 11:05 UTC
+"qrx_bench_reference_scene" time elapsed: 00:00:00
+----------------------------------------------------------
+
+14/52 Testing: qrx_bench_glide_mmio
+14/52 Test: qrx_bench_glide_mmio
+Command: "/workspace/armithlon26-build/engine/qrx_bench_api" "glide-mmio" "--frames" "2" "--warmup" "1"
+Directory: /workspace/armithlon26-build/engine
+"qrx_bench_glide_mmio" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+{"api":"glide-mmio","kind":"command_translation_only","width":800,"height":450,"triangles_per_frame":256,"commands_per_frame":257,"frames":2,"warmup":1,"elapsed_ms":0.093,"fps":21470.515,"commands_per_s":5517922.3,"reference_fnv64":"ac7a4785457e07c9","status":"PASS"}
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"qrx_bench_glide_mmio" end time: Nov 01 11:05 UTC
+"qrx_bench_glide_mmio" time elapsed: 00:00:00
+----------------------------------------------------------
+
+15/52 Testing: qrx_bench_opengl_hle
+15/52 Test: qrx_bench_opengl_hle
+Command: "/workspace/armithlon26-build/engine/qrx_bench_api" "opengl-hle" "--frames" "2" "--warmup" "1"
+Directory: /workspace/armithlon26-build/engine
+"qrx_bench_opengl_hle" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+{"api":"opengl-hle","kind":"command_translation_only","width":800,"height":450,"triangles_per_frame":256,"commands_per_frame":257,"frames":2,"warmup":1,"elapsed_ms":0.045,"fps":44787.823,"commands_per_s":11510470.4,"reference_fnv64":"ac7a4785457e07c9","status":"PASS"}
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"qrx_bench_opengl_hle" end time: Nov 01 11:05 UTC
+"qrx_bench_opengl_hle" time elapsed: 00:00:00
+----------------------------------------------------------
+
+16/52 Testing: qrx_bench_cpu_renderer
+16/52 Test: qrx_bench_cpu_renderer
+Command: "/workspace/armithlon26-build/engine/qrx_bench_api" "cpu" "--frames" "2" "--warmup" "1"
+Directory: /workspace/armithlon26-build/engine
+"qrx_bench_cpu_renderer" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+{"api":"cpu","kind":"cpu_reference","width":800,"height":450,"triangles_per_frame":256,"commands_per_frame":257,"frames":2,"warmup":1,"elapsed_ms":7.205,"fps":277.574,"commands_per_s":71336.6,"reference_fnv64":"ac7a4785457e07c9","status":"PASS"}
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"qrx_bench_cpu_renderer" end time: Nov 01 11:05 UTC
+"qrx_bench_cpu_renderer" time elapsed: 00:00:00
+----------------------------------------------------------
+
+17/52 Testing: external_benchmark_adapters
+17/52 Test: external_benchmark_adapters
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-external-benchmarks.py"
+Directory: /workspace/armithlon26-build/engine
+"external_benchmark_adapters" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+test_exec_and_raw_log (__main__.AdapterTests.test_exec_and_raw_log) ... ok
+test_glmark2_score (__main__.AdapterTests.test_glmark2_score) ... ok
+test_last_score_wins (__main__.AdapterTests.test_last_score_wins) ... ok
+test_malformed_json_not_overwritten (__main__.AdapterTests.test_malformed_json_not_overwritten) ... ok
+test_manual_geekbench_import (__main__.AdapterTests.test_manual_geekbench_import) ... ok
+test_manual_invalid_rejected (__main__.AdapterTests.test_manual_invalid_rejected) ... Invalid score; expected positive integer
+ok
+test_nonzero_is_error (__main__.AdapterTests.test_nonzero_is_error) ... ok
+test_report_does_not_compare_mixed_scores (__main__.AdapterTests.test_report_does_not_compare_mixed_scores) ... ok
+test_scene_fps_not_score (__main__.AdapterTests.test_scene_fps_not_score) ... ok
+test_skipped_if_missing (__main__.AdapterTests.test_skipped_if_missing) ... ok
+test_vkmark_score (__main__.AdapterTests.test_vkmark_score) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.011s
+
+OK
+Imported Geekbench 7 metrics: {'cpu_single': 2000, 'cpu_multi': 7777, 'gpu_metal': 34802}
+Report: /tmp/tmprhysltq1/EXTERNAL-REPORT.md
+<end of output>
+Test time =   0.15 sec
+----------------------------------------------------------
+Test Passed.
+"external_benchmark_adapters" end time: Nov 01 11:05 UTC
+"external_benchmark_adapters" time elapsed: 00:00:00
+----------------------------------------------------------
+
+18/52 Testing: linux_i386_x11_to_metal_ipc
+18/52 Test: linux_i386_x11_to_metal_ipc
+Command: "/workspace/armithlon26-build/engine/qrx_x11_bridge_tests"
+Directory: /workspace/armithlon26-build/engine
+"linux_i386_x11_to_metal_ipc" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+QRX X11 -> native ARMITHLON socket -> Metal command stream PASS
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"linux_i386_x11_to_metal_ipc" end time: Nov 01 11:05 UTC
+"linux_i386_x11_to_metal_ipc" time elapsed: 00:00:00
+----------------------------------------------------------
+
+19/52 Testing: qrx_x11_input_patch_contract
+19/52 Test: qrx_x11_input_patch_contract
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-patch-qrx86-x11-input.py"
+Directory: /workspace/armithlon26-build/engine
+"qrx_x11_input_patch_contract" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS QRX86 X11 input patch: apply, idempotence, partial, drift
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"qrx_x11_input_patch_contract" end time: Nov 01 11:05 UTC
+"qrx_x11_input_patch_contract" time elapsed: 00:00:00
+----------------------------------------------------------
+
+20/52 Testing: qrx86_crossos_benchmark_classification
+20/52 Test: qrx86_crossos_benchmark_classification
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-qrx86-execution.py"
+Directory: /workspace/armithlon26-build/engine
+"qrx86_crossos_benchmark_classification" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS QRX86 execution benchmark: pass/fail/skip/stats, honest reference dashboard
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"qrx86_crossos_benchmark_classification" end time: Nov 01 11:05 UTC
+"qrx86_crossos_benchmark_classification" time elapsed: 00:00:00
+----------------------------------------------------------
+
+21/52 Testing: qrx_compat_boot_provenance_gate
+21/52 Test: qrx_compat_boot_provenance_gate
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-compat-boot.py"
+Directory: /workspace/armithlon26-build/engine
+"qrx_compat_boot_provenance_gate" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS QRX compat boot refuses unavailable/unverified bootstrap assets
+<end of output>
+Test time =   0.09 sec
+----------------------------------------------------------
+Test Passed.
+"qrx_compat_boot_provenance_gate" end time: Nov 01 11:05 UTC
+"qrx_compat_boot_provenance_gate" time elapsed: 00:00:00
+----------------------------------------------------------
+
+22/52 Testing: qrx_full68k_host_bus_mock_NO_CPU_EXECUTION
+22/52 Test: qrx_full68k_host_bus_mock_NO_CPU_EXECUTION
+Command: "/workspace/armithlon26-build/engine/qrx_full_bus_mock_tests"
+Directory: /workspace/armithlon26-build/engine
+"qrx_full68k_host_bus_mock_NO_CPU_EXECUTION" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS QRX full68k bus mock: RAM / timer / IRQ / ROM overlay / aliases (NO CPU ISA emulated)
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"qrx_full68k_host_bus_mock_NO_CPU_EXECUTION" end time: Nov 01 11:05 UTC
+"qrx_full68k_host_bus_mock_NO_CPU_EXECUTION" time elapsed: 00:00:00
+----------------------------------------------------------
+
+23/52 Testing: dual_68040_compat_and_jit_coherence_MOCK
+23/52 Test: dual_68040_compat_and_jit_coherence_MOCK
+Command: "/workspace/armithlon26-build/engine/qrx68100_dual_mock_tests"
+Directory: /workspace/armithlon26-build/engine
+"dual_68040_compat_and_jit_coherence_MOCK" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS dual-core MMIO, singlecore Amiga compatibility, context isolation (stub), multi-ISA JIT block metadata, page-coherent invalidation (NOT 68k ISA execution)
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"dual_68040_compat_and_jit_coherence_MOCK" end time: Nov 01 11:05 UTC
+"dual_68040_compat_and_jit_coherence_MOCK" time elapsed: 00:00:00
+----------------------------------------------------------
+
+24/52 Testing: QRX68100_two_host_thread_native_fast_path_MOCK_68k
+24/52 Test: QRX68100_two_host_thread_native_fast_path_MOCK_68k
+Command: "/workspace/armithlon26-build/engine/qrx68100_parallel_fast_tests"
+Directory: /workspace/armithlon26-build/engine
+"QRX68100_two_host_thread_native_fast_path_MOCK_68k" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS parallel 2-worker loop executor / portable-C-fallback / flag coherence, invalidation, legacy gating
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68100_two_host_thread_native_fast_path_MOCK_68k" end time: Nov 01 11:05 UTC
+"QRX68100_two_host_thread_native_fast_path_MOCK_68k" time elapsed: 00:00:00
+----------------------------------------------------------
+
+25/52 Testing: QRX68100_Vampire_inspired_cache_vector64_and_legacy_MOCK
+25/52 Test: QRX68100_Vampire_inspired_cache_vector64_and_legacy_MOCK
+Command: "/workspace/armithlon26-build/engine/qrx68100_vampire_mock_tests"
+Directory: /workspace/armithlon26-build/engine
+"QRX68100_Vampire_inspired_cache_vector64_and_legacy_MOCK" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS QRX68100-1.7 Vampire-inspired functional L1/JIT, vector64, 64-bit arithmetic, branch predictor, SMP isolation, Amiga legacy (CPU STUB, no Apollo AMMX opcode emulation)
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68100_Vampire_inspired_cache_vector64_and_legacy_MOCK" end time: Nov 01 11:05 UTC
+"QRX68100_Vampire_inspired_cache_vector64_and_legacy_MOCK" time elapsed: 00:00:00
+----------------------------------------------------------
+
+26/52 Testing: QRX68100_real_68k_boot_shell_and_persistent_QRXFS
+26/52 Test: QRX68100_real_68k_boot_shell_and_persistent_QRXFS
+Command: "/workspace/armithlon26-build/engine/qrx68100_boot_shell_tests"
+Directory: /workspace/armithlon26-build/engine
+"QRX68100_real_68k_boot_shell_and_persistent_QRXFS" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS actual 68k boot firmware + QRXFS-1 save/reload/reboot/corruption protection
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68100_real_68k_boot_shell_and_persistent_QRXFS" end time: Nov 01 11:05 UTC
+"QRX68100_real_68k_boot_shell_and_persistent_QRXFS" time elapsed: 00:00:00
+----------------------------------------------------------
+
+27/52 Testing: qrx_pe32_elf32_hunk_qex_binary_signature_launcher
+27/52 Test: qrx_pe32_elf32_hunk_qex_binary_signature_launcher
+Command: "/workspace/armithlon26-build/engine/qrx_app_router_tests"
+Directory: /workspace/armithlon26-build/engine
+"qrx_pe32_elf32_hunk_qex_binary_signature_launcher" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS: strict PE/ELF/HUNK/QEX parser, no shell-based invocation
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"qrx_pe32_elf32_hunk_qex_binary_signature_launcher" end time: Nov 01 11:05 UTC
+"qrx_pe32_elf32_hunk_qex_binary_signature_launcher" time elapsed: 00:00:00
+----------------------------------------------------------
+
+28/52 Testing: qrx_native_board_block_sector_dma_and_safe_persistence
+28/52 Test: qrx_native_board_block_sector_dma_and_safe_persistence
+Command: "/workspace/armithlon26-build/engine/qrx_block_device_tests"
+Directory: /workspace/armithlon26-build/engine
+"qrx_native_board_block_sector_dma_and_safe_persistence" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS QRX block DMA disk persistence, bounds and read-only
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"qrx_native_board_block_sector_dma_and_safe_persistence" end time: Nov 01 11:05 UTC
+"qrx_native_board_block_sector_dma_and_safe_persistence" time elapsed: 00:00:00
+----------------------------------------------------------
+
+29/52 Testing: qrx_existing_AROS_QRXDesktop_safe_doubleclick_source_patch
+29/52 Test: qrx_existing_AROS_QRXDesktop_safe_doubleclick_source_patch
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-qrxdesktop-patch19.py"
+Directory: /workspace/armithlon26-build/engine
+"qrx_existing_AROS_QRXDesktop_safe_doubleclick_source_patch" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS: QRXDesktop source patch (idempotent, guarded, asynchronous, safe quoted paths)
+<end of output>
+Test time =   0.03 sec
+----------------------------------------------------------
+Test Passed.
+"qrx_existing_AROS_QRXDesktop_safe_doubleclick_source_patch" end time: Nov 01 11:05 UTC
+"qrx_existing_AROS_QRXDesktop_safe_doubleclick_source_patch" time elapsed: 00:00:00
+----------------------------------------------------------
+
+30/52 Testing: qrx_HOST_directory_volume_MMIO_DMA_and_confinement
+30/52 Test: qrx_HOST_directory_volume_MMIO_DMA_and_confinement
+Command: "/workspace/armithlon26-build/engine/qrx_hostfs_tests"
+Directory: /workspace/armithlon26-build/engine
+"qrx_HOST_directory_volume_MMIO_DMA_and_confinement" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS QRXHostFS: real directory, DMA, offset, RW, readonly, symlink+traversal denial, persistence
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"qrx_HOST_directory_volume_MMIO_DMA_and_confinement" end time: Nov 01 11:05 UTC
+"qrx_HOST_directory_volume_MMIO_DMA_and_confinement" time elapsed: 00:00:00
+----------------------------------------------------------
+
+31/52 Testing: QRX_SMP_shared_ready_queue_affinity_parallel_host_NO_AROS_EXEC
+31/52 Test: QRX_SMP_shared_ready_queue_affinity_parallel_host_NO_AROS_EXEC
+Command: "/workspace/armithlon26-build/engine/qrx_smp_ready_tests"
+Directory: /workspace/armithlon26-build/engine
+"QRX_SMP_shared_ready_queue_affinity_parallel_host_NO_AROS_EXEC" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS QRX SMP ready-queue: affinity, priority, UP fallback, concurrent workers
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"QRX_SMP_shared_ready_queue_affinity_parallel_host_NO_AROS_EXEC" end time: Nov 01 11:05 UTC
+"QRX_SMP_shared_ready_queue_affinity_parallel_host_NO_AROS_EXEC" time elapsed: 00:00:00
+----------------------------------------------------------
+
+32/52 Testing: QRX68100_boot_host_directory_no_IMG_READWRITE_and_guest_QEX
+32/52 Test: QRX68100_boot_host_directory_no_IMG_READWRITE_and_guest_QEX
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-hostfs-boot20.py" "/workspace/armithlon26-build/engine/qrx68100_boot_shell"
+Directory: /workspace/armithlon26-build/engine
+"QRX68100_boot_host_directory_no_IMG_READWRITE_and_guest_QEX" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS real 68k guest firmware -> HostFS DMA -> host files, volatile no-img, readonly, write, host QEX
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68100_boot_host_directory_no_IMG_READWRITE_and_guest_QEX" end time: Nov 01 11:05 UTC
+"QRX68100_boot_host_directory_no_IMG_READWRITE_and_guest_QEX" time elapsed: 00:00:00
+----------------------------------------------------------
+
+33/52 Testing: QRX68040_FF000800_hostfs_alias_and_DMA_CPU_MOCK
+33/52 Test: QRX68040_FF000800_hostfs_alias_and_DMA_CPU_MOCK
+Command: "/workspace/armithlon26-build/engine/qrx_hostfs_upper_alias_mock_tests"
+Directory: /workspace/armithlon26-build/engine
+"QRX68040_FF000800_hostfs_alias_and_DMA_CPU_MOCK" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS 68040 FF000800 hostfs MMIO alias and DMA with CPU mock
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68040_FF000800_hostfs_alias_and_DMA_CPU_MOCK" end time: Nov 01 11:05 UTC
+"QRX68040_FF000800_hostfs_alias_and_DMA_CPU_MOCK" time elapsed: 00:00:00
+----------------------------------------------------------
+
+34/52 Testing: QRX68100_host_quarter_ram_sparse_128MiB_32bit_bus
+34/52 Test: QRX68100_host_quarter_ram_sparse_128MiB_32bit_bus
+Command: "/workspace/armithlon26-build/engine/qrx_memory_tests"
+Directory: /workspace/armithlon26-build/engine
+"QRX68100_host_quarter_ram_sparse_128MiB_32bit_bus" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS optional 3840 MiB sparse mapping at guest address E0000000
+PASS 2.1 RAM: host_effective=32768 MiB auto=3840 MiB, 128 MiB sparse 68k bus, legacy MMIO preserved
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68100_host_quarter_ram_sparse_128MiB_32bit_bus" end time: Nov 01 11:05 UTC
+"QRX68100_host_quarter_ram_sparse_128MiB_32bit_bus" time elapsed: 00:00:00
+----------------------------------------------------------
+
+35/52 Testing: AmigaOS3_AROS68k_HUNK_CODE_DATA_RELOC32_strict_loader
+35/52 Test: AmigaOS3_AROS68k_HUNK_CODE_DATA_RELOC32_strict_loader
+Command: "/workspace/armithlon26-build/engine/qrx_hunk_loader_tests"
+Directory: /workspace/armithlon26-build/engine
+"AmigaOS3_AROS68k_HUNK_CODE_DATA_RELOC32_strict_loader" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS strict AmigaOS HUNK_HEADER CODE DATA BSS relocation loader; atomic failure; no Exec ABI claim
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"AmigaOS3_AROS68k_HUNK_CODE_DATA_RELOC32_strict_loader" end time: Nov 01 11:05 UTC
+"AmigaOS3_AROS68k_HUNK_CODE_DATA_RELOC32_strict_loader" time elapsed: 00:00:00
+----------------------------------------------------------
+
+36/52 Testing: AmigaOS3_real_Kickstart_FS_UAE_compatibility_profile_configuration
+36/52 Test: AmigaOS3_real_Kickstart_FS_UAE_compatibility_profile_configuration
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-amigaos3-profile21.py"
+Directory: /workspace/armithlon26-build/engine
+"AmigaOS3_real_Kickstart_FS_UAE_compatibility_profile_configuration" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS real AmigaOS3 FS-UAE profile configurator validates paths and preserves single-core compatibility
+<end of output>
+Test time =   0.16 sec
+----------------------------------------------------------
+Test Passed.
+"AmigaOS3_real_Kickstart_FS_UAE_compatibility_profile_configuration" end time: Nov 01 11:05 UTC
+"AmigaOS3_real_Kickstart_FS_UAE_compatibility_profile_configuration" time elapsed: 00:00:00
+----------------------------------------------------------
+
+37/52 Testing: QRX68100_actual_guest_Amiga_HUNK_HOST_launch_96MiB
+37/52 Test: QRX68100_actual_guest_Amiga_HUNK_HOST_launch_96MiB
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-hunk-boot21.py" "/workspace/armithlon26-build/engine/qrx68100_boot_shell"
+Directory: /workspace/armithlon26-build/engine
+"QRX68100_actual_guest_Amiga_HUNK_HOST_launch_96MiB" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS actual 68k Amiga HUNK executable via HOST: with 96MiB RAM; malformed input rejected
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68100_actual_guest_Amiga_HUNK_HOST_launch_96MiB" end time: Nov 01 11:05 UTC
+"QRX68100_actual_guest_Amiga_HUNK_HOST_launch_96MiB" time elapsed: 00:00:00
+----------------------------------------------------------
+
+38/52 Testing: QRX68040_128MiB_RAM_Kickstart_ROM_protection_AND_MOCK_CPU
+38/52 Test: QRX68040_128MiB_RAM_Kickstart_ROM_protection_AND_MOCK_CPU
+Command: "/workspace/armithlon26-build/engine/qrx_large_mem_040_mock_tests"
+Directory: /workspace/armithlon26-build/engine
+"QRX68040_128MiB_RAM_Kickstart_ROM_protection_AND_MOCK_CPU" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS 68040 guest 128MiB high RAM, Kickstart ROM read protection, upper MMIO with classic ROM overlay, CPU stub
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68040_128MiB_RAM_Kickstart_ROM_protection_AND_MOCK_CPU" end time: Nov 01 11:05 UTC
+"QRX68040_128MiB_RAM_Kickstart_ROM_protection_AND_MOCK_CPU" time elapsed: 00:00:00
+----------------------------------------------------------
+
+39/52 Testing: QRX_user_workstation_auto_RAM_HOST_readonly_no_IMG
+39/52 Test: QRX_user_workstation_auto_RAM_HOST_readonly_no_IMG
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-workstation21.py"
+Directory: /workspace/armithlon26-build/engine
+"QRX_user_workstation_auto_RAM_HOST_readonly_no_IMG" start time: Nov 01 11:05 UTC
+Output:
+----------------------------------------------------------
+PASS user workstation: actual guest boot, automatic RAM, read-only private share, no IMG
+<end of output>
+Test time =   4.96 sec
+----------------------------------------------------------
+Test Passed.
+"QRX_user_workstation_auto_RAM_HOST_readonly_no_IMG" end time: Nov 01 11:06 UTC
+"QRX_user_workstation_auto_RAM_HOST_readonly_no_IMG" time elapsed: 00:00:04
+----------------------------------------------------------
+
+40/52 Testing: QRX68_QRXDesktop_2_4_patch_compatibility_and_source_guard
+40/52 Test: QRX68_QRXDesktop_2_4_patch_compatibility_and_source_guard
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-qrxdesktop-qrx68-24.py"
+Directory: /workspace/armithlon26-build/engine
+"QRX68_QRXDesktop_2_4_patch_compatibility_and_source_guard" start time: Nov 01 11:06 UTC
+Output:
+----------------------------------------------------------
+PASS pinned desktop patch: explicit QRX68 routing; AROS native and QRX86 paths preserved (source regression)
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68_QRXDesktop_2_4_patch_compatibility_and_source_guard" end time: Nov 01 11:06 UTC
+"QRX68_QRXDesktop_2_4_patch_compatibility_and_source_guard" time elapsed: 00:00:00
+----------------------------------------------------------
+
+41/52 Testing: QRX68_AROS_guest_installer_non_destructive
+41/52 Test: QRX68_AROS_guest_installer_non_destructive
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-qrx68-aros-install24.py"
+Directory: /workspace/armithlon26-build/engine
+"QRX68_AROS_guest_installer_non_destructive" start time: Nov 01 11:06 UTC
+Output:
+----------------------------------------------------------
+installed: /tmp/tmpyj6uaiil/C/QRX68Run /tmp/tmpyj6uaiil/QRX/C/QRX68Run
+No startup scripts or existing QRXDesktop binary changed.
+installed: /tmp/tmpyj6uaiil/C/QRX68Run /tmp/tmpyj6uaiil/QRX/C/QRX68Run
+No startup scripts or existing QRXDesktop binary changed.
+PASS AROS guest installer validates binary and never overwrites existing programs
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68_AROS_guest_installer_non_destructive" end time: Nov 01 11:06 UTC
+"QRX68_AROS_guest_installer_non_destructive" time elapsed: 00:00:00
+----------------------------------------------------------
+
+42/52 Testing: QRX68_guest_to_host_bridge_real_HUNK_and_GUI_snapshot
+42/52 Test: QRX68_guest_to_host_bridge_real_HUNK_and_GUI_snapshot
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-qrx68-bridge24.py" "/workspace/armithlon26-build/engine/qrx68-run"
+Directory: /workspace/armithlon26-build/engine
+"QRX68_guest_to_host_bridge_real_HUNK_and_GUI_snapshot" start time: Nov 01 11:06 UTC
+Output:
+----------------------------------------------------------
+QRX68 bridge ready at /tmp/qrx68-bridge-test-9dew8oy3 (guest: QRXBRIDGE:)
+QRX68 SERVICE000001: ok
+PASS QRX68/1 real HUNK Exec/DOS, GUI snapshot, one-shot service, fail-closed format, no-follow symlink, fixed paths
+<end of output>
+Test time =   0.13 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68_guest_to_host_bridge_real_HUNK_and_GUI_snapshot" end time: Nov 01 11:06 UTC
+"QRX68_guest_to_host_bridge_real_HUNK_and_GUI_snapshot" time elapsed: 00:00:00
+----------------------------------------------------------
+
+43/52 Testing: QRX68_real_HUNK_Exec_DOS_library_vector_HLE_AND_shared_files
+43/52 Test: QRX68_real_HUNK_Exec_DOS_library_vector_HLE_AND_shared_files
+Command: "/workspace/armithlon26-build/engine/qrx68_hle_tests"
+Directory: /workspace/armithlon26-build/engine
+"QRX68_real_HUNK_Exec_DOS_library_vector_HLE_AND_shared_files" start time: Nov 01 11:06 UTC
+Output:
+----------------------------------------------------------
+PASS: REAL 68k HUNK guest -> Exec OpenLibrary vector -> DOS Write/Read via QRX68 HLE; bounded, unsupported fail
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68_real_HUNK_Exec_DOS_library_vector_HLE_AND_shared_files" end time: Nov 01 11:06 UTC
+"QRX68_real_HUNK_Exec_DOS_library_vector_HLE_AND_shared_files" time elapsed: 00:00:00
+----------------------------------------------------------
+
+44/52 Testing: QRX68_host_application_router_dispatches_real_HUNK_to_isolated_HLE
+44/52 Test: QRX68_host_application_router_dispatches_real_HUNK_to_isolated_HLE
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-qrx68-route.py" "/workspace/armithlon26-build/engine/qrx-app" "/workspace/armithlon26-build/engine/qrx68-run"
+Directory: /workspace/armithlon26-build/engine
+"QRX68_host_application_router_dispatches_real_HUNK_to_isolated_HLE" start time: Nov 01 11:06 UTC
+Output:
+----------------------------------------------------------
+PASS qrx-app -> isolated QRX68 HUNK -> real 68k CPU/LVO -> DOS Write stdout
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68_host_application_router_dispatches_real_HUNK_to_isolated_HLE" end time: Nov 01 11:06 UTC
+"QRX68_host_application_router_dispatches_real_HUNK_to_isolated_HLE" time elapsed: 00:00:00
+----------------------------------------------------------
+
+45/52 Testing: QRX68_amigaos_HUNK_batch_compatibility_failsafe_scanner
+45/52 Test: QRX68_amigaos_HUNK_batch_compatibility_failsafe_scanner
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-qrx68-compat-scan.py" "/workspace/armithlon26-build/engine/qrx68-run"
+Directory: /workspace/armithlon26-build/engine
+"QRX68_amigaos_HUNK_batch_compatibility_failsafe_scanner" start time: Nov 01 11:06 UTC
+Output:
+----------------------------------------------------------
+PASS QRX68 bounded batch scanner: genuine HUNK, malformed, non-HUNK, symlink
+<end of output>
+Test time =   0.08 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68_amigaos_HUNK_batch_compatibility_failsafe_scanner" end time: Nov 01 11:06 UTC
+"QRX68_amigaos_HUNK_batch_compatibility_failsafe_scanner" time elapsed: 00:00:00
+----------------------------------------------------------
+
+46/52 Testing: QRX68_Amiga_HUNK_Intuition_graphics_HLE_guest_pixel_proof
+46/52 Test: QRX68_Amiga_HUNK_Intuition_graphics_HLE_guest_pixel_proof
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-qrx68-gui23.py" "/workspace/armithlon26-build/engine/qrx68-run" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../data/qrx68/QRX68-GUI.hunk"
+Directory: /workspace/armithlon26-build/engine
+"QRX68_Amiga_HUNK_Intuition_graphics_HLE_guest_pixel_proof" start time: Nov 01 11:06 UTC
+Output:
+----------------------------------------------------------
+PASS: real 68k HUNK -> Intuition OpenWindow -> graphics SetAPen/RectFill -> verified PPM, opt-in only
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68_Amiga_HUNK_Intuition_graphics_HLE_guest_pixel_proof" end time: Nov 01 11:06 UTC
+"QRX68_Amiga_HUNK_Intuition_graphics_HLE_guest_pixel_proof" time elapsed: 00:00:00
+----------------------------------------------------------
+
+47/52 Testing: QRX68_Musashi_68040_integration_COMPILE_LINK_ONLY_STUB
+47/52 Test: QRX68_Musashi_68040_integration_COMPILE_LINK_ONLY_STUB
+Command: "/workspace/armithlon26-build/engine/qrx68_musashi_abi_linkcheck" "--help"
+Directory: /workspace/armithlon26-build/engine
+"QRX68_Musashi_68040_integration_COMPILE_LINK_ONLY_STUB" start time: Nov 01 11:06 UTC
+Output:
+----------------------------------------------------------
+usage: qrx68-run [--ram auto|MIB] [--share DIR] [--share-rw] [--budget N] [--experimental-gui --snapshot FILE.ppm --gpu-socket PATH --live-events DIR --live-frame PPM] PROGRAM.HUNK
+Runs a strictly bounded isolated Amiga 68k CLI HUNK in QRX68 HLE.
+Unimplemented LVOs and invalid memory always FAIL, never fake success.
+Build with Musashi to run the full 68040 ISA/FPU; portable CPU is a subset.
+Host files: single directory, read-only unless --share-rw.
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68_Musashi_68040_integration_COMPILE_LINK_ONLY_STUB" end time: Nov 01 11:06 UTC
+"QRX68_Musashi_68040_integration_COMPILE_LINK_ONLY_STUB" time elapsed: 00:00:00
+----------------------------------------------------------
+
+48/52 Testing: QRX68_AMIGA_68k_Intuition_graphics_to_native_Q86F_GPU_packet
+48/52 Test: QRX68_AMIGA_68k_Intuition_graphics_to_native_Q86F_GPU_packet
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-qrx68-metal23.py" "/workspace/armithlon26-build/engine/qrx68-run" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../data/qrx68/QRX68-GUI.hunk"
+Directory: /workspace/armithlon26-build/engine
+"QRX68_AMIGA_68k_Intuition_graphics_to_native_Q86F_GPU_packet" start time: Nov 01 11:06 UTC
+Output:
+----------------------------------------------------------
+PASS: guest Amiga HUNK rendered real Q86F framebuffer to native Metal-compatible socket (Metal device not tested)
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68_AMIGA_68k_Intuition_graphics_to_native_Q86F_GPU_packet" end time: Nov 01 11:06 UTC
+"QRX68_AMIGA_68k_Intuition_graphics_to_native_Q86F_GPU_packet" time elapsed: 00:00:00
+----------------------------------------------------------
+
+49/52 Testing: QRXDesktop_6_6_20_existing_UI_HUNK_compat_ToolType_optin_patch
+49/52 Test: QRXDesktop_6_6_20_existing_UI_HUNK_compat_ToolType_optin_patch
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-qrxdesktop-qrx68-23.py"
+Directory: /workspace/armithlon26-build/engine
+"QRXDesktop_6_6_20_existing_UI_HUNK_compat_ToolType_optin_patch" start time: Nov 01 11:06 UTC
+Output:
+----------------------------------------------------------
+PASS QRXDesktop preserved existing launches, opt-in QRX68 HUNK guarded by installed guest handler
+<end of output>
+Test time =   0.03 sec
+----------------------------------------------------------
+Test Passed.
+"QRXDesktop_6_6_20_existing_UI_HUNK_compat_ToolType_optin_patch" end time: Nov 01 11:06 UTC
+"QRXDesktop_6_6_20_existing_UI_HUNK_compat_ToolType_optin_patch" time elapsed: 00:00:00
+----------------------------------------------------------
+
+50/52 Testing: QRX68_large_Amiga_HUNK_96KiB_heap_guard_no_program_overlap
+50/52 Test: QRX68_large_Amiga_HUNK_96KiB_heap_guard_no_program_overlap
+Command: "/workspace/armithlon26-build/engine/qrx68_hunk_large_tests"
+Directory: /workspace/armithlon26-build/engine
+"QRX68_large_Amiga_HUNK_96KiB_heap_guard_no_program_overlap" start time: Nov 01 11:06 UTC
+Output:
+----------------------------------------------------------
+PASS 96KiB HUNK (former 64KiB cap removed), aligned heap beyond program
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68_large_Amiga_HUNK_96KiB_heap_guard_no_program_overlap" end time: Nov 01 11:06 UTC
+"QRX68_large_Amiga_HUNK_96KiB_heap_guard_no_program_overlap" time elapsed: 00:00:00
+----------------------------------------------------------
+
+51/52 Testing: QRX68_2_live_IDCMP_mouse_redraw_close_concurrent_HUNK
+51/52 Test: QRX68_2_live_IDCMP_mouse_redraw_close_concurrent_HUNK
+Command: "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3" "/workspace/qrxosone/upstream/armithlon/2.6/engine/../tools/test-qrx68-live25.py" "/workspace/armithlon26-build/engine/qrx68-run"
+Directory: /workspace/armithlon26-build/engine
+"QRX68_2_live_IDCMP_mouse_redraw_close_concurrent_HUNK" start time: Nov 01 11:06 UTC
+Output:
+----------------------------------------------------------
+PASS QRX68/2 concurrent real 68k HUNK IDCMP WaitPort/GetMsg/ReplyMsg, close, incremental frames, fail-closed event filtering
+<end of output>
+Test time =   0.30 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68_2_live_IDCMP_mouse_redraw_close_concurrent_HUNK" end time: Nov 01 11:06 UTC
+"QRX68_2_live_IDCMP_mouse_redraw_close_concurrent_HUNK" time elapsed: 00:00:00
+----------------------------------------------------------
+
+52/52 Testing: QRX68_26_Exec_signals_ports_Intuition_gadget_menu_layered_windows
+52/52 Test: QRX68_26_Exec_signals_ports_Intuition_gadget_menu_layered_windows
+Command: "/workspace/armithlon26-build/engine/qrx68_compat26_tests"
+Directory: /workspace/armithlon26-build/engine
+"QRX68_26_Exec_signals_ports_Intuition_gadget_menu_layered_windows" start time: Nov 01 11:06 UTC
+Output:
+----------------------------------------------------------
+PASS QRX68 Exec signals/message-port/reply, Intuition gadget/menu, layered framebuffer, invalid DOS access fail closed
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"QRX68_26_Exec_signals_ports_Intuition_gadget_menu_layered_windows" end time: Nov 01 11:06 UTC
+"QRX68_26_Exec_signals_ports_Intuition_gadget_menu_layered_windows" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Nov 01 11:06 UTC

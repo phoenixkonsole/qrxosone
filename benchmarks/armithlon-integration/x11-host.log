@@ -1,0 +1,3 @@
+PASS X11 framing, both byte orders, errors, all truncated opcodes
+PASS i386 X11 client: socket, window, fill, exposure, poll, errors
+PASS all 3072 pixels of i386 X11 window match expected drawing

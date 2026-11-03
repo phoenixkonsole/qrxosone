@@ -175,6 +175,11 @@ static int hle_hook(x86cpu *c, uint32_t idx)
     const qhle *e = idx < w->nthunk ? w->thunk[idx] : NULL;
     uint32_t a[16], ret, r, sp = c->r[X86_ESP];
     int i;
+#ifdef QRX_EXEC_PROFILE
+    uint64_t profile_start = w->be->now(w);
+    if (idx < QW_THUNK_MAX) w->prof_api_hits[idx]++;
+#endif
+    w->api_calls++;
     if (!e) {
         qw_log(w, "unimplemented API called: %s", idx < w->nthunk ? w->thunk_name[idx] : "?");
         c->fault = X86_FAULT_HOST;
@@ -186,6 +191,13 @@ static int hle_hook(x86cpu *c, uint32_t idx)
     for (i = 0; i < 16; i++) a[i] = x86_rd32(c, sp + 4 + (uint32_t)i * 4);
     if (w->trace) qw_log(w, "-> %s(%08x, %08x, %08x, %08x, %08x, %08x, %08x) ret=%08x", e->name, a[0], a[1], a[2], a[3], a[4], a[5], a[6], ret);
     r = e->fn(w, a);
+#ifdef QRX_EXEC_PROFILE
+    {
+        uint64_t end = w->be->now(w);
+        if (idx < QW_THUNK_MAX && end >= profile_start)
+            w->prof_api_ms[idx] += end - profile_start;
+    }
+#endif
     if (w->trace) qw_log(w, "<- %s = %08x", e->name, r);
     if (c->fault) return 1;
     if (w->exiting) { c->stop = 1; return 1; }

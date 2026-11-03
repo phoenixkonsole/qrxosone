@@ -1,0 +1,82 @@
+{
+  "inputs": {
+    "prboom-plus.exe": "2825e6eeada7c016634d25a95638ade700ba4da67cbec97f2b24f6ebc7f433b5",
+    "prboom-plus.wad": "6311b2083609a46be88385524fc62c290cded429c92c0c0e34ab380ec76f35bf",
+    "freedoom1.wad": "c565b5aee32a1821a4aff42439254eb6ed3a9abc011b8725bcd30c5071a387c8",
+    "tranmap.dat": "0192c43c31f8e6f2bb20b78098ad14b1fe5e6846e946c066969443fc73c8d0c8"
+  },
+  "runs": [
+    {
+      "runtime": "/workspace/qrx-bench/baseline/qrx-win32",
+      "runtime_sha256": "c4add0e2c08f31a115a711ab672ded41d62d25485ab5a4fddab101aefcb898e3",
+      "repeat": 0,
+      "instructions": 1000000000,
+      "frames": 325,
+      "virtual_ms": 100000,
+      "wall_seconds": 11.245693071000005,
+      "wall_fps": 28.899952892907816,
+      "exit_code": 139,
+      "frame_sha256": "c5f993231d9145b59c321b2f4a9b74851e6c18d5f0fad0df0f269ee95a3ab4c5"
+    },
+    {
+      "runtime": "/workspace/qrx-bench/candidate/qrx-win32",
+      "runtime_sha256": "4c0ef9c16953d9bbe2cc7472a29d864e6710fb0adb53772b55f5ec5a1720454c",
+      "repeat": 0,
+      "instructions": 1000000000,
+      "frames": 325,
+      "virtual_ms": 100000,
+      "wall_seconds": 11.493171985999993,
+      "wall_fps": 28.27765915239826,
+      "exit_code": 139,
+      "frame_sha256": "c5f993231d9145b59c321b2f4a9b74851e6c18d5f0fad0df0f269ee95a3ab4c5"
+    },
+    {
+      "runtime": "/workspace/qrx-bench/candidate/qrx-win32",
+      "runtime_sha256": "4c0ef9c16953d9bbe2cc7472a29d864e6710fb0adb53772b55f5ec5a1720454c",
+      "repeat": 1,
+      "instructions": 1000000000,
+      "frames": 325,
+      "virtual_ms": 100000,
+      "wall_seconds": 10.542376971000067,
+      "wall_fps": 30.8279623176072,
+      "exit_code": 139,
+      "frame_sha256": "c5f993231d9145b59c321b2f4a9b74851e6c18d5f0fad0df0f269ee95a3ab4c5"
+    },
+    {
+      "runtime": "/workspace/qrx-bench/baseline/qrx-win32",
+      "runtime_sha256": "c4add0e2c08f31a115a711ab672ded41d62d25485ab5a4fddab101aefcb898e3",
+      "repeat": 1,
+      "instructions": 1000000000,
+      "frames": 325,
+      "virtual_ms": 100000,
+      "wall_seconds": 10.594401072999972,
+      "wall_fps": 30.676580748700232,
+      "exit_code": 139,
+      "frame_sha256": "c5f993231d9145b59c321b2f4a9b74851e6c18d5f0fad0df0f269ee95a3ab4c5"
+    },
+    {
+      "runtime": "/workspace/qrx-bench/baseline/qrx-win32",
+      "runtime_sha256": "c4add0e2c08f31a115a711ab672ded41d62d25485ab5a4fddab101aefcb898e3",
+      "repeat": 2,
+      "instructions": 1000000000,
+      "frames": 325,
+      "virtual_ms": 100000,
+      "wall_seconds": 10.968259042,
+      "wall_fps": 29.63095590243628,
+      "exit_code": 139,
+      "frame_sha256": "c5f993231d9145b59c321b2f4a9b74851e6c18d5f0fad0df0f269ee95a3ab4c5"
+    },
+    {
+      "runtime": "/workspace/qrx-bench/candidate/qrx-win32",
+      "runtime_sha256": "4c0ef9c16953d9bbe2cc7472a29d864e6710fb0adb53772b55f5ec5a1720454c",
+      "repeat": 2,
+      "instructions": 1000000000,
+      "frames": 325,
+      "virtual_ms": 100000,
+      "wall_seconds": 11.43941796599995,
+      "wall_fps": 28.410536354730603,
+      "exit_code": 139,
+      "frame_sha256": "c5f993231d9145b59c321b2f4a9b74851e6c18d5f0fad0df0f269ee95a3ab4c5"
+    }
+  ]
+}

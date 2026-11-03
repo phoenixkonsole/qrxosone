@@ -16,20 +16,23 @@
 # Speed (22.5.12): the 68040/060 MMU emulation is off by default (AROS does not use
 # it; 1.5x faster CPU emulation); QRX_FSUAE_MMU=1 restores it.  FS-UAE 3.1.66's JIT
 # crashes with the Deadwood AROS ROM on this host ("JIT: Can't handle access"), so
-# QRX_FSUAE_JIT stays 0 by default.
+# QRX_FSUAE_JIT stays 0 by default for the stock binary. For the validated
+# patched emulator/profile, source tools/qrx86/fsuae/enable.sh; see its README.
+# QRX_FSUAE_BIN selects an explicit emulator executable.
 # Warp mode is off by default since 22.5.12 (QRX_FSUAE_WARP=1 turns it on): with
 # warp the emulated clock (vblank, timer.device) ran 54x ahead of the emulated CPU
 # for qrx-win32, which breaks programs that pace work by time (PrBoom's screen
 # melt), and the CPU itself was slower (BusyBox loop 63-72 s with warp, 31 s
 # without; Doom 282 k -> 498 k x86 instructions/s).
 set -Eeuo pipefail
+qrx_tmp_base="${QRX_SCENARIO_TMPDIR:-/var/tmp}"
 # bash reads scripts while running: run from a private copy so edits cannot break active runs
 if [[ -z "${QRX_SCN_SELFCOPY:-}" ]]; then
-  c="$(mktemp /var/tmp/qrx-scn-harness.XXXXXX)"; cp "$0" "$c"
+  c="$(mktemp "$qrx_tmp_base/qrx-scn-harness.XXXXXX")"; cp "$0" "$c"
   QRX_SCN_SELFCOPY="$c" exec bash "$c" "$@"
 fi
 SYS="$1"; ROM="$2"; EXT="$3"; SCN="$4"; OUT="$5"; CPU="${6:-68060}"; TMO="${7:-900}"
-W="$(mktemp -d /var/tmp/qrx-scn.XXXXXX)"; trap 'rm -rf "$W" "$QRX_SCN_SELFCOPY"' EXIT
+W="$(mktemp -d "$qrx_tmp_base/qrx-scn.XXXXXX")"; trap 'rm -rf "$W" "$QRX_SCN_SELFCOPY"' EXIT
 mkdir -p "$OUT" "$W/home"
 cp -a "$SYS" "$W/sys"
 [[ -d "$SCN/overlay" ]] && cp -a "$SCN/overlay/." "$W/sys/"
@@ -64,11 +67,17 @@ log_flush = 1
 $( [[ "${QRX_FSUAE_MMU:-0}" == 1 ]] || echo "uae_mmu_model = 0" )
 ${QRX_FSUAE_EXTRA:-}
 CFG
+cp "$W/cfg.fs-uae" "$OUT/fs-uae.cfg"
 BT="${QRX_BOOT_TMO:-240}"; tries=$(( ${QRX_BOOT_RETRIES:-2} + 1 )); attempt=0
 while :; do
 attempt=$((attempt+1)); rm -f "$OUT/BOOTED" "$OUT/DONE"
-d=$(( 200 + RANDOM % 200 )); Xvfb ":$d" -screen 0 1280x1024x24 >/dev/null 2>&1 & xp=$!; sleep 2
-HOME="$W/home" DISPLAY=":$d" SDL_AUDIODRIVER=dummy fs-uae "$W/cfg.fs-uae" > "$OUT/fs-uae.stdout" 2>&1 & fp=$!
+d=$(( 200 + RANDOM % 200 )); Xvfb ":$d" -screen 0 1280x1024x24 >"$OUT/xvfb.log" 2>&1 & xp=$!; sleep 2
+if ! kill -0 "$xp" 2>/dev/null; then
+  echo "Xvfb failed; see $OUT/xvfb.log" >&2
+  echo DISPLAY_FAILED > "$OUT/STATUS"
+  exit 1
+fi
+HOME="$W/home" DISPLAY=":$d" SDL_AUDIODRIVER=dummy "${QRX_FSUAE_BIN:-fs-uae}" "$W/cfg.fs-uae" > "$OUT/fs-uae.stdout" 2>&1 & fp=$!
 t=0; hung=0; flat=0; HT="${QRX_HANG_TMO:-120}"
 while (( t < TMO )); do
   [[ -f "$OUT/DONE" ]] && break; kill -0 $fp 2>/dev/null || break
