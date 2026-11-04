@@ -4,8 +4,10 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import "qrx_metal_renderer.h"
+#include "qrx_hostgpu.h"
 #include "qrx_aros_window.h"
 #include <stdatomic.h>
+#include <unistd.h>
 #include "qrxmedia.h"
 #include "qrx_hostfs.h"
 static QRXMediaDevice media;
@@ -43,6 +45,30 @@ static id<MTLDevice> gpu;
 static id<MTLCommandQueue> gpuQueue;
 static id<MTLRenderPipelineState> gpuPipeline;
 static id<MTLBuffer> gpuRam;
+/* Each presented frame is copied once on this thread. Reading guest RAM from the
+ * GPU directly would tear: by the time the command buffer runs, the guest may have
+ * flipped and be drawing into the very buffer on screen. The CPU thread never
+ * waits for this. The ring is larger than the drawables that can be in flight. */
+#define GPU_FRAMES 4u
+static id<MTLBuffer> gpuFrames[GPU_FRAMES];
+static unsigned gpuFrameNext;
+static uint8_t *guestRamBase;
+static size_t guestRamBytes;
+static BOOL copy_framebuffer(QRXPresent *u){
+ size_t bytes=(size_t)u->stride*u->h;
+ if((uint64_t)u->fb+bytes>guestRamBytes){fprintf(stderr,"[RTG] framebuffer %x+%zu outside RAM\n",u->fb,bytes);return NO;}
+ id<MTLBuffer> b=gpuFrames[gpuFrameNext];
+ if(!b||b.length<bytes){
+  b=[gpu newBufferWithLength:bytes options:MTLResourceStorageModeShared|MTLResourceCPUCacheModeWriteCombined];
+  if(!b)return NO;
+  gpuFrames[gpuFrameNext]=b;
+ }
+ memcpy(b.contents,guestRamBase+u->fb,bytes);
+ gpuRam=b;
+ gpuFrameNext=(gpuFrameNext+1u)%GPU_FRAMES;
+ u->fb=0;
+ return YES;
+}
 /* Guest 3D (QRX3D door) reaches the Mac's GPU as validated commands; while they
  * keep coming they replace the RTG picture, as a Voodoo pass-through card did. */
 static QRXAccelStream accelStream;
@@ -140,7 +166,7 @@ static QRXAROSView *view;
   alert.informativeText=path;[alert runModal];return;
  }
  qrx_hostfs_unmount(&probe);
- [diskPreferences setObject:path forKey:@"AppsDirectory"];
+ [diskPreferences setObject:path forKey:@"AppsDirectory"];[diskPreferences synchronize];
  NSAlert *alert=[NSAlert new];alert.messageText=@"APPS: für den nächsten Start gespeichert";
  alert.informativeText=[NSString stringWithFormat:@"%@\n\nSpeichere offene Arbeiten in QRX OS One und starte ARMithlon anschließend neu.",path];
  [alert runModal];
@@ -150,10 +176,15 @@ static QRXAROSView *view;
 static QRXAROSDelegate *delegate;
 /* AHI (DEVS:AHI/qrxhost.audio) fills the media ring; CoreAudio drains it. */
 static AudioQueueRef audioQueue;
+static uint64_t audioFramesHeard;
 static void audio_callback(void *opaque,AudioQueueRef q,AudioQueueBufferRef buffer){
  (void)opaque;
  size_t frames=buffer->mAudioDataBytesCapacity/4u;
  size_t got=qrx_media_pull_audio(&media,(int16_t*)buffer->mAudioData,frames);
+ {
+  const int16_t *pcm=buffer->mAudioData;
+  for(size_t i=0;i<got*2u;i++)if(pcm[i]){audioFramesHeard+=got;break;}
+ }
  if(got<frames)memset((int16_t*)buffer->mAudioData+got*2u,0,(frames-got)*4u);
  buffer->mAudioDataByteSize=(UInt32)(frames*4u);
  AudioQueueEnqueueBuffer(q,buffer,0,NULL);
@@ -173,7 +204,7 @@ static void audio_open(void){
  }
  AudioQueueStart(audioQueue,NULL);
 }
-int qrx_aros_window_open(QRXVM *vm){@autoreleasepool{
+int qrx_aros_window_open(QRXVM *vm,size_t ramBytes){@autoreleasepool{
  [NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
  qrx_media_init(&media,NULL,NULL);qrx_vm_bind_media(vm,&media);
  gpu=MTLCreateSystemDefaultDevice();
@@ -187,14 +218,13 @@ int qrx_aros_window_open(QRXVM *vm){@autoreleasepool{
  pd.colorAttachments[0].pixelFormat=MTLPixelFormatBGRA8Unorm;
  gpuPipeline=[gpu newRenderPipelineStateWithDescriptor:pd error:&shaderError];
  if(!gpuPipeline){fprintf(stderr,"[RTG] pipeline: %s\n",shaderError.localizedDescription.UTF8String);return 0;}
- gpuRam=[gpu newBufferWithBytesNoCopy:vm->ram.data length:vm->ram.size options:MTLResourceStorageModeShared deallocator:nil];
- if(!gpuRam){fprintf(stderr,"[RTG] guest RAM is not GPU-mappable\n");return 0;}
+  guestRamBase=vm->ram.data;guestRamBytes=ramBytes;
  window=[[NSWindow alloc]initWithContentRect:NSMakeRect(0,0,1024,768) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
  window.title=@"QRX OS One — ARMithlon / AROS RTG";window.releasedWhenClosed=NO;
  view=[[QRXAROSView alloc]initWithFrame:NSMakeRect(0,0,1024,768)];view.guestWidth=1024;view.guestHeight=768;
  view.wantsLayer=YES;
  window.contentView=view;window.acceptsMouseMovedEvents=YES;delegate=[QRXAROSDelegate new];window.delegate=delegate;
- guestVM=vm;diskPreferences=[[NSUserDefaults alloc]initWithSuiteName:@"org.qrxosone.armithlon.aros"];
+ guestVM=vm;diskPreferences=[[NSBundle mainBundle].bundleIdentifier isEqualToString:@"org.qrxosone.armithlon.aros"]?[NSUserDefaults standardUserDefaults]:[[NSUserDefaults alloc]initWithSuiteName:@"org.qrxosone.armithlon.aros"];
  NSString *defaultPath=[[[NSBundle mainBundle]bundlePath].stringByDeletingLastPathComponent stringByAppendingPathComponent:@"Apps"];
  [[NSFileManager defaultManager]createDirectoryAtPath:defaultPath withIntermediateDirectories:YES attributes:nil error:nil];
  NSString *appsPath=[diskPreferences stringForKey:@"AppsDirectory"]?:defaultPath;
@@ -209,6 +239,7 @@ int qrx_aros_window_open(QRXVM *vm){@autoreleasepool{
   accelRenderer=[[QRXMetalRenderer alloc]initWithDevice:gpu pixelFormat:MTLPixelFormatBGRA8Unorm depthFormat:MTLPixelFormatDepth32Float];
   if(accelRenderer)media.accel=&accelStream;
  }
+ qrx_hg_set_layer((__bridge void*)view.layer);
  audio_open();
  NSMenu *bar=[NSMenu new];NSMenuItem *appItem=[NSMenuItem new];[bar addItem:appItem];
  NSMenu *appMenu=[[NSMenu alloc]initWithTitle:@"ARMithlon"];appItem.submenu=appMenu;
@@ -221,6 +252,14 @@ int qrx_aros_window_open(QRXVM *vm){@autoreleasepool{
  [window center];[window makeKeyAndOrderFront:nil];[window makeFirstResponder:view];[NSApp finishLaunching];[NSApp activateIgnoringOtherApps:YES];running=YES;return 1;
 }}
 static void present_guest(void){
+ /* A host-API program presents from the CPU thread; here only the size is kept up. */
+ if(qrx_hg_active()){
+  CAMetalLayer *hgLayer=(CAMetalLayer*)view.layer;
+  CGFloat hgScale=window.backingScaleFactor;NSSize hgSize=view.bounds.size;
+  CGSize hgWant=CGSizeMake(hgSize.width*hgScale,hgSize.height*hgScale);
+  if(!CGSizeEqualToSize(hgLayer.drawableSize,hgWant)){hgLayer.drawableSize=hgWant;hgLayer.contentsScale=hgScale;}
+  return;
+ }
  if(accel_active()){
   CAMetalLayer *layer=(CAMetalLayer*)view.layer;
   CGFloat scale=window.backingScaleFactor;NSSize size=view.bounds.size;
@@ -232,7 +271,7 @@ static void present_guest(void){
  }
  uint64_t a=atomic_load_explicit(&presentFb,memory_order_acquire),g=atomic_load_explicit(&presentGeom,memory_order_acquire);
  QRXPresent u={(uint32_t)(a>>32),(uint32_t)a,(uint32_t)(g>>32)>>16,(uint32_t)(g>>32)&0xFFFFu,(uint32_t)g};
- if(!u.w||!u.h||!u.fmt)return;
+ if(!u.w||!u.h||!u.fmt||!copy_framebuffer(&u))return;
  view.guestWidth=u.w;view.guestHeight=u.h;
  CAMetalLayer *layer=(CAMetalLayer*)view.layer;
  CGFloat scale=window.backingScaleFactor;NSSize size=view.bounds.size;
@@ -260,9 +299,15 @@ static void present_guest(void){
 static void capture_guest(const char *path){
  uint64_t a=atomic_load(&presentFb),g=atomic_load(&presentGeom);
  QRXPresent u={(uint32_t)(a>>32),(uint32_t)a,(uint32_t)(g>>32)>>16,(uint32_t)(g>>32)&0xFFFFu,(uint32_t)g};
+ if(getenv("QRX_RTG_CAPTURE_DEBUG")&&u.w){
+  size_t nz=0,cn=0,n=(size_t)u.stride*u.h;
+  for(size_t i=0;i<n;i+=64)nz+=guestRamBase[u.fb+i]!=0;
+  if(presentClut)for(int i=0;i<256;i++)cn+=(presentClut[i]&0xFFFFFFu)!=0;
+  fprintf(stderr,"[RTG-DEBUG] fb=%08x nonzero=%zu/%zu clut_nonzero=%zu\n",u.fb,nz,n/64,cn);
+ }
  BOOL accel=accel_active();
  if(accel){u.w=800;u.h=450;}
- else if(!u.w||!u.h||!u.fmt)return;
+ else if(!u.w||!u.h||!u.fmt||!copy_framebuffer(&u)){fprintf(stderr,"[RTG] nothing to capture %ux%u fmt=%u\n",u.w,u.h,u.fmt);return;}
  MTLTextureDescriptor *d=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:u.w height:u.h mipmapped:NO];
  d.usage=MTLTextureUsageRenderTarget;d.storageMode=MTLStorageModeShared;
  id<MTLTexture> tex=[gpu newTextureWithDescriptor:d];
@@ -289,17 +334,37 @@ static void capture_guest(const char *path){
   fprintf(f,"P6\n%u %u\n255\n",u.w,u.h);
   for(size_t i=0;i<(size_t)u.w*u.h;i++){uint8_t rgb[3]={px[i*4+2],px[i*4+1],px[i*4]};fwrite(rgb,1,3,f);}
   fclose(f);
-  fprintf(stderr,"[RTG] captured %ux%u fmt=%u to %s\n",u.w,u.h,u.fmt,path);
+  fprintf(stderr,"[RTG] captured %ux%u fmt=%u to %s\n",u.w,u.h,u.fmt,path);if(audioFramesHeard)fprintf(stderr,"[AUDIO] %llu frames with sound so far\n",(unsigned long long)audioFramesHeard);
  }
  free(px);
 }
 int qrx_aros_window_pump(void){@autoreleasepool{
  {
-  static NSDate *captureAt;static BOOL captureDone;
+  /* Unattended input check: QRX_TEST_KEY=rawkey pressed at QRX_TEST_KEY_AT seconds. */
+  static NSDate *keyAt;static int keyStage;
+  const char *key=getenv("QRX_TEST_KEY");
+  if(key&&keyStage<2){
+   if(!keyAt){const char *at=getenv("QRX_TEST_KEY_AT");keyAt=[NSDate dateWithTimeIntervalSinceNow:at?atof(at):20.0];}
+   if([keyAt compare:[NSDate date]]==NSOrderedAscending){
+    qrx_media_push_input(&media,((keyStage==0?1u:2u)<<24)|((unsigned)strtoul(key,NULL,0)<<16));
+    keyStage++;keyAt=[NSDate dateWithTimeIntervalSinceNow:0.15];
+   }
+  }
+ }
+ {
+  /* QRX_RTG_CAPTURE_COUNT=n takes a series, 67 ms apart, as path.0 .. path.n-1 */
+  static NSDate *captureAt;static int captureLeft=-1,captureIndex;
   const char *path=getenv("QRX_RTG_CAPTURE");
-  if(path&&!captureDone){
-   if(!captureAt){const char *at=getenv("QRX_RTG_CAPTURE_AT");captureAt=[NSDate dateWithTimeIntervalSinceNow:at?atof(at):20.0];}
-   if([captureAt compare:[NSDate date]]==NSOrderedAscending){captureDone=YES;capture_guest(path);}
+  if(path&&captureLeft){
+   if(!captureAt){const char *at=getenv("QRX_RTG_CAPTURE_AT"),*n=getenv("QRX_RTG_CAPTURE_COUNT");
+    captureAt=[NSDate dateWithTimeIntervalSinceNow:at?atof(at):20.0];captureLeft=n?atoi(n):1;}
+   if([captureAt compare:[NSDate date]]==NSOrderedAscending){
+    char name[1024];
+    if(getenv("QRX_RTG_CAPTURE_COUNT"))snprintf(name,sizeof name,"%s.%d",path,captureIndex++);
+    else snprintf(name,sizeof name,"%s",path);
+    capture_guest(name);captureLeft--;
+    captureAt=[NSDate dateWithTimeIntervalSinceNow:0.067];
+   }
   }
  }
  /* Blocks in the event queue until the next frame is due; the guest CPU has
@@ -319,4 +384,4 @@ void qrx_aros_window_publish(uint32_t fb,uint32_t stride,uint32_t w,uint32_t h,u
  atomic_store_explicit(&presentFb,((uint64_t)fb<<32)|stride,memory_order_release);
  atomic_store_explicit(&presentGeom,((uint64_t)((w<<16)|(h&0xFFFFu))<<32)|fmt,memory_order_release);
 }
-void qrx_aros_window_close(void){if(accelStream.submitted)fprintf(stderr,"[3D] frames submitted=%llu dropped=%llu\n",(unsigned long long)accelStream.submitted,(unsigned long long)accelStream.dropped);if(audioQueue){AudioQueueStop(audioQueue,true);AudioQueueDispose(audioQueue,true);audioQueue=NULL;}[window orderOut:nil];running=NO;if(guestVM)qrx_hostfs_attach2(guestVM,NULL);qrx_hostfs_unmount(&appsDisk);guestVM=NULL;}
+void qrx_aros_window_close(void){if(audioFramesHeard)fprintf(stderr,"[AUDIO] %llu frames with sound played\n",(unsigned long long)audioFramesHeard);if(accelStream.submitted)fprintf(stderr,"[3D] frames submitted=%llu dropped=%llu\n",(unsigned long long)accelStream.submitted,(unsigned long long)accelStream.dropped);if(audioQueue){AudioQueueStop(audioQueue,true);AudioQueueDispose(audioQueue,true);audioQueue=NULL;}[window orderOut:nil];running=NO;if(guestVM)qrx_hostfs_attach2(guestVM,NULL);qrx_hostfs_unmount(&appsDisk);guestVM=NULL;}

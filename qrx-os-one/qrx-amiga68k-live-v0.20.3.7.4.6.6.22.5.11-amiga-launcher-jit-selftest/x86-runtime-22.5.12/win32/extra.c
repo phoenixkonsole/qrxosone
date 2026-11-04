@@ -278,12 +278,153 @@ FN(x_GetSystemPaletteEntries) {
 }
 FN(x_SetPaletteEntries) { UNUSED; return a[2]; }
 
+/* Environment block for GetEnvironmentStrings: one empty variable list. */
+FN(x_GetEnvironmentStrings) { UNUSED; return qw_data(w, 8); }
+FN(x_WriteConsoleA) {
+    char buf[512]; uint32_t i, n = a[2] < sizeof(buf) - 1 ? a[2] : (uint32_t)sizeof(buf) - 1;
+    for (i = 0; i < n; i++) buf[i] = (char)x86_rd8(C, a[1] + i);
+    buf[n] = 0; qw_log(w, "console: %s", buf);
+    if (a[3]) x86_wr32(C, a[3], a[2]);
+    return 1;
+}
+FN(x_FileTimeToDosDateTime) { if (a[1]) x86_wr16(C, a[1], 0x2821); if (a[2]) x86_wr16(C, a[2], 0); return 1; }
+FN(x_DosDateTimeToFileTime) { if (a[2]) { x86_wr32(C, a[2], 0); x86_wr32(C, a[2] + 4, 0); } return 1; }
+FN(x_FileTimeCopy) { x86_wr32(C, a[1], x86_rd32(C, a[0])); x86_wr32(C, a[1] + 4, x86_rd32(C, a[0] + 4)); return 1; }
+FN(x_GetEnvironmentStringsW) { UNUSED; return qw_data(w, 8); }
+FN(x_SetHandleCount) { UNUSED; return a[0]; }
+FN(x_GetOEMCP) { UNUSED; return 437; }
+/* GetStringTypeA(lcid, type, src, n, out) / W(type, src, n, out): C1 classes for plain ASCII */
+static uint16_t ctype1(unsigned c)
+{
+    uint16_t t = 0;
+    if (c >= '0' && c <= '9') t |= 0x04;
+    if (c >= 'a' && c <= 'z') t |= 0x02 | 0x100;
+    if (c >= 'A' && c <= 'Z') t |= 0x01 | 0x100;
+    if (c == ' ' || (c >= 9 && c <= 13)) t |= 0x08;
+    if (c == ' ') t |= 0x40;
+    if (c < 32 || c == 127) t |= 0x20;
+    if (c > 32 && c < 127 && !(t & 0x107)) t |= 0x10;
+    return t;
+}
+FN(x_GetStringTypeA) {
+    uint32_t i, n = a[3];
+    if (n == 0xFFFFFFFFu) { for (n = 0; x86_rd8(C, a[2] + n); n++) {} n++; }
+    for (i = 0; i < n; i++) x86_wr16(C, a[4] + i * 2, ctype1(x86_rd8(C, a[2] + i)));
+    (void)w;
+    return 1;
+}
+FN(x_GetStringTypeW) {
+    uint32_t i, n = a[2];
+    if (n == 0xFFFFFFFFu) { for (n = 0; x86_rd16(C, a[1] + n * 2); n++) {} n++; }
+    for (i = 0; i < n; i++) x86_wr16(C, a[3] + i * 2, ctype1(x86_rd16(C, a[1] + i * 2)));
+    (void)w;
+    return 1;
+}
+/* LCMapStringA(lcid, flags, src, n, dst, dstn): case maps ASCII, flags 0x100 lower 0x200 upper */
+FN(x_LCMapStringA) {
+    uint32_t i, n = a[3];
+    if (n == 0xFFFFFFFFu) { for (n = 0; x86_rd8(C, a[2] + n); n++) {} n++; }
+    if (!a[5]) return n;
+    if (n > a[5]) return 0;
+    for (i = 0; i < n; i++) {
+        uint8_t c = x86_rd8(C, a[2] + i);
+        if ((a[1] & 0x100) && c >= 'A' && c <= 'Z') c += 32;
+        if ((a[1] & 0x200) && c >= 'a' && c <= 'z') c -= 32;
+        x86_wr8(C, a[4] + i, c);
+    }
+    (void)w;
+    return n;
+}
+FN(x_LCMapStringW) {
+    uint32_t i, n = a[3];
+    if (n == 0xFFFFFFFFu) { for (n = 0; x86_rd16(C, a[2] + n * 2); n++) {} n++; }
+    if (!a[5]) return n;
+    if (n > a[5]) return 0;
+    for (i = 0; i < n; i++) {
+        uint16_t c = x86_rd16(C, a[2] + i * 2);
+        if ((a[1] & 0x100) && c >= 'A' && c <= 'Z') c += 32;
+        if ((a[1] & 0x200) && c >= 'a' && c <= 'z') c -= 32;
+        x86_wr16(C, a[4] + i * 2, c);
+    }
+    (void)w;
+    return n;
+}
+/* CompareStringA(lcid, flags, s1, n1, s2, n2): returns 1 less, 2 equal, 3 greater */
+FN(x_CompareStringA) {
+    uint32_t n1 = a[3], n2 = a[5], i;
+    if (n1 == 0xFFFFFFFFu) for (n1 = 0; x86_rd8(C, a[2] + n1); n1++) {}
+    if (n2 == 0xFFFFFFFFu) for (n2 = 0; x86_rd8(C, a[4] + n2); n2++) {}
+    for (i = 0; i < n1 && i < n2; i++) {
+        unsigned x = x86_rd8(C, a[2] + i), y = x86_rd8(C, a[4] + i);
+        if (a[1] & 1) { if (x >= 'a' && x <= 'z') x -= 32; if (y >= 'a' && y <= 'z') y -= 32; }
+        if (x != y) return x < y ? 1 : 3;
+    }
+    (void)w;
+    return n1 == n2 ? 2 : (n1 < n2 ? 1 : 3);
+}
+FN(x_lstrcatA) {
+    uint32_t e = a[0], i = 0;
+    uint8_t c;
+    while (x86_rd8(C, e)) e++;
+    do { c = x86_rd8(C, a[1] + i); x86_wr8(C, e + i, c); i++; } while (c);
+    (void)w;
+    return a[0];
+}
+FN(x_FileTimeToSystemTime) { uint32_t i; for (i = 0; i < 16; i += 2) x86_wr16(C, a[1] + i, i == 0 ? 1996 : 1); (void)w; return 1; }
+FN(x_GetUserNameA) {
+    static const char n[] = "QRX";
+    uint32_t i;
+    for (i = 0; i < sizeof(n); i++) x86_wr8(C, a[0] + i, (uint8_t)n[i]);
+    if (a[1]) x86_wr32(C, a[1], (uint32_t)sizeof(n));
+    (void)w;
+    return 1;
+}
+/* No cooperative scheduler yet: the thread is recorded and never runs. */
+FN(x_CreateThread) {
+    qw_log(w, "CreateThread start=%08x param=%08x flags=%08x: not run", a[2], a[3], a[4]);
+    if (a[5]) x86_wr32(C, a[5], 0x200);
+    return 0x7E200001u;
+}
+FN(x_ExitThread) { qw_log(w, "ExitThread(%u)", a[0]); w->exit_code = (int)a[0]; w->exiting = 1; C->stop = 1; return 0; }
+/* No registry on this board: games fall back to their defaults. */
+#define REG_NOT_FOUND 2u
+FN(x_RegNotFound) { UNUSED; return REG_NOT_FOUND; }
+FN(x_RegCreateKeyA) { if (a[2]) x86_wr32(C, a[2], 0x7E000001u); return 0; }
+FN(x_MidiFail) { UNUSED; return 2u; /* MMSYSERR_BADDEVICEID */ }
+FN(x_DeviceIoControl) { UNUSED; return 0; }
+FN(x_StretchDIBits) { UNUSED; return a[6]; /* lines copied; the RTG surface is the real output */ }
+FN(x_CreateDCA) { UNUSED; return 0x7E100001u; }
+FN(x_CreateDIBitmap) { UNUSED; return 0x7E100002u; }
 #define K(n, f, c) { "kernel32", n, c, f }
 #define U(n, f, c) { "user32", n, c, f }
 #define G(n, f, c) { "gdi32", n, c, f }
+#define ADV(n, f, c) { "advapi32", n, c, f }
 #define M(n, f) { "msvcrt", n, -1, f }
 #define W_(n, f, c) { "winmm", n, c, f }
 const qhle qw_extra[] = {
+    K("GetEnvironmentStringsW", x_GetEnvironmentStringsW, 0), K("FreeEnvironmentStringsW", x_ok1, 1), K("FreeEnvironmentStringsA", x_ok1, 1),
+    K("SetHandleCount", x_SetHandleCount, 1), K("GetOEMCP", x_GetOEMCP, 0), K("GetStringTypeA", x_GetStringTypeA, 5),
+    K("GetStringTypeW", x_GetStringTypeW, 4), K("LCMapStringA", x_LCMapStringA, 6), K("LCMapStringW", x_LCMapStringW, 6),
+    K("CompareStringA", x_CompareStringA, 6), K("CompareStringW", x_ok0, 6), K("IsBadCodePtr", x_ok0, 1), K("IsBadWritePtr", x_ok0, 2),
+    K("DebugBreak", x_ok0, 0), K("lstrcatA", x_lstrcatA, 2), K("FileTimeToSystemTime", x_FileTimeToSystemTime, 2),
+    K("RtlUnwind", x_ok0, 4), K("CreateThread", x_CreateThread, 6), K("ExitThread", x_ExitThread, 1),
+    ADV("GetUserNameA", x_GetUserNameA, 2), ADV("RegDeleteKeyA", x_ok0, 2), ADV("RegEnumKeyExA", x_RegNotFound, 8),
+    U("WinHelpA", x_ok1, 4), U("PostThreadMessageA", x_ok1, 4), U("GetWindowPlacement", x_ok0, 2), U("SetWindowPlacement", x_ok1, 2),
+    U("CreateDialogIndirectParamA", x_ok0, 5),
+    { "comctl32", "PropertySheetA", 1, x_fail_m1 },
+    { "comdlg32", "GetOpenFileNameA", 1, x_ok0 }, { "comdlg32", "GetSaveFileNameA", 1, x_ok0 }, { "comdlg32", "CommDlgExtendedError", 0, x_ok0 },
+    K("GetEnvironmentStrings", x_GetEnvironmentStrings, 0), K("SetStdHandle", x_ok1, 2), K("GetConsoleMode", x_ok0, 2),
+    K("SetConsoleMode", x_ok1, 2), K("WriteConsoleA", x_WriteConsoleA, 5), K("ReadConsoleInputA", x_ok0, 4),
+    K("DosDateTimeToFileTime", x_DosDateTimeToFileTime, 3), K("FileTimeToDosDateTime", x_FileTimeToDosDateTime, 3),
+    K("FileTimeToLocalFileTime", x_FileTimeCopy, 2), K("LocalFileTimeToFileTime", x_FileTimeCopy, 2),
+    K("DeviceIoControl", x_DeviceIoControl, 8), 
+    ADV("RegOpenKeyA", x_RegNotFound, 3), ADV("RegCreateKeyA", x_RegCreateKeyA, 3),
+    ADV("RegQueryValueExA", x_RegNotFound, 6), ADV("RegSetValueExA", x_ok0, 6),
+    W_("joyGetNumDevs", x_ok0, 0), W_("joyGetDevCapsA", x_MidiFail, 3), W_("joyGetPosEx", x_MidiFail, 2),
+    W_("midiStreamOpen", x_MidiFail, 6), W_("midiStreamClose", x_ok0, 1), W_("midiStreamOut", x_MidiFail, 3),
+    W_("midiStreamPause", x_ok0, 1), W_("midiStreamRestart", x_ok0, 1), W_("midiStreamProperty", x_MidiFail, 3),
+    W_("midiOutPrepareHeader", x_MidiFail, 3), W_("midiOutUnprepareHeader", x_ok0, 3), W_("midiOutReset", x_ok0, 1),
+    G("CreateDCA", x_CreateDCA, 4), G("CreateDIBitmap", x_CreateDIBitmap, 6), G("StretchDIBits", x_StretchDIBits, 13),
     K("GetEnvironmentVariableA", x_GetEnvironmentVariableA, 3), K("GetEnvironmentVariableW", x_GetEnvironmentVariableW, 3),
     K("SetEnvironmentVariableA", x_SetEnvironmentVariableA, 2), K("FormatMessageA", x_ok0, 7), K("GetLocaleInfoA", x_GetLocaleInfoA, 4),
     K("GetCPInfo", x_GetCPInfo, 2), K("IsDBCSLeadByte", x_ok0, 1), K("GetFileInformationByHandle", x_ok0, 2),

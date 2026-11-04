@@ -6,6 +6,7 @@
 #include "qrx68100_jit.h"
 #include "qrx86_door.h"
 #include "qrxmedia.h"
+#include "qrx68100_core1.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -169,6 +170,9 @@ int main(int argc,char **argv){
     bool share_rw=false;QRXHostFS hostfs={0},appsfs={0};
     const char *apps=NULL;
     bool realtime=false;
+    /* A quarter of the host's RAM up to the board limit, backed lazily.
+     * C:QRXMoreMemory hands the part above 32 MiB to exec. */
+    uint32_t ram_mb=(uint32_t)(qrx_ram_auto_bytes()/(1024u*1024u));
     uint64_t budget=1000000;
     uint8_t *adf_hold=NULL;
     for(int i=1;i<argc;i++){
@@ -179,6 +183,7 @@ int main(int argc,char **argv){
         else if(!strcmp(argv[i],"--share")&&i+1<argc)share=argv[++i];
         else if(!strcmp(argv[i],"--share-rw"))share_rw=true;
         else if(!strcmp(argv[i],"--realtime"))realtime=true;
+        else if(!strcmp(argv[i],"--ram")&&i+1<argc)ram_mb=(uint32_t)strtoul(argv[++i],NULL,10);
         else if(!strcmp(argv[i],"--seconds")&&i+1<argc){run_seconds=strtod(argv[++i],NULL);budget=UINT64_MAX;}
         else if(!strcmp(argv[i],"--apps")&&i+1<argc)apps=argv[++i];
         else if(!strcmp(argv[i],"--cycles")&&i+1<argc)budget=strtoull(argv[++i],NULL,10);
@@ -188,7 +193,8 @@ int main(int argc,char **argv){
     QRXFullCPU c;
     size_t adfsz = 0;
     int rc = 1;
-    if(!qrx_full_init(&c,32u*1024u*1024u,cpu)){fprintf(stderr,"CPU init failed; models 68000..68040, one active VM\n");return 2;}
+    if(ram_mb<32)ram_mb=32;
+    if(!qrx_full_init(&c,(size_t)ram_mb*1024u*1024u,cpu)){fprintf(stderr,"CPU init failed; models 68000..68040, one active VM\n");return 2;}
     if(share){
         if(!qrx_hostfs_mount(&hostfs,share,!share_rw)){fprintf(stderr,"HostFS mount failed: %s\n",share);qrx_full_destroy(&c);return 2;}
         qrx_hostfs_attach(&c.vm,&hostfs);
@@ -198,9 +204,10 @@ int main(int argc,char **argv){
         if(!qrx_hostfs_mount(&appsfs,apps,false)){fprintf(stderr,"APPS mount failed: %s\n",apps);qrx_full_destroy(&c);return 2;}
         qrx_hostfs_attach2(&c.vm,&appsfs);
     }
+    qrx_full_hide_high_ram(&c,32u*1024u*1024u);
     qrx_full_set_host(&c,putc_host,host_ms,NULL);
 #ifdef __APPLE__
-    if(native_window){static struct fsaga_sink live;if(!qrx_aros_window_open(&c.vm)){fprintf(stderr,"native window failed\n");return 2;}qrx_full_set_display(&c,fsaga_host_display,&live);}
+    if(native_window){static struct fsaga_sink live;if(!qrx_aros_window_open(&c.vm,c.ram_total?c.ram_total:c.vm.ram.size)){fprintf(stderr,"native window failed\n");return 2;}qrx_full_set_display(&c,fsaga_host_display,&live);}
 #endif
     {
         const char *ppm = getenv("QRX_FULL_FSAGA_TEST");
@@ -275,6 +282,7 @@ int main(int argc,char **argv){
     {const char *je=getenv("QRX_JIT");
      if(!je||strcmp(je,"0")){
          bool jit_on=qrx_jit_init(&c,mainrom?20000000u:0u);
+         if(jit_on)qrx_core1_attach(&c);
          fprintf(stderr,"[ARMITHLON] JIT %s\n",jit_on?"on":"unavailable");
      }}
     fprintf(stderr,"[ARMITHLON] model=%u PC=%08x cycles_budget=%llu\n",cpu,qrx_full_pc(&c),(unsigned long long)budget);
@@ -339,6 +347,7 @@ int main(int argc,char **argv){
     if(native_window)qrx_aros_window_close();
 #endif
     qrx86_door_report();
+    qrx_core1_detach(&c);
     qrx_jit_destroy(&c);
     free(rom);qrx_hostfs_attach(&c.vm,NULL);qrx_hostfs_unmount(&hostfs);
     if(apps&&!native_window){qrx_hostfs_attach2(&c.vm,NULL);qrx_hostfs_unmount(&appsfs);}

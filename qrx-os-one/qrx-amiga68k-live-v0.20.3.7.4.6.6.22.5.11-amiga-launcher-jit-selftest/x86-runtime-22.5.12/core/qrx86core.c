@@ -1516,6 +1516,7 @@ struct door_req {
     uint32_t top, fsw, fcw, ftw;
     uint32_t dir, map_serial, hle_base, hle_count, stop_eip, limit;
     uint32_t executed, status;
+    uint32_t alloc, alloc_addr, alloc_done;
 } __attribute__((packed, aligned(4)));
 int x86_door_enable(x86cpu *c)
 {
@@ -1523,7 +1524,17 @@ int x86_door_enable(x86cpu *c)
     c->door = 1;
     return 1;
 }
-static void door_quantum(x86cpu *c, uint32_t stop_eip)
+int x86_door_call(x86cpu *c, uint32_t *block)
+{
+    if (!c->door) return 0;
+    block[1] = c->map_serial;
+    block[2] = (uint32_t)(uintptr_t)c->dir;
+    (*(volatile uint32_t *)0xFF00088Cu) = (uint32_t)(uintptr_t)block;
+    __asm__ volatile("" ::: "memory");
+    return 1;
+}
+/* Returns 1 when the door wants to continue: the host asked for x86 memory. */
+static int door_quantum(x86cpu *c, uint32_t stop_eip)
 {
     static struct door_req q;
     int i;
@@ -1550,10 +1561,18 @@ static void door_quantum(x86cpu *c, uint32_t stop_eip)
     for (i = 0; i < 6; i++) { c->sreg[i] = (uint16_t)q.sreg[i]; c->sbase[i] = q.sbase[i]; }
     c->top = (int)q.top; c->fsw = (uint16_t)q.fsw; c->fcw = (uint16_t)q.fcw; c->ftw = (uint16_t)q.ftw;
     c->left -= q.executed < c->left ? q.executed : c->left;
+    q.alloc_done = 0;
+    if (q.alloc && c->door_alloc) {
+        q.alloc_addr = c->door_alloc(c, q.alloc);
+        q.alloc_done = q.alloc;
+        return 1;
+    }
+    return 0;
 }
 #else
 int x86_door_enable(x86cpu *c) { (void)c; return 0; }
-#define door_quantum(c, stop) ((void)0)
+int x86_door_call(x86cpu *c, uint32_t *block) { (void)c; (void)block; return 0; }
+#define door_quantum(c, stop) 0
 #endif
 
 /* single = 1: exactly one instruction, no budget accounting (x86_step).
@@ -1575,7 +1594,7 @@ static int run_loop(x86cpu *c, uint32_t stop_eip, int single)
             if (!c->left && !budget_refill(c))
                 FAULT(c, X86_FAULT_BUDGET, c->eip, "instruction budget exhausted");
             if (c->door) {
-                door_quantum(c, stop_eip);
+                if (door_quantum(c, stop_eip)) continue;
                 if (c->eip == stop_eip) break;
                 if (!c->left) continue;
             }

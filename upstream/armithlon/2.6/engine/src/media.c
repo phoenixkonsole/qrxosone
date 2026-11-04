@@ -48,6 +48,20 @@ static bool push_audio(QRXMediaDevice *m,uint32_t frame) {
     atomic_store_explicit(&m->audio_write,w+1,memory_order_release);
     return true;
 }
+size_t qrx_media_push_audio(QRXMediaDevice *m,const uint32_t *frames,size_t n) {
+    if(!m)return 0;
+    unsigned w=atomic_load_explicit(&m->audio_write,memory_order_relaxed);
+    unsigned r=atomic_load_explicit(&m->audio_read,memory_order_acquire);
+    size_t room=QRX_AUDIO_RING_SIZE-(size_t)(w-r);
+    if(n>room)n=room;
+    for(size_t i=0;i<n;i++)m->audio_frames[(w+(unsigned)i)%QRX_AUDIO_RING_SIZE]=frames[i];
+    atomic_store_explicit(&m->audio_write,w+(unsigned)n,memory_order_release);
+    return n;
+}
+unsigned qrx_media_audio_queued(QRXMediaDevice *m) {
+    if(!m)return 0;
+    return atomic_load_explicit(&m->audio_write,memory_order_acquire)-atomic_load_explicit(&m->audio_read,memory_order_acquire);
+}
 size_t qrx_media_pull_audio(QRXMediaDevice *m,int16_t *dst,size_t frames) {
     if (!m || !dst) return 0;
     unsigned r=atomic_load_explicit(&m->audio_read,memory_order_relaxed);

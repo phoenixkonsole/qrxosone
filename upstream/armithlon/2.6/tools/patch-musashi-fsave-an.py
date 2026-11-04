@@ -93,7 +93,40 @@ assert restore_anchor.endswith(restore_tail)
 fpu = fpu.replace(restore_anchor,
                   restore_anchor[:-len(restore_tail)] + restore_fix + restore_tail)
 
+# TAS and CAS must stay atomic once a second core runs. They go through hooks
+# that the board overrides for RAM; the weak defaults keep plain Musashi behaviour.
+cpu += '''
+__attribute__((weak)) int qrx_atomic_cas(unsigned width, unsigned ea, unsigned cmp, unsigned val, unsigned *old)
+{ (void)width; (void)ea; (void)cmp; (void)val; (void)old; return 0; }
+__attribute__((weak)) int qrx_atomic_tas(unsigned ea, unsigned *old)
+{ (void)ea; (void)old; return 0; }
+'''
+ops = (src / 'm68k_in.c').read_text(encoding='latin-1')
+def sub_once(text, old, new):
+    if text.count(old) != 1:
+        raise SystemExit(f'patch anchor not unique: {old!r}')
+    return text.replace(old, new)
+ops = sub_once(ops, 'M68KMAKE_OPCODE_HANDLER_HEADER\n\n#include <stdio.h>\n#include "m68kcpu.h"\n',
+               'M68KMAKE_OPCODE_HANDLER_HEADER\n\n#include <stdio.h>\n#include "m68kcpu.h"\n'
+               'extern int qrx_atomic_cas(unsigned width, unsigned ea, unsigned cmp, unsigned val, unsigned *old);\n'
+               'extern int qrx_atomic_tas(unsigned ea, unsigned *old);\n')
+for bits, mask in ((8, 'MASK_OUT_ABOVE_8(*compare)'), (16, 'MASK_OUT_ABOVE_16(*compare)'), (32, '*compare')):
+    size = bits // 8
+    value = f'MASK_OUT_ABOVE_{bits}(REG_D[(word2 >> 6) & 7])' if bits != 32 else 'REG_D[(word2 >> 6) & 7]'
+    ops = sub_once(ops,
+        f'\t\tuint ea = M68KMAKE_GET_EA_AY_{bits};\n\t\tuint dest = m68ki_read_{bits}(ea);\n\t\tuint* compare = &REG_D[word2 & 7];\n',
+        f'\t\tuint ea = M68KMAKE_GET_EA_AY_{bits};\n\t\tuint dest;\n\t\tuint* compare = &REG_D[word2 & 7];\n'
+        f'\t\tint atomic_done = qrx_atomic_cas({size}, ea, {mask}, {value}, &dest);\n'
+        f'\t\tif(!atomic_done) dest = m68ki_read_{bits}(ea);\n')
+    ops = sub_once(ops,
+        f'\t\t\tm68ki_write_{bits}(ea, {value});\n\t\t}}\n\t\treturn;',
+        f'\t\t\tif(!atomic_done) m68ki_write_{bits}(ea, {value});\n\t\t}}\n\t\treturn;')
+ops = sub_once(ops, '\tuint dst = m68ki_read_8(ea);\n\tuint allow_writeback;\n',
+               '\tuint dst;\n\tuint allow_writeback;\n\tint atomic_done = qrx_atomic_tas(ea, &dst);\n\tif(!atomic_done) dst = m68ki_read_8(ea);\n')
+ops = sub_once(ops, '\tif (allow_writeback==1) m68ki_write_8(ea, dst | 0x80);\n',
+               '\tif (allow_writeback==1 && !atomic_done) m68ki_write_8(ea, dst | 0x80);\n')
 dst.mkdir(parents=True, exist_ok=True)
+(dst / 'm68k_in.c').write_text(ops, encoding='latin-1')
 (dst / 'm68kcpu.c').write_text(cpu)
 (dst / 'm68kfpu.c').write_text(fpu)
 print(f'Musashi FSAVE-(An) build-tree copy ready: {dst}')

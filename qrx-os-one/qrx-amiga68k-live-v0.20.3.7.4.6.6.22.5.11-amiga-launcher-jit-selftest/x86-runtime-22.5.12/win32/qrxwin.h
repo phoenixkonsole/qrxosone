@@ -105,6 +105,7 @@ typedef struct qwnd {
     uint8_t *extra;                   /* cbWndExtra bytes */
     int nextra;
     int visible, enabled, destroyed;
+    int app_activated;                /* got its WM_ACTIVATEAPP */
     int dirty, erase;                 /* needs WM_PAINT / WM_ERASEBKGND */
     int ux0, uy0, ux1, uy1;           /* update region bounds (client coords) */
     /* top-level */
@@ -264,6 +265,9 @@ typedef struct qwin {
 int  qw_load(qwin *w, const char *path, int argc, char **argv);
 int  qw_run(qwin *w);
 uint32_t qw_thunk(qwin *w, const char *dll, const char *name);
+/* Functions the host implements through the ARMithlon door (3D APIs). */
+int qw_host_bind(qwin *w, uint32_t idx);
+int qw_host_has(qwin *w, const char *name);
 uint32_t qw_alloc(qwin *w, uint32_t n);
 void qw_free(qwin *w, uint32_t a);
 uint32_t qw_size(qwin *w, uint32_t a);

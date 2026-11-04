@@ -230,7 +230,9 @@ static qmod *pe_map(qwin *w, const uint8_t *b, size_t n, const char *name, int i
         uint32_t vsz = le32(s + 8), va = le32(s + 12), rsz = le32(s + 16), rp = le32(s + 20);
         if (rsz > vsz && vsz) rsz = vsz;
         if ((uint64_t)rp + rsz > n) rsz = rp < n ? (uint32_t)(n - rp) : 0;
-        if (rsz) x86_write_mem(c, base + va, b + rp, rsz);
+        /* Raw pointer 0 means uninitialised data, whatever the size field says
+         * (Watcom-linked programs such as Doom95 fill it in for .bss). */
+        if (rsz && rp) x86_write_mem(c, base + va, b + rp, rsz);
     }
     if (base != pref) {
         apply_relocs(w, base, rel_rva, rel_size, base - pref);

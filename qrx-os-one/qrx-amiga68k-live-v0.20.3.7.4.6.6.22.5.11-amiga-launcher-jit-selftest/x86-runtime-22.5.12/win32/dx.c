@@ -351,7 +351,8 @@ FN(dd_CreateSurface) {                  /* (this, desc, pp, outer) */
     int sw, sh, bpp;
     dxobj *s;
     if (!dd || !d) return DDERR_INVALIDPARAMS;
-    flags = RD32(d + 4); caps = (flags & 1) ? RD32(d + 104) : 0x40;
+    flags = RD32(d + 4); caps = ((flags & 1) || RD32(d + 104)) ? RD32(d + 104) : 0x40;   /* Doom95 fills caps without the flag */
+    if (w->verbose) qw_log(w, "DirectDraw: CreateSurface flags=%08x caps=%08x back=%u size=%ux%u", flags, caps, RD32(d + 20), RD32(d + 12), RD32(d + 8));
     if (!dd->mw) { dd->mw = 640; dd->mh = 480; dd->mbpp = 16; }          /* no SetDisplayMode: desktop-like 640x480x16 */
     bpp = (flags & 0x1000) ? (int)RD32(d + 84) : dd->mbpp;
     if (bpp != 8 && bpp != 16 && bpp != 32) bpp = dd->mbpp;
@@ -359,7 +360,8 @@ FN(dd_CreateSurface) {                  /* (this, desc, pp, outer) */
         id = new_surface(w, idx_of(dd), dd->mw, dd->mh, dd->mbpp, caps | 0x8000 | 0x4000 | ((caps & 0x10) ? 0x20 : 0));
         if (!id) return E_FAIL_;
         s = &g_o[id - 1]; s->primary = 1;
-        if ((flags & 0x20) && RD32(d + 20) >= 1) {                       /* back buffer(s): one is supported */
+        /* A FLIP primary always has a back buffer, even if the count flag is unset. */
+        if (((flags & 0x20) && RD32(d + 20) >= 1) || (caps & 0x10)) {                       /* back buffer(s): one is supported */
             uint32_t bid = new_surface(w, idx_of(dd), dd->mw, dd->mh, dd->mbpp, 0x4 | 0x10 | 0x4000);
             if (!bid) return E_FAIL_;
             g_o[bid - 1].back = 1;
@@ -421,7 +423,9 @@ FN(dd_GetDisplayMode) {
 FN(dd_GetFourCCCodes) { UNUSED; if (a[1]) WR32(a[1], 0); return DD_OK; }
 FN(dd_GetMonitorFrequency) { UNUSED; if (a[1]) WR32(a[1], 60); return DD_OK; }
 FN(dd_GetScanLine) { UNUSED; if (a[1]) WR32(a[1], 0); return DD_OK; }
-FN(dd_GetVerticalBlankStatus) { UNUSED; if (a[1]) WR32(a[1], 1); return DD_OK; }
+/* A 60 Hz display spends about 2 ms of each 16 in vertical blank. Programs wait
+ * for this to change, so a constant answer hangs them. */
+FN(dd_GetVerticalBlankStatus) { if (a[1]) WR32(a[1], (uint32_t)w->be->now(w) % 16u < 2u); return DD_OK; }
 FN(dd_SetCooperativeLevel) {
     dxobj *dd = ob(w, a[0], OB_DD);
     if (!dd) return DDERR_INVALIDPARAMS;
@@ -791,16 +795,41 @@ FN(x_DirectDrawEnumerateA) {             /* (callback(guid, desc, name, ctx), ct
 
 /* ================================================================== DirectSound */
 static uint64_t now_ms(qwin *w) { return w->be->now(w); }
+static int ds_host(qwin *w, dxobj *b, uint32_t op, uint32_t arg);
+static uint32_t ds_host_pos(qwin *w, dxobj *b, int *playing);
+#define DOOR_SVC_SOUND 1u
+enum { DS_START = 1, DS_STOP, DS_SET, DS_POS, DS_FREE };
 static uint32_t play_pos(qwin *w, dxobj *b)
 {
     uint64_t el;
     uint32_t adv;
+    if (w->cpu.door && !b->primbuf) { int on = 0; uint32_t p = ds_host_pos(w, b, &on); b->playing = on; return p; }
     if (!b->playing || !b->size) return b->pos0;
     el = now_ms(w) - b->t0;
     adv = (uint32_t)(el * (uint64_t)(b->bps ? b->bps : 22050) / 1000u);
     if (b->looping) return (b->pos0 + adv) % b->size;
     if (b->pos0 + adv >= b->size) { b->playing = 0; b->pos0 = 0; return 0; }
     return b->pos0 + adv;
+}
+/* With the ARMithlon door the host mixes: buffers stay in x86 memory and only state
+ * changes come through here. Without it, the silent clock model above remains. */
+static int ds_host(qwin *w, dxobj *b, uint32_t op, uint32_t arg)
+{
+    static uint32_t q[16];
+    if (!w->cpu.door || b->primbuf) return 0;   /* the primary buffer is the mix itself, not a voice */
+    q[0] = DOOR_SVC_SOUND; q[3] = op; q[4] = (uint32_t)idx_of(b); q[5] = b->mem; q[6] = b->size;
+    q[7] = b->freq ? b->freq : b->rate; q[8] = b->chans; q[9] = b->bits;
+    q[10] = (uint32_t)b->vol; q[11] = (uint32_t)b->pan; q[12] = (uint32_t)b->looping; q[13] = arg; q[14] = 0;
+    if (!x86_door_call(&w->cpu, q)) return 0;
+    return 1;
+}
+static uint32_t ds_host_pos(qwin *w, dxobj *b, int *playing)
+{
+    static uint32_t q[16];
+    q[0] = DOOR_SVC_SOUND; q[3] = DS_POS; q[4] = (uint32_t)idx_of(b); q[14] = 0; q[15] = 0;
+    if (!x86_door_call(&w->cpu, q)) { *playing = 0; return 0; }
+    *playing = (int)q[15];
+    return q[14];
 }
 FN(ds_QueryInterface) { UNUSED; WR32(a[2], 0); return E_NOINTERFACE; }
 FN(ds_AddRef) { return addref(ob(w, a[0], OB_DS)); }
@@ -822,7 +851,7 @@ FN(ds_CreateSoundBuffer) {               /* (this, desc, pp, outer) */
     b->mem = qw_alloc(w, b->size + 16);
     b->freq = b->rate;
     WR32(a[2], b->guest);
-    if (w->verbose) qw_log(w, "DirectSound: buffer %u bytes %u Hz%s (silent: no audio output)", b->size, b->rate, b->primbuf ? " primary" : "");
+    if (w->verbose) qw_log(w, "DirectSound: buffer %u bytes %u Hz%s", b->size, b->rate, b->primbuf ? " primary" : "");
     return DD_OK;
 }
 FN(ds_GetCaps) { uint32_t sz = RD32(a[1]), k; UNUSED; for (k = 4; k < sz && k < 200; k += 4) WR32(a[1] + k, 0); WR32(a[1] + 4, 0x1F00); return DD_OK; }
@@ -839,7 +868,7 @@ FN(ds_DuplicateSoundBuffer) {
 }
 FN(ds_GetSpeakerConfig) { UNUSED; WR32(a[1], 4); return DD_OK; }
 FN(b_AddRef) { return addref(ob(w, a[0], OB_DSB)); }
-FN(b_Release) { dxobj *o = ob(w, a[0], OB_DSB); if (!o) return 0; if (--o->refs > 0) return (uint32_t)o->refs; obj_free(w, o); return 0; }
+FN(b_Release) { dxobj *o = ob(w, a[0], OB_DSB); if (!o) return 0; if (--o->refs > 0) return (uint32_t)o->refs; ds_host(w, o, DS_FREE, 0); obj_free(w, o); return 0; }
 FN(b_GetCaps) { dxobj *b = ob(w, a[0], OB_DSB); if (!b) return DDERR_INVALIDPARAMS; WR32(a[1] + 4, b->primbuf ? 1u : 0x20u); WR32(a[1] + 8, b->size); WR32(a[1] + 12, 0); WR32(a[1] + 16, 0); return DD_OK; }
 FN(b_GetCurrentPosition) { dxobj *b = ob(w, a[0], OB_DSB); uint32_t p; if (!b) return DDERR_INVALIDPARAMS; p = play_pos(w, b); if (a[1]) WR32(a[1], p); if (a[2]) WR32(a[2], b->size ? (p + b->align * 64) % b->size : 0); return DD_OK; }
 FN(b_GetFormat) {
@@ -875,13 +904,13 @@ FN(b_Lock) {                             /* (this, off, bytes, p1, n1, p2, n2, f
     }
     return DD_OK;
 }
-FN(b_Play) { dxobj *b = ob(w, a[0], OB_DSB); if (!b) return DDERR_INVALIDPARAMS; if (!b->playing) { b->t0 = now_ms(w); b->playing = 1; } b->looping = (a[3] & 1) != 0; return DD_OK; }
-FN(b_SetCurrentPosition) { dxobj *b = ob(w, a[0], OB_DSB); if (!b) return DDERR_INVALIDPARAMS; b->pos0 = b->size ? a[1] % b->size : 0; b->t0 = now_ms(w); return DD_OK; }
+FN(b_Play) { dxobj *b = ob(w, a[0], OB_DSB); if (!b) return DDERR_INVALIDPARAMS; if (!b->playing) { b->t0 = now_ms(w); b->playing = 1; } b->looping = (a[3] & 1) != 0; ds_host(w, b, DS_START, 0); return DD_OK; }
+FN(b_SetCurrentPosition) { dxobj *b = ob(w, a[0], OB_DSB); if (!b) return DDERR_INVALIDPARAMS; b->pos0 = b->size ? a[1] % b->size : 0; b->t0 = now_ms(w); ds_host(w, b, DS_SET, b->pos0 + 1u); return DD_OK; }
 FN(b_SetFormat) { dxobj *b = ob(w, a[0], OB_DSB); if (b && a[1]) { b->chans = x86_rd16(C, a[1] + 2); b->rate = RD32(a[1] + 4); b->bps = RD32(a[1] + 8); b->align = x86_rd16(C, a[1] + 12); b->bits = x86_rd16(C, a[1] + 14); } return DD_OK; }
-FN(b_SetVolume) { dxobj *b = ob(w, a[0], OB_DSB); if (b) b->vol = (int32_t)a[1]; return DD_OK; }
-FN(b_SetPan) { dxobj *b = ob(w, a[0], OB_DSB); if (b) b->pan = (int32_t)a[1]; return DD_OK; }
-FN(b_SetFrequency) { dxobj *b = ob(w, a[0], OB_DSB); if (b && a[1]) { b->freq = a[1]; } return DD_OK; }
-FN(b_Stop) { dxobj *b = ob(w, a[0], OB_DSB); if (b) { b->pos0 = play_pos(w, b); b->playing = 0; } return DD_OK; }
+FN(b_SetVolume) { dxobj *b = ob(w, a[0], OB_DSB); if (b) { b->vol = (int32_t)a[1]; ds_host(w, b, DS_SET, 0); } return DD_OK; }
+FN(b_SetPan) { dxobj *b = ob(w, a[0], OB_DSB); if (b) { b->pan = (int32_t)a[1]; ds_host(w, b, DS_SET, 0); } return DD_OK; }
+FN(b_SetFrequency) { dxobj *b = ob(w, a[0], OB_DSB); if (b && a[1]) { b->freq = a[1]; ds_host(w, b, DS_SET, 0); } return DD_OK; }
+FN(b_Stop) { dxobj *b = ob(w, a[0], OB_DSB); if (b) { b->pos0 = play_pos(w, b); b->playing = 0; ds_host(w, b, DS_STOP, 0); } return DD_OK; }
 FN(b_Unlock) { UNUSED; return DD_OK; }
 FN(x_DirectSoundCreate) {                /* (guid, pp, outer) */
     int i = obj_new(w, OB_DS, VT_DS);

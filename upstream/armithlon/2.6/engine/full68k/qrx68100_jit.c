@@ -218,6 +218,7 @@ static uint64_t read_helper(uint32_t addr,uint32_t width,uint32_t pc){
     j->slow_reads++;
     REG_PC=pc;REG_PPC=pc;
     if(!qrx_full_bus_read(c,addr,width,&out)){c->mem_fault=true;c->fault_address=addr;out=0xFFFFFFFFu;}
+    if(c->smp_strong)__atomic_thread_fence(__ATOMIC_ACQUIRE);
     request_exit_if_needed(j);
     return out;
 }
@@ -231,6 +232,7 @@ static void write_helper(uint32_t addr,uint32_t width,uint32_t pc,uint32_t value
        (addr>=c->rom_overlay*8u)&&
        !(width==4&&((value&0xFFFFF000u)==0x00BFE000u||value==709379u||value==715909u))){
         uint8_t *p=(uint8_t*)(base+addr);
+        if(c->smp_strong)__atomic_thread_fence(__ATOMIC_RELEASE);
         if(width==4){uint32_t v=__builtin_bswap32(value);memcpy(p,&v,4);}
         else if(width==2){uint16_t v=__builtin_bswap16((uint16_t)value);memcpy(p,&v,2);}
         else *p=(uint8_t)value;
@@ -242,6 +244,8 @@ static void write_helper(uint32_t addr,uint32_t width,uint32_t pc,uint32_t value
     request_exit_if_needed(j);
     /* The host door can take a millisecond; timers must get their turn after it. */
     if(addr>=0xFF000880u&&addr<0xFF000900u)j->force_exit=1;
+    /* Starting the second core switches translations to ordered accesses. */
+    if(addr>=0xFF000600u&&addr<0xFF000640u)j->force_exit=1;
 }
 
 /* ---------- runtime stubs ---------- */
@@ -328,12 +332,26 @@ static void build_stubs(JitCtx *j){
 
 /* ---------- guest memory emission ---------- */
 static inline unsigned width_index(unsigned w){return w==1?0u:w==2?1u:2u;}
+/* Ordered accesses (ldapr/stlr) fault on unaligned addresses, which a 68040 allows. Those go
+ * to the helper by clearing the page base. Host flags hold guest flags, so no compare here. */
+static void strong_unaligned_to_cold(Trans *t,unsigned width){
+    if(width>=2){E(t,0x36000041u);E(t,0xAA1F03E2u);}      /* tbz w1,#0,+8 ; mov x2,xzr */
+    if(width==4){E(t,0x36080041u);E(t,0xAA1F03E2u);}      /* tbz w1,#1,+8 ; mov x2,xzr */
+}
 /* w1=addr -> w0=value (zero-extended to width). Clobbers x2,x3. */
 static void mem_read(Trans *t,unsigned width){
     lsri(t,W2,W1,PAGE_SHIFT);
     ldr_page(t,W2,RRPAGE,W2);
+    if(t->j->cpu->smp_strong)strong_unaligned_to_cold(t,width);
     uint32_t *site=hole(t);
-    if(width==4){E(t,0xB8616840u);rev32(t,W0,W0);}      /* ldr w0,[x2,x1] */
+    if(t->j->cpu->smp_strong){
+        /* With a second core running, keep the 68040's bus order (ldapr after add x2,x2,x1). */
+        E(t,0x8B010042u);
+        if(width==4){E(t,0xB8BFC040u);rev32(t,W0,W0);}
+        else if(width==2){E(t,0x78BFC040u);rev16w(t,W0,W0);}
+        else E(t,0x38BFC040u);
+    }
+    else if(width==4){E(t,0xB8616840u);rev32(t,W0,W0);}  /* ldr w0,[x2,x1] */
     else if(width==2){E(t,0x78616840u);rev16w(t,W0,W0);}/* ldrh w0,[x2,x1] */
     else E(t,0x38616840u);                              /* ldrb w0,[x2,x1] */
     if(!t->dry&&t->cold_count<sizeof(t->cold)/sizeof(t->cold[0]))
@@ -344,8 +362,15 @@ static void mem_read(Trans *t,unsigned width){
 static void mem_write(Trans *t,unsigned width){
     lsri(t,W2,W1,QRX_WPAGE_SHIFT);
     ldr_page(t,W2,RWPAGE,W2);
+    if(t->j->cpu->smp_strong)strong_unaligned_to_cold(t,width);
     uint32_t *site=hole(t);
-    if(width==4){rev32(t,W3,W0);E(t,0xB8216843u);}       /* str w3,[x2,x1] */
+    if(t->j->cpu->smp_strong){
+        E(t,0x8B010042u);                                 /* add x2,x2,x1, then stlr */
+        if(width==4){rev32(t,W3,W0);E(t,0x889FFC43u);}
+        else if(width==2){rev16w(t,W3,W0);E(t,0x489FFC43u);}
+        else E(t,0x089FFC40u);
+    }
+    else if(width==4){rev32(t,W3,W0);E(t,0xB8216843u);}   /* str w3,[x2,x1] */
     else if(width==2){rev16w(t,W3,W0);E(t,0x78216843u);} /* strh w3,[x2,x1] */
     else E(t,0x38216840u);                               /* strb w0,[x2,x1] */
     if(!t->dry&&t->cold_count<sizeof(t->cold)/sizeof(t->cold[0]))
@@ -1742,6 +1767,10 @@ static int jit_execute(QRXFullCPU *c,int slice){
     return (int)(slice-(remaining>0?remaining:0));
 }
 
+static void jit_request_flush(QRXFullCPU *c){
+    JitCtx *j=c->jit;
+    if(j)__atomic_store_n(&j->flush_pending,true,__ATOMIC_RELEASE);
+}
 static void *map_code(size_t n){
 #if defined(__APPLE__)
     void *p=mmap(NULL,n,PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANON|MAP_JIT,-1,0);
@@ -1787,6 +1816,7 @@ bool qrx_jit_init(QRXFullCPU *c,uint64_t start_instructions){
     c->jit=j;
     c->jit_exec=jit_execute;
     c->jit_notify=jit_notify;
+    c->jit_request_flush=jit_request_flush;
     c->vm.dma_ram_write=dma_notify;c->vm.dma_opaque=c;
     return true;
 }
@@ -1800,7 +1830,7 @@ void qrx_jit_destroy(QRXFullCPU *c){
     free(j->hash);free(j->icache);free(j->opcode_misses);
     if(the_ctx==j)the_ctx=NULL;
     free(j);
-    c->jit=NULL;c->jit_exec=NULL;c->jit_notify=NULL;
+    c->jit=NULL;c->jit_exec=NULL;c->jit_notify=NULL;c->jit_request_flush=NULL;
     c->vm.dma_ram_write=NULL;c->vm.dma_opaque=NULL;
 }
 bool qrx_jit_cpu_stopped(void){return CPU_STOPPED!=0;}

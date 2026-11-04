@@ -273,6 +273,25 @@ static uint32_t file_attrs(qwin *w, uint32_t p, int wide)
     return S_ISDIR(st.st_mode) ? 0x10u : 0x80u;               /* DIRECTORY / NORMAL */
 }
 FN(f_GetFileAttributesA) { return file_attrs(w, a[0], 0); }
+/* SearchPathA(path, file, ext, buflen, buf, filepart): the program's directory only. */
+FN(f_SearchPathA) {
+    char name[300], ext[32], host[1200], full[340];
+    struct stat st;
+    uint32_t i, n, part;
+    qw_rd_str(w, a[1], name, sizeof(name));
+    ext[0] = 0;
+    if (a[2] && !strchr(name, '.')) qw_rd_str(w, a[2], ext, sizeof(ext));
+    snprintf(full, sizeof(full), "%s%s", name, ext);
+    map_path(w, full, host, sizeof(host));
+    if (stat(host, &st)) return 0;
+    n = (uint32_t)strlen(full) + 3;
+    if (n + 1 > a[3]) return n + 1;
+    x86_wr8(C, a[4], 'C'); x86_wr8(C, a[4] + 1, ':'); x86_wr8(C, a[4] + 2, '\\');
+    for (i = 0; i <= strlen(full); i++) x86_wr8(C, a[4] + 3 + i, (uint8_t)full[i]);
+    part = a[4] + 3;
+    if (a[5]) WR32(a[5], part);
+    return n;
+}
 FN(f_GetFileAttributesW) { return file_attrs(w, a[0], 1); }
 FN(f_SetFileAttributesA) { UNUSED; return 1; }
 static uint32_t del_file(qwin *w, uint32_t p, int wide) { char win[600], host[1200]; rd_path(w, p, wide, win, sizeof(win)); map_path(w, win, host, sizeof(host)); return remove(host) == 0; }
@@ -650,6 +669,7 @@ const qhle qw_files[] = {
     K("CreateFileA", f_CreateFileA, 7), K("CreateFileW", f_CreateFileW, 7), K("ReadFile", f_ReadFile, 5), K("WriteFile", f_WriteFile, 5),
     K("SetFilePointer", f_SetFilePointer, 4), K("GetFileSize", f_GetFileSize, 2), K("GetFileType", f_GetFileType, 1),
     K("FlushFileBuffers", f_FlushFileBuffers, 1), K("SetEndOfFile", f_SetEndOfFile, 1), K("GetFileTime", f_GetFileTime, 4),
+    K("SearchPathA", f_SearchPathA, 6),
     K("GetFileAttributesA", f_GetFileAttributesA, 1), K("GetFileAttributesW", f_GetFileAttributesW, 1), K("SetFileAttributesA", f_SetFileAttributesA, 2),
     K("DeleteFileA", f_DeleteFileA, 1), K("DeleteFileW", f_DeleteFileW, 1), K("CreateDirectoryA", f_CreateDirectoryA, 2),
     K("CreateDirectoryW", f_CreateDirectoryW, 2), K("RemoveDirectoryA", f_RemoveDirectoryA, 1), K("MoveFileA", f_MoveFileA, 2),

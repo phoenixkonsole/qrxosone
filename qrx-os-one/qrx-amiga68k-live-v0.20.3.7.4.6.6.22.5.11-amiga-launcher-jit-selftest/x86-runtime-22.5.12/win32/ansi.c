@@ -151,7 +151,15 @@ FN(a_LoadStringA) {
     (void)t;
     return r;
 }
-FN(a_MessageBoxA) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], -1); b[2] = tw(w, &t, a[2], -1); r = CALL("user32", "MessageBoxW"); tfree(w, &t); return r; }
+FN(a_MessageBoxA) { uint32_t r; COPYARGS;
+    {   /* Always in the log. Benchmarks and unattended runs set QRX_WIN_AUTO_OK:
+         * nobody is there to click the box a timedemo ends with. */
+        char text[256];
+        qw_rd_str(w, a[1], text, sizeof(text));
+        qw_log(w, "MessageBox: %s", text);
+        if (getenv("QRX_WIN_AUTO_OK")) return 1;
+    }
+    b[1] = tw(w, &t, a[1], -1); b[2] = tw(w, &t, a[2], -1); r = CALL("user32", "MessageBoxW"); tfree(w, &t); return r; }
 FN(a_LoadBitmapA) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], -1); r = CALL("user32", "LoadBitmapW"); tfree(w, &t); return r; }
 FN(a_LoadImageA) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], -1); r = CALL("user32", "LoadImageW"); tfree(w, &t); return r; }
 FN(a_LoadMenuA) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], -1); r = CALL("user32", "LoadMenuW"); tfree(w, &t); return r; }
@@ -192,6 +200,7 @@ FN(a_GetClassInfoExA) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], -1); r = CA
 FN(a_TextOutA) { uint32_t r; COPYARGS; b[3] = tw(w, &t, a[3], (int32_t)a[4]); r = CALL("gdi32", "TextOutW"); tfree(w, &t); return r; }
 FN(a_ExtTextOutA) { uint32_t r; COPYARGS; b[5] = tw(w, &t, a[5], (int32_t)a[6]); r = CALL("gdi32", "ExtTextOutW"); tfree(w, &t); return r; }
 FN(a_GetTextExtentPoint32A) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], (int32_t)a[2]); r = CALL("gdi32", "GetTextExtentPoint32W"); tfree(w, &t); return r; }
+FN(a_FindResourceA) { return callw(w, "kernel32", "FindResourceW", a); }  /* numeric ids are identical */
 FN(a_GetObjectA) { return callw(w, "gdi32", "GetObjectW", a); }    /* bitmaps: identical layout */
 FN(a_CreateFontA) { return callw(w, "gdi32", "CreateFontW", a); }  /* face name is not used */
 FN(a_CreateFontIndirectA) { return callw(w, "gdi32", "CreateFontIndirectW", a); }   /* first 28 bytes identical */
@@ -217,6 +226,7 @@ const qhle qw_ansi[] = {
     U("SetWindowTextA", a_SetWindowTextA, 2), U("GetWindowTextA", a_GetWindowTextA, 3), U("SetDlgItemTextA", a_SetDlgItemTextA, 3),
     U("GetDlgItemTextA", a_GetDlgItemTextA, 4), U("LoadStringA", a_LoadStringA, 4), U("MessageBoxA", a_MessageBoxA, 4),
     U("LoadBitmapA", a_LoadBitmapA, 2), U("LoadImageA", a_LoadImageA, 6), U("LoadMenuA", a_LoadMenuA, 2),
+    { "kernel32", "FindResourceA", 3, a_FindResourceA },
     U("LoadAcceleratorsA", a_LoadAcceleratorsA, 2), U("DialogBoxParamA", a_DialogBoxParamA, 5), U("CreateDialogParamA", a_CreateDialogParamA, 5),
     U("FindWindowA", a_FindWindowA, 2), U("RegisterWindowMessageA", a_RegisterWindowMessageA, 1), U("GetClassNameA", a_GetClassNameA, 3),
     U("AppendMenuA", a_AppendMenuA, 4), U("ModifyMenuA", a_ModifyMenuA, 5), U("DrawTextA", a_DrawTextA, 5),

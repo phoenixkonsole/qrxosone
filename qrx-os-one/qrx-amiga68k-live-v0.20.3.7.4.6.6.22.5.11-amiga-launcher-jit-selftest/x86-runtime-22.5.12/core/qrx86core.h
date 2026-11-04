@@ -123,6 +123,7 @@ struct x86cpu {
     void *user;
     /* ARMithlon host door: x86_door_enable hands runs to the Mac's own core. */
     int door;
+    uint32_t (*door_alloc)(x86cpu *c, uint32_t size);   /* memory requests from the host */
     uint32_t map_serial;                 /* bumped on any page mapping change */
     int stop;                            /* set by hooks to leave run() normally */
     int fault;
@@ -170,6 +171,9 @@ void     x86_set_flags(x86cpu *c, uint32_t f);
 /* Only on an ARMithlon board: the door register bus-faults anywhere else.
  * Returns 0 when the board does not answer with the door's magic value. */
 int      x86_door_enable(x86cpu *c);
+/* Host service call: `words` big-endian longwords at block, block[0] the service.
+ * Results come back in the block. Returns 0 when no door is active. */
+int      x86_door_call(x86cpu *c, uint32_t *block);
 /* Run until a hook sets c->stop, a fault happens or eip == stop_eip. Returns c->fault. */
 int      x86_run(x86cpu *c, uint32_t stop_eip);
 int      x86_step(x86cpu *c);

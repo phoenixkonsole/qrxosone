@@ -115,5 +115,8 @@ bool qrx_gpu_write(QRXVM *vm, uint32_t address, unsigned width, uint32_t value);
 bool qrx_media_push_input(QRXMediaDevice *media, uint32_t packed_event);
 void qrx_media_set_mouse(QRXMediaDevice *media, uint32_t x, uint32_t y, uint32_t buttons);
 /* Output is interleaved signed 16 bit stereo in HOST endian, silence on underrun. */
+/* Queues frames ('left<<16|right') for playback; returns how many fit. */
+size_t qrx_media_push_audio(QRXMediaDevice *m,const uint32_t *frames,size_t n);
+unsigned qrx_media_audio_queued(QRXMediaDevice *m);
 size_t qrx_media_pull_audio(QRXMediaDevice *media, int16_t *interleaved, size_t frames);
 #endif

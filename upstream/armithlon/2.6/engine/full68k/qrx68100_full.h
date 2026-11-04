@@ -160,15 +160,21 @@ typedef struct QRXFullCPU {
      * wpage stays 0 for ROM, I/O and granules holding translated code. */
     uintptr_t *rpage, *wpage;
     bool fast_bus;
+    size_t ram_total;  /* host allocation; vm.ram.size is the visible part */
     /* Set by qrx_jit_init; left NULL the interpreter runs alone. */
     void *jit;
     int (*jit_exec)(struct QRXFullCPU *, int cycles);
     void (*jit_notify)(struct QRXFullCPU *, uint32_t addr, uint32_t len);
+    void (*jit_request_flush)(struct QRXFullCPU *);
     /* Guest timers follow the host clock at the PAL 7.09 MHz rate instead of
      * retired cycles: a faster CPU then gets more done per guest second. */
     /* Optional host services inside the board's I/O window. */
     bool (*door_read)(struct QRXFullCPU *, uint32_t addr, unsigned width, uint32_t *out);
     bool (*door_write)(struct QRXFullCPU *, uint32_t addr, unsigned width, uint32_t value);
+    /* Second core's registers, plus ordered memory accesses once it has been started. */
+    bool (*smp_read)(struct QRXFullCPU *, uint32_t addr, unsigned width, uint32_t *out);
+    bool (*smp_write)(struct QRXFullCPU *, uint32_t addr, unsigned width, uint32_t value);
+    bool smp_strong;
     bool realtime;
     bool (*cpu_stopped)(void);
     uint64_t realtime_base_us;
@@ -196,6 +202,11 @@ void qrx_full_fsaga_present(QRXFullCPU *c);
 void qrx_full_set_aux(QRXFullCPU *c, QRXAuxReadFn readfn,
                       QRXAuxWriteFn writefn, QRXRamWriteFn ramfn, void *opaque);
 
+/* RAM above `visible` stays open bus until the guest asks for it: the ROM's
+ * memory probes must not find it during boot. Call before reset. */
+void qrx_full_hide_high_ram(QRXFullCPU *c, size_t visible);
+/* Opens the hidden RAM; returns the new size in bytes. */
+size_t qrx_full_show_high_ram(QRXFullCPU *c);
 /* See the realtime field; call after reset, before the first run. */
 void qrx_full_set_realtime(QRXFullCPU *c, bool (*cpu_stopped)(void));
 

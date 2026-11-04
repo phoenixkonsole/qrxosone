@@ -55,6 +55,9 @@ typedef struct QRXHostFS QRXHostFS;
 bool qrx_hostfs_mount(QRXHostFS *fs,const char *dir,bool readonly);
 void qrx_hostfs_unmount(QRXHostFS *fs);
 void qrx_hostfs_attach(QRXVM *vm, QRXHostFS *fs);
+/* Blocks until every guest write so far is on the disk; unmount does this too. */
+void qrx_hostfs_sync(void);
+unsigned qrx_hostfs_flush_pending(void);
 void qrx_hostfs_attach2(QRXVM *vm, QRXHostFS *fs);
 bool qrx_hostfs_read(QRXVM *vm,uint32_t addr,unsigned width,uint32_t *out);
 bool qrx_hostfs_write(QRXVM *vm,uint32_t addr,unsigned width,uint32_t value);

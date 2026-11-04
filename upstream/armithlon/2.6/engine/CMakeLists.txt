@@ -181,8 +181,8 @@ if(QRX_ENABLE_MUSASHI)
   set(QRX_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/musashi_generated")
   file(MAKE_DIRECTORY "${QRX_GENERATED_DIR}")
   add_custom_command(OUTPUT "${QRX_GENERATED_DIR}/m68kops.c" "${QRX_GENERATED_DIR}/m68kops.h"
-    COMMAND "$<TARGET_FILE:qrx_m68kmake>" "${QRX_GENERATED_DIR}" "${QRX_MUSASHI_DIR}/m68k_in.c"
-    DEPENDS qrx_m68kmake "${QRX_MUSASHI_DIR}/m68k_in.c"
+    COMMAND "$<TARGET_FILE:qrx_m68kmake>" "${QRX_GENERATED_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/musashi_patched/m68k_in.c"
+    DEPENDS qrx_m68kmake "${CMAKE_CURRENT_BINARY_DIR}/musashi_patched/m68k_in.c"
     COMMENT "Generate pin-verified Motorola 680x0 opcode tables"
     VERBATIM)
   # ARMITHLON 2.7: FSAVE-(An) IDLE-frame fix on a build-tree COPY of the pinned
@@ -195,10 +195,10 @@ if(QRX_ENABLE_MUSASHI)
   endif()
   set(QRX_MUSASHI_PATCHED_DIR "${CMAKE_CURRENT_BINARY_DIR}/musashi_patched")
   file(MAKE_DIRECTORY "${QRX_MUSASHI_PATCHED_DIR}")
-  add_custom_command(OUTPUT "${QRX_MUSASHI_PATCHED_DIR}/m68kcpu.c" "${QRX_MUSASHI_PATCHED_DIR}/m68kfpu.c"
+  add_custom_command(OUTPUT "${QRX_MUSASHI_PATCHED_DIR}/m68kcpu.c" "${QRX_MUSASHI_PATCHED_DIR}/m68kfpu.c" "${QRX_MUSASHI_PATCHED_DIR}/m68k_in.c"
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/patch-musashi-fsave-an.py"
       "${QRX_MUSASHI_DIR}" "${QRX_MUSASHI_PATCHED_DIR}"
-    DEPENDS "${QRX_MUSASHI_DIR}/m68kcpu.c" "${QRX_MUSASHI_DIR}/m68kfpu.c"
+    DEPENDS "${QRX_MUSASHI_DIR}/m68kcpu.c" "${QRX_MUSASHI_DIR}/m68kfpu.c" "${QRX_MUSASHI_DIR}/m68k_in.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/../tools/patch-musashi-fsave-an.py"
     COMMENT "Copy pinned Musashi CPU with FSAVE-(An) boot fix"
     VERBATIM)
@@ -217,7 +217,25 @@ if(QRX_ENABLE_MUSASHI)
   # The JIT reads Musashi's CPU struct, so it shares that library's options.
   set_source_files_properties(full68k/qrx68100_jit.c PROPERTIES COMPILE_DEFINITIONS
     "M68K_INSTRUCTION_HOOK=1;M68K_EMULATE_INT_ACK=1;M68K_EMULATE_ADDRESS_ERROR=1")
-  target_link_libraries(qrx68100_full PUBLIC qrx68100_core qrx_musashi)
+  # Core 1 of the 68100: its own copy of Musashi and the JIT with every global renamed,
+  # so it runs on a second host thread and core 0 pays nothing for it.
+  set(QRX_CORE1_RENAME "${CMAKE_CURRENT_BINARY_DIR}/qrx_core1_rename.h")
+  add_custom_command(OUTPUT "${QRX_CORE1_RENAME}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen-core1-rename.py"
+      "$<TARGET_FILE:qrx_musashi>" "${QRX_CORE1_RENAME}"
+    DEPENDS qrx_musashi "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen-core1-rename.py"
+    COMMENT "Generate symbol renames for 68100 core 1" VERBATIM)
+  add_custom_target(qrx_core1_rename DEPENDS "${QRX_CORE1_RENAME}")
+  add_library(qrx_core1 STATIC full68k/qrx68100_core1.c full68k/qrx68100_jit.c
+    "${QRX_MUSASHI_PATCHED_DIR}/m68kcpu.c" "${QRX_GENERATED_DIR}/m68kops.c" "${QRX_MUSASHI_DIR}/softfloat/softfloat.c")
+  add_dependencies(qrx_core1 qrx_core1_rename)
+  target_include_directories(qrx_core1 PRIVATE full68k include "${QRX_MUSASHI_DIR}" "${QRX_GENERATED_DIR}")
+  target_compile_definitions(qrx_core1 PRIVATE M68K_INSTRUCTION_HOOK=1 M68K_EMULATE_INT_ACK=1 M68K_EMULATE_ADDRESS_ERROR=1)
+  target_compile_options(qrx_core1 PRIVATE -include "${QRX_CORE1_RENAME}")
+  if(APPLE)
+    target_compile_definitions(qrx_core1 PRIVATE setjmp=_setjmp longjmp=_longjmp)
+  endif()
+  target_link_libraries(qrx68100_full PUBLIC qrx68100_core qrx_musashi qrx_core1)
   target_compile_options(qrx68100_full PRIVATE -Wall -Wextra -Wpedantic)
   # Full 68040 QRX68: same HUNK/Exec/DOS HLE as portable interpreter,
   # but the CPU, exceptions, instructions and FPU come from real Musashi.
@@ -238,13 +256,13 @@ if(QRX_ENABLE_MUSASHI)
   set(QRX86_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12")
   file(GLOB QRX86_QMATH_SOURCES "${QRX86_RUNTIME_DIR}/qmath/*.c")
   set_source_files_properties(${QRX86_QMATH_SOURCES} PROPERTIES COMPILE_OPTIONS "-w;-std=gnu11")
-  add_executable(qrx68100_full_run full68k/full_main.c full68k/qrx86_door.c ${QRX86_QMATH_SOURCES})
+  add_executable(qrx68100_full_run full68k/full_main.c full68k/qrx86_door.c full68k/qrx_hostapi.c full68k/qrx_hostapi_gl.c full68k/qrx_hostapi_glide.c full68k/qrx_hostapi_d3d.c ${QRX86_QMATH_SOURCES})
   target_include_directories(qrx68100_full_run PRIVATE "${QRX86_RUNTIME_DIR}/core")
   set_source_files_properties(full68k/qrx86_door.c PROPERTIES COMPILE_OPTIONS "-w;-std=gnu11")
   target_link_libraries(qrx68100_full_run PRIVATE qrx68100_full)
   if(APPLE)
-    target_sources(qrx68100_full_run PRIVATE macos/qrx_aros_window.m macos/qrx_metal_renderer.m)
-    set_source_files_properties(macos/qrx_aros_window.m macos/qrx_metal_renderer.m PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+    target_sources(qrx68100_full_run PRIVATE macos/qrx_aros_window.m macos/qrx_metal_renderer.m macos/qrx_hostgpu.m)
+    set_source_files_properties(macos/qrx_aros_window.m macos/qrx_metal_renderer.m macos/qrx_hostgpu.m PROPERTIES COMPILE_FLAGS "-fobjc-arc")
     target_include_directories(qrx68100_full_run PRIVATE macos)
     target_link_libraries(qrx68100_full_run PRIVATE ${COCOA_FRAMEWORK} "-framework Metal" "-framework MetalKit" "-framework QuartzCore" "-framework AudioToolbox")
   endif()
@@ -254,6 +272,10 @@ if(QRX_ENABLE_MUSASHI)
   target_link_libraries(qrx68100_jit_diff_tests PRIVATE qrx68100_full)
   target_compile_options(qrx68100_jit_diff_tests PRIVATE -UNDEBUG -Wall -Wextra)
   add_test(NAME jit_a64_differential_against_musashi COMMAND qrx68100_jit_diff_tests)
+  add_executable(qrx68100_core1_tests tests/core1_tests.c)
+  target_link_libraries(qrx68100_core1_tests PRIVATE qrx68100_full)
+  target_compile_options(qrx68100_core1_tests PRIVATE -UNDEBUG -Wall -Wextra)
+  add_test(NAME core1_second_host_thread_atomics_and_faults COMMAND qrx68100_core1_tests)
   add_executable(qrx68100_full_tests full68k/full_tests.c)
   target_link_libraries(qrx68100_full_tests PRIVATE qrx68100_full)
   target_compile_options(qrx68100_full_tests PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)

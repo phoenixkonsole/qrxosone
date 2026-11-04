@@ -1,4 +1,5 @@
 #include "qrx68100_full.h"
+#include "qrx_atomic_ram.h"
 #include "m68k.h"
 #include <stdlib.h>
 #include <string.h>
@@ -626,7 +627,13 @@ static void fsaga_recompute_dims(QRXFullCPU *c) {
     c->fsaga_width = w;
     c->fsaga_height = h;
 }
+static void fsaga_present(QRXFullCPU *c);
 static void fsaga_write(QRXFullCPU *c, uint32_t addr, unsigned width, uint32_t value) {
+    /* V4 palette port: index in the top byte, RGB below. */
+    if (addr == UINT32_C(0xDFF388) && width == 4) {
+        c->fsaga_clut[value >> 24] = (value & 0xFFFFFFu) | UINT32_C(0xFF000000);
+        return;
+    }
     uint64_t e = (uint64_t)addr + width;
     (void)e;
     uint8_t trace = c->fsaga_trace;
@@ -636,6 +643,9 @@ static void fsaga_write(QRXFullCPU *c, uint32_t addr, unsigned width, uint32_t v
         c->fsaga_bplptr = value;
         if (trace) fprintf(stderr, "[FSAGA] bplptr=%08x instr=%llu\n",
             value, (unsigned long long)c->instructions);
+        /* A page flip takes effect at once: the guest draws into the old front
+         * buffer next, and showing that until the next vblank is visible flicker. */
+        fsaga_present(c);
     } else if ((addr == 0x00DFF1ECu || addr == 0x00DFF1EEu) && width == 2) {
         uint32_t old = c->fsaga_bplptr;
         uint32_t nw = (addr == 0x00DFF1ECu) ?
@@ -644,6 +654,7 @@ static void fsaga_write(QRXFullCPU *c, uint32_t addr, unsigned width, uint32_t v
         c->fsaga_bplptr = nw;
         if (trace) fprintf(stderr, "[FSAGA] bplptr16=%08x -> %08x instr=%llu\n",
             (unsigned)value, nw, (unsigned long long)c->instructions);
+        if (addr == 0x00DFF1EEu) fsaga_present(c);
     }
     if (addr == 0x00DFF1E6u && width == 2) { c->fsaga_bplhmod = (uint16_t)value; }
     if (addr == 0x00DFF1F4u && width == 2) {
@@ -714,6 +725,7 @@ static void fsaga_write(QRXFullCPU *c, uint32_t addr, unsigned width, uint32_t v
  * emulated chip RAM, which fake success forever. The FSAGA window is
  * host-owned, not RAM. */
 static bool fsaga_window(uint32_t addr) {
+    if (addr == UINT32_C(0xDFF388)) return true;                         /* V4 palette port */
     if (addr >= 0x00DFF300u && addr < 0x00DFF340u) return true;   /* sync */
     if (addr >= 0x00DFF3A0u && addr < 0x00DFF3B0u) return true;   /* sprite pal */
     if (addr >= 0x00DFF3F0u && addr < 0x00DFF410u) return true;   /* pll + board */
@@ -1143,6 +1155,7 @@ bool qrx_full_bus_read(QRXFullCPU *c, uint32_t addr, unsigned width, uint32_t *o
     if (!c || !out || (width!=1&&width!=2&&width!=4)) return false;
     if (upper_io(addr,width)) {
         if (c->door_read && c->door_read(c, addr, width, out)) return true;
+        if (c->smp_read && c->smp_read(c, addr, width, out)) return true;
         if (c->aux_read && c->aux_read(c->aux_opaque, addr, width, out)) return true;
         if (overlap_internal(addr,width)) return full_internal_read(c,addr,width,out);
         /* Z3 config header (no boards) floats high; internal regs above win. */
@@ -1276,6 +1289,7 @@ bool qrx_full_bus_write(QRXFullCPU *c, uint32_t addr, unsigned width, uint32_t v
       }
     }    if (upper_io(addr,width)) {
         if(c->door_write && c->door_write(c,addr,width,value)) return true;
+        if(c->smp_write && c->smp_write(c,addr,width,value)) return true;
         if(c->aux_write && c->aux_write(c->aux_opaque,addr,width,value)) return true;
         if(overlap_internal(addr,width)) return full_internal_write(c,addr,width,value);
         if(board_hole(c,addr,width)) return true; /* ShutUp to absent Z3 boards */
@@ -1347,8 +1361,9 @@ static bool bus_tracing(void) {
 }
 static void build_page_maps(QRXFullCPU *c) {
     if(!c->rpage)return;
-    memset(c->rpage,0,QRX_PAGE_ENTRIES*sizeof(uintptr_t));
-    memset(c->wpage,0,QRX_WPAGE_ENTRIES*sizeof(uintptr_t));
+    /* A fresh mapping instead of memset: the 128 MiB write map stays sparse. */
+    mmap(c->rpage,QRX_PAGE_ENTRIES*sizeof(uintptr_t),PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON|MAP_FIXED,-1,0);
+    mmap(c->wpage,QRX_WPAGE_ENTRIES*sizeof(uintptr_t),PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON|MAP_FIXED,-1,0);
     c->fast_bus=!bus_tracing()&&!c->aux_opaque;
     if(!c->fast_bus)return;
     for(uint32_t a=0;(uint64_t)a+QRX_PAGE_SIZE<=c->vm.ram.size;a+=QRX_PAGE_SIZE)
@@ -1381,7 +1396,11 @@ static inline bool write_needs_full_bus(const QRXFullCPU *c,uint32_t a,unsigned 
 static unsigned int core_read(unsigned address,unsigned width) {
     if(LIKELY_FAST(address,width)) {
         uintptr_t base=active->rpage[address>>QRX_PAGE_SHIFT];
-        if(base)return page_load((const uint8_t *)(base+address),width);
+        if(base){
+            unsigned v=page_load((const uint8_t *)(base+address),width);
+            if(active->smp_strong)__atomic_thread_fence(__ATOMIC_ACQUIRE);
+            return v;
+        }
     }
     /* Debug watch: count opcode fetches in a guest range (env QRX_FULL_WATCH_PC
      * as "start-end", hex). Used to prove an interrupt server ever executes. */
@@ -1440,6 +1459,27 @@ static void core_write(unsigned address,unsigned width,unsigned value) {
     if(!active || !qrx_full_bus_write(active,address,width,value)) {
         if(active) {active->mem_fault=true;active->fault_address=address;m68k_end_timeslice();}
     }
+}
+/* TAS and CAS on RAM stay atomic against the second core. The JIT leaves both to Musashi. */
+int qrx_atomic_cas(unsigned width,unsigned ea,unsigned cmp,unsigned val,unsigned *old){
+    QRXFullCPU *c=active;
+    if(!c||!c->fast_bus||(uint64_t)ea+width>c->vm.ram.size||(ea&0xFFFu)>0x1000u-width)return 0;
+    uintptr_t base=c->rpage[ea>>QRX_PAGE_SHIFT];
+    if(!base)return 0;
+    int swapped=0;uint32_t o=0;
+    if(!qrx_ram_cas((uint8_t*)(base+ea),width,cmp,val,&o,&swapped))return 0;
+    *old=o;
+    if(swapped&&!c->wpage[ea>>QRX_WPAGE_SHIFT]&&c->jit_notify)c->jit_notify(c,ea,width);
+    return 1;
+}
+int qrx_atomic_tas(unsigned ea,unsigned *old){
+    QRXFullCPU *c=active;
+    if(!c||!c->fast_bus||ea>=c->vm.ram.size)return 0;
+    uintptr_t base=c->rpage[ea>>QRX_PAGE_SHIFT];
+    if(!base)return 0;
+    *old=__atomic_fetch_or((uint8_t*)(base+ea),0x80u,__ATOMIC_SEQ_CST);
+    if(!c->wpage[ea>>QRX_WPAGE_SHIFT]&&c->jit_notify)c->jit_notify(c,ea,1);
+    return 1;
 }
 unsigned int m68k_read_memory_8(unsigned int a){return core_read(a,1);}
 unsigned int m68k_read_memory_16(unsigned int a){return core_read(a,2);}
@@ -2332,6 +2372,23 @@ static void timer_tick(QRXFullCPU *c,unsigned cycles){
     c->irq_pending=1;c->timer_remaining=c->timer_period;
     if(!(c->timer_control&QRX_FULL_TIMER_AUTO))c->timer_control&=~QRX_FULL_TIMER_ENABLE;
     m68k_set_irq(c->irq_level>2 ? c->irq_level : 2);
+}
+void qrx_full_hide_high_ram(QRXFullCPU *c, size_t visible) {
+    if(!c||visible>=c->vm.ram.size)return;
+    c->ram_total=c->vm.ram.size;
+    c->vm.ram.size=visible;
+}
+size_t qrx_full_show_high_ram(QRXFullCPU *c) {
+    if(!c)return 0;
+    if(c->ram_total>c->vm.ram.size){
+        size_t old=c->vm.ram.size;
+        c->vm.ram.size=c->ram_total;
+        if(c->fast_bus)for(size_t a=old;a+QRX_PAGE_SIZE<=c->ram_total;a+=QRX_PAGE_SIZE){
+            c->rpage[a>>QRX_PAGE_SHIFT]=(uintptr_t)c->ram_owned;
+            set_write_page(c,(uint32_t)(a>>QRX_PAGE_SHIFT),(uintptr_t)c->ram_owned);
+        }
+    }
+    return c->vm.ram.size;
 }
 static uint64_t host_us(void) {
     struct timespec t;

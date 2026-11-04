@@ -48,13 +48,79 @@ static int tree_parent(QRXHostFS *s,const char *path,char leaf[256]){
     }
     int saved=errno;close(fd);errno=saved;return -1;
 }
+/* Durability: guest writes reach the host's page cache at once, so a crash of
+ * the emulator or guest loses nothing. A background thread then forces them onto
+ * the disk within HFS_FLUSH_MS, which covers a kernel panic or power cut too,
+ * without stalling the guest on every 4 KiB packet. */
+#define HFS_FLUSH_MS 200u
+#define HFS_FLUSH_QUEUE 64u
+static pthread_mutex_t hfs_flush_lock=PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t hfs_flush_idle=PTHREAD_COND_INITIALIZER;
+static int hfs_flush_fds[HFS_FLUSH_QUEUE];
+static unsigned hfs_flush_count,hfs_flush_busy;
+static uint64_t hfs_flush_cycle=1;
+static bool hfs_flush_started;
+static void hfs_full_sync(int fd){
+#if defined(__APPLE__) && defined(F_FULLFSYNC)
+    /* Plain fsync on macOS stops at the drive's volatile cache. */
+    if(fcntl(fd,F_FULLFSYNC)==0)return;
+#endif
+    fsync(fd);
+}
+static void *hfs_flush_thread(void *arg){
+    (void)arg;
+    for(;;){
+        struct timespec nap={0,(long)HFS_FLUSH_MS*1000000L};
+        nanosleep(&nap,NULL);
+        int batch[HFS_FLUSH_QUEUE];
+        pthread_mutex_lock(&hfs_flush_lock);
+        unsigned n=hfs_flush_count;
+        memcpy(batch,hfs_flush_fds,n*sizeof(int));
+        hfs_flush_count=0;hfs_flush_busy=n;hfs_flush_cycle++;
+        pthread_mutex_unlock(&hfs_flush_lock);
+        for(unsigned i=0;i<n;i++){hfs_full_sync(batch[i]);close(batch[i]);}
+        pthread_mutex_lock(&hfs_flush_lock);
+        hfs_flush_busy=0;
+        pthread_cond_broadcast(&hfs_flush_idle);
+        pthread_mutex_unlock(&hfs_flush_lock);
+    }
+    return NULL;
+}
+/* Queues one duplicate of fd per flush cycle; a full queue syncs right here. */
+static void hfs_flush_request(int fd,uint64_t *seen_cycle){
+    pthread_mutex_lock(&hfs_flush_lock);
+    if(!hfs_flush_started){
+        pthread_t tid;
+        if(pthread_create(&tid,NULL,hfs_flush_thread,NULL)==0){pthread_detach(tid);hfs_flush_started=true;}
+    }
+    if(seen_cycle&&*seen_cycle==hfs_flush_cycle){pthread_mutex_unlock(&hfs_flush_lock);return;}
+    bool queued=false;
+    if(hfs_flush_started&&hfs_flush_count<HFS_FLUSH_QUEUE){
+        int copy=dup(fd);
+        if(copy>=0){hfs_flush_fds[hfs_flush_count++]=copy;queued=true;}
+    }
+    if(queued&&seen_cycle)*seen_cycle=hfs_flush_cycle;
+    pthread_mutex_unlock(&hfs_flush_lock);
+    if(!queued)hfs_full_sync(fd);
+}
+void qrx_hostfs_sync(void){
+    pthread_mutex_lock(&hfs_flush_lock);
+    while(hfs_flush_started&&(hfs_flush_count||hfs_flush_busy))pthread_cond_wait(&hfs_flush_idle,&hfs_flush_lock);
+    pthread_mutex_unlock(&hfs_flush_lock);
+}
+unsigned qrx_hostfs_flush_pending(void){
+    pthread_mutex_lock(&hfs_flush_lock);
+    unsigned n=hfs_flush_count+hfs_flush_busy;
+    pthread_mutex_unlock(&hfs_flush_lock);
+    return n;
+}
 /* AmigaDOS reads files in small packets and walks directories by index, and
  * each request used to reopen every path component. These caches serve repeat
  * requests with one syscall. Entries expire quickly because other host programs
  * may change the share too; every guest-side change drops them at once. */
 #define HFS_CACHE_TTL_MS 1500u
 #define HFS_FILE_SLOTS 16u
-typedef struct { char path[HFS_PATH_MAX+1]; int fd; bool writable; bool dirty; uint64_t opened_ms, used; } HFSFileSlot;
+typedef struct { char path[HFS_PATH_MAX+1]; int fd; bool writable; uint64_t flush_cycle, opened_ms, used; } HFSFileSlot;
 typedef struct { char name[256]; uint32_t size; bool dir; } HFSDirEntry;
 struct QRXHostFSCache {
     HFSFileSlot file[HFS_FILE_SLOTS];
@@ -77,8 +143,8 @@ static struct QRXHostFSCache *hfs_cache(QRXHostFS *s){
     return s->cache;
 }
 static void hfs_slot_close(HFSFileSlot *f){
-    if(f->fd>=0){if(f->dirty)fsync(f->fd);close(f->fd);}
-    f->fd=-1;f->path[0]=0;f->dirty=false;
+    if(f->fd>=0)close(f->fd);   /* any write already has its flush queued */
+    f->fd=-1;f->path[0]=0;f->flush_cycle=0;
 }
 static void hfs_cache_drop(QRXHostFS *s){
     struct QRXHostFSCache *c=s->cache;
@@ -110,7 +176,7 @@ static HFSFileSlot *hfs_file_insert(struct QRXHostFSCache *c,const char *path,in
         if(c->file[i].used<best->used)best=&c->file[i];
     }
     hfs_slot_close(best);
-    strcpy(best->path,path);best->fd=fd;best->writable=write;best->dirty=false;
+    strcpy(best->path,path);best->fd=fd;best->writable=write;best->flush_cycle=0;
     best->opened_ms=hfs_now_ms();best->used=++c->clock;
     return best;
 }
@@ -173,7 +239,7 @@ static void execute_tree(QRXVM *v,QRXHostFS *s,unsigned op){
                              :pwrite(f->fd,v->ram.data+s->data_dma,s->length,s->offset);
             struct stat fst;
             if(got<0||fstat(f->fd,&fst)){s->status=status_errno(errno);return;}
-            if(op==4)f->dirty=true;
+            if(op==4)hfs_flush_request(f->fd,&f->flush_cycle);
             s->size=(uint32_t)fst.st_size;s->result=(uint32_t)got;s->status=0;
             if(op==3)tree_changed(v,s,(unsigned)got);
             return;
@@ -208,9 +274,10 @@ static void execute_tree(QRXVM *v,QRXHostFS *s,unsigned op){
         if(fstatat(parent,leaf,&st,AT_SYMLINK_NOFOLLOW))goto io_error;
         if(!S_ISREG(st.st_mode)&&!S_ISDIR(st.st_mode)){s->status=QRX_HOSTFS_ACCESS;goto done;}
         if(unlinkat(parent,leaf,S_ISDIR(st.st_mode)?AT_REMOVEDIR:0))goto io_error;
+        hfs_full_sync(parent);
         s->status=0;goto done;
     }
-    if(op==7){if(mkdirat(parent,leaf,0700))goto io_error;s->status=0;goto done;}
+    if(op==7){if(mkdirat(parent,leaf,0700))goto io_error;hfs_full_sync(parent);s->status=0;goto done;}
     if(op==8){
         if(fstatat(parent,leaf,&st,AT_SYMLINK_NOFOLLOW))goto io_error;
         if(!S_ISREG(st.st_mode)&&!S_ISDIR(st.st_mode)){s->status=QRX_HOSTFS_ACCESS;goto done;}
@@ -218,7 +285,9 @@ static void execute_tree(QRXVM *v,QRXHostFS *s,unsigned op){
         if(!tree_string(v,s->data_dma,dest)||!*dest)goto done;
         int target=tree_parent(s,dest,other);if(target<0){s->status=QRX_HOSTFS_ACCESS;goto done;}
         if(fstatat(target,other,&st,AT_SYMLINK_NOFOLLOW)==0){close(target);s->status=QRX_HOSTFS_ACCESS;goto done;}
-        int result=renameat(parent,leaf,target,other);close(target);
+        int result=renameat(parent,leaf,target,other);
+        if(!result){hfs_full_sync(target);hfs_full_sync(parent);}
+        close(target);
         if(result)goto io_error;s->status=0;goto done;
     }
     if(op==3||op==4){
@@ -233,17 +302,17 @@ static void execute_tree(QRXVM *v,QRXHostFS *s,unsigned op){
     if(op==4)n=pwrite(fd,v->ram.data+s->data_dma,s->length,s->offset);
     if(op==6||op==9)n=ftruncate(fd,op==9?0:s->offset);
     if(n<0)goto io_error;
-    /* Truncations are synced here; plain writes when their cache slot closes,
-     * since one AmigaDOS write can arrive as hundreds of small packets. */
-    if((op==6||op==9)&&fsync(fd))goto io_error;
+    /* A create or truncate changes the file's shape: on disk before the reply,
+     * like the directory entry. Plain writes go through the flush thread. */
+    if(op==6||op==9){hfs_full_sync(fd);hfs_full_sync(parent);}
     if(fstat(fd,&st))goto io_error;
     s->size=(uint32_t)st.st_size;s->result=(uint32_t)n;s->status=0;
     if(op==3)tree_changed(v,s,(unsigned)n);
     if(cache&&(op==3||op==4)){
         HFSFileSlot *slot=hfs_file_insert(cache,path,fd,op==4);
-        slot->dirty=op==4;
+        if(op==4)hfs_flush_request(slot->fd,&slot->flush_cycle);
         fd=-1;
-    }else if(op==4)fsync(fd);
+    }else if(op==4)hfs_full_sync(fd);
     goto done;
 io_error:s->status=status_errno(errno);
 done:if(trace)fprintf(stderr,"[HOSTFS] status=%u result=%u size=%u\n",s->status,s->result,s->size);if(fd>=0)close(fd);close(parent);

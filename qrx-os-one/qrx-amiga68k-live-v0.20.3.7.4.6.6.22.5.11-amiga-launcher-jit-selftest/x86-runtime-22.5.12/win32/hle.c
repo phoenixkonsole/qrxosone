@@ -66,6 +66,11 @@ static qblk *g_hash[QW_HBUCKETS];
 
 static unsigned hb(uint32_t a) { return (a >> 4) & (QW_HBUCKETS - 1); }
 
+#ifdef __AROS__
+#include <proto/exec.h>
+#include <exec/memory.h>
+#define QW_HOST_RESERVE (3u * 1024u * 1024u)
+#endif
 uint32_t qw_alloc(qwin *w, uint32_t n)
 {
     qblk **pp, *b;
@@ -83,12 +88,21 @@ uint32_t qw_alloc(qwin *w, uint32_t n)
     }
     if ((uint64_t)w->heap_top + n > QW_HEAP_LIMIT) return 0;
     a = w->heap_top;
-    w->heap_top += n;
-    if (w->heap_top > w->heap_mapped) {
-        uint32_t need = ((w->heap_top - w->heap_mapped) + 0xFFFFu) & ~0xFFFFu;
-        if (!x86_map(&w->cpu, w->heap_mapped, need, 1)) return 0;
+    if (a + n > w->heap_mapped) {
+        uint32_t need = ((a + n - w->heap_mapped) + 0xFFFFu) & ~0xFFFFu;
+#ifdef __AROS__
+        /* Programs probe with ever smaller requests until one succeeds: refuse
+         * early, so a too large probe neither pages the machine dry nor leaves
+         * the operating system without memory. */
+        if ((uint64_t)AvailMem(MEMF_ANY) < (uint64_t)need + QW_HOST_RESERVE) return 0;
+#endif
+        if (!x86_map(&w->cpu, w->heap_mapped, need, 1)) {
+            x86_unmap(&w->cpu, w->heap_mapped, need);
+            return 0;
+        }
         w->heap_mapped += need;
     }
+    w->heap_top = a + n;
 got:
     b = (qblk *)malloc(sizeof(*b));
     if (!b) return 0;
@@ -169,6 +183,23 @@ uint32_t qw_thunk(qwin *w, const char *dll, const char *name)
     return QW_THUNK_BASE + i;
 }
 
+static uint32_t door_alloc_cb(x86cpu *c, uint32_t size) { return qw_alloc((qwin *)c->user, size); }
+#define DOOR_SVC_API 2u
+/* block: service, serial, dir, op(0 query, 1 bind), thunk index, scratch, result, name[64] */
+static int host_api_call(qwin *w, uint32_t op, uint32_t idx, const char *name)
+{
+    static uint32_t block[7 + 16];
+    static uint32_t scratch;
+    if (!w->cpu.door) return 0;
+    if (!scratch) scratch = qw_alloc(w, 4096);
+    block[0] = DOOR_SVC_API; block[3] = op; block[4] = idx; block[5] = scratch; block[6] = 0;
+    memset(block + 7, 0, 64);
+    strncpy((char *)(block + 7), name, 63);
+    if (!x86_door_call(&w->cpu, block)) return 0;
+    return (int)block[6];
+}
+int qw_host_bind(qwin *w, uint32_t idx) { return host_api_call(w, 1, idx, w->thunk_name[idx]); }
+int qw_host_has(qwin *w, const char *name) { return host_api_call(w, 0, 0, name); }
 static int hle_hook(x86cpu *c, uint32_t idx)
 {
     qwin *w = (qwin *)c->user;
@@ -180,6 +211,9 @@ static int hle_hook(x86cpu *c, uint32_t idx)
     if (idx < QW_THUNK_MAX) w->prof_api_hits[idx]++;
 #endif
     w->api_calls++;
+    /* The door stops here for a thunk it does not know yet. If the host has the
+     * function it takes this and all later calls without coming back. */
+    if (!e && idx < w->nthunk && qw_host_bind(w, idx)) return 1;
     if (!e) {
         qw_log(w, "unimplemented API called: %s", idx < w->nthunk ? w->thunk_name[idx] : "?");
         c->fault = X86_FAULT_HOST;
@@ -299,7 +333,7 @@ int qw_run(qwin *w)
     pe_init_dlls(w);                              /* DllMain of DLLs loaded with the program */
     c->eip = w->image_base + w->entry;
     /* SetEnv QRX86_HOST 1 in the board's startup: QRX86 runs on the host CPU. */
-    if (getenv("QRX86_HOST") && x86_door_enable(c)) qw_log(w, "x86 runs on the host door");
+    if (getenv("QRX86_HOST") && x86_door_enable(c)) { c->door_alloc = door_alloc_cb; qw_log(w, "x86 runs on the host door"); }
     f = w->cpu.fault ? w->cpu.fault : x86_run(c, 0xFFFFFFFFu);
     if (f && !w->exiting) {
         char d[400];

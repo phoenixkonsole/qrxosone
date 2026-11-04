@@ -1,119 +1,121 @@
 Test project /Users/pascalpapara/Documents/GitHub/qrxosone/.build/m1-merged
-      Start  1: foundation_smoke
- 1/57 Test  #1: foundation_smoke .....................................................   Passed    0.00 sec
-      Start  2: vm_unit_tests
- 2/57 Test  #2: vm_unit_tests ........................................................   Passed    0.00 sec
-      Start  3: virtual_boot_monitor
- 3/57 Test  #3: virtual_boot_monitor .................................................   Passed    0.00 sec
-      Start  4: guest_gpu_bridge_and_pcm_dma
- 4/57 Test  #4: guest_gpu_bridge_and_pcm_dma .........................................   Passed    0.00 sec
-      Start  5: guest_glide3d_triangle_texture
- 5/57 Test  #5: guest_glide3d_triangle_texture .......................................   Passed    0.00 sec
-      Start  6: mmio_media_devices
- 6/57 Test  #6: mmio_media_devices ...................................................   Passed    0.00 sec
-      Start  7: native_media_68k_demo
- 7/57 Test  #7: native_media_68k_demo ................................................   Passed    0.00 sec
-      Start  8: native_metal_command_stream_and_qrx86_surface
- 8/57 Test  #8: native_metal_command_stream_and_qrx86_surface ........................   Passed    0.00 sec
-      Start  9: qrx86_hle_guest_frame_host_ipc
- 9/57 Test  #9: qrx86_hle_guest_frame_host_ipc .......................................   Passed    0.00 sec
-      Start 10: qrx86_host_interactive_input_protocol
-10/57 Test #10: qrx86_host_interactive_input_protocol ................................   Passed    0.00 sec
-      Start 11: qrx86_opengl_subset_to_gpu_commands
-11/57 Test #11: qrx86_opengl_subset_to_gpu_commands ..................................   Passed    0.00 sec
-      Start 12: qrx86_opengl_command_ipc_to_metal_stream
-12/57 Test #12: qrx86_opengl_command_ipc_to_metal_stream .............................   Passed    0.00 sec
-      Start 13: qrx_bench_reference_scene
-13/57 Test #13: qrx_bench_reference_scene ............................................   Passed    0.01 sec
-      Start 14: qrx_bench_glide_mmio
-14/57 Test #14: qrx_bench_glide_mmio .................................................   Passed    0.01 sec
-      Start 15: qrx_bench_opengl_hle
-15/57 Test #15: qrx_bench_opengl_hle .................................................   Passed    0.01 sec
-      Start 16: qrx_bench_cpu_renderer
-16/57 Test #16: qrx_bench_cpu_renderer ...............................................   Passed    0.01 sec
-      Start 17: external_benchmark_adapters
-17/57 Test #17: external_benchmark_adapters ..........................................   Passed    0.66 sec
-      Start 18: linux_i386_x11_to_metal_ipc
-18/57 Test #18: linux_i386_x11_to_metal_ipc ..........................................   Passed    0.00 sec
-      Start 19: qrx_x11_input_patch_contract
-19/57 Test #19: qrx_x11_input_patch_contract .........................................   Passed    0.04 sec
-      Start 20: qrx86_crossos_benchmark_classification
-20/57 Test #20: qrx86_crossos_benchmark_classification ...............................   Passed    0.37 sec
-      Start 21: qrx_compat_boot_provenance_gate
-21/57 Test #21: qrx_compat_boot_provenance_gate ......................................   Passed    0.12 sec
-      Start 22: QRX68_REAL_MUSASHI_68040_ILLEGAL_supervisor_RTE_exception
-22/57 Test #22: QRX68_REAL_MUSASHI_68040_ILLEGAL_supervisor_RTE_exception ............   Passed    0.00 sec
+      Start 24: core1_second_host_thread_atomics_and_faults
       Start 23: jit_a64_differential_against_musashi
-23/57 Test #23: jit_a64_differential_against_musashi .................................   Passed    0.58 sec
-      Start 24: full_68k_cpu_boot_monitor_and_memory_bus
-24/57 Test #24: full_68k_cpu_boot_monitor_and_memory_bus .............................   Passed    0.08 sec
-      Start 25: dual_040_real_independent_cores_and_coherent_jit
-25/57 Test #25: dual_040_real_independent_cores_and_coherent_jit .....................   Passed    0.05 sec
-      Start 26: qrx_full68k_host_bus_mock_NO_CPU_EXECUTION
-26/57 Test #26: qrx_full68k_host_bus_mock_NO_CPU_EXECUTION ...........................   Passed    0.02 sec
-      Start 27: dual_68040_compat_and_jit_coherence_MOCK
-27/57 Test #27: dual_68040_compat_and_jit_coherence_MOCK .............................   Passed    0.02 sec
-      Start 28: QRX68100_two_host_thread_native_fast_path_MOCK_68k
-28/57 Test #28: QRX68100_two_host_thread_native_fast_path_MOCK_68k ...................   Passed    0.03 sec
-      Start 29: QRX68100_Vampire_inspired_cache_vector64_and_legacy_MOCK
-29/57 Test #29: QRX68100_Vampire_inspired_cache_vector64_and_legacy_MOCK .............   Passed    0.03 sec
-      Start 30: QRX68100_real_68k_boot_shell_and_persistent_QRXFS
-30/57 Test #30: QRX68100_real_68k_boot_shell_and_persistent_QRXFS ....................   Passed    0.01 sec
-      Start 31: qrx_pe32_elf32_hunk_qex_binary_signature_launcher
-31/57 Test #31: qrx_pe32_elf32_hunk_qex_binary_signature_launcher ....................   Passed    0.00 sec
-      Start 32: qrx_native_board_block_sector_dma_and_safe_persistence
-32/57 Test #32: qrx_native_board_block_sector_dma_and_safe_persistence ...............   Passed    0.00 sec
-      Start 33: REAL_MUSASHI_040_boot_QEX_and_two_core_worker
-33/57 Test #33: REAL_MUSASHI_040_boot_QEX_and_two_core_worker ........................   Passed    0.15 sec
-      Start 34: qrx_existing_AROS_QRXDesktop_safe_doubleclick_source_patch
-34/57 Test #34: qrx_existing_AROS_QRXDesktop_safe_doubleclick_source_patch ...........   Passed    0.03 sec
-      Start 35: qrx_HOST_directory_volume_MMIO_DMA_and_confinement
-35/57 Test #35: qrx_HOST_directory_volume_MMIO_DMA_and_confinement ...................   Passed    0.01 sec
-      Start 36: QRX_SMP_shared_ready_queue_affinity_parallel_host_NO_AROS_EXEC
-36/57 Test #36: QRX_SMP_shared_ready_queue_affinity_parallel_host_NO_AROS_EXEC .......   Passed    0.00 sec
-      Start 37: QRX68100_boot_host_directory_no_IMG_READWRITE_and_guest_QEX
-37/57 Test #37: QRX68100_boot_host_directory_no_IMG_READWRITE_and_guest_QEX ..........   Passed    0.05 sec
-      Start 38: QRX68040_FF000800_hostfs_alias_and_DMA_CPU_MOCK
-38/57 Test #38: QRX68040_FF000800_hostfs_alias_and_DMA_CPU_MOCK ......................   Passed    0.00 sec
-      Start 39: QRX68100_host_quarter_ram_sparse_128MiB_32bit_bus
-39/57 Test #39: QRX68100_host_quarter_ram_sparse_128MiB_32bit_bus ....................   Passed    0.00 sec
-      Start 40: AmigaOS3_AROS68k_HUNK_CODE_DATA_RELOC32_strict_loader
-40/57 Test #40: AmigaOS3_AROS68k_HUNK_CODE_DATA_RELOC32_strict_loader ................   Passed    0.00 sec
-      Start 41: AmigaOS3_real_Kickstart_FS_UAE_compatibility_profile_configuration
-41/57 Test #41: AmigaOS3_real_Kickstart_FS_UAE_compatibility_profile_configuration ...   Passed    0.25 sec
-      Start 42: QRX68100_actual_guest_Amiga_HUNK_HOST_launch_96MiB
-42/57 Test #42: QRX68100_actual_guest_Amiga_HUNK_HOST_launch_96MiB ...................   Passed    0.06 sec
-      Start 43: QRX68040_128MiB_RAM_Kickstart_ROM_protection_AND_MOCK_CPU
-43/57 Test #43: QRX68040_128MiB_RAM_Kickstart_ROM_protection_AND_MOCK_CPU ............   Passed    0.00 sec
-      Start 44: QRX68_QRXDesktop_2_4_patch_compatibility_and_source_guard
-44/57 Test #44: QRX68_QRXDesktop_2_4_patch_compatibility_and_source_guard ............   Passed    0.04 sec
-      Start 45: QRX68_AROS_guest_installer_non_destructive
-45/57 Test #45: QRX68_AROS_guest_installer_non_destructive ...........................   Passed    0.06 sec
-      Start 46: QRX68_guest_to_host_bridge_real_HUNK_and_GUI_snapshot
-46/57 Test #46: QRX68_guest_to_host_bridge_real_HUNK_and_GUI_snapshot ................   Passed    0.18 sec
-      Start 47: QRX68_real_HUNK_Exec_DOS_library_vector_HLE_AND_shared_files
-47/57 Test #47: QRX68_real_HUNK_Exec_DOS_library_vector_HLE_AND_shared_files .........   Passed    0.01 sec
-      Start 48: QRX68_host_application_router_dispatches_real_HUNK_to_isolated_HLE
-48/57 Test #48: QRX68_host_application_router_dispatches_real_HUNK_to_isolated_HLE ...   Passed    0.04 sec
-      Start 49: QRX68_amigaos_HUNK_batch_compatibility_failsafe_scanner
-49/57 Test #49: QRX68_amigaos_HUNK_batch_compatibility_failsafe_scanner ..............   Passed    0.11 sec
-      Start 50: QRX68_Amiga_HUNK_Intuition_graphics_HLE_guest_pixel_proof
-50/57 Test #50: QRX68_Amiga_HUNK_Intuition_graphics_HLE_guest_pixel_proof ............   Passed    0.06 sec
-      Start 51: QRX68_REAL_MUSASHI_68040_HUNK_Exec_DOS_Intuition_graphics
-51/57 Test #51: QRX68_REAL_MUSASHI_68040_HUNK_Exec_DOS_Intuition_graphics ............   Passed    0.08 sec
-      Start 52: QRX68_Musashi_68040_integration_COMPILE_LINK_ONLY_STUB
-52/57 Test #52: QRX68_Musashi_68040_integration_COMPILE_LINK_ONLY_STUB ...............   Passed    0.00 sec
-      Start 53: QRX68_AMIGA_68k_Intuition_graphics_to_native_Q86F_GPU_packet
-53/57 Test #53: QRX68_AMIGA_68k_Intuition_graphics_to_native_Q86F_GPU_packet .........   Passed    0.05 sec
-      Start 54: QRXDesktop_6_6_20_existing_UI_HUNK_compat_ToolType_optin_patch
-54/57 Test #54: QRXDesktop_6_6_20_existing_UI_HUNK_compat_ToolType_optin_patch .......   Passed    0.03 sec
-      Start 55: QRX68_large_Amiga_HUNK_96KiB_heap_guard_no_program_overlap
-55/57 Test #55: QRX68_large_Amiga_HUNK_96KiB_heap_guard_no_program_overlap ...........   Passed    0.00 sec
-      Start 56: QRX68_2_live_IDCMP_mouse_redraw_close_concurrent_HUNK
-56/57 Test #56: QRX68_2_live_IDCMP_mouse_redraw_close_concurrent_HUNK ................   Passed    0.46 sec
-      Start 57: QRX68_26_Exec_signals_ports_Intuition_gadget_menu_layered_windows
-57/57 Test #57: QRX68_26_Exec_signals_ports_Intuition_gadget_menu_layered_windows ....   Passed    0.00 sec
+      Start 57: QRX68_2_live_IDCMP_mouse_redraw_close_concurrent_HUNK
+      Start 17: external_benchmark_adapters
+ 1/58 Test #57: QRX68_2_live_IDCMP_mouse_redraw_close_concurrent_HUNK ................   Passed    0.53 sec
+      Start 20: qrx86_crossos_benchmark_classification
+ 2/58 Test #17: external_benchmark_adapters ..........................................   Passed    0.62 sec
+      Start 34: REAL_MUSASHI_040_boot_QEX_and_two_core_worker
+ 3/58 Test #23: jit_a64_differential_against_musashi .................................   Passed    0.70 sec
+      Start 36: qrx_HOST_directory_volume_MMIO_DMA_and_confinement
+ 4/58 Test #34: REAL_MUSASHI_040_boot_QEX_and_two_core_worker ........................   Passed    0.18 sec
+      Start 47: QRX68_guest_to_host_bridge_real_HUNK_and_GUI_snapshot
+ 5/58 Test #20: qrx86_crossos_benchmark_classification ...............................   Passed    0.39 sec
+      Start 42: AmigaOS3_real_Kickstart_FS_UAE_compatibility_profile_configuration
+ 6/58 Test #36: qrx_HOST_directory_volume_MMIO_DMA_and_confinement ...................   Passed    0.27 sec
+      Start 52: QRX68_REAL_MUSASHI_68040_HUNK_Exec_DOS_Intuition_graphics
+ 7/58 Test #47: QRX68_guest_to_host_bridge_real_HUNK_and_GUI_snapshot ................   Passed    0.22 sec
+      Start 53: QRX68_Musashi_68040_integration_COMPILE_LINK_ONLY_STUB
+ 8/58 Test #53: QRX68_Musashi_68040_integration_COMPILE_LINK_ONLY_STUB ...............   Passed    0.00 sec
+      Start 21: qrx_compat_boot_provenance_gate
+ 9/58 Test #52: QRX68_REAL_MUSASHI_68040_HUNK_Exec_DOS_Intuition_graphics ............   Passed    0.09 sec
+      Start  6: mmio_media_devices
+10/58 Test  #6: mmio_media_devices ...................................................   Passed    0.01 sec
+      Start 30: QRX68100_Vampire_inspired_cache_vector64_and_legacy_MOCK
+11/58 Test #30: QRX68100_Vampire_inspired_cache_vector64_and_legacy_MOCK .............   Passed    0.01 sec
+      Start 38: QRX68100_boot_host_directory_no_IMG_READWRITE_and_guest_QEX
+12/58 Test #38: QRX68100_boot_host_directory_no_IMG_READWRITE_and_guest_QEX ..........   Passed    0.08 sec
+      Start 50: QRX68_amigaos_HUNK_batch_compatibility_failsafe_scanner
+13/58 Test #21: qrx_compat_boot_provenance_gate ......................................   Passed    0.17 sec
+      Start 22: QRX68_REAL_MUSASHI_68040_ILLEGAL_supervisor_RTE_exception
+14/58 Test #22: QRX68_REAL_MUSASHI_68040_ILLEGAL_supervisor_RTE_exception ............   Passed    0.01 sec
+      Start 26: dual_040_real_independent_cores_and_coherent_jit
+15/58 Test #26: dual_040_real_independent_cores_and_coherent_jit .....................   Passed    0.02 sec
+      Start 25: full_68k_cpu_boot_monitor_and_memory_bus
+16/58 Test #42: AmigaOS3_real_Kickstart_FS_UAE_compatibility_profile_configuration ...   Passed    0.31 sec
+      Start  2: vm_unit_tests
+17/58 Test  #2: vm_unit_tests ........................................................   Passed    0.00 sec
+      Start 27: qrx_full68k_host_bus_mock_NO_CPU_EXECUTION
+18/58 Test #25: full_68k_cpu_boot_monitor_and_memory_bus .............................   Passed    0.02 sec
+      Start  9: qrx86_hle_guest_frame_host_ipc
+19/58 Test #27: qrx_full68k_host_bus_mock_NO_CPU_EXECUTION ...........................   Passed    0.01 sec
+      Start  1: foundation_smoke
+20/58 Test  #9: qrx86_hle_guest_frame_host_ipc .......................................   Passed    0.00 sec
+      Start 41: AmigaOS3_AROS68k_HUNK_CODE_DATA_RELOC32_strict_loader
+21/58 Test  #1: foundation_smoke .....................................................   Passed    0.00 sec
+      Start 11: qrx86_opengl_subset_to_gpu_commands
+22/58 Test #41: AmigaOS3_AROS68k_HUNK_CODE_DATA_RELOC32_strict_loader ................   Passed    0.00 sec
+      Start  3: virtual_boot_monitor
+23/58 Test #11: qrx86_opengl_subset_to_gpu_commands ..................................   Passed    0.00 sec
+      Start 44: QRX68040_128MiB_RAM_Kickstart_ROM_protection_AND_MOCK_CPU
+24/58 Test  #3: virtual_boot_monitor .................................................   Passed    0.00 sec
+      Start  7: native_media_68k_demo
+25/58 Test #44: QRX68040_128MiB_RAM_Kickstart_ROM_protection_AND_MOCK_CPU ............   Passed    0.01 sec
+      Start 12: qrx86_opengl_command_ipc_to_metal_stream
+26/58 Test  #7: native_media_68k_demo ................................................   Passed    0.01 sec
+      Start 13: qrx_bench_reference_scene
+27/58 Test #12: qrx86_opengl_command_ipc_to_metal_stream .............................   Passed    0.01 sec
+      Start 18: linux_i386_x11_to_metal_ipc
+28/58 Test #18: linux_i386_x11_to_metal_ipc ..........................................   Passed    0.01 sec
+      Start 33: qrx_native_board_block_sector_dma_and_safe_persistence
+29/58 Test #33: qrx_native_board_block_sector_dma_and_safe_persistence ...............   Passed    0.00 sec
+      Start 29: QRX68100_two_host_thread_native_fast_path_MOCK_68k
+30/58 Test #13: qrx_bench_reference_scene ............................................   Passed    0.02 sec
+      Start 10: qrx86_host_interactive_input_protocol
+31/58 Test #29: QRX68100_two_host_thread_native_fast_path_MOCK_68k ...................   Passed    0.01 sec
+      Start 58: QRX68_26_Exec_signals_ports_Intuition_gadget_menu_layered_windows
+32/58 Test #10: qrx86_host_interactive_input_protocol ................................   Passed    0.01 sec
+      Start 31: QRX68100_real_68k_boot_shell_and_persistent_QRXFS
+33/58 Test #58: QRX68_26_Exec_signals_ports_Intuition_gadget_menu_layered_windows ....   Passed    0.01 sec
+      Start  5: guest_glide3d_triangle_texture
+34/58 Test #31: QRX68100_real_68k_boot_shell_and_persistent_QRXFS ....................   Passed    0.01 sec
+      Start 40: QRX68100_host_quarter_ram_sparse_128MiB_32bit_bus
+35/58 Test #40: QRX68100_host_quarter_ram_sparse_128MiB_32bit_bus ....................   Passed    0.02 sec
+      Start 28: dual_68040_compat_and_jit_coherence_MOCK
+36/58 Test  #5: guest_glide3d_triangle_texture .......................................   Passed    0.02 sec
+      Start 14: qrx_bench_glide_mmio
+37/58 Test #28: dual_68040_compat_and_jit_coherence_MOCK .............................   Passed    0.01 sec
+      Start 39: QRX68040_FF000800_hostfs_alias_and_DMA_CPU_MOCK
+38/58 Test #50: QRX68_amigaos_HUNK_batch_compatibility_failsafe_scanner ..............   Passed    0.18 sec
+39/58 Test #39: QRX68040_FF000800_hostfs_alias_and_DMA_CPU_MOCK ......................   Passed    0.01 sec
+      Start  4: guest_gpu_bridge_and_pcm_dma
+      Start 56: QRX68_large_Amiga_HUNK_96KiB_heap_guard_no_program_overlap
+40/58 Test #14: qrx_bench_glide_mmio .................................................   Passed    0.02 sec
+      Start  8: native_metal_command_stream_and_qrx86_surface
+41/58 Test  #4: guest_gpu_bridge_and_pcm_dma .........................................   Passed    0.01 sec
+      Start 48: QRX68_real_HUNK_Exec_DOS_library_vector_HLE_AND_shared_files
+42/58 Test #56: QRX68_large_Amiga_HUNK_96KiB_heap_guard_no_program_overlap ...........   Passed    0.01 sec
+      Start 51: QRX68_Amiga_HUNK_Intuition_graphics_HLE_guest_pixel_proof
+43/58 Test  #8: native_metal_command_stream_and_qrx86_surface ........................   Passed    0.01 sec
+      Start 54: QRX68_AMIGA_68k_Intuition_graphics_to_native_Q86F_GPU_packet
+44/58 Test #48: QRX68_real_HUNK_Exec_DOS_library_vector_HLE_AND_shared_files .........   Passed    0.01 sec
+      Start 43: QRX68100_actual_guest_Amiga_HUNK_HOST_launch_96MiB
+45/58 Test #43: QRX68100_actual_guest_Amiga_HUNK_HOST_launch_96MiB ...................   Passed    0.08 sec
+      Start 49: QRX68_host_application_router_dispatches_real_HUNK_to_isolated_HLE
+46/58 Test #54: QRX68_AMIGA_68k_Intuition_graphics_to_native_Q86F_GPU_packet .........   Passed    0.08 sec
+      Start 46: QRX68_AROS_guest_installer_non_destructive
+47/58 Test #51: QRX68_Amiga_HUNK_Intuition_graphics_HLE_guest_pixel_proof ............   Passed    0.09 sec
+      Start 35: qrx_existing_AROS_QRXDesktop_safe_doubleclick_source_patch
+48/58 Test #35: qrx_existing_AROS_QRXDesktop_safe_doubleclick_source_patch ...........   Passed    0.06 sec
+      Start 19: qrx_x11_input_patch_contract
+49/58 Test #46: QRX68_AROS_guest_installer_non_destructive ...........................   Passed    0.07 sec
+      Start 55: QRXDesktop_6_6_20_existing_UI_HUNK_compat_ToolType_optin_patch
+50/58 Test #49: QRX68_host_application_router_dispatches_real_HUNK_to_isolated_HLE ...   Passed    0.07 sec
+      Start 45: QRX68_QRXDesktop_2_4_patch_compatibility_and_source_guard
+51/58 Test #55: QRXDesktop_6_6_20_existing_UI_HUNK_compat_ToolType_optin_patch .......   Passed    0.04 sec
+      Start 16: qrx_bench_cpu_renderer
+52/58 Test #45: QRX68_QRXDesktop_2_4_patch_compatibility_and_source_guard ............   Passed    0.04 sec
+      Start 15: qrx_bench_opengl_hle
+53/58 Test #19: qrx_x11_input_patch_contract .........................................   Passed    0.05 sec
+      Start 37: QRX_SMP_shared_ready_queue_affinity_parallel_host_NO_AROS_EXEC
+54/58 Test #37: QRX_SMP_shared_ready_queue_affinity_parallel_host_NO_AROS_EXEC .......   Passed    0.01 sec
+      Start 32: qrx_pe32_elf32_hunk_qex_binary_signature_launcher
+55/58 Test #15: qrx_bench_opengl_hle .................................................   Passed    0.01 sec
+56/58 Test #16: qrx_bench_cpu_renderer ...............................................   Passed    0.01 sec
+57/58 Test #32: qrx_pe32_elf32_hunk_qex_binary_signature_launcher ....................   Passed    0.00 sec
+58/58 Test #24: core1_second_host_thread_atomics_and_faults ..........................   Passed   13.87 sec
 
-100% tests passed out of 57
+100% tests passed out of 58
 
-Total Test time (real) =   3.83 sec
+Total Test time (real) =  13.88 sec

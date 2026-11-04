@@ -1107,9 +1107,28 @@ static uint32_t menu_popup_proc(qwin *w, uint32_t *a)
 }
 
 /* ====================================================================== focus / input */
+/* Windows tells a top-level window that it became active before it gets the keyboard. Games
+ * rely on this: Doom95 pauses, and ignores its keyboard, until WM_ACTIVATEAPP arrives. */
+static void activate_top(qwin *w, uint32_t h)
+{
+    qwnd *x = W(w, h);
+    uint32_t old;
+    while (x && (x->style & WS_CHILD) && W(w, x->parent)) x = W(w, x->parent);
+    if (!x) return;
+    old = w->active;
+    if (old != x->h && W(w, old)) win_send(w, old, WM_ACTIVATE, 0, x->h);
+    w->active = x->h;
+    if (!x->app_activated) {
+        x->app_activated = 1;
+        win_send(w, x->h, 0x001C /* WM_ACTIVATEAPP */, 1, 0);
+    }
+    if (old != x->h) win_send(w, x->h, WM_ACTIVATE, 1, old);
+}
+
 static void set_focus(qwin *w, uint32_t h)
 {
     uint32_t old = w->focus;
+    if (W(w, h)) activate_top(w, h);
     if (old == h) return;
     w->focus = h;
     if (W(w, old)) win_send(w, old, WM_KILLFOCUS, h, 0);
@@ -1177,16 +1196,71 @@ static void mouse_event(qwin *w, qwnd *top, int type, int x, int y, int button)
 }
 
 static uint8_t g_vkchar[256];
+/* WH_KEYBOARD hooks: Doom95 reads the keyboard only through one and leaves WM_KEYDOWN alone. */
+#define QW_MAXHOOKS 4
+static uint32_t g_kbhook[QW_MAXHOOKS];
+
+static uint32_t scan_of_vk(int vk)
+{
+    static const char *const top = "QWERTYUIOP", *const mid = "ASDFGHJKL", *const low = "ZXCVBNM";
+    const char *p;
+    if (vk >= '1' && vk <= '9') return 2u + (uint32_t)(vk - '1');
+    if (vk == '0') return 0x0B;
+    if (vk >= 'A' && vk <= 'Z') {
+        if ((p = strchr(top, vk)) != NULL) return 0x10u + (uint32_t)(p - top);
+        if ((p = strchr(mid, vk)) != NULL) return 0x1Eu + (uint32_t)(p - mid);
+        if ((p = strchr(low, vk)) != NULL) return 0x2Cu + (uint32_t)(p - low);
+    }
+    if (vk >= 0x70 && vk <= 0x79) return 0x3Bu + (uint32_t)(vk - 0x70);   /* F1-F10 */
+    switch (vk) {
+    case 0x08: return 0x0E; case 0x09: return 0x0F; case 0x0D: return 0x1C; case 0x10: return 0x2A;
+    case 0x11: return 0x1D; case 0x12: return 0x38; case 0x1B: return 0x01; case 0x20: return 0x39;
+    case 0x25: return 0x4B; case 0x26: return 0x48; case 0x27: return 0x4D; case 0x28: return 0x50;
+    case 0x7A: return 0x57; case 0x7B: return 0x58;
+    }
+    return 0;
+}
+
+/* True when a hook swallowed the key. */
+static int kb_hook(qwin *w, int vk, int up, int was_down)
+{
+    uint32_t lp = 1u | (scan_of_vk(vk) << 16) | (was_down ? 0x40000000u : 0) | (up ? 0x80000000u : 0);
+    int i;
+    for (i = QW_MAXHOOKS - 1; i >= 0; i--) {
+        if (g_kbhook[i] && qw_call(w, g_kbhook[i], 3, 0 /* HC_ACTION */, (uint32_t)vk, lp, 0)) return 1;
+    }
+    return 0;
+}
+
+FN(u_SetWindowsHookEx) {
+    int i;
+    (void)w;
+    if (a[0] != 2 /* WH_KEYBOARD */) { qw_log(w, "SetWindowsHookEx: hook type %d is not delivered", (int)a[0]); return 0x4900u + a[0]; }
+    for (i = 0; i < QW_MAXHOOKS; i++) {
+        if (!g_kbhook[i]) { g_kbhook[i] = a[1]; return 0x4800u + (uint32_t)i; }
+    }
+    return 0;
+}
+FN(u_UnhookWindowsHookEx) {
+    uint32_t i = a[0] - 0x4800u;
+    (void)w;
+    if (i < QW_MAXHOOKS) g_kbhook[i] = 0;
+    return 1;
+}
+
 static void key_event(qwin *w, int type, int vk, int ch)
 {
+    int was_down = 0;
     qwnd *tgt = W(w, w->focus);
     qwnd *top = active_top(w);
     if (!tgt || win_top(w, tgt) != top) tgt = top;
     if (!tgt) return;
     if (vk > 0 && vk < 256) {
+        was_down = w->keystate[vk] != 0;
         w->keystate[vk] = type == QE_KEYDOWN ? 0x80 : 0;
         if (ch) g_vkchar[vk] = (uint8_t)ch;
     }
+    if ((type == QE_KEYDOWN || type == QE_KEYUP) && kb_hook(w, vk, type == QE_KEYUP, was_down)) return;
     if (type == QE_KEYDOWN) win_post(w, tgt->h, WM_KEYDOWN, (uint32_t)vk, 1);
     else if (type == QE_KEYUP) win_post(w, tgt->h, WM_KEYUP, (uint32_t)vk, 0xC0000001u);
     else if (type == QE_CHAR) win_post(w, tgt->h, WM_CHAR, (uint32_t)ch, 1);
@@ -2171,7 +2245,7 @@ const qhle qw_user32[] = {
     U("PostMessageA", u_PostMessageW, 4), U("TranslateAcceleratorA", u_TranslateAcceleratorW, 3),
     U("IsDialogMessageA", u_IsDialogMessageW, 2), U("DefDlgProcA", u_DefDlgProcW, 4),
     U("SystemParametersInfoA", u_SystemParametersInfoW, 4), U("MapVirtualKeyA", u_MapVirtualKeyExW, 2),
-    U("GetWindowTextLengthA", u_GetWindowTextLengthW, 1), U("SetWindowsHookExA", u_zero, 4),
+    U("GetWindowTextLengthA", u_GetWindowTextLengthW, 1), U("SetWindowsHookExA", u_SetWindowsHookEx, 4),
     U("GetWindowLongPtrW", u_GetWindowLongW, 2), U("SetWindowLongPtrW", u_SetWindowLongW, 3),
     U("GetClassLongW", u_GetClassLongW, 2), U("SetClassLongW", u_SetClassLongW, 3),
     U("TrackMouseEvent", u_TrackMouseEvent, 1),
@@ -2185,7 +2259,7 @@ const qhle qw_user32[] = {
     U("ModifyMenuW", u_ModifyMenuW, 5), U("DeleteMenu", u_DeleteMenu, 3), U("RemoveMenu", u_DeleteMenu, 3), U("GetMenuStringW", u_GetMenuStringW, 5),
     U("DrawMenuBar", u_DrawMenuBar, 1), U("TrackPopupMenu", u_TrackPopupMenu, 7), U("TrackPopupMenuEx", u_TrackPopupMenu, 6),
     U("GetSystemMenu", u_GetSystemMenu, 2), U("SetWindowContextHelpId", u_one, 2), U("WinHelpW", u_one, 4),
-    U("SetWindowsHookExW", u_zero, 4), U("UnhookWindowsHookEx", u_one, 1), U("CallNextHookEx", u_zero, 4),
+    U("SetWindowsHookExW", u_SetWindowsHookEx, 4), U("UnhookWindowsHookEx", u_UnhookWindowsHookEx, 1), U("CallNextHookEx", u_zero, 4),
     U("qrx_ButtonProc", h_ButtonProc, 4), U("qrx_StaticProc", h_StaticProc, 4), U("qrx_EditProc", h_EditProc, 4),
     U("qrx_DialogProc", h_DialogProc, 4), U("qrx_ListBoxProc", h_ListBoxProc, 4), U("qrx_ScrollBarProc", h_ScrollBarProc, 4),
     U("qrx_MenuProc", h_MenuProc, 4),

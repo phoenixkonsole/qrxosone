@@ -6,6 +6,9 @@
 #include "qrx_hostfs.h"
 #include "qrx_bootshell.h"
 #include <assert.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -70,6 +73,20 @@ int main(void){
  name(&vm,"Nested");assert(operation(&vm,0x107,0,0)==0);
  name(&vm,"Nested/hello.bin");assert(operation(&vm,0x109,0,0)==0);
  memcpy(ram+0x3000,"TREE",4);assert(operation(&vm,0x104,0,4)==0);
+ /* Durability: the flush thread drains, and a killed emulator keeps the data. */
+ qrx_hostfs_sync();assert(qrx_hostfs_flush_pending()==0);
+ {
+     pid_t child=fork();assert(child>=0);
+     if(child==0){
+         memcpy(ram+0x3000,"KILL",4);
+         if(operation(&vm,0x104,4,4)!=0)_exit(9);
+         raise(SIGKILL);
+     }
+     int status=0;assert(waitpid(child,&status,0)==child);
+     assert(WIFSIGNALED(status)&&WTERMSIG(status)==SIGKILL);
+     memset(ram+0x3000,0,16);assert(operation(&vm,0x103,0,8)==0);
+     assert(!memcmp(ram+0x3000,"TREEKILL",8));
+ }
  name(&vm,"nested/HELLO.BIN");assert(operation(&vm,0x103,0,4)==0);assert(!memcmp(ram+0x3000,"TREE",4));
  name(&vm,"Nested");assert(operation(&vm,0x101,0,256)==0);assert(!strcmp((char*)ram+0x3000,"hello.bin"));
  name(&vm,"Nested/../hello.txt");assert(operation(&vm,0x102,0,0)!=0);

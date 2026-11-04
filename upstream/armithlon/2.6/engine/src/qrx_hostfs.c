@@ -18,6 +18,7 @@
 #include <sys/statvfs.h>
 #include <unistd.h>
 #include <time.h>
+#include <pthread.h>
 #ifndef O_NOFOLLOW
 #error "QRXHostFS needs O_NOFOLLOW to protect against symlink traversal"
 #endif
@@ -152,6 +153,7 @@ bool qrx_hostfs_mount(QRXHostFS *fs,const char *dir,bool readonly){
 void qrx_hostfs_unmount(QRXHostFS *fs){
     if(!fs)return;
     hfs_cache_free(fs);
+    qrx_hostfs_sync();
     if(fs->mounted && fs->dirfd>=0)close(fs->dirfd);
     memset(fs,0,sizeof(*fs));fs->dirfd=-1;
 }

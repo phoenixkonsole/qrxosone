@@ -16,8 +16,8 @@
 #define WR32(x, v) x86_wr32(C, (x), (v))
 #define UNUSED (void)w; (void)a
 
-static const char *known_dlls[] = { "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll", "ddraw", "dsound", "dinput", NULL };
-#define QW_NKNOWN 12
+static const char *known_dlls[] = { "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll", "ddraw", "dsound", "dinput", "opengl32", "glide2x", "glide3x", "d3d8", "d3d9", "vulkan-1", NULL };
+#define QW_NKNOWN 18
 #define QW_MODBASE 0x7E000000u
 
 static double argd(qwin *w, uint32_t addr) { uint64_t u = (uint64_t)RD32(addr) | ((uint64_t)RD32(addr + 4) << 32); double d; memcpy(&d, &u, 8); return d; }
@@ -559,6 +559,7 @@ FN(k_GetModuleHandleA) { char n[64]; if (!a[0]) return w->image_base; qw_rd_str(
 FN(k_GetModuleHandleW) { wchar16 t[64]; char n[64]; if (!a[0]) return w->image_base; qw_rd_wstr(w, a[0], t, 64); w2a(n, t, 64); return module_handle(w, n, 0); }
 FN(k_LoadLibraryA) { char n[128]; qw_rd_str(w, a[0], n, 128); return module_handle(w, n, 1); }
 FN(k_LoadLibraryW) { wchar16 t[128]; char n[128]; qw_rd_wstr(w, a[0], t, 128); w2a(n, t, 128); return module_handle(w, n, 1); }
+FN(k_QrxLauncherPlay) { UNUSED; return 1; }
 FN(k_GetProcAddress) {
     char n[96];
     uint32_t idx = (a[0] - QW_MODBASE) / 0x10000u;
@@ -567,12 +568,16 @@ FN(k_GetProcAddress) {
     if (m) {
         if (a[1] < 0x10000u) return pe_export(w, m, NULL, a[1]);
         qw_rd_str(w, a[1], n, sizeof(n));
+        /* Doom95's launcher is a property-sheet dialog the game only needs to
+         * have closed with "play": the command line carries the settings. */
+        if (!strcmp(n, "_Launcher@4")) return qw_thunk(w, "kernel32", "QrxLauncherPlay");
         return pe_export(w, m, n, 0);
     }
     if (a[0] < QW_MODBASE || idx >= QW_NKNOWN) return 0;
     if (a[1] < 0x10000u) return 0;
     qw_rd_str(w, a[1], n, 64);
     e = qw_find_hle(known_dlls[idx], n);
+    if (!e && qw_host_has(w, n)) return qw_thunk(w, known_dlls[idx], n);
     if (!e) { if (w->verbose) qw_log(w, "GetProcAddress(%s, %s): not implemented", known_dlls[idx], n); return 0; }
     return qw_thunk(w, known_dlls[idx], n);
 }
@@ -886,6 +891,7 @@ const qhle qw_kernel32[] = {
     K("GetStdHandle", k_GetStdHandle, 1), K("WriteFile", k_WriteFile, 5), K("CloseHandle", k_CloseHandle, 1),
     K("OutputDebugStringA", k_OutputDebugStringA, 1), K("OutputDebugStringW", k_OutputDebugStringW, 1), K("IsDebuggerPresent", k_IsDebuggerPresent, 0),
     K("GetSystemInfo", k_GetSystemInfo, 1), K("RaiseException", k_RaiseException, 4), K("IsBadReadPtr", k_IsBadReadPtr, 2),
+    K("QrxLauncherPlay", k_QrxLauncherPlay, 1),
     K("FindResourceW", k_FindResourceW, 3), K("LoadResource", k_LoadResource, 2), K("LockResource", k_LockResource, 1), K("SizeofResource", k_SizeofResource, 2),
     K("InterlockedIncrement", k_InterlockedIncrement, 1), K("InterlockedDecrement", k_InterlockedDecrement, 1),
     K("InterlockedExchange", k_InterlockedExchange, 2), K("InterlockedCompareExchange", k_InterlockedCompareExchange, 3),

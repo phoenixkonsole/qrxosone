@@ -2,13 +2,17 @@
 /* The host build of the same interpreter the guest runs, with its internals in
  * reach: the door keeps a shadow page table of host pointers. */
 #include "qrx86core.c"
+#include "qrx_hostapi.h"
+#include "qrxmedia.h"
+#include <math.h>
+#define QW_THUNKS 4096u
 
 /* struct door_req on the guest side; all fields big-endian. */
 enum {
     REQ_R=0, REQ_EIP=32, REQ_EFLAGS=36, REQ_SREG=40, REQ_SBASE=64, REQ_TLS=88,
     REQ_ST=124, REQ_TOP=188, REQ_FSW=192, REQ_FCW=196, REQ_FTW=200,
     REQ_DIR=204, REQ_SERIAL=208, REQ_HLE_BASE=212, REQ_HLE_COUNT=216,
-    REQ_STOP=220, REQ_LIMIT=224, REQ_EXECUTED=228, REQ_STATUS=232, REQ_SIZE=236
+    REQ_STOP=220, REQ_LIMIT=224, REQ_EXECUTED=228, REQ_STATUS=232, REQ_ALLOC=236, REQ_ALLOC_ADDR=240, REQ_ALLOC_DONE=244, REQ_SIZE=248
 };
 static x86cpu host;
 static uint32_t shadow_serial, shadow_dir;
@@ -45,18 +49,163 @@ static void shadow_rebuild(QRXFullCPU *c,uint32_t dir){
 }
 /* Anything the guest must decide stops the run with eip on that instruction;
  * the guest interprets it, so its behaviour stays in exactly one place. */
-static int door_hle_hook(x86cpu *h,uint32_t index){(void)index;h->stop=1;return 1;}
+static const QRXHostApi *api_bound[QW_THUNKS];
+static int door_hle_hook(x86cpu *h,uint32_t index){
+    const QRXHostApi *f=index<QW_THUNKS?api_bound[index]:NULL;
+    if(!f&&index<QW_THUNKS)f=qrx_d3d_thunks[index];
+    if(!f){h->stop=1;return 1;}
+    /* The guest told us this thunk is ours: stdcall (or cdecl with nargs<0). */
+    uint32_t sp=h->r[X86_ESP],a[16];
+    uint32_t ret=x86_rd32(h,sp);
+    for(unsigned i=0;i<16;i++)a[i]=x86_rd32(h,sp+4u+i*4u);
+    uint32_t result=f->fn(h,a);
+    /* Needs guest memory: leave eip on the thunk, the door runs this again. */
+    if(qrx_hostapi_alloc_request){h->stop=1;return 1;}
+    h->r[X86_EAX]=result;
+    h->r[X86_ESP]=sp+4u+(f->nargs>0?(uint32_t)f->nargs*4u:0u);
+    h->eip=ret;
+    return 1;
+}
 static int door_int_hook(x86cpu *h,int vector){(void)vector;h->eip=h->cur_eip;h->stop=1;return 1;}
 
+/* ---- DirectSound mixer. Runs on the CPU thread between x86 quanta, so the shadow
+ * page table never changes under it, and tops up the host ring to a fixed latency. */
+#define MIX_RATE 48000u
+#define MIX_TARGET_FRAMES 2400u   /* 50 ms */
+#define MIX_VOICES 128u
+typedef struct {
+    bool used,playing,looping;
+    uint32_t mem,size,rate,chans,bits;
+    float gain_l,gain_r;
+    double pos;                   /* in source frames */
+} MixVoice;
+static MixVoice voices[MIX_VOICES];
+static unsigned voices_live;
+static QRXFullCPU *door_cpu;
+static inline const uint8_t *x86_page_ptr(uint32_t a){
+    x86page *t=host.dir[a>>22];
+    if(!t)return NULL;
+    t+=(a>>12)&1023u;
+    return t->mem;
+}
+static inline uint8_t x86_byte(uint32_t a){
+    const uint8_t *p=x86_page_ptr(a);
+    return p?p[a&X86_PAGE_MASK]:0;
+}
+static inline float voice_sample(const MixVoice *v,uint32_t frame,unsigned ch){
+    uint32_t bytes=v->bits/8u;
+    uint32_t a=v->mem+frame*v->chans*bytes+ch*bytes;
+    if(bytes==1)return ((float)x86_byte(a)-128.f)/128.f;
+    return (float)(int16_t)((uint16_t)x86_byte(a)|(uint16_t)x86_byte(a+1u)<<8)/32768.f;
+}
+static void mix_tick(void){
+    if(!voices_live||!door_cpu||!door_cpu->vm.media)return;
+    QRXMediaDevice *m=door_cpu->vm.media;
+    unsigned queued=qrx_media_audio_queued(m);
+    if(queued>=MIX_TARGET_FRAMES)return;
+    unsigned n=MIX_TARGET_FRAMES-queued;
+    static float left[MIX_TARGET_FRAMES],right[MIX_TARGET_FRAMES];
+    static uint32_t out[MIX_TARGET_FRAMES];
+    memset(left,0,n*sizeof(float));memset(right,0,n*sizeof(float));
+    for(unsigned vi=0;vi<MIX_VOICES;vi++){
+        MixVoice *v=&voices[vi];
+        if(!v->used||!v->playing||!v->size||!v->chans||!v->bits)continue;
+        uint32_t frames=v->size/(v->chans*(v->bits/8u));
+        if(!frames)continue;
+        double step=(double)v->rate/MIX_RATE;
+        for(unsigned i=0;i<n;i++){
+            uint32_t f=(uint32_t)v->pos;
+            float l=voice_sample(v,f,0),r=v->chans>1?voice_sample(v,f,1):l;
+            left[i]+=l*v->gain_l;right[i]+=r*v->gain_r;
+            v->pos+=step;
+            if((uint32_t)v->pos>=frames){
+                if(v->looping)v->pos-=frames;
+                else{v->playing=false;v->pos=0;voices_live--;break;}
+            }
+        }
+    }
+    for(unsigned i=0;i<n;i++){
+        float l=left[i],r=right[i];
+        l=l>1.f?1.f:l<-1.f?-1.f:l;r=r>1.f?1.f:r<-1.f?-1.f:r;
+        out[i]=(uint32_t)(uint16_t)(int16_t)(l*32767.f)<<16|(uint16_t)(int16_t)(r*32767.f);
+    }
+    qrx_media_push_audio(m,out,n);
+}
+static void voice_set(MixVoice *v,const uint8_t *q){
+    v->mem=rd32(q+20);v->size=rd32(q+24);v->rate=rd32(q+28);v->chans=rd32(q+32);v->bits=rd32(q+36);
+    if(!v->rate)v->rate=22050;
+    if(v->bits!=8&&v->bits!=16)v->bits=16;
+    if(v->chans<1||v->chans>2)v->chans=2;
+    /* hundredths of a decibel; pan attenuates the opposite side */
+    double vol=pow(10.0,(double)(int32_t)rd32(q+40)/2000.0);
+    int32_t pan=(int32_t)rd32(q+44);
+    v->gain_l=(float)(vol*(pan>0?pow(10.0,-(double)pan/2000.0):1.0));
+    v->gain_r=(float)(vol*(pan<0?pow(10.0,(double)pan/2000.0):1.0));
+    v->looping=rd32(q+48)!=0;
+}
+static void shadow_sync(QRXFullCPU *c,uint32_t dir,uint32_t serial);
+static void sound_service(QRXFullCPU *c,uint8_t *q){
+    uint32_t op=rd32(q+12),idx=rd32(q+16);
+    if(idx>=MIX_VOICES)return;
+    MixVoice *v=&voices[idx];
+    door_cpu=c;
+    switch(op){
+    case 1:{ /* start */
+        bool was=v->used&&v->playing;
+        voice_set(v,q);
+        v->used=true;v->playing=true;
+        if(!was)voices_live++;
+        mix_tick();
+        break;
+    }
+    case 2: if(v->used&&v->playing){v->playing=false;voices_live--;} break;
+    case 3:{ /* volume, pan, frequency, position+1 */
+        uint32_t arg=rd32(q+52);
+        voice_set(v,q);
+        v->used=true;
+        if(arg&&v->chans)v->pos=(double)(arg-1u)/(v->chans*(v->bits/8u));
+        break;
+    }
+    case 4:{
+        uint32_t pos=(uint32_t)v->pos*(v->used?v->chans*(v->bits/8u):0u);
+        wr32(q+56,pos);wr32(q+60,v->used&&v->playing);
+        break;
+    }
+    case 5: if(v->used&&v->playing)voices_live--; memset(v,0,sizeof(*v)); break;
+    default: break;
+    }
+}
+/* ---- host API binding */
+static void api_service(QRXFullCPU *c,uint8_t *q){
+    uint32_t op=rd32(q+12),idx=rd32(q+16);
+    char name[64];
+    memcpy(name,q+28,63);name[63]=0;
+    const QRXHostApi *f=qrx_hostapi_find(name);
+    qrx_hostapi_context(c,&host,rd32(q+20));
+    if(f&&op==1&&idx<QW_THUNKS)api_bound[idx]=f;
+    wr32(q+24,f?1u:0u);
+}
+static void service_call(QRXFullCPU *c,uint32_t block){
+    if((uint64_t)block+128u>c->vm.ram.size)return;
+    uint8_t *q=c->ram_owned+block;
+    uint32_t svc=rd32(q);
+    shadow_sync(c,rd32(q+8),rd32(q+4));
+    if(svc==1)sound_service(c,q);
+    else if(svc==2)api_service(c,q);
+}
+static void shadow_sync(QRXFullCPU *c,uint32_t dir,uint32_t serial){
+    if(!shadow_valid||dir!=shadow_dir||serial!=shadow_serial){
+        shadow_serial=serial;
+        shadow_rebuild(c,dir);
+    }
+}
 static void door_run(QRXFullCPU *c,uint32_t req){
     if((uint64_t)req+REQ_SIZE>c->vm.ram.size)return;
     uint8_t *q=c->ram_owned+req;
     uint32_t dir=rd32(q+REQ_DIR),serial=rd32(q+REQ_SERIAL);
     if((uint64_t)dir+4096u>c->vm.ram.size)return;
-    if(!shadow_valid||dir!=shadow_dir||serial!=shadow_serial){
-        shadow_serial=serial;
-        shadow_rebuild(c,dir);
-    }
+    shadow_sync(c,dir,serial);
+    mix_tick();
     for(unsigned i=0;i<8;i++){host.r[i]=rd32(q+REQ_R+i*4u);host.st[i]=rd_double(q+REQ_ST+i*8u);}
     host.eip=rd32(q+REQ_EIP);
     x86_set_flags(&host,rd32(q+REQ_EFLAGS));
@@ -68,6 +217,7 @@ static void door_run(QRXFullCPU *c,uint32_t req){
     host.fcw=(uint16_t)rd32(q+REQ_FCW);host.ftw=(uint16_t)rd32(q+REQ_FTW);
     host.hle_base=rd32(q+REQ_HLE_BASE);host.hle_count=rd32(q+REQ_HLE_COUNT);
     host.hle_hook=door_hle_hook;host.int_hook=door_int_hook;
+    if(rd32(q+REQ_ALLOC_DONE))qrx_hostapi_alloc_result(rd32(q+REQ_ALLOC_ADDR),rd32(q+REQ_ALLOC_DONE));
     uint32_t limit=rd32(q+REQ_LIMIT);
     host.fault=X86_OK;host.stop=0;
     host.icount=0;host.left=limit;host.lbase=limit;host.budget=limit;
@@ -85,16 +235,20 @@ static void door_run(QRXFullCPU *c,uint32_t req){
     for(unsigned i=0;i<6;i++){wr32(q+REQ_SREG+i*4u,host.sreg[i]);wr32(q+REQ_SBASE+i*4u,host.sbase[i]);}
     wr32(q+REQ_TOP,(uint32_t)host.top);wr32(q+REQ_FSW,host.fsw);wr32(q+REQ_FCW,host.fcw);wr32(q+REQ_FTW,host.ftw);
     wr32(q+REQ_EXECUTED,executed);
+    wr32(q+REQ_ALLOC,qrx_hostapi_alloc_request);
+    qrx_hostapi_alloc_request=0;
     wr32(q+REQ_STATUS,(uint32_t)host.fault);
     door_calls++;door_x86+=executed;
 }
 static bool door_read(QRXFullCPU *c,uint32_t addr,unsigned n,uint32_t *out){
-    (void)c;
     if(addr==QRX86_DOOR_BASE&&n==4){*out=QRX86_DOOR_MAGIC;return true;}
+    /* Reading the size register opens the RAM above the boot-visible 32 MiB. */
+    if(addr==QRX86_DOOR_BASE+8u&&n==4){*out=(uint32_t)qrx_full_show_high_ram(c);return true;}
     return false;
 }
 static bool door_write(QRXFullCPU *c,uint32_t addr,unsigned n,uint32_t value){
     if(addr==QRX86_DOOR_BASE+4u&&n==4){door_run(c,value);return true;}
+    if(addr==QRX86_DOOR_BASE+12u&&n==4){service_call(c,value);return true;}
     return false;
 }
 void qrx86_door_attach(QRXFullCPU *c){

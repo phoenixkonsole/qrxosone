@@ -48,6 +48,7 @@ typedef struct bew {
     APTR lock[2];
     UBYTE *fbaddr[2];
     int fbn, fbshown;
+    uint32_t pal_gen, buf_pal_gen[2];
     ULONG fbpitch;
     char title[260];
     qsurf mb;
@@ -257,7 +258,7 @@ static void ar_menu(qwin *w, qwnd *t) { t->present = 1; if (t->be) ((bew *)t->be
  * PrBoom-plus's screen melt run with negative tics, i.e. ~2^32 iterations) */
 static uint64_t g_last_now, g_back_max;
 static unsigned g_back_n;
-static uint64_t ar_now(qwin *w)
+static uint64_t ar_clock(qwin *w)
 {
     struct timeval tv;
     uint64_t t;
@@ -270,6 +271,15 @@ static uint64_t ar_now(qwin *w)
         return g_last_now;
     }
     return g_last_now = t;
+}
+/* Windows tick counts start small, at boot. Programs such as Doom95 multiply the value
+ * in 32 bits, which an epoch-sized number overflows into nonsense. */
+static uint64_t ar_now(qwin *w)
+{
+    static uint64_t base;
+    uint64_t t = ar_clock(w);
+    if (!base) base = t - 60000u;
+    return t - base;
 }
 
 /* raw key -> Windows virtual key */
@@ -535,27 +545,40 @@ static void grab_fb(qwin *w, const UBYTE *p, ULONG pitch, const uint32_t *pal, i
     fclose(f);
     qw_log(w, "AROS backend: display buffer captured after %d frames -> %s", w->frames, w->grab_path);
 }
+static void ar_load_palette(bew *b, const uint32_t *pal)
+{
+    static ULONG tab[256 * 3 + 2];
+    int k;
+    tab[0] = (256UL << 16) | 0;
+    for (k = 0; k < 256; k++) {
+        tab[1 + k * 3] = ((pal[k] >> 16) & 0xFF) * 0x01010101u;
+        tab[2 + k * 3] = ((pal[k] >> 8) & 0xFF) * 0x01010101u;
+        tab[3 + k * 3] = (pal[k] & 0xFF) * 0x01010101u;
+    }
+    tab[1 + 256 * 3] = 0;
+    LoadRGB32(&b->scr->ViewPort, tab);
+}
 static uint8_t *ar_fb_show(qwin *w, qwnd *t, int i, const uint32_t *pal)
 {
     bew *b = (bew *)t->be;
     if (!b || i < 0 || i >= b->fbn) return NULL;
     if (memcmp(b->pal, pal, sizeof(b->pal))) {
-        static ULONG tab[256 * 3 + 2];
-        int k;
-        tab[0] = (256UL << 16) | 0;
-        for (k = 0; k < 256; k++) {
-            tab[1 + k * 3] = ((pal[k] >> 16) & 0xFF) * 0x01010101u;
-            tab[2 + k * 3] = ((pal[k] >> 8) & 0xFF) * 0x01010101u;
-            tab[3 + k * 3] = (pal[k] & 0xFF) * 0x01010101u;
-        }
-        tab[1 + 256 * 3] = 0;
-        LoadRGB32(&b->scr->ViewPort, tab);
+        ar_load_palette(b, pal);
         memcpy(b->pal, pal, sizeof(b->pal));
+        b->pal_gen++;
+        b->buf_pal_gen[b->fbshown] = b->pal_gen;
     }
     if (b->fbn > 1 && i != b->fbshown) {             /* page flip */
         int k;
         for (k = 0; k < 50 && !ChangeScreenBuffer(b->scr, b->sb[i]); k++) WaitTOF();
         b->fbshown = i;
+        /* The driver keeps a palette per bitmap and loads it on every flip, so a
+         * buffer that missed the last change would show the old colours, and until
+         * its first load nothing but black. */
+        if (b->buf_pal_gen[i] != b->pal_gen) {
+            ar_load_palette(b, pal);
+            b->buf_pal_gen[i] = b->pal_gen;
+        }
         {   /* the driver may have moved the bitmap into video memory to show it */
             IPTR addr = 0;
             APTR l = LockBitMapTags(b->sb[i]->sb_BitMap, LBMI_BASEADDRESS, (IPTR)&addr, TAG_DONE);

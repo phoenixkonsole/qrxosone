@@ -15,7 +15,8 @@ repository's checkout. They are emulator measurements, not real Amiga hardware.
 The PrBoom numbers use a game rebuilt with a current MinGW, so the binary is not
 byte-identical to the one behind the FS-UAE figure. Within this build, frame 10
 is byte-identical with the host door and with the 68k interpreter
-(`629d88d766bb0d64...`). Sound is off in these runs, as in the baseline.
+(`629d88d766bb0d64...`). Sound is off in these runs, as in the baseline. Newer results
+are in the 2026-11-04 update below.
 
 ## What changed
 
@@ -67,19 +68,17 @@ is byte-identical with the host door and with the 68k interpreter
 
 ## Not done
 
-- **Second 68100 core.** The JIT drives one core. `qrx68100_dual.c` still switches
-  cooperatively on one thread and is not used by the AROS path. AROS m68k has no
-  SMP scheduler, so a real second thread would speed up nothing existing until
-  something in the guest explicitly schedules work on it.
-- **Glide, Direct3D, OpenGL and Vulkan for applications.** What exists is the host
-  half: QRX3D commands to Metal. No application-facing `glide2x.dll`, `d3d*.dll`,
-  `opengl32.dll` or Vulkan loader uses it in the QRX86 HLE yet, and nothing has
-  been tested with a real 3D game. macOS has no DirectX or native Vulkan, so those
-  would be translated to Metal, and Vulkan would need MoltenVK as well.
-- **Sound in QRX86 games.** DirectSound in the Win32 HLE is not connected to AHI;
-  the PrBoom runs use `-nosound`.
+- **AROS on the second core.** Core 1 runs jobs a program gives it; AROS m68k has no SMP
+  scheduler, so existing software gains nothing from it until it starts such jobs.
+- **Vulkan.** `vulkan-1.dll` is a stub whose `vkCreateInstance` returns
+  `VK_ERROR_INCOMPATIBLE_DRIVER`, so programs can fall back cleanly. A real
+  implementation would need MoltenVK.
+- **Direct3D 2 to 7.** Only D3D8 and D3D9 fixed-function exist. DirectDraw stays guest
+  HLE writing straight to RTG, without a host blitter.
+- **No real 3D game tested.** OpenGL, Glide and D3D were only run with the test programs
+  in `guest/win32tests`, which use limited subsets of those APIs.
+- **MIDI.** `midiOut` has no device, so Doom95 plays without music.
 - **Larger HostFS packets** need the guest handler rebuilt.
-- Interactive play of PrBoom in the window has not been tried, only the timedemo.
 
 ## Rebuild
 
@@ -99,3 +98,70 @@ Then copy `.build/m1-merged/qrx68100_full_run` to
 `.build/bundle/ARMithlon.app/Contents/MacOS/armithlon-engine` and
 `.build/qrx-target/hunk/qrx-win32` and `qrx-i386` to `.build/bundle/SystemFull/C/`.
 The local bundle in this checkout is already up to date.
+
+## Update 2026-11-04: Doom95, host APIs, second core
+
+| Measurement | Result |
+| --- | --- |
+| Doom95 `-timedemo demo3`, 640x400, sound on, host door | 2134 gametics in 1592 realtics, about 47 FPS, 45.4 s |
+| Doom95 normal game | 35 game tics per second, the game's own limit |
+| OpenGL test, 300 frames, 3200 triangles | 395 FPS |
+| Glide test, same scene | 402 to 416 FPS |
+| D3D8 and D3D9 test, same scene | 300 frames in 0.26 s and 0.16 s of wall time |
+| Core 1 alongside core 0, bare metal | 1.75x to 2.01x the throughput of one core |
+| Core 1 alongside core 0, under AROS (`C:QRXSmpBench`) | one job 0.96 s, two jobs 1.06 s, about 1.8x |
+
+The 47 FPS may sit close to a limit of the HLE's flip and vblank timing; that was not
+checked. The API tests ran headless.
+
+### Doom95
+
+Start with `Execute S:Doom95 [args]`. It reads the game from `APPS:windows_games/doom95`.
+What was needed beyond the HLE stubs:
+
+- The game reads the keyboard only through a `WH_KEYBOARD` hook, which is now real.
+  `WM_ACTIVATE` and `WM_ACTIVATEAPP` are delivered as well.
+- Windows tick counts start low. An epoch-sized value is wrong for 32-bit programs.
+- The DirectSound primary buffer is no longer played as a voice. It used to give a
+  constant full-scale output in the host mixer.
+- A flip publishes its frame at once, and each of the two RTG bitmaps gets its palette
+  reloaded. Together these removed the fullscreen flicker: 0 of 40 sampled frames black.
+
+The launcher dialog is skipped and answers "play", so the game starts in E1M1 and the
+player waits for input. This was checked in the real window with injected keys: ESC opens
+the menu, Ctrl fires and uses ammunition, the shot produces 0.55 s of sound, then silence.
+Real keyboard and speaker output have not been judged by a person.
+
+### Host APIs
+
+An import of `opengl32`, `glide2x`, `glide3x`, `d3d8`, `d3d9` or `vulkan-1` with no guest
+implementation binds to a host function on first call. Later calls stay inside the host
+door, and drawing goes to a Metal batch renderer. The code is `full68k/qrx_hostapi*.c` and
+`macos/qrx_hostgpu.m`, and the tests are in `guest/win32tests`.
+
+### Second 68100 core
+
+`full68k/qrx68100_core1.c` runs on a second host thread with its own registers and JIT
+cache. It is a second compiled copy of Musashi and the JIT with all globals renamed by
+`tools/gen-core1-rename.py`, so core 0 pays nothing until core 1 is first started.
+`guest/qrx68100_smp.h` documents the registers.
+
+- Core 1 reaches shared RAM and its registers only: no chipset, ROM or interrupts. Faults
+  and exceptions park it and report the place.
+- TAS and CAS are atomic on RAM. CAS2 is not.
+- Once core 1 has started, both cores keep the 68040's memory order through ordered AArch64
+  accesses. This has a cost on core 0 that was not measured.
+- Code changes are not snooped between cores, as between two 68040s: a program has to
+  flush, which `CTL=1` does on start.
+
+`tests/core1_tests.c` was checked by breaking the code on purpose: without atomic TAS and
+CAS the test hangs and now fails on a time limit, and without ordered accesses its message
+passing check counts 59 million violations, against 0 with them.
+
+### RAM and HostFS
+
+- RAM is a quarter of host RAM, up to the 3840 MiB board limit, opened after boot by
+  `C:QRXMoreMemory`.
+- HostFS file data reaches the disk within 200 ms through a background `F_FULLFSYNC`, and
+  directory changes sync before the reply. `hostfs_tests` checks this with SIGKILL, which
+  covers a crash of the emulator. A power failure within those 200 ms can still lose data.
