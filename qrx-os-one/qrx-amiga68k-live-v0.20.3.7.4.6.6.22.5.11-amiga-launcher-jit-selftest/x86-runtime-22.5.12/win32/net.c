@@ -20,8 +20,6 @@
 #define WSAEWOULDBLOCK 10035u
 #define WSAENETDOWN 10050u
 #define MAXSOCK 64
-enum { NET_SOCKET = 1, NET_BIND, NET_LISTEN, NET_ACCEPT, NET_CONNECT, NET_SEND, NET_RECV, NET_SENDTO, NET_RECVFROM,
-       NET_POLL, NET_CLOSE, NET_SHUTDOWN, NET_SETOPT, NET_GETOPT, NET_SOCKNAME, NET_PEERNAME, NET_RESOLVE, NET_HOSTNAME };
 
 static int g_nonblock[MAXSOCK];
 static uint32_t g_err;
@@ -36,6 +34,7 @@ static int net_call(qwin *w, uint32_t *q, uint32_t op)
     if (q[12] == SOCKET_ERROR) { g_err = q[13]; return 0; }
     return 1;
 }
+int qw_net_call(qwin *w, uint32_t *q, uint32_t op) { return net_call(w, q, op); }
 static int blocking(uint32_t s) { return s < MAXSOCK && !g_nonblock[s]; }
 
 /* sockaddr_in in guest memory: u16 family, be16 port, be32 addr */

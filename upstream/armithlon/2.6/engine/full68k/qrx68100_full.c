@@ -1345,6 +1345,8 @@ static void map_rom_pages(QRXFullCPU *c,uint32_t base,const uint8_t *rom,size_t 
     for(size_t o=0;o+QRX_PAGE_SIZE<=size;o+=QRX_PAGE_SIZE)
         c->rpage[(base+o)>>QRX_PAGE_SHIFT]=(uintptr_t)rom-(uintptr_t)base;
 }
+void (*qrx_x86code_notify)(struct QRXFullCPU *, uint32_t, uint32_t);
+void (*qrx_x86code_regate)(struct QRXFullCPU *);
 static void set_write_page(QRXFullCPU *c,uint32_t page,uintptr_t v) {
     uint32_t first=page<<(QRX_PAGE_SHIFT-QRX_WPAGE_SHIFT);
     for(uint32_t i=0;i<(1u<<(QRX_PAGE_SHIFT-QRX_WPAGE_SHIFT));i++)c->wpage[first+i]=v;

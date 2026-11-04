@@ -84,6 +84,7 @@ typedef int (*x86_hle_fn)(x86cpu *c, uint32_t index);  /* return 0 to fault */
 typedef struct x86page { uint8_t *mem; uint32_t flags; } x86page;
 #define X86_PG_W 1u
 #define X86_PG_EXT 2u      /* mem belongs to the host (frame buffer): never freed */
+#define X86_PG_CODE 4u     /* host JIT: translated code on this page */
 
 struct x86cpu {
     uint32_t r[8];
@@ -134,6 +135,10 @@ struct x86cpu {
     uint32_t cur_eip;                    /* eip of the instruction being executed */
     jmp_buf *jb;
     struct x86jit *jit;                 /* owned; NEVER share in a CPU clone */
+#ifdef QRX86_HOST_JIT
+    uint32_t *xj_site;                  /* branch to link to the next block */
+    int xj_abort;                       /* the block running may be stale */
+#endif
 #ifdef QRX_EXEC_PROFILE
     /* Diagnostic build only: dispatcher counts; native block interiors excluded. */
     uint32_t prof_ops[512], prof_pc[4096], prof_pc_hits[4096];

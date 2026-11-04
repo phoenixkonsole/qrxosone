@@ -210,6 +210,19 @@ static void frame_marker(qwin *w)
 
 /* ------------------------------------------------------------------ presentation */
 /* show the primary surface in the cooperative window */
+/* Real cards show one new frame per display refresh, and games take their pace from
+ * that: a Flip or WaitForVerticalBlank here waits for the next 60 Hz tick. */
+#define VBL_US 16667u
+static void vsync_wait(qwin *w)
+{
+    static uint64_t next_us;
+    uint64_t now_us;
+    if (w->no_vsync) return;
+    now_us = (uint64_t)w->be->now(w) * 1000u;
+    if (!next_us || now_us >= next_us + 2u * VBL_US) next_us = now_us;   /* fell behind: do not rush afterwards */
+    if (now_us < next_us) qw_thread_sleep(w, (uint32_t)((next_us - now_us + 999u) / 1000u));
+    next_us += VBL_US;
+}
 static void present(qwin *w, dxobj *prim)
 {
     dxobj *dd = prim->dd >= 0 ? &g_o[prim->dd] : NULL;
@@ -228,6 +241,7 @@ static void present(qwin *w, dxobj *prim)
         if (!t0) { t0 = now; f0 = w->frames; }
         if (now - t0 >= 5000u) {
             qw_log(w, "DirectDraw: %d frames per second", (int)((w->frames - f0) * 1000u / (uint32_t)(now - t0)));
+            qw_api_report(w);
             t0 = now; f0 = w->frames;
         }
     }
@@ -239,6 +253,12 @@ static void present(qwin *w, dxobj *prim)
         if (mv) mv->fn(w, b);
     }
     if (prim->rtg && g_fb.n) { fb_show(w, prim, pal); return; }
+    if (!w->grab_path[0] && t->be && w->be->present_frame) {
+        static uint32_t grey8[256];
+        const uint32_t *p8 = pal;
+        if (!p8) { int i; for (i = 0; i < 256; i++) grey8[i] = (uint32_t)i * 0x010101u; p8 = grey8; }
+        if (w->be->present_frame(w, t, prim->mem, prim->pitch, prim->sw, prim->sh, prim->bpp, p8)) return;
+    }
     if (prim->bpp >= 16 && t->fs_w == prim->sw && t->fs_h == prim->sh && t->fs_bpp == prim->bpp && t->be && w->be->present_deep &&
         w->be->present_deep(w, t, prim->mem, prim->pitch, prim->sw, prim->sh, prim->bpp)) return;
     if (prim->bpp == 8 && w->be->present8 && t->be) {      /* fast path: 8-bit frame straight to the backend */
@@ -486,6 +506,8 @@ FN(dd_GetScanLine) { UNUSED; if (a[1]) WR32(a[1], 0); return DD_OK; }
 /* A 60 Hz display spends about 2 ms of each 16 in vertical blank. Programs wait
  * for this to change, so a constant answer hangs them. */
 FN(dd_GetVerticalBlankStatus) { if (a[1]) WR32(a[1], (uint32_t)w->be->now(w) % 16u < 2u); return DD_OK; }
+/* (this, flags, event): BLOCKBEGIN and BLOCKEND wait, the event form is not supported. */
+FN(dd_WaitForVerticalBlank) { if (a[1] & 4u) return DDERR_INVALIDPARAMS; vsync_wait(w); return DD_OK; }
 FN(dd_SetCooperativeLevel) {
     dxobj *dd = ob(w, a[0], OB_DD);
     if (!dd) return DDERR_INVALIDPARAMS;
@@ -502,6 +524,16 @@ static void fullscreen(qwin *w, dxobj *dd, int on)
     if (!t || !w->be->reopen) return;
     fb_detach(w, 1);                                  /* mode change: display buffers go away */
     if (on && !dd->exclusive) return;
+    /* The program asked for the whole display. It gets a window of that size and is told
+     * its mode was set: the conversion happens when frames are shown. */
+    if (on && w->windowed) {
+        if (t->force_frame && t->cw == dd->mw && t->ch == dd->mh) return;
+        t->force_frame = 1;
+        t->nl = t->nr = t->nt = t->nb = 0;
+        t->cw = dd->mw; t->ch = dd->mh;
+        if (t->be) w->be->reopen(w, t);
+        return;
+    }
     if (on) {
         const qhle *mv = qw_find_hle("user32", "MoveWindow");
         uint32_t b[16];
@@ -672,6 +704,8 @@ FN(s_Flip) {
     dxobj *p = sf(w, a[0]), *b;
     uint32_t t;
     if (!p) return DDERR_INVALIDPARAMS;
+    /* DDFLIP_NOVSYNC asks not to wait */
+    if (!(a[2] & 8u)) vsync_wait(w);
     if (g_d3d_active) { d3d_host_present(w); return DD_OK; }
     if (p->attached < 0) { present(w, p); return DD_OK; }
     b = &g_o[p->attached];
@@ -1427,7 +1461,7 @@ static const vslot vt_dd[] = {
     V("GetFourCCCodes", dd_GetFourCCCodes, 3), V("GetGDISurface", NULL, 2), V("GetMonitorFrequency", dd_GetMonitorFrequency, 2),
     V("GetScanLine", dd_GetScanLine, 2), V("GetVerticalBlankStatus", dd_GetVerticalBlankStatus, 2), V("Initialize", dd_ok, 2),
     V("RestoreDisplayMode", dd_RestoreDisplayMode, 1), V("SetCooperativeLevel", dd_SetCooperativeLevel, 3), V("SetDisplayMode", dd_SetDisplayMode, 4),
-    V("WaitForVerticalBlank", dd_ok, 3), { NULL, NULL, 0, NULL }
+    V("WaitForVerticalBlank", dd_WaitForVerticalBlank, 3), { NULL, NULL, 0, NULL }
 };
 FN(dd_GetDeviceIdentifier) {
     uint32_t i;
@@ -1444,7 +1478,7 @@ static const vslot vt_dd2[] = {
     V("GetFourCCCodes", dd_GetFourCCCodes, 3), V("GetGDISurface", NULL, 2), V("GetMonitorFrequency", dd_GetMonitorFrequency, 2),
     V("GetScanLine", dd_GetScanLine, 2), V("GetVerticalBlankStatus", dd_GetVerticalBlankStatus, 2), V("Initialize", dd_ok, 2),
     V("RestoreDisplayMode", dd_RestoreDisplayMode, 1), V("SetCooperativeLevel", dd_SetCooperativeLevel, 3), V("SetDisplayMode", dd2_SetDisplayMode, 6),
-    V("WaitForVerticalBlank", dd_ok, 3), V("GetAvailableVidMem", dd2_GetAvailableVidMem, 4),
+    V("WaitForVerticalBlank", dd_WaitForVerticalBlank, 3), V("GetAvailableVidMem", dd2_GetAvailableVidMem, 4),
     V("GetSurfaceFromDC", dd_ok, 3), V("RestoreAllSurfaces", dd_ok, 1), V("TestCooperativeLevel", dd_ok, 1),
     V("GetDeviceIdentifier", dd_GetDeviceIdentifier, 3), V("StartModeTest", dd_ok, 4), V("EvaluateMode", dd_ok, 3), { NULL, NULL, 0, NULL }
 };

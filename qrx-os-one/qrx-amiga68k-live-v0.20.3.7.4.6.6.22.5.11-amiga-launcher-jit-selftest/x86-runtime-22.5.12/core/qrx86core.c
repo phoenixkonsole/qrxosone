@@ -219,10 +219,16 @@ static uint8_t *rptr_slow(x86cpu *c, uint32_t a)
     c->tlb_rptr[i] = p->mem;
     return p->mem + (a & X86_PAGE_MASK);
 }
+#ifdef QRX86_HOST_JIT
+static void x86_host_code_write(x86cpu *c, uint32_t a);
+#endif
 static uint8_t *wptr_slow(x86cpu *c, uint32_t a)
 {
     x86page *p = pg(c, a);
     unsigned i = (a >> 12) & 63u;
+#ifdef QRX86_HOST_JIT
+    if (p && (p->flags & X86_PG_CODE)) x86_host_code_write(c, a);
+#endif
     if (!p || !(p->flags & X86_PG_W)) FAULT(c, X86_FAULT_PAGE, a, p ? "write to read-only memory" : "write to unmapped memory");
     c->tlb_wtag[i] = (a & ~X86_PAGE_MASK) | 1u;
     c->tlb_wptr[i] = p->mem;

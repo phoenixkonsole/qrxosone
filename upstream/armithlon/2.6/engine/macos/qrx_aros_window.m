@@ -358,6 +358,24 @@ int qrx_aros_window_pump(void){@autoreleasepool{
     }
    }
   }
+  /* Unattended input check: QRX_TEST_CLICKS=seconds:x:y,... one left click each. */
+  {
+   static NSDate *clickStart;static const char *clickNext;static unsigned releaseX,releaseY;static int pressed;
+   if(!clickStart&&getenv("QRX_TEST_CLICKS")){clickStart=[NSDate date];clickNext=getenv("QRX_TEST_CLICKS");}
+   if(clickStart){
+    if(pressed&&--pressed==0)qrx_media_push_input(&media,(4u<<24)|0u);
+    char *e;double at=clickNext&&*clickNext?strtod(clickNext,&e):0;
+    if(!pressed&&clickNext&&*clickNext&&*e==':'&&-[clickStart timeIntervalSinceNow]>=at){
+     releaseX=(unsigned)strtoul(e+1,&e,0);
+     if(*e==':')releaseY=(unsigned)strtoul(e+1,&e,0);
+     clickNext=*e==','?e+1:"";
+     qrx_media_set_mouse(&media,releaseX,releaseY,0);
+     qrx_media_push_input(&media,(3u<<24)|((releaseX&4095u)<<12)|(releaseY&4095u));
+     qrx_media_push_input(&media,(4u<<24)|1u);
+     pressed=3;
+    }
+   }
+  }
   /* Unattended input check: QRX_TEST_KEY=rawkey pressed at QRX_TEST_KEY_AT seconds. */
   static NSDate *keyAt;static int keyStage;
   const char *key=getenv("QRX_TEST_KEY");

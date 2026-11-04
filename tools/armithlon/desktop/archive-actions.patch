@@ -1,0 +1,220 @@
+--- a/qrx_desktop.c
++++ b/qrx_desktop.c
+@@ -240,6 +240,12 @@
+ static WORD g_object_drag_start_x = 0;
+ static WORD g_object_drag_start_y = 0;
+ 
++/* Right-click (MENUDOWN, WFLG_RMBTRAP) archive context menu state. */
++static int g_archive_menu = 0;
++static int g_archive_index = -1;
++static WORD g_archive_x = 0;
++static WORD g_archive_y = 0;
++
+ static struct QRXDesktopEntry g_desktop_entries[DESKTOP_MAX];
+ static int g_desktop_count = 0;
+ static int g_desktop_selected = -1;
+@@ -1561,7 +1567,165 @@
+     if (has_icon && IconBase)
+         DeleteDiskObject((UBYTE *)full);
+     return 1;
++}
++
++/* ZIP / 7z / LHA(LZH) / RAR right-click support: unpack archives here,
++ * pack files and drawers. RAR packing needs the commercial rar tool, so
++ * only unpack is offered for .rar. External tools (UnZip, 7z, Lha, UnRAR,
++ * Zip) must be reachable via the AmigaDOS path; missing tools report via
++ * the terminal capture instead of failing silently. */
++enum { QRX_ARCH_NONE = 0, QRX_ARCH_ZIP, QRX_ARCH_7Z, QRX_ARCH_LHA, QRX_ARCH_RAR };
++static int qrx_archive_kind(const char *name) {
++    if (!name) return QRX_ARCH_NONE;
++    if (qrx_ci_ends(name, ".zip")) return QRX_ARCH_ZIP;
++    if (qrx_ci_ends(name, ".7z")) return QRX_ARCH_7Z;
++    if (qrx_ci_ends(name, ".lha") || qrx_ci_ends(name, ".lzh")) return QRX_ARCH_LHA;
++    if (qrx_ci_ends(name, ".rar")) return QRX_ARCH_RAR;
++    return QRX_ARCH_NONE;
++}
++static LONG qrx_run_in_dir(const char *dir, const char *cmd) {
++    BPTR lock, old;
++    LONG rc;
++    if (!dir || !*dir || !cmd) return 0;
++    lock = Lock((STRPTR)dir, ACCESS_READ);
++    if (!lock) { qrx_set_status("Archive: cannot lock drawer."); return 0; }
++    old = CurrentDir(lock);
++    rc = execute_capture(cmd);
++    CurrentDir(old);
++    UnLock(lock);
++    return rc;
++}
++static void qrx_archive_unpack(int index) {
++    struct QRXFileEntry *e;
++    char full[FILE_PATH_LEN + 128];
++    char command[FILE_PATH_LEN + 256];
++    int kind;
++    if (index < 0 || index >= g_file_count) return;
++    e = &g_file_entries[index];
++    if (e->dir_type > 0) { qrx_set_status("Archive: drawers cannot be unpacked."); return; }
++    kind = qrx_archive_kind(e->name);
++    if (kind == QRX_ARCH_NONE) { qrx_set_status("Archive: not a .zip/.7z/.lha/.rar file."); return; }
++    qrx_join_path(full, sizeof(full), g_files_path, e->name);
++    if (kind == QRX_ARCH_ZIP)
++        snprintf(command, sizeof(command), "UnZip -o \"%s\" -d \"%s\"", full, g_files_path);
++    else if (kind == QRX_ARCH_7Z)
++        snprintf(command, sizeof(command), "7z x \"%s\" -o\"%s\"", full, g_files_path);
++    else if (kind == QRX_ARCH_LHA)
++        snprintf(command, sizeof(command), "Lha x \"%s\" \"%s/\"", full, g_files_path);
++    else
++        snprintf(command, sizeof(command), "UnRAR x \"%s\" \"%s/\"", full, g_files_path);
++    if (qrx_run_in_dir(g_files_path, command)) {
++        qrx_load_directory(g_files_path);
++        qrx_set_status("Archive unpacked. Refresh shows new objects.");
++    } else {
++        qrx_set_status(kind == QRX_ARCH_ZIP ? "Archive: needs UnZip in the command path."
++                     : kind == QRX_ARCH_7Z ? "Archive: needs 7z in the command path."
++                     : kind == QRX_ARCH_LHA ? "Archive: needs Lha in the command path."
++                     : "Archive: needs UnRAR in the command path.");
++    }
++}
++static void qrx_archive_pack(int index, int kind) {
++    struct QRXFileEntry *e;
++    char target[FILE_PATH_LEN + 128];
++    char command[FILE_PATH_LEN + 256];
++    const char *ext;
++    if (index < 0 || index >= g_file_count) return;
++    e = &g_file_entries[index];
++    ext = kind == QRX_ARCH_ZIP ? "zip" : kind == QRX_ARCH_LHA ? "lha" : "7z";
++    snprintf(target, sizeof(target), "%s.%s", e->name, ext);
++    if (qrx_ci_ends(e->name, ".zip") || qrx_ci_ends(e->name, ".7z") ||
++        qrx_ci_ends(e->name, ".lha") || qrx_ci_ends(e->name, ".lzh") ||
++        qrx_ci_ends(e->name, ".rar")) {
++        qrx_set_status("Archive: packing an archive again is refused.");
++        return;
++    }
++    if (kind == QRX_ARCH_ZIP)
++        snprintf(command, sizeof(command), "Zip -r \"%s\" \"%s\"", target, e->name);
++    else if (kind == QRX_ARCH_LHA)
++        snprintf(command, sizeof(command), "Lha a \"%s\" \"%s\"", target, e->name);
++    else
++        snprintf(command, sizeof(command), "7z a \"%s\" \"%s\"", target, e->name);
++    if (qrx_run_in_dir(g_files_path, command)) {
++        qrx_load_directory(g_files_path);
++        qrx_set_status("Archive packed.");
++    } else {
++        qrx_set_status(kind == QRX_ARCH_ZIP ? "Archive: needs Zip in the command path."
++                     : kind == QRX_ARCH_LHA ? "Archive: needs Lha in the command path."
++                     : "Archive: needs 7z in the command path.");
++    }
++}
++#define QRX_ARCH_ROW_H 20
++#define QRX_ARCH_MENU_W 150
++static int qrx_archive_item_count(int index) {
++    if (index < 0 || index >= g_file_count) return 0;
++    return qrx_archive_kind(g_file_entries[index].name) != QRX_ARCH_NONE ? 2 : 4;
+ }
++static const char *qrx_archive_item_label(int index, int row) {
++    if (index < 0 || index >= g_file_count) return "";
++    if (qrx_archive_kind(g_file_entries[index].name) != QRX_ARCH_NONE)
++        return row == 0 ? "Unpack here" : "Cancel";
++    if (row == 0) return "Pack as .zip";
++    if (row == 1) return "Pack as .lha";
++    if (row == 2) return "Pack as .7z";
++    return "Cancel";
++}
++static void qrx_draw_archive_menu(struct RastPort *rp) {
++    WORD x, y, w, h;
++    int i, n;
++    if (!g_archive_menu || !g_files) return;
++    if (g_archive_index < 0 || g_archive_index >= g_file_count) return;
++    n = qrx_archive_item_count(g_archive_index);
++    if (!n) return;
++    x = g_archive_x; y = g_archive_y;
++    w = QRX_ARCH_MENU_W; h = (WORD)(n * QRX_ARCH_ROW_H + 8);
++    if (x + w > g_files->Width - 4) x = g_files->Width - 4 - w;
++    if (y + h > g_files->Height - 4) y = g_files->Height - 4 - h;
++    if (x < 4) x = 4;
++    if (y < 30) y = 30;
++    fill(rp, PEN_PANEL, x, y, x + w, y + h);
++    outline(rp, PEN_EDGE, x, y, x + w, y + h);
++    for (i = 0; i < n; ++i) {
++        WORD ry = (WORD)(y + 4 + i * QRX_ARCH_ROW_H);
++        if (i == n - 1)
++            fill(rp, PEN_BUTTON, x + 4, ry, x + w - 4, ry + QRX_ARCH_ROW_H - 2);
++        else
++            fill(rp, PEN_ACCENT, x + 4, ry, x + w - 4, ry + QRX_ARCH_ROW_H - 2);
++        text_at(rp, i == n - 1 ? PEN_TEXT : PEN_BLACK, x + 12, ry + 14,
++                qrx_archive_item_label(g_archive_index, i));
++    }
++}
++static void qrx_archive_menu_click(WORD x, WORD y) {
++    WORD mx, my, w, h;
++    int i, n, row;
++    if (!g_archive_menu || !g_files) return;
++    n = qrx_archive_item_count(g_archive_index);
++    if (!n) { g_archive_menu = 0; g_archive_index = -1; redraw_filemanager(); return; }
++    mx = g_archive_x; my = g_archive_y;
++    w = QRX_ARCH_MENU_W; h = (WORD)(n * QRX_ARCH_ROW_H + 8);
++    if (mx + w > g_files->Width - 4) mx = g_files->Width - 4 - w;
++    if (my + h > g_files->Height - 4) my = g_files->Height - 4 - h;
++    if (mx < 4) mx = 4;
++    if (my < 30) my = 30;
++    row = -1;
++    if (x >= mx + 4 && x <= mx + w - 4 && y >= my + 4 && y <= my + 4 + n * QRX_ARCH_ROW_H)
++        row = (y - (my + 4)) / QRX_ARCH_ROW_H;
++    if (row < 0 || row >= n) {
++        g_archive_menu = 0; g_archive_index = -1;
++        qrx_set_status("");
++        redraw_filemanager();
++        return;
++    }
++    i = g_archive_index;
++    g_archive_menu = 0; g_archive_index = -1;
++    if (qrx_archive_kind(g_file_entries[i].name) != QRX_ARCH_NONE) {
++        if (row == 0) qrx_archive_unpack(i);
++    } else {
++        if (row == 0) qrx_archive_pack(i, QRX_ARCH_ZIP);
++        else if (row == 1) qrx_archive_pack(i, QRX_ARCH_LHA);
++        else if (row == 2) qrx_archive_pack(i, QRX_ARCH_7Z);
++    }
++    redraw_filemanager();
++}
+ 
+ static int qrx_rename_path(const char *old_full, const char *new_full,
+                            int has_icon) {
+@@ -2146,6 +2310,8 @@
+                  g_file_entries[g_file_selected].name);
+         text_at(rp, PEN_ACCENT, 110, 105, buf);
+     }
++
++    qrx_draw_archive_menu(rp);
+ }
+ 
+ static int filemanager_close_hit(WORD x, WORD y) {
+@@ -2433,11 +2599,29 @@
+         if (g_object_drag_candidate >= 0 || g_object_dragging) {
+             qrx_finish_object_drag(x, y);
+             return;
++        }
++        return;
++    }
++    /* Right button (RMBTRAP): archive context menu on an object, dismiss elsewhere. */
++    if (code == MENUDOWN) {
++        index = qrx_file_index_at(x, y);
++        if (index >= 0) {
++            g_archive_menu = 1;
++            g_archive_index = index;
++            g_file_selected = index;
++            g_archive_x = x;
++            g_archive_y = y;
++        } else {
++            g_archive_menu = 0;
++            g_archive_index = -1;
+         }
++        redraw_filemanager();
+         return;
+     }
++    if (code == MENUUP) return;
+     if (code != SELECTDOWN) return;
+     if (g_rename_active) return;
++    if (g_archive_menu) { qrx_archive_menu_click(x, y); return; }
+ 
+     if (filemanager_close_hit(x, y)) { close_filemanager(); return; }
+     if (filemanager_resize_hit(x, y)) { begin_file_gesture(x, y, 1); return; }

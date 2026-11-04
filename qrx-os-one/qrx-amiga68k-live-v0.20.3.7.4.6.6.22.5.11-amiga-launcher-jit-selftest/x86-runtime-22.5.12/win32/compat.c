@@ -551,8 +551,9 @@ FN(c_CopyFileA) {
 FN(c_GlobalMemoryStatus) {
     uint32_t p = a[0];
     WR32(p, 32); WR32(p + 4, 20);
-    WR32(p + 8, 128u << 20); WR32(p + 12, 96u << 20);
-    WR32(p + 16, 256u << 20); WR32(p + 20, 200u << 20);
+    WR32(p + 8, 256u << 20); WR32(p + 12, 192u << 20);
+    /* Demos of the time refuse to start below some amount of free page file. */
+    WR32(p + 16, 1024u << 20); WR32(p + 20, 900u << 20);
     WR32(p + 24, 0x7FFE0000u); WR32(p + 28, 0x7F000000u);
     return 0;
 }
@@ -1138,10 +1139,6 @@ FN(c_FindNextFileA) {
     return call_api(w, "files-next", "FindNextFileA", a);
 }
 
-/* ================================================================ DirectPlay */
-/* Without a network session object, programs report that multiplayer is unavailable. */
-FN(c_DirectPlayCreate) { if (a[1]) WR32(a[1], 0); UNUSED; return 0x88770078u; /* DPERR_UNAVAILABLE */ }
-
 /* ================================================================ small answers */
 FN(c_GetPaletteEntries) { UNUSED; if (a[3]) { uint32_t i; for (i = 0; i < a[2]; i++) WR32(a[3] + i * 4, 0); } return a[2]; }
 FN(c_GetDIBColorTable) { UNUSED; return 0; }
@@ -1151,11 +1148,37 @@ FN(c_GetClipBox) { if (a[1]) { WR32(a[1], 0); WR32(a[1] + 4, 0); WR32(a[1] + 8, 
 FN(c_GetProcessVersion) { UNUSED; return 0x00040000u; }
 FN(c_RegQueryValueA) { UNUSED; return 2; }
 /* No codecs: only metric asked by games at start, the largest format size, gets an answer. */
+FN(c_LoadLibraryExA) {
+    const qhle *e = qw_find_hle("kernel32", "LoadLibraryA");
+    uint32_t b[16];
+    memset(b, 0, sizeof(b));
+    b[0] = a[0];
+    return e ? e->fn(w, b) : 0;
+}
+FN(c_StringFromGUID2) {
+    char t[64];
+    int i, n;
+    uint8_t g[16];
+    for (i = 0; i < 16; i++) g[i] = x86_rd8(C, a[0] + (uint32_t)i);
+    n = snprintf(t, sizeof(t), "{%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+                 g[3], g[2], g[1], g[0], g[5], g[4], g[7], g[6], g[8], g[9], g[10], g[11], g[12], g[13], g[14], g[15]);
+    if ((int)a[2] < n + 1) return 0;
+    for (i = 0; i <= n; i++) x86_wr16(C, a[1] + (uint32_t)i * 2, (uint16_t)(uint8_t)t[i]);
+    return (uint32_t)n + 1;
+}
+/* An event or mutex nobody created: not found, what a program checks for its running twin. */
+FN(c_OpenEventA) { UNUSED; w->last_error = 2; return 0; }
+FN(c_DdeInitializeA) { if (a[0]) WR32(a[0], 1); return 0; }
+FN(c_GetKeyboardLayoutList) { if (a[0] > 0 && a[1]) WR32(a[1], 0x04070407u); return 1; }
+FN(c_RegisterClipboardFormatA) { static uint32_t next = 0xC000u; UNUSED; return next++; }
+FN(c_CoRegisterClassObject) { if (a[4]) WR32(a[4], 1); return 0; }
 FN(c_acmMetrics) { if (a[2]) WR32(a[2], a[1] == 50 ? 50u : 0u); return 0; }
 static uint32_t g_prio_class = 0x20, g_thread_prio;
 FN(c_SetPriorityClass) { (void)w; g_prio_class = a[1]; return 1; }
 FN(c_GetPriorityClass) { UNUSED; return g_prio_class; }
-FN(c_SetThreadPriority) { (void)w; g_thread_prio = a[1]; return 1; }
+/* A process handle is not a thread: real Windows fails, and Fury3, which passes
+ * GetCurrentProcess() by mistake, reads success here as an error. */
+FN(c_SetThreadPriority) { (void)w; if (a[0] == 0xFFFFFFFFu) return 0; g_thread_prio = a[1]; return 1; }
 FN(c_GetThreadPriority) { UNUSED; return g_thread_prio; }
 /* A movable block that is no longer locked: 0, and no error. */
 FN(c_GlobalUnlock) { UNUSED; w->last_error = 0; return 0; }
@@ -1256,11 +1279,6 @@ const qhle qw_compat[] = {
     WM("waveOutGetPosition", c_waveOutGetPosition, 3), WM("waveOutGetDevCapsA", c_waveOutGetDevCapsA, 3), WM("waveOutGetID", c_waveOutGetID, 2),
     WM("waveOutSetVolume", c_ok0, 2), WM("waveOutGetVolume", c_ok0, 2),
     K("FindFirstFileA", c_FindFirstFileA, 2), K("FindNextFileA", c_FindNextFileA, 2), K("FindClose", c_FindClose, 1),
-    { "dplayx", "DirectPlayCreate", 3, c_DirectPlayCreate }, { "dplayx", "#1", 3, c_DirectPlayCreate },
-    { "dplayx", "DirectPlayEnumerateA", 2, c_ok0 }, { "dplayx", "#2", 2, c_ok0 },
-    { "dplayx", "DirectPlayEnumerate", 2, c_ok0 }, { "dplayx", "#9", 2, c_ok0 },
-    { "dplayx", "DirectPlayLobbyCreateA", 5, c_DirectPlayCreate }, { "dplayx", "#4", 5, c_DirectPlayCreate },
-    { "dplay", "DirectPlayCreate", 3, c_DirectPlayCreate }, { "dplay", "DirectPlayEnumerateA", 2, c_ok0 }, { "dplay", "DirectPlayEnumerate", 2, c_ok0 },
     { "comctl32", "#17", 0, c_ok0 }, { "comctl32", "InitCommonControls", 0, c_ok0 },
     G("GetPaletteEntries", c_GetPaletteEntries, 4), G("GetDIBColorTable", c_GetDIBColorTable, 4), G("RectVisible", c_ok1, 2), G("PtVisible", c_ok1, 3),
     G("GetClipBox", c_GetClipBox, 2), G("SetWindowExtEx", c_ok1, 4), G("SetViewportExtEx", c_ok1, 4), G("OffsetViewportOrgEx", c_ok1, 4),
@@ -1286,6 +1304,17 @@ const qhle qw_compat[] = {
     { "version", "GetFileVersionInfoSizeA", 2, c_FileVersionNone }, { "version", "GetFileVersionInfoA", 4, c_FileVersionNone }, { "version", "VerQueryValueA", 4, c_FileVersionNone },
     { "msacm32", "acmMetrics", 3, c_acmMetrics }, { "msacm32", "acmStreamOpen", 8, c_acmNoDriver }, { "msacm32", "acmStreamClose", 2, c_ok0 }, { "msacm32", "acmStreamSize", 4, c_acmNoDriver },
     { "msacm32", "acmStreamPrepareHeader", 3, c_acmNoDriver }, { "msacm32", "acmStreamUnprepareHeader", 3, c_ok0 }, { "msacm32", "acmStreamConvert", 3, c_acmNoDriver },
+    { "kernel32", "LoadLibraryExA", 3, c_LoadLibraryExA }, { "kernel32", "DisableThreadLibraryCalls", 1, c_ok1 },
+    { "user32", "RegisterClipboardFormatA", 1, c_RegisterClipboardFormatA },
+    { "user32", "SetMessageQueue", 1, c_ok1 }, { "user32", "GetKeyboardLayoutList", 2, c_GetKeyboardLayoutList },
+    { "kernel32", "OpenMutexA", 3, c_OpenEventA },
+    { "kernel32", "OpenEventA", 3, c_OpenEventA }, { "msacm32", "acmFormatSuggest", 5, c_acmNoDriver },
+    { "user32", "DdeInitializeA", 4, c_DdeInitializeA }, { "user32", "DdeUninitialize", 1, c_ok1 },
+    { "user32", "DdeCreateStringHandleA", 3, c_ok0 }, { "user32", "DdeFreeStringHandle", 2, c_ok1 },
+    { "user32", "DdeNameService", 4, c_ok0 }, { "user32", "DdeConnect", 4, c_ok0 }, { "user32", "DdeGetLastError", 1, c_ok0 },
+    { "comctl32", "#6", 4, c_ok0 }, { "comctl32", "#16", 12, c_ok0 }, { "comctl32", "#8", 13, c_ok0 },
+    { "ole32", "StringFromGUID2", 3, c_StringFromGUID2 }, { "ole32", "CoRegisterClassObject", 5, c_CoRegisterClassObject },
+    { "ole32", "CoRevokeClassObject", 1, c_ok0 },
     /* ole32 */
     { "ole32", "CoInitialize", 1, c_ok0 }, { "ole32", "CoUninitialize", 0, c_ok0 }, { "ole32", "CoCreateInstance", 5, c_CoCreateInstance },
     { NULL, NULL, 0, NULL }

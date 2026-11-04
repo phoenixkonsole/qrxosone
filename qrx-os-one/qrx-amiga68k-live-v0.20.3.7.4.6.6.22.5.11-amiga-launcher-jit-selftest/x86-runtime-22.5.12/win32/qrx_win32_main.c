@@ -8,6 +8,9 @@
 #include <time.h>
 #include "../core/qrx_bigstack.h"
 #include "qrxwin.h"
+#ifdef __AROS__
+#include <proto/dos.h>
+#endif
 
 static qwin g_w;
 
@@ -22,9 +25,12 @@ static int real_main(int argc, char **argv)
 {
     qwin *w = &g_w;
     const char *script = NULL;
-    int i = 1, rc;
+    int i = 1, rc, chdir_exe = 0;
     uint64_t t0;
     memset(w, 0, sizeof(*w));
+    /* Fullscreen programs stay in a window unless told otherwise: SetEnv QRX_WIN_MODE fullscreen */
+    w->windowed = !(getenv("QRX_WIN_MODE") && !strcmp(getenv("QRX_WIN_MODE"), "fullscreen"));
+    w->no_vsync = getenv("QRX_WIN_NOVSYNC") != NULL;
     w->lang = 0x0407;
     w->log = stderr;
     snprintf(w->outdir, sizeof(w->outdir), ".");
@@ -38,10 +44,24 @@ static int real_main(int argc, char **argv)
         else if (!strcmp(argv[i], "-e") && i + 1 < argc) { char kv[300], *eq; snprintf(kv, sizeof(kv), "%s", argv[++i]); eq = strchr(kv, '='); if (eq) { *eq = 0; qw_env_set(kv, eq + 1); } }
         else if (!strcmp(argv[i], "-G") && i + 2 < argc) { snprintf(w->grab_path, sizeof(w->grab_path), "%s", argv[i + 1]); w->grab_at = atoi(argv[i + 2]); i += 2; }
         else if (!strcmp(argv[i], "-T")) w->trace = 1;
+        else if (!strcmp(argv[i], "--chdir")) chdir_exe = 1;
+        else if (!strcmp(argv[i], "--fullscreen")) w->windowed = 0;
+        else if (!strcmp(argv[i], "--window")) w->windowed = 1;
         else { usage(); return 2; }
         i++;
     }
     if (i >= argc) { usage(); return 2; }
+#ifdef __AROS__
+    /* Started from a file manager: a Windows program's current directory is its own. */
+    if (chdir_exe) {
+        char dir[512];
+        BPTR lock;
+        snprintf(dir, sizeof(dir), "%s", argv[i]);
+        *PathPart((STRPTR)dir) = 0;
+        lock = Lock((STRPTR)dir, ACCESS_READ);
+        if (lock) CurrentDir(lock);                 /* kept for the life of the process */
+    }
+#endif
     if(getenv("QRX_WIN_FRAME_MARKERS")){
         const char *first=getenv("QRX_WIN_FRAME_START"),*last=getenv("QRX_WIN_FRAME_END");
         char *aend,*bend;unsigned long a,b;

@@ -124,6 +124,8 @@ typedef struct qwnd {
     uint32_t tme;                     /* TrackMouseEvent flags */
     uint32_t icon;
     int fs_w, fs_h, fs_bpp;           /* DirectDraw exclusive mode: show on an own screen (backend permitting) */
+    int force_frame;                  /* fullscreen program kept in a normal window */
+    int frame_direct;                 /* DirectDraw frames reach the window directly: surf holds no image */
 } qwnd;
 
 typedef struct qmsg { uint32_t hwnd, msg, wp, lp, time; int x, y; } qmsg;
@@ -168,6 +170,8 @@ typedef struct qbackend {
     void (*fb_close)(struct qwin *w, qwnd *top);
     /* own 16/32-bit screen: copy one frame of little-endian guest pixels to it; 0 if not possible */
     int (*present_deep)(struct qwin *w, struct qwnd *t, uint32_t guest, int pitch, int sw, int sh, int bpp);
+    /* A whole frame converted by the host. Returns 0 when it cannot, then the slower paths run. */
+    int (*present_frame)(struct qwin *w, struct qwnd *t, uint32_t guest, int pitch, int sw, int sh, int bpp, const uint32_t *pal);
 } qbackend;
 
 /* ------------------------------------------------------------------ instance */
@@ -200,6 +204,8 @@ typedef struct qwin {
     void *beh;                        /* backend private */
     FILE *log;
     int trace, verbose;
+    int windowed;                     /* fullscreen programs stay in a window, --fullscreen turns it off */
+    int no_vsync;                     /* benchmarks: Flip does not wait for the display rate */
     uint16_t lang;
     /* image */
     uint32_t image_base, image_size, entry, res_rva, res_size;
@@ -268,6 +274,7 @@ int  qw_load(qwin *w, const char *path, int argc, char **argv);
 int  qw_run(qwin *w);
 uint32_t qw_thunk(qwin *w, const char *dll, const char *name);
 /* Functions the host implements through the ARMithlon door (3D APIs). */
+void qw_api_report(struct qwin *w);
 int qw_host_bind(qwin *w, uint32_t idx);
 int qw_host_has(qwin *w, const char *name);
 uint32_t qw_alloc(qwin *w, uint32_t n);
@@ -348,6 +355,11 @@ extern const qhle qw_dx[];     /* dx.c: DirectDraw/DirectSound/DirectInput */
 extern const qhle qw_extra[];  /* extra.c */
 extern const qhle qw_compat[]; /* compat.c */
 extern const qhle qw_net[];    /* net.c */
+extern const qhle qw_dplay[];  /* dplay.c */
+/* Host socket calls through the door. q is 16 words: q[4..] arguments, q[12] result, q[13] error, q[14] ip, q[15] port. */
+enum { NET_SOCKET = 1, NET_BIND, NET_LISTEN, NET_ACCEPT, NET_CONNECT, NET_SEND, NET_RECV, NET_SENDTO, NET_RECVFROM,
+       NET_POLL, NET_CLOSE, NET_SHUTDOWN, NET_SETOPT, NET_GETOPT, NET_SOCKNAME, NET_PEERNAME, NET_RESOLVE, NET_HOSTNAME };
+int qw_net_call(struct qwin *w, uint32_t *q, uint32_t op);
 /* threads.c */
 void qw_thread_yield(qwin *w);
 void qw_thread_tick(qwin *w);

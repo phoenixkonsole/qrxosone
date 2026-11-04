@@ -1,3 +1,4 @@
+#include <strings.h>
 /* QRX OS One 22.5.12 - qrx-win32: GDI on 32-bit software surfaces. */
 #include <stdlib.h>
 #include <string.h>
@@ -651,6 +652,19 @@ FN(g_DeleteObject) {
     memset(o, 0, sizeof(*o));
     return 1;
 }
+/* (bitmap, bytes, buffer): rows of 32 bits per pixel, the depth GetObject reports */
+FN(g_GetBitmapBits) {
+    qobj *o = O(w, a[0], GO_BITMAP);
+    uint32_t n = 0, total;
+    int x, y;
+    if (!o || !o->bmp.pix) return 0;
+    total = (uint32_t)o->bmp.w * (uint32_t)o->bmp.h * 4u;
+    if (!a[2]) return total;
+    for (y = 0; y < o->bmp.h && n + 4u <= a[1]; y++)
+        for (x = 0; x < o->bmp.w && n + 4u <= a[1]; x++, n += 4u)
+            x86_wr32(C, a[2] + n, o->bmp.pix[(size_t)y * (size_t)o->bmp.w + (size_t)x] & 0xFFFFFFu);
+    return n;
+}
 FN(g_GetObjectW) {
     qobj *o = O(w, a[0], 0);
     if (!o) return 0;
@@ -862,11 +876,24 @@ FN(g_Polygon) {
     if (pen_visible(p)) for (i = 0; i < n; i++) line_abs(d, TX(d, xs[i]), TY(d, ys[i]), TX(d, xs[(i + 1) % n]), TY(d, ys[(i + 1) % n]), p->color, p->width);
     return 1;
 }
+/* A few programs refuse anything but a 256 colour desktop. Windows would make the
+ * user change it; here the desktop is whatever the program wants to hear. */
+static int qw_needs_256_colours(qwin *w)
+{
+    static const char *const names[] = { "SONICCD.EXE", NULL };
+    const char *base = strrchr(w->exe_path, '/');
+    int i;
+    if (!base) base = strrchr(w->exe_path, ':');
+    base = base ? base + 1 : w->exe_path;
+    for (i = 0; names[i]; i++) if (!strcasecmp(base, names[i])) return 1;
+    return 0;
+}
+
 FN(g_GetDeviceCaps) {
     UNUSED;
     switch (a[1]) {
     case 8: return 1024; case 10: return 768;        /* HORZRES / VERTRES */
-    case 12: return 16; case 14: return 1;          /* BITSPIXEL / PLANES: games of the time refuse true colour desktops */
+    case 12: return qw_needs_256_colours(w) ? 8 : 16; case 14: return 1;          /* BITSPIXEL / PLANES: games of the time refuse true colour desktops */
     case 88: case 90: return 96;                     /* LOGPIXELSX/Y */
     case 24: return 0xFFFFFFFFu;                     /* NUMCOLORS */
     default: return 0;
@@ -1075,6 +1102,7 @@ const qhle qw_gdi32[] = {
     G("CreateCompatibleBitmap", g_CreateCompatibleBitmap, 3), G("CreateBitmap", g_CreateBitmap, 5),
     G("CreatePen", g_CreatePen, 3), G("CreateSolidBrush", g_CreateSolidBrush, 1), G("CreateBrushIndirect", g_CreateBrushIndirect, 1),
     G("CreateFontW", g_CreateFontW, 14), G("CreateFontIndirectW", g_CreateFontIndirectW, 1),
+    G("GetBitmapBits", g_GetBitmapBits, 3),
     G("SelectObject", g_SelectObject, 2), G("DeleteObject", g_DeleteObject, 1), G("GetObjectW", g_GetObjectW, 3),
     G("BitBlt", g_BitBlt, 9), G("StretchBlt", g_StretchBlt, 11), G("PatBlt", g_PatBlt, 6),
     G("SetPixel", g_SetPixel, 4), G("SetPixelV", g_SetPixel, 4), G("GetPixel", g_GetPixel, 3),

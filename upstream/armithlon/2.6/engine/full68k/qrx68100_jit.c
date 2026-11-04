@@ -52,6 +52,8 @@ typedef struct Block {
 } Block;
 typedef struct CodePage {
     uint64_t granules;   /* one bit per 64 guest bytes holding translated code */
+    uint64_t fine[8];    /* one bit per 8 guest bytes: exec variables sit right next to
+                          * its jump table, and every write there would walk the blocks */
     Block *blocks;
 } CodePage;
 typedef struct { uint64_t pc; const void *code; } ICacheEntry;
@@ -1493,6 +1495,11 @@ static void register_block_pages(JitCtx *j,Block *b){
     b->page_next=cp->blocks;cp->blocks=b;
     for(uint32_t a=b->pc&~((1u<<GRANULE_SHIFT)-1u);a<b->end;a+=1u<<GRANULE_SHIFT)
         cp->granules|=UINT64_C(1)<<((a>>GRANULE_SHIFT)&63u);
+    for(uint32_t a=b->pc&~7u;a<b->end;a+=8u){
+        uint32_t bit=(a&0xFFFu)>>3;
+        /* A block may run over into the next page: that bit belongs there. */
+        if(a>>PAGE_SHIFT==page)cp->fine[bit>>6]|=UINT64_C(1)<<(bit&63u);
+    }
     if((uint64_t)b->pc<j->cpu->vm.ram.size)protect_code(j,b->pc,b->end);
 }
 static Block *new_block(JitCtx *j,uint32_t pc){
@@ -1646,6 +1653,7 @@ static void kill_block(JitCtx *j,Block *b){
 }
 static void jit_notify(QRXFullCPU *c,uint32_t addr,uint32_t len){
     JitCtx *j=c->jit;
+    if(qrx_x86code_notify)qrx_x86code_notify(c,addr,len);
     if(!j||!len)return;
     uint64_t end=(uint64_t)addr+len;
     for(uint64_t a=addr;a<end;a=(a|0xFFFu)+1u){
@@ -1658,6 +1666,12 @@ static void jit_notify(QRXFullCPU *c,uint32_t addr,uint32_t len){
         uint64_t mask=0;
         for(uint64_t g=a>>GRANULE_SHIFT;g<=(e-1u)>>GRANULE_SHIFT;g++)mask|=UINT64_C(1)<<(g&63u);
         if(!(cp->granules&mask))continue;
+        bool hit=false;
+        for(uint64_t f=a>>3;f<=(e-1u)>>3&&!hit;f++){
+            uint32_t bit=(uint32_t)f&511u;
+            hit=(cp->fine[bit>>6]>>(bit&63u))&1u;
+        }
+        if(!hit)continue;
         for(Block *b=cp->blocks;b;b=b->page_next)
             if(!b->dead&&(uint64_t)b->pc<e&&a<(uint64_t)b->end)kill_block(j,b);
     }
@@ -1678,9 +1692,11 @@ static void flush_all(JitCtx *j){
             if(p&&c->rpage[p-1u])c->wpage[g-1u]=c->rpage[p-1u];
         }
         j->pages[p].granules=0;j->pages[p].blocks=NULL;
+        memset(j->pages[p].fine,0,sizeof j->pages[p].fine);
     }
     j->arena_next=j->arena;
     j->flush_pending=false;
+    if(qrx_x86code_regate)qrx_x86code_regate(c);
 }
 
 /* ---------- execution ---------- */

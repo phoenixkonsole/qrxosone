@@ -1,0 +1,48 @@
+Two armithlon-engine --window processes on one Mac, Grand Theft Auto.exe, QRX_TEST_KEYS driving the menus, QRX_RTG_CAPTURE for the images. From qrx-win32 -v.
+=== host
+DirectPlayEnumerateA
+DirectPlayCreate
+Open flags=2
+hosting 'GTA Game' for 4 players, TCP port 52409, search port 47800
+CreatePlayer 'Travis'
+player 'Travis' has id 100
+EnumPlayers (logged once)
+host, 1 players, sent 0, received 0, dropped 0
+host, 2 players, sent 0, received 0, dropped 0
+Send from=100 to=101 flags=1 size=10 (logged once)
+Receive flags=1 (logged once)
+host, 2 players, sent 221, received 220, dropped 0
+host, 2 players, sent 678, received 677, dropped 0
+host, 2 players, sent 1134, received 1133, dropped 0
+DestroyPlayer 100
+Close
+closing, sent 1138, received 1138, dropped 0
+host, 2 players, sent 1134, received 1133, dropped 0
+=== member
+DirectPlayEnumerateA
+DirectPlayCreate
+EnumSessions timeout=0 flags=0
+found 1 sessions
+Open flags=1
+joined 'GTA Game'
+CreatePlayer 'Travis'
+player 'Travis' has id 101
+EnumPlayers (logged once)
+Receive flags=1 (logged once)
+member, 2 players, sent 0, received 0, dropped 0
+Send from=101 to=100 flags=0 size=17 (logged once)
+member, 2 players, sent 267, received 268, dropped 0
+member, 2 players, sent 724, received 725, dropped 0
+connection to the session host lost
+member, 0 players, sent 1138, received 1138, dropped 0
+member, 0 players, sent 1138, received 1138, dropped 0
+member, 0 players, sent 1138, received 1138, dropped 0
+=== dptest, alone
+exchange: 2000 of 2000 messages back, 0 wrong, 12566 ms
+exchange: 2000 of 2000 messages back, 0 wrong, 12567 ms
+DPTEST PASSED
+=== dptest host and join in two engines
+h.log:exchange: 2000 of 2000 messages back, 0 wrong, 9104 ms
+h.log:DPTEST HOST PASSED
+j.log:exchange: 2000 of 2000 messages back, 0 wrong, 9114 ms
+j.log:DPTEST JOIN PASSED

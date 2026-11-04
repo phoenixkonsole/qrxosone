@@ -234,4 +234,9 @@ bool qrx_full_run_subroutine(QRXFullCPU *c,uint32_t entry,
                              uint64_t cycle_budget,uint64_t *retired);
 uint32_t qrx_full_pc(const QRXFullCPU *c);
 uint32_t qrx_full_reg(const QRXFullCPU *c, unsigned reg); /* use Musashi enum */
+/* Set by the QRX86 door's JIT: a 68k write or DMA reached a write-gated page, and the
+ * 68k JIT reopened its write map, so gated x86 code pages must be closed again. Only
+ * core 0 reports: the Win32 runtime, which loads x86 code, is not moved to core 1. */
+extern void (*qrx_x86code_notify)(struct QRXFullCPU *, uint32_t addr, uint32_t len);
+extern void (*qrx_x86code_regate)(struct QRXFullCPU *);
 #endif

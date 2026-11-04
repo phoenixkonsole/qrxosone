@@ -3,6 +3,7 @@
 #include "qrx_hostnet.h"
 /* The host build of the same interpreter the guest runs, with its internals in
  * reach: the door keeps a shadow page table of host pointers. */
+#define QRX86_HOST_JIT 1
 #include "qrx86core.c"
 #include "qrx_hostapi.h"
 #include "qrxmedia.h"
@@ -20,6 +21,10 @@ static x86cpu host;
 static uint32_t shadow_serial, shadow_dir;
 static bool shadow_valid;
 static uint64_t door_calls, door_x86;
+#include "qrx86_hostjit.c"
+#ifndef QRX86_HOST_JIT_ACTIVE
+static void x86_host_code_write(x86cpu *c, uint32_t a) { (void)c; (void)a; }
+#endif
 
 static inline uint32_t rd32(const uint8_t *p){uint32_t v;memcpy(&v,p,4);return __builtin_bswap32(v);}
 static inline void wr32(uint8_t *p,uint32_t x){uint32_t v=__builtin_bswap32(x);memcpy(p,&v,4);}
@@ -34,15 +39,33 @@ static void shadow_rebuild(QRXFullCPU *c,uint32_t dir){
         uint32_t gt=rd32(ram+dir+i*4u);
         x86page *t=host.dir[i];
         if(!gt){
-            if(t){free(t);host.dir[i]=NULL;}
+            if(t){
+#ifdef QRX86_HOST_JIT_ACTIVE
+                for(unsigned j=0;j<1024;j++){
+                    if(t[j].flags&X86_PG_CODE)xj_kill_page((i<<10)|j);
+                    t[j].mem=NULL;t[j].flags=0;
+                    xj_table_page((i<<10)|j,&t[j]);
+                }
+#endif
+                free(t);host.dir[i]=NULL;
+            }
             continue;
         }
         if((uint64_t)gt+1024u*8u>size)continue;
         if(!t){t=calloc(1024,sizeof(x86page));host.dir[i]=t;if(!t)continue;}
         for(unsigned j=0;j<1024;j++){
-            uint32_t mem=rd32(ram+gt+j*8u);
-            t[j].flags=rd32(ram+gt+j*8u+4u);
-            t[j].mem=(mem&&(uint64_t)mem+X86_PAGE_SIZE<=size)?(uint8_t*)ram+mem:NULL;
+            uint32_t mem=rd32(ram+gt+j*8u),flags=rd32(ram+gt+j*8u+4u);
+            uint8_t *host_mem=(mem&&(uint64_t)mem+X86_PAGE_SIZE<=size)?(uint8_t*)ram+mem:NULL;
+#ifdef QRX86_HOST_JIT_ACTIVE
+            /* Translations survive a remap only if the page stayed where it was. */
+            if((t[j].flags&X86_PG_CODE)&&t[j].mem!=host_mem)xj_kill_page((i<<10)|j);
+            flags|=t[j].flags&X86_PG_CODE;
+#endif
+            t[j].flags=flags;
+            t[j].mem=host_mem;
+#ifdef QRX86_HOST_JIT_ACTIVE
+            xj_table_page((i<<10)|j,&t[j]);
+#endif
         }
     }
     tlb_flush(&host);
@@ -213,6 +236,87 @@ static void net_service(QRXFullCPU *c,uint8_t *q){
     qrx_hostnet_call(rd32(q+12),a,c->ram_owned);
     for(unsigned i=8;i<12;i++)wr32(q+16+i*4u,a[i]);
 }
+/* ---- A whole frame from x86 memory into guest RAM. The 68k would need a load, a
+ * table look-up and a store per pixel; the frame buffer the display reads is plain RAM. */
+enum { FRAME_LUT8, FRAME_ARGB32, FRAME_BGRA32, FRAME_RGB16, FRAME_RGB16PC };
+static void frame_service(QRXFullCPU *c,uint8_t *q){
+    uint32_t src=rd32(q+12),pitch=rd32(q+16),w=rd32(q+20),h=rd32(q+24),bpp=rd32(q+28);
+    uint32_t dst=rd32(q+32),bpr=rd32(q+36),fmt=rd32(q+40),pal_addr=rd32(q+44);
+    size_t size=c->vm.ram.size;
+    wr32(q+48,0);
+    if(!w||!h||w>4096||h>4096||(bpp!=8&&bpp!=16&&bpp!=32)||fmt>FRAME_RGB16PC||bpr>0x10000u)return;
+    if((uint64_t)dst+(uint64_t)bpr*(h-1u)+(uint64_t)w*4u>size)return;
+    if(fmt==FRAME_LUT8&&bpp!=8)return;
+    uint32_t pal[256];
+    if(bpp==8&&fmt!=FRAME_LUT8){
+        if(!pal_addr||(uint64_t)pal_addr+1024u>size)return;
+        const uint8_t *p=c->ram_owned+pal_addr;
+        for(unsigned i=0;i<256;i++)pal[i]=rd32(p+i*4u)&0xFFFFFFu;
+    }
+    uint8_t *row=c->ram_owned+dst;
+    /* One row of source pixels, joined across x86 pages when they are not contiguous. */
+    static uint8_t line[4096u*4u];
+    uint32_t bytes=w*bpp/8u;
+    for(uint32_t y=0;y<h;y++,row+=bpr){
+        uint32_t a=src+y*pitch,done=0;
+        const uint8_t *s=NULL;
+        if((a&X86_PAGE_MASK)+bytes<=X86_PAGE_SIZE){
+            const uint8_t *m=x86_page_ptr(a);
+            if(m)s=m+(a&X86_PAGE_MASK);
+        }
+        if(!s){
+            while(done<bytes){
+                uint32_t at=a+done,k=X86_PAGE_SIZE-(at&X86_PAGE_MASK);
+                const uint8_t *m=x86_page_ptr(at);
+                if(k>bytes-done)k=bytes-done;
+                if(m)memcpy(line+done,m+(at&X86_PAGE_MASK),k);else memset(line+done,0,k);
+                done+=k;
+            }
+            s=line;
+        }
+        switch(fmt){
+        case FRAME_LUT8: memcpy(row,s,w);break;
+        case FRAME_ARGB32:
+        case FRAME_BGRA32:{
+            uint32_t *d=(uint32_t*)row;
+            /* Stored bytes: A R G B, or B G R A. */
+            if(bpp==8){
+                if(fmt==FRAME_ARGB32)for(uint32_t x=0;x<w;x++)d[x]=__builtin_bswap32(pal[s[x]]|0xFF000000u);
+                else for(uint32_t x=0;x<w;x++)d[x]=pal[s[x]]|0xFF000000u;
+            }else if(bpp==16){
+                const uint16_t *p=(const uint16_t*)s;
+                for(uint32_t x=0;x<w;x++){
+                    uint32_t v=p[x];
+                    uint32_t r=(v>>11)&31u,g=(v>>5)&63u,b=v&31u;
+                    uint32_t px=0xFF000000u|((r<<3|r>>2)<<16)|((g<<2|g>>4)<<8)|(b<<3|b>>2);
+                    d[x]=fmt==FRAME_ARGB32?__builtin_bswap32(px):px;
+                }
+            }else{
+                const uint32_t *p=(const uint32_t*)s;
+                if(fmt==FRAME_ARGB32)for(uint32_t x=0;x<w;x++)d[x]=__builtin_bswap32(p[x]|0xFF000000u);
+                else for(uint32_t x=0;x<w;x++)d[x]=p[x]|0xFF000000u;
+            }
+            break;
+        }
+        default:{
+            uint16_t *d=(uint16_t*)row;
+            bool swap=fmt==FRAME_RGB16;
+            if(bpp==16){
+                if(swap)for(uint32_t x=0;x<w;x++)d[x]=__builtin_bswap16(((const uint16_t*)s)[x]);
+                else memcpy(row,s,w*2u);
+            }else{
+                for(uint32_t x=0;x<w;x++){
+                    uint32_t v=bpp==8?pal[s[x]]:((const uint32_t*)s)[x];
+                    uint16_t px=(uint16_t)(((v>>8)&0xF800u)|((v>>5)&0x07E0u)|((v>>3)&0x001Fu));
+                    d[x]=swap?__builtin_bswap16(px):px;
+                }
+            }
+            break;
+        }
+        }
+    }
+    wr32(q+48,1);
+}
 static void service_call(QRXFullCPU *c,uint32_t block){
     if((uint64_t)block+128u>c->vm.ram.size)return;
     uint8_t *q=c->ram_owned+block;
@@ -222,6 +326,7 @@ static void service_call(QRXFullCPU *c,uint32_t block){
     else if(svc==2)api_service(c,q);
     else if(svc==3)midi_service(c,q);
     else if(svc==4)net_service(c,q);
+    else if(svc==5)frame_service(c,q);
 }
 static void shadow_sync(QRXFullCPU *c,uint32_t dir,uint32_t serial){
     if(!shadow_valid||dir!=shadow_dir||serial!=shadow_serial){
@@ -251,7 +356,17 @@ static void door_run(QRXFullCPU *c,uint32_t req){
     uint32_t limit=rd32(q+REQ_LIMIT);
     host.fault=X86_OK;host.stop=0;
     host.icount=0;host.left=limit;host.lbase=limit;host.budget=limit;
-    (void)x86_run(&host,rd32(q+REQ_STOP));
+    uint32_t stop_eip=rd32(q+REQ_STOP);
+#ifdef QRX86_HOST_JIT_ACTIVE
+    /* Translated code assumes flat data segments and that the stop address, the
+     * return sentinel of x86_call, is never inside it. */
+    static int jit_off=-1;
+    if(jit_off<0)jit_off=getenv("QRX86_NOJIT")!=NULL;
+    if(!jit_off&&stop_eip>=0xFFFFFF00u&&!host.sbase[X86_DS]&&!host.sbase[X86_ES]&&!host.sbase[X86_SS]&&xj_init(c))
+        (void)xj_run(&host,stop_eip);
+    else
+#endif
+    (void)x86_run(&host,stop_eip);
     uint32_t executed=limit-host.left;
     /* A fault or stop charged the instruction it did not finish. */
     if(host.fault||host.stop){
@@ -286,5 +401,8 @@ void qrx86_door_attach(QRXFullCPU *c){
     c->door_read=door_read;c->door_write=door_write;
 }
 void qrx86_door_report(void){
+#ifdef QRX86_HOST_JIT_ACTIVE
+    xj_report();
+#endif
     if(door_calls)fprintf(stderr,"[QRX86-DOOR] calls=%llu x86=%llu\n",(unsigned long long)door_calls,(unsigned long long)door_x86);
 }

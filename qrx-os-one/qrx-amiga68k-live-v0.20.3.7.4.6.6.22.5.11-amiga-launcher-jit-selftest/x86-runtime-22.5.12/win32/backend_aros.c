@@ -108,8 +108,15 @@ static int open_fullscreen(qwin *w, qwnd *t, bew *b)
 static void ar_create(qwin *w, qwnd *t)
 {
     bew *b = (bew *)calloc(1, sizeof(bew));
-    int popup = (t->style & WS_POPUP) && !(t->style & WS_CAPTION);
+    int popup = (t->style & WS_POPUP) && !(t->style & WS_CAPTION) && !t->force_frame;
     if (!b) return;
+    if (t->force_frame && g_scr) {                  /* a fullscreen program in a window: centre it */
+        int bw = g_scr->WBorLeft + g_scr->WBorRight, bh = g_scr->WBorTop + g_scr->Font->ta_YSize + 1 + g_scr->WBorBottom;
+        t->x = (g_scr->Width - t->cw - bw) / 2 + g_scr->WBorLeft;
+        t->y = (g_scr->Height - t->ch - bh) / 2 + g_scr->WBorTop + g_scr->Font->ta_YSize + 1;
+        if (t->x < g_scr->WBorLeft) t->x = g_scr->WBorLeft;
+        if (t->y < g_scr->WBorTop + g_scr->Font->ta_YSize + 1) t->y = g_scr->WBorTop + g_scr->Font->ta_YSize + 1;
+    }
     if (t->fs_w > 0 && open_fullscreen(w, t, b)) {
         b->h = t->h;
         b->win->UserPort = g_port;
@@ -126,6 +133,10 @@ static void ar_create(qwin *w, qwnd *t)
     b->h = t->h;
     b->mbh = user_menubar_height(w, t);
     latin1(b->title, t->text, sizeof(b->title));
+    /* Programs centre their window with screen metrics of a display that is not this
+     * one: never leave a window off screen. */
+    if (t->x + t->cw <= 0 || t->x < 0) t->x = 0;
+    if (t->y + t->ch <= 0 || t->y < 0) t->y = b->mbh;
     b->win = OpenWindowTags(NULL,
         WA_Left, t->x - (popup ? 0 : g_scr->WBorLeft), WA_Top, t->y - b->mbh - (popup ? 0 : g_scr->WBorTop + g_scr->Font->ta_YSize + 1),
         WA_InnerWidth, t->cw, WA_InnerHeight, t->ch + b->mbh,
@@ -227,6 +238,7 @@ static void ar_present(qwin *w, qwnd *t)
         user_render_menubar(w, t, &b->mb);
         blit(b->win, b->mb.pix, t->cw, b->win->BorderLeft, b->win->BorderTop, t->cw, mbh);
     }
+    if (t->frame_direct) { b->full = 0; return; }    /* the empty surf must not cover the frame */
     {
         int x0 = 0, y0 = 0, x1 = t->cw < t->surf.w ? t->cw : t->surf.w, y1 = t->ch < t->surf.h ? t->ch : t->surf.h;
         if (!b->full && t->px1 > t->px0 && t->py1 > t->py0) {       /* only the changed area */
@@ -517,6 +529,76 @@ static int ar_present_deep(qwin *w, qwnd *t, uint32_t guest, int pitch, int sw, 
     return 1;
 }
 
+/* Host conversion through the door. dst is guest RAM, in the format asked for. */
+enum { DOOR_FMT_LUT8 = 0, DOOR_FMT_ARGB32 = 1, DOOR_FMT_BGRA32 = 2, DOOR_FMT_RGB16 = 3, DOOR_FMT_RGB16PC = 4 };
+static int door_frame(qwin *w, uint32_t guest, int pitch, int sw, int sh, int bpp, void *dst, ULONG bpr, int fmt, const uint32_t *pal)
+{
+    static uint32_t q[32];
+    q[0] = 5;
+    q[3] = guest; q[4] = (uint32_t)pitch; q[5] = (uint32_t)sw; q[6] = (uint32_t)sh; q[7] = (uint32_t)bpp;
+    q[8] = (uint32_t)(uintptr_t)dst; q[9] = (uint32_t)bpr; q[10] = (uint32_t)fmt; q[11] = (uint32_t)(uintptr_t)pal;
+    q[12] = 0;
+    if (!x86_door_call(&w->cpu, q)) return 0;
+    return q[12] != 0;
+}
+static int ar_present_frame(qwin *w, qwnd *t, uint32_t guest, int pitch, int sw, int sh, int bpp, const uint32_t *pal)
+{
+    static uint8_t *buf;
+    static size_t bufn;
+    bew *b = (bew *)t->be;
+    if (!b || !b->win || !w->cpu.door || !CyberGfxBase) return 0;
+    if (b->scr) {                                   /* own screen: straight into its bitmap */
+        IPTR addr = 0;
+        ULONG bpr = 0, fmt = 0;
+        APTR lock;
+        int dfmt, ok;
+        if (sw > t->fs_w || sh > t->fs_h) return 0;
+        if (b->scr8) {
+            if (bpp != 8) return 0;
+            if (memcmp(b->pal, pal, sizeof(b->pal))) {
+                static ULONG tab[256 * 3 + 2];
+                int i;
+                tab[0] = (256UL << 16) | 0;
+                for (i = 0; i < 256; i++) {
+                    tab[1 + i * 3] = ((pal[i] >> 16) & 0xFF) * 0x01010101u;
+                    tab[2 + i * 3] = ((pal[i] >> 8) & 0xFF) * 0x01010101u;
+                    tab[3 + i * 3] = (pal[i] & 0xFF) * 0x01010101u;
+                }
+                tab[1 + 256 * 3] = 0;
+                LoadRGB32(&b->scr->ViewPort, tab);
+                memcpy(b->pal, pal, sizeof(b->pal));
+            }
+        }
+        lock = LockBitMapTags(b->scr->RastPort.BitMap, LBMI_BASEADDRESS, (IPTR)&addr, LBMI_BYTESPERROW, (IPTR)&bpr, LBMI_PIXFMT, (IPTR)&fmt, TAG_DONE);
+        if (!lock) return 0;
+        switch (fmt) {
+        case PIXFMT_LUT8: dfmt = DOOR_FMT_LUT8; break;
+        case PIXFMT_ARGB32: dfmt = DOOR_FMT_ARGB32; break;
+        case PIXFMT_BGRA32: dfmt = DOOR_FMT_BGRA32; break;
+        case PIXFMT_RGB16: dfmt = DOOR_FMT_RGB16; break;
+        case PIXFMT_RGB16PC: dfmt = DOOR_FMT_RGB16PC; break;
+        default: dfmt = -1; break;
+        }
+        ok = dfmt >= 0 && door_frame(w, guest, pitch, sw, sh, bpp, (void *)addr, bpr, dfmt, pal);
+        UnLockBitMap(lock);
+        return ok;
+    }
+    /* A window: other windows can cover it, so the system must do the last copy. */
+    if (!g_truecolor) return 0;
+    {
+        size_t n = (size_t)sw * (size_t)sh * 4;
+        int x0 = b->win->BorderLeft, y0 = b->win->BorderTop + b->mbh;
+        if (n > bufn) { free(buf); buf = (uint8_t *)malloc(n); bufn = buf ? n : 0; }
+        if (!buf) return 0;
+        if (sw > t->cw) sw = t->cw;
+        if (sh > t->ch) sh = t->ch;
+        if (!door_frame(w, guest, pitch, sw, sh, bpp, buf, (ULONG)sw * 4, DOOR_FMT_ARGB32, pal)) return 0;
+        WritePixelArray(buf, 0, 0, (UWORD)(sw * 4), b->win->RPort, (UWORD)x0, (UWORD)y0, (UWORD)sw, (UWORD)sh, RECTFMT_ARGB);
+        t->frame_direct = 1;
+        return 1;
+    }
+}
+
 static void ar_reopen(qwin *w, qwnd *t)
 {
     if (w->verbose) qw_log(w, "AROS backend: reopening window %08x (%s)", t->h, t->fs_w ? "own screen" : "Workbench");
@@ -626,5 +708,5 @@ static uint8_t *ar_fb_show(qwin *w, qwnd *t, int i, const uint32_t *pal)
 }
 
 const qbackend qw_aros = { "aros", ar_init, ar_create, ar_destroy, ar_present, ar_title, ar_menu, ar_wait, ar_now, ar_shutdown, ar_present8, ar_reopen,
-                           ar_fb_open, ar_fb_show, ar_fb_close, ar_present_deep };
+                           ar_fb_open, ar_fb_show, ar_fb_close, ar_present_deep, ar_present_frame };
 #endif

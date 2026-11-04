@@ -70,8 +70,8 @@ are in the 2026-11-04 update below.
 
 - **AROS on the second core.** Core 1 runs jobs a program gives it; AROS m68k has no SMP
   scheduler, so existing software gains nothing from it until it starts such jobs.
-- **DirectPlay.** `DirectPlayCreate` reports the service as unavailable, so GTA's network
-  games do not work. Winsock is there; DirectPlay's session layer on top of it is missing.
+- **DirectPlay beyond GTA.** Only the calls GTA makes exist, see "GTA network games" below.
+  Lobby, groups and the service providers for IPX, modem and serial are missing.
 - **Direct3D.** No execute buffers (Direct3D 1 to 3 style), no lighting, no points or lines in
   versions 5 to 7. A 2D lock of a surface does not mix with what the host GPU has drawn on it.
 - **Vulkan.** A subset of the API: no descriptor sets, no depth images, no textures yet.
@@ -205,3 +205,120 @@ image or a running frame rate: `NORSE95.EXE` (31 FPS), `NEVDEMO.EXE` (25 FPS), `
 Doom95 and GTA got any input. The others stop at missing data because they were not installed
 by their setup, want a launcher, or hit an API gap. `TOMB2.EXE` and `MDKDEM95.EXE` open a window
 and go no further within that time. `msacm32` answers but has no codecs.
+
+## Update 2026-11-04, third part: GTA network games
+
+"Gather Network" and "Join Network" in GTA 1 work between two ARMithlon instances over TCP/IP.
+`win32/dplay.c` implements DirectPlay on the Winsock door. Its protocol on the wire is QRX86's
+own and **does not talk to real DirectPlay**, so a QRX86 game cannot join one on Windows.
+
+Which calls GTA makes was read from its code around the `dplayx` imports (ordinals 1 and 2) and
+checked in the log of a running game. Only these exist; any other method stops the program with
+its name in the log:
+
+| Call | Used for |
+| --- | --- |
+| `DirectPlayEnumerateA` | Lists one provider, "Internet TCP/IP Connection For DirectPlay" |
+| `DirectPlayCreate`, `QueryInterface(IDirectPlay2A)`, `Release` | The object GTA holds |
+| `EnumSessions` | Search, with the default timeout of 1.5 s |
+| `Open` with `DPOPEN_CREATE` or `DPOPEN_JOIN`, `Close` | Gather, join, leave |
+| `CreatePlayer`, `DestroyPlayer`, `EnumPlayers` | Players; ids rise, and GTA sorts by id, so all see the same order |
+| `Send`, `Receive` with `DPRECEIVE_ALL` | Game data, one target at a time; `DPID_ALLPLAYERS` is not there |
+
+How it works:
+
+- **Finding a session.** UDP probes go to ports 47800 to 47807 on the loopback address and as a
+  broadcast. For another network, `SetEnv QRX_DPLAY_HOST name-or-address` before the game adds that
+  host. Each host takes the next free port, which is how two emulators share one Mac.
+- **In a session.** Each member holds one TCP connection to the host, which hands out player ids
+  and relays data. So plain and guaranteed messages both arrive complete and in order.
+- **Busy programs.** A service thread keeps the session answering while the program does other things.
+- **Security.** There is no password and no encryption: any computer that reaches the ports can
+  join an open session. Use it on a network you trust.
+- **A host leaving** ends the session: GTA shows "Connection To Travis Has Failed" and the member
+  plays on alone. There is no host migration.
+
+To try it, start two emulators with `Execute S:GTA`. They must not share a game folder, because
+each writes its settings there. In the first choose Gather Network, your character, the city,
+the multiplayer options, the connection and the session name; wait on the Gather screen. In
+the second choose Join Network, your character, the connection and the session. When the first
+shows "Found 1 Joiner", press Enter there.
+
+How it was checked, on the Mac M1 (log: `benchmarks/armithlon-m1-2026-11-03/directplay-gta.log`):
+
+| Check | Result |
+| --- | --- |
+| `dptest.exe` alone in one engine (`guest/win32tests/dptest.c`): two hosts, one member, player lists, small buffer, unknown player, leaving, host gone | Passed 5 of 5 runs, 2000 messages each way, none wrong |
+| `dptest.exe host` and `dptest.exe join` in two engines | Passed, 2000 messages each way, none wrong, about 4.5 ms for a round trip |
+| GTA in two `armithlon-engine --window` processes, menus driven by `QRX_TEST_KEYS`, images from `QRX_RTG_CAPTURE` | Gather shows "Found 1 Joiner", Join "Found Gatherer"; both load Liberty City Deathmatch, one as yellow, one as green, and run at about 60 frames per second |
+| Data in that game, with a temporary dump of what was sent and received | GTA's start message, both player names, its own handshake and key events arrived unchanged; 1154 messages each way, none lost, about 23 per second |
+| Host quits with Esc and Enter | Member logs the lost connection, shows the message above and keeps running |
+| The same game once more with the final build, without the dump | 1138 messages each way, none lost; the log above is from this run |
+
+A bug that has nothing to do with the network showed up: after GTA quits cleanly from a game, it
+saves `GTADATA/PLAYER_A.DAT`, and the next start of any level stops with a page fault at
+`eip=00414ce3`, in single player too. It reads video mode 6 from GTA's mode table and finds no
+entry there. Putting the original file back gets past it. It is not fixed yet.
+
+Not checked: two computers, which means `QRX_DPLAY_HOST` and broadcast over a real network, and whether
+the macOS firewall asks for permission there; more than two players; a whole deathmatch to its
+end. `dptest.exe` alone expects to find exactly its own two sessions, so run it with no other
+session open. The two players started apart and were not driven into each other, so the images
+do not show one player's car on the other's screen; the key events crossing is the evidence for that.
+
+## Update 2026-11-04, fourth part: x86 JIT, window mode, icons
+
+### Measured first
+
+Daytona USA ran at 9 to 20 frames per second and almost all CPU time was in the x86 interpreter on the host. After the JIT below, x86 code took about 1% of the time. What remained was this:
+
+- 40% in `jit_notify`: writes to AROS system variables right next to translated 68k code walked the page's whole block list, 1.7 million times a second. The 68k JIT now keeps one bit per 8 bytes per page and skips the walk. All of AROS gains from this.
+- Daytona waiting for itself, with 225,000 `PeekMessage` and `timeGetTime` calls per 5 s in its menu and demo scenes. Those run at 20 frames per second by the game's own timing, not for lack of speed. In a race it ran at 300 frames per second without a limit, which is too fast.
+
+### QRX86 host JIT
+
+`full68k/qrx86_hostjit.c` translates x86 to AArch64 blocks in the door. The interpreter stays the reference: instructions without a translation, memory accesses that miss the tables and NaN results run there, one instruction at a time. Native code changes no guest state before its last memory access, so a re-run and any fault see the state at the start of the instruction.
+
+- Registers are pinned, memory goes through flat page tables, and flags use the host's NZCV. The lazy flag state is written only where a liveness pass and a short look into the successor blocks say it may be read.
+- x87 loads, stores and arithmetic are native.
+- Code pages are write protected for x86 and for 68k writes and DMA, so self-modifying and reloaded code is noticed. A page rewritten 16 times stays with the interpreter.
+- `QRX86_NOJIT` in the host environment turns it off. `QRX86_PROF=1` prints a profile that also names x86 addresses.
+- `tests/qrx86_jit_tests.c` runs random instruction sequences through both and compares registers, flags, x87 state and memory: 200,000 cases differ in none, see `qrx86-jit-differential.log`. It also tests self-modifying code and that a linked loop ends at its budget.
+
+### Frames
+
+- A Flip or `WaitForVerticalBlank` now waits for a 60 Hz tick, because games take their pace from it. `DDFLIP_NOVSYNC` and `QRX_WIN_NOVSYNC` skip the wait. The D3D7 test does 600 flips in 9990 ms.
+- Door service 5 converts a whole frame on the host. The 68k needed a load, a table look-up and a store per pixel.
+
+### Window mode
+
+Fullscreen DirectDraw programs now get a centred window of the mode they asked for, on the desktop. `qrx-win32 --fullscreen` or `SetEnv QRX_WIN_MODE fullscreen` gives the old behaviour. Direct3D, OpenGL, Glide and Vulkan output is drawn by the Mac into the whole ARMithlon window: it is not in a window of its own on the desktop.
+
+### Icons
+
+`tools/armithlon/desktop` adds to QRXDesktop, built by `tools/armithlon/build-desktop.py` without touching the canonical source:
+
+- Windows icons from the resources of `.exe`, `.dll` and `.scr` files, and `.ico` files. 70 of 86 programs tried gave one; the 16 others were not looked at one by one.
+- AmigaOS classic images, converted with the Workbench colours because a deep screen's low pens hold something else. GlowIcons and AROS PNG icons through icon.library, shrunk when too large. NewIcons take the same path but no sample was available.
+- A double click on a Windows program runs it on QRX86, in its own folder. Before, it went to `QRXWinRun`, which looks for a Wine that is not shipped.
+- The file manager lists 256 entries, not 64.
+
+The shipped desktop had Pack and Unpack menus that are not in the canonical source. They come from a local snapshot and are now `archive-actions.patch`, so a rebuild keeps them.
+
+### All programs in windows_games
+
+`windows-games-survey.txt` has one line per program and `windows-games-contact-sheet.png` the screens. All 68 ran for 44 s without input, so this says how far each one starts, not that it can be played. Frame rates are from five engines running at once.
+
+| Result | Programs, by entry in the survey file |
+| --- | --- |
+| Picture and frame rate | daytona (about 60 in a race, measured alone), doom95 35, nrse95d 31, sega_rally 30, vsquad 30, nevdemo_full 25, pbdemo title. GTA 1 60 to 70, measured alone |
+| Window and a first screen or dialog, waiting for input | tr2demo1, tr2demo2, raptorshr, gextrial, nfighter, socdemo, shadowsdemo, turok3dfx, turok2demo |
+| Window stays black within 44 s | abeodd, ff7demo(battle), ft2dem95, mdkpcw95, nfs2demo, nfs2sea, s3d_demo, MSIFDEMO |
+| No window within 44 s | beavislg, bunghole, ch2setup, dnmp_demo_101, mj97, mscasinotrial, MSpuzzle |
+| Page fault, not examined yet | BB2001, FinalFantasy, HaloTrial, MtM2trial, naboo, pitdroidsdemo_pc, cursedemo, sk_demo, vf2_demo, w95turokdemov101, islepro |
+| Missing function | MaxPayneDemo1-05 (`_EH_prolog`), sc3000_demo (`operator new`), diablosw (`SHGetDesktopFolder`), bossw13 (`OpenMutexA`, added after this run and not run again) |
+| Asks for data, a CD or its launcher, or refuses | MSAoE, fury3x, heltrial, mtmtrial, descent3demo2, rashdemo, b2demoa, aoe2demo(Japanese), roguedemo (assertion), sonic_cd (256 colours, still refused) |
+| 16-bit, which QRX86 does not run | Setups of Worms2Demo23Feb98i, ff7demo, ft2dem31, jamxdemo, and freddi, galac15 |
+| Other installers | clawdins and gmdemins: extraction fails. J2swc123 and SCDemo stop at their first message, DiabloIIDemo and MaxPayne2DemoSetup show nothing |
+
+Input and sound were not judged by a person in any of them. Installers ran only as far as listed, so programs unpacked with host tools can lack settings their setup would write.

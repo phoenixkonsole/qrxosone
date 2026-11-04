@@ -147,7 +147,7 @@ uint32_t qw_data(qwin *w, uint32_t n)
 }
 
 /* ---------------------------------------------------------------- thunks */
-static const qhle *tables[] = { qw_compat, qw_net, qw_files, qw_extra, qw_kernel32, qw_user32, qw_gdi32, qw_misc, qw_ansi, qw_dx, NULL };
+static const qhle *tables[] = { qw_compat, qw_net, qw_dplay, qw_files, qw_extra, qw_kernel32, qw_user32, qw_gdi32, qw_misc, qw_ansi, qw_dx, NULL };
 
 static int dllcmp(const char *a, const char *b)
 {
@@ -200,6 +200,23 @@ static int host_api_call(qwin *w, uint32_t op, uint32_t idx, const char *name)
 }
 int qw_host_bind(qwin *w, uint32_t idx) { return host_api_call(w, 1, idx, w->thunk_name[idx]); }
 int qw_host_has(qwin *w, const char *name) { return host_api_call(w, 0, 0, name); }
+/* -v: which API functions take the time, printed with the frame rate. */
+static uint32_t g_api_calls[QW_THUNK_MAX], g_api_ms[QW_THUNK_MAX];
+void qw_api_report(qwin *w)
+{
+    int n;
+    for (n = 0; n < 6; n++) {
+        uint32_t best = 0;
+        int i, b = -1;
+        for (i = 0; i < w->nthunk; i++) if (g_api_ms[i] * 1000u + g_api_calls[i] > best) { best = g_api_ms[i] * 1000u + g_api_calls[i]; b = i; }
+        if (b < 0) break;
+        qw_log(w, "  API %s: %u calls, %u ms", w->thunk_name[b], g_api_calls[b], g_api_ms[b]);
+        g_api_calls[b] = g_api_ms[b] = 0;
+    }
+    memset(g_api_calls, 0, sizeof(g_api_calls));
+    memset(g_api_ms, 0, sizeof(g_api_ms));
+}
+
 static int hle_hook(x86cpu *c, uint32_t idx)
 {
     qwin *w = (qwin *)c->user;
@@ -224,6 +241,12 @@ static int hle_hook(x86cpu *c, uint32_t idx)
     ret = x86_rd32(c, sp);
     for (i = 0; i < 16; i++) a[i] = x86_rd32(c, sp + 4 + (uint32_t)i * 4);
     if (w->trace) qw_log(w, "-> %s(%08x, %08x, %08x, %08x, %08x, %08x, %08x) ret=%08x", e->name, a[0], a[1], a[2], a[3], a[4], a[5], a[6], ret);
+    if (w->verbose) {
+        uint64_t t0 = w->be->now(w);
+        r = e->fn(w, a);
+        g_api_calls[idx]++;
+        g_api_ms[idx] += (uint32_t)(w->be->now(w) - t0);
+    } else
     r = e->fn(w, a);
 #ifdef QRX_EXEC_PROFILE
     {
@@ -279,6 +302,9 @@ int qw_load(qwin *w, const char *path, int argc, char **argv)
     c->user = w;
     c->hle_base = QW_THUNK_BASE;
     c->hle_count = QW_THUNK_MAX;
+    /* A program can import a variable where we have a function: it then reads the thunk's
+     * address as data. Zeroes there let it go on; execution never reaches this memory. */
+    x86_map(c, QW_THUNK_BASE, QW_THUNK_MAX, 0);
     c->hle_hook = hle_hook;
     w->data_next = QW_DATA_BASE;
     x86_map(c, QW_DATA_BASE, QW_DATA_SIZE, 1);
