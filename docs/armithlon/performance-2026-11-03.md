@@ -311,7 +311,7 @@ The shipped desktop had Pack and Unpack menus that are not in the canonical sour
 
 | Result | Programs, by entry in the survey file |
 | --- | --- |
-| Picture and frame rate | daytona (about 60 in a race, measured alone), doom95 35, nrse95d 31, sega_rally 30, vsquad 30, nevdemo_full 25, pbdemo title. GTA 1 60 to 70, measured alone |
+| Picture and frame rate | daytona (track missing in this run, see the correction below), doom95 35, nrse95d 31, sega_rally 30, vsquad 30, nevdemo_full 25, pbdemo title. GTA 1 60 to 70, measured alone |
 | Window and a first screen or dialog, waiting for input | tr2demo1, tr2demo2, raptorshr, gextrial, nfighter, socdemo, shadowsdemo, turok3dfx, turok2demo |
 | Window stays black within 44 s | abeodd, ff7demo(battle), ft2dem95, mdkpcw95, nfs2demo, nfs2sea, s3d_demo, MSIFDEMO |
 | No window within 44 s | beavislg, bunghole, ch2setup, dnmp_demo_101, mj97, mscasinotrial, MSpuzzle |
@@ -322,3 +322,38 @@ The shipped desktop had Pack and Unpack menus that are not in the canonical sour
 | Other installers | clawdins and gmdemins: extraction fails. J2swc123 and SCDemo stop at their first message, DiabloIIDemo and MaxPayne2DemoSetup show nothing |
 
 Input and sound were not judged by a person in any of them. Installers ran only as far as listed, so programs unpacked with host tools can lack settings their setup would write.
+
+## Update 2026-11-05: corrections, input, desktop look
+
+### Corrections to the fourth part
+
+- Daytona's "about 60 FPS" and "correct graphics" were wrong. The track was missing. The interpreter runs REP string instructions in portions and stays on the instruction until the count is done, and a translated block went on to the next instruction regardless, losing the rest of the copy. Blocks now leave when the interpreter is somewhere else. The differential test had no REP and now has it, with large counts. With the track, Daytona runs at 40 to 50 frames per second in a race, measured with the game paused by a test key, so a race proper is still to be measured.
+- Fullscreen programs no longer get a window by default, which was a misreading of the request. They get the display as on Windows. Alt+Enter toggles any exclusive DirectDraw program at any time, and `--window` or `SetEnv QRX_WIN_MODE window` starts in a window.
+
+### Open: GTA 1 fullscreen on the desktop
+
+GTA 1 stalls while loading after the menu when it runs fullscreen with QRXDesktop running: no x86 runs, 68k code keeps running. It happens with the JIT off and with the runtime of the previous commit, so neither is the cause. Without the desktop, or in a window on it, it runs at 70 frames per second. The cause is not found. `S:GTA` starts it in a window until then.
+
+### Input
+
+- `QRXHostInput` polled with `Delay(1)`: at best 30 updates a second, with keys in bursts. It polls every 2 ms now through timer.device and passes only the newest pointer position of a burst.
+- The virtual key was taken from the character the key gives with the current qualifiers. Ctrl, Alt or Shift could turn that into nothing, and the key press was lost. It now comes from the key alone, and a release uses the key its press gave.
+- macOS auto repeat is marked as a repeat and dropped for programs that present DirectDraw frames. Keys are released when the window loses focus, on the Mac and in the guest.
+- Tested with injected chords: Ctrl+X, Ctrl+Z, Shift+1, Shift+A all arrive with their releases. Nobody has yet judged this by hand.
+
+### Dragging windows
+
+The terminal followed the pointer 30 times a second, 58 pixels behind. It is now 53 times a second, 34 pixels behind, with the pointer moving 22 pixels per display frame. A drag waits for its last `MoveWindow`, because the call is asynchronous and relative, and refreshes no longer reload the palette. `QRX_TEST_DRAG` injects a drag, and building with `QRX_DRAG_STATS=1` makes the desktop log the numbers.
+
+### Desktop look
+
+- `tools/armithlon/desktop/gen-assets.swift` draws three wallpapers (Convergence, Horizon, Aurora) in four sizes, and seven icons for each of the four designs. `build-desktop.py` puts them into the system tree, about 44 MB that is not in the repository.
+- All designs use their own icons for drives, drawers and files without a picture of their own. Programs keep theirs.
+- Drives: the desktop now lists every mounted volume and APPS:, which is mounted as a device and has no volume entry.
+- `QRXDesktopPrefs`, opened from Settings, changes wallpaper and pointer. The desktop applies and saves them at once. The pointer is the Mac's own, chosen through door service 6. The five pointers were not looked at in the window, because captures do not show the host pointer.
+
+### Games so far
+
+Going through them one by one has only started. Sonic CD now passes its 256 colour test, loads its DLLs from subfolders and has lz32 with SZDD support, and then faults reading a sequence in DINO2D.DLL. The fixes on the way help others too: `LoadLibrary` with a path, `RealizePalette`, off-screen window positions.
+
+16-bit programs are not started on. They need an NE loader, segmented addressing in the core and the Win16 API.

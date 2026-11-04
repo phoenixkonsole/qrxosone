@@ -28,8 +28,9 @@ static int real_main(int argc, char **argv)
     int i = 1, rc, chdir_exe = 0;
     uint64_t t0;
     memset(w, 0, sizeof(*w));
-    /* Fullscreen programs stay in a window unless told otherwise: SetEnv QRX_WIN_MODE fullscreen */
-    w->windowed = !(getenv("QRX_WIN_MODE") && !strcmp(getenv("QRX_WIN_MODE"), "fullscreen"));
+    /* As on Windows: a program that asks for the display gets it. Alt+Enter toggles at any
+     * time; SetEnv QRX_WIN_MODE window starts in a window. */
+    w->windowed = getenv("QRX_WIN_MODE") && !strcmp(getenv("QRX_WIN_MODE"), "window");
     w->no_vsync = getenv("QRX_WIN_NOVSYNC") != NULL;
     w->lang = 0x0407;
     w->log = stderr;

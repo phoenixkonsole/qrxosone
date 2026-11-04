@@ -121,7 +121,7 @@ static void ar_create(qwin *w, qwnd *t)
         b->h = t->h;
         b->win->UserPort = g_port;
         b->win->UserData = (APTR)b;
-        ModifyIDCMP(b->win, IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_ACTIVEWINDOW);
+        ModifyIDCMP(b->win, IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_ACTIVEWINDOW | IDCMP_INACTIVEWINDOW);
         /* A screen opened right after closing another one does not always get the input. */
         ScreenToFront(b->scr);
         ActivateWindow(b->win);
@@ -135,8 +135,8 @@ static void ar_create(qwin *w, qwnd *t)
     latin1(b->title, t->text, sizeof(b->title));
     /* Programs centre their window with screen metrics of a display that is not this
      * one: never leave a window off screen. */
-    if (t->x + t->cw <= 0 || t->x < 0) t->x = 0;
-    if (t->y + t->ch <= 0 || t->y < 0) t->y = b->mbh;
+    if (t->x < 0 || (g_scr && t->x >= g_scr->Width)) t->x = g_scr ? (g_scr->Width > t->cw ? (g_scr->Width - t->cw) / 2 : 0) : 0;
+    if (t->y < 0 || (g_scr && t->y >= g_scr->Height)) t->y = g_scr ? (g_scr->Height > t->ch ? (g_scr->Height - t->ch) / 2 : b->mbh) : b->mbh;
     b->win = OpenWindowTags(NULL,
         WA_Left, t->x - (popup ? 0 : g_scr->WBorLeft), WA_Top, t->y - b->mbh - (popup ? 0 : g_scr->WBorTop + g_scr->Font->ta_YSize + 1),
         WA_InnerWidth, t->cw, WA_InnerHeight, t->ch + b->mbh,
@@ -149,7 +149,7 @@ static void ar_create(qwin *w, qwnd *t)
     if (!b->win) { free(b); qw_log(w, "AROS: OpenWindow failed"); return; }
     b->win->UserPort = g_port;
     b->win->UserData = (APTR)b;
-    ModifyIDCMP(b->win, IDCMP_CLOSEWINDOW | IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_ACTIVEWINDOW | IDCMP_REFRESHWINDOW | IDCMP_CHANGEWINDOW);
+    ModifyIDCMP(b->win, IDCMP_INACTIVEWINDOW | IDCMP_CLOSEWINDOW | IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_ACTIVEWINDOW | IDCMP_REFRESHWINDOW | IDCMP_CHANGEWINDOW);
     t->be = b;
     t->present = 1;
     b->full = 1;
@@ -357,18 +357,36 @@ static int translate(qwin *w, struct IntuiMessage *im, qevent *ev)
         case MIDDLEUP: ev->type = QE_MOUSEUP; ev->button = 3; return 1;
         }
         return 0;
+    case IDCMP_INACTIVEWINDOW:                      /* key releases now go elsewhere */
+        memset(w->keystate, 0, sizeof(w->keystate));
+        return 0;
     case IDCMP_RAWKEY: {
         struct InputEvent ie;
         char buf[8];
         LONG n;
+        static uint8_t down_vk[128];
+        UWORD raw = im->Code & 0x7F;
         memset(&ie, 0, sizeof(ie));
         ie.ie_Class = IECLASS_RAWKEY;
-        ie.ie_Code = im->Code & 0x7F;
+        ie.ie_Code = raw;
+        /* Games take their pace from the held state. Windows programs get the repeat. */
+        if ((im->Qualifier & IEQUALIFIER_REPEAT) && w->frames > 0) return 0;
         ie.ie_Qualifier = im->Qualifier;
         n = MapRawKey(&ie, (STRPTR)buf, sizeof(buf), NULL);
         ev->ch = n == 1 ? (unsigned char)buf[0] : 0;
-        ev->vk = vk_of_raw(im->Code & 0x7F, ev->ch);
-        ev->type = (im->Code & 0x80) ? QE_KEYUP : QE_KEYDOWN;
+        /* The virtual key is the key itself. Taken with Ctrl, Alt or Shift held, the
+         * character can be anything or nothing, and the key press would be lost. */
+        if (im->Code & 0x80) {
+            ev->vk = down_vk[raw];
+            ev->type = QE_KEYUP;
+            down_vk[raw] = 0;
+            return ev->vk != 0;
+        }
+        ie.ie_Qualifier = 0;
+        n = MapRawKey(&ie, (STRPTR)buf, sizeof(buf), NULL);
+        ev->vk = vk_of_raw(raw, n == 1 ? (unsigned char)buf[0] : 0);
+        down_vk[raw] = (uint8_t)ev->vk;
+        ev->type = QE_KEYDOWN;
         return ev->vk != 0;
     }
     }

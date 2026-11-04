@@ -110,7 +110,48 @@ static unsigned rawkey(unsigned k){
  0xff,0xff,0x5f,0x70,0x48,0x46,0x53,0x71,0x51,0x49,0x50,0x4f,0x4e,0x4d,0x4c,0xff};
  return k<128?table[k]:0xff;
 }
+/* The pointer on the guest screen is the Mac's own: the desktop picks which one. */
+static NSCursor *guestCursor;
+static NSCursor *makeCursor(unsigned index){
+ NSSize size=NSMakeSize(index==4?36:24,index==4?36:24);
+ NSImage *img=[NSImage imageWithSize:size flipped:YES drawingHandler:^BOOL(NSRect r){
+  (void)r;
+  CGFloat k=size.width/24.0;
+  if(index==3){
+   [[NSColor colorWithRed:0.22 green:0.9 blue:0.78 alpha:1] setStroke];
+   NSBezierPath *p=[NSBezierPath bezierPath];p.lineWidth=2;
+   [p moveToPoint:NSMakePoint(12,1)];[p lineToPoint:NSMakePoint(12,9)];
+   [p moveToPoint:NSMakePoint(12,15)];[p lineToPoint:NSMakePoint(12,23)];
+   [p moveToPoint:NSMakePoint(1,12)];[p lineToPoint:NSMakePoint(9,12)];
+   [p moveToPoint:NSMakePoint(15,12)];[p lineToPoint:NSMakePoint(23,12)];
+   [p appendBezierPathWithOvalInRect:NSMakeRect(8,8,8,8)];
+   [p stroke];
+   return YES;
+  }
+  NSBezierPath *a=[NSBezierPath bezierPath];
+  [a moveToPoint:NSMakePoint(2*k,2*k)];[a lineToPoint:NSMakePoint(2*k,19*k)];[a lineToPoint:NSMakePoint(7*k,15*k)];
+  [a lineToPoint:NSMakePoint(11*k,22*k)];[a lineToPoint:NSMakePoint(14*k,20.5*k)];[a lineToPoint:NSMakePoint(10.5*k,14*k)];
+  [a lineToPoint:NSMakePoint(16*k,13.5*k)];[a closePath];
+  a.lineWidth=1.4*k;a.lineJoinStyle=NSLineJoinStyleRound;
+  NSColor *fill,*line;
+  if(index==1){fill=[NSColor colorWithRed:0.05 green:0.08 blue:0.15 alpha:1];line=[NSColor colorWithRed:0.22 green:0.9 blue:0.78 alpha:1];}
+  else if(index==2){fill=[NSColor colorWithRed:0.95 green:0.25 blue:0.15 alpha:1];line=[NSColor blackColor];}
+  else{fill=[NSColor whiteColor];line=[NSColor blackColor];}
+  [fill setFill];[a fill];[line setStroke];[a stroke];
+  return YES;
+ }];
+ return [[NSCursor alloc] initWithImage:img hotSpot:NSMakePoint(index==3?12:2*size.width/24.0,index==3?12:2*size.width/24.0)];
+}
+void qrx_host_set_pointer(uint32_t index){
+ dispatch_async(dispatch_get_main_queue(),^{
+  guestCursor=(index==0||index>4)?nil:makeCursor(index);
+  NSWindow *win=NSApp.mainWindow?:NSApp.windows.firstObject;
+  [win invalidateCursorRectsForView:win.contentView];
+  [(guestCursor?:[NSCursor arrowCursor]) set];
+ });
+}
 @implementation QRXAROSView
+- (void)resetCursorRects{[self addCursorRect:self.bounds cursor:guestCursor?:[NSCursor arrowCursor]];}
 - (BOOL)acceptsFirstResponder{return YES;}
 - (BOOL)isFlipped{return NO;}
 - (BOOL)wantsUpdateLayer{return YES;}
@@ -119,9 +160,20 @@ static unsigned rawkey(unsigned k){
  l.framebufferOnly=YES;l.displaySyncEnabled=YES;
  return l;
 }
+static uint8_t keysDown[128];
 - (void)key:(NSEvent*)e down:(BOOL)down {
- unsigned code=rawkey(e.keyCode);if(code!=0xff)qrx_media_push_input(&media,((down?1u:2u)<<24)|(code<<16));
+ unsigned code=rawkey(e.keyCode);
+ if(code==0xff||code>127)return;
+ /* The auto repeat is marked: it is not a new press. */
+ BOOL rep=down&&e.type==NSEventTypeKeyDown&&e.isARepeat;
+ keysDown[code]=down;
+ qrx_media_push_input(&media,((down?1u:2u)<<24)|(code<<16)|(rep?1u:0u));
 }
+/* macOS sends no key up to a window that lost the focus: such a key would stay held. */
+- (void)releaseAllKeys{
+ for(unsigned k=0;k<128;k++)if(keysDown[k]){keysDown[k]=0;qrx_media_push_input(&media,(2u<<24)|(k<<16));}
+}
+- (BOOL)resignFirstResponder{[self releaseAllKeys];return [super resignFirstResponder];}
 - (void)keyDown:(NSEvent*)e{[self key:e down:YES];}
 - (void)keyUp:(NSEvent*)e{[self key:e down:NO];}
 - (void)flagsChanged:(NSEvent*)e {
@@ -345,16 +397,37 @@ int qrx_aros_window_pump(void){@autoreleasepool{
    static NSDate *keysStart;static const char *keysNext;static double releaseAt;static unsigned heldKey;
    if(!keysStart&&getenv("QRX_TEST_KEYS")){keysStart=[NSDate date];keysNext=getenv("QRX_TEST_KEYS");}
    if(keysStart){
+    static struct {unsigned key;double at;} held[8];
     double t=-[keysStart timeIntervalSinceNow];
-    if(heldKey&&t>=releaseAt){qrx_media_push_input(&media,(2u<<24)|(heldKey<<16));heldKey=0;}
-    if(keysNext&&*keysNext&&!heldKey){
+    for(int i=0;i<8;i++)if(held[i].key&&t>=held[i].at){qrx_media_push_input(&media,(2u<<24)|(held[i].key<<16));held[i].key=0;}
+    while(keysNext&&*keysNext){
      char *e;double at=strtod(keysNext,&e);
-     if(*e==':'&&t>=at){
-      unsigned k=(unsigned)strtoul(e+1,&e,0);double hold=0.15;
-      if(*e==':')hold=strtod(e+1,&e);
-      qrx_media_push_input(&media,(1u<<24)|(k<<16));heldKey=k;releaseAt=t+hold;
-      keysNext=*e==','?e+1:"";
-     }
+     if(*e!=':'||t<at)break;
+     unsigned k=(unsigned)strtoul(e+1,&e,0);double hold=0.15;
+     if(*e==':')hold=strtod(e+1,&e);
+     qrx_media_push_input(&media,(1u<<24)|(k<<16));
+     for(int i=0;i<8;i++)if(!held[i].key){held[i].key=k;held[i].at=t+hold;break;}
+     keysNext=*e==','?e+1:"";
+    }
+   }
+  }
+  /* Unattended input check: QRX_TEST_DRAG=seconds:x0:y0:x1:y1:duration, left button held,
+   * back and forth along the line, one position per display frame. */
+  {
+   static NSDate *dragStart;static double dragAt,dragDur;static unsigned dx0,dy0,dx1,dy1;static int dragState;
+   if(!dragStart&&getenv("QRX_TEST_DRAG")){
+    dragStart=[NSDate date];
+    sscanf(getenv("QRX_TEST_DRAG"),"%lf:%u:%u:%u:%u:%lf",&dragAt,&dx0,&dy0,&dx1,&dy1,&dragDur);
+   }
+   if(dragStart&&dragState<2){
+    double t=-[dragStart timeIntervalSinceNow]-dragAt;
+    if(t>=0){
+     double f=t/1.0;f-=floor(f);f=f<0.5?f*2.0:2.0-f*2.0;   /* one second there and back */
+     unsigned x=(unsigned)(dx0+(dx1-(double)dx0)*f),y=(unsigned)(dy0+(dy1-(double)dy0)*f);
+     qrx_media_set_mouse(&media,x,y,dragState?1:0);
+     qrx_media_push_input(&media,(3u<<24)|((x&4095u)<<12)|(y&4095u));
+     if(!dragState){qrx_media_push_input(&media,(4u<<24)|1u);dragState=1;}
+     if(t>=dragDur){qrx_media_push_input(&media,(4u<<24)|0u);dragState=2;}
     }
    }
   }

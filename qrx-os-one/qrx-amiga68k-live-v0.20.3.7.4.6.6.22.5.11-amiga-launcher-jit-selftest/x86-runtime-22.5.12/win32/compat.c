@@ -1170,6 +1170,96 @@ FN(c_StringFromGUID2) {
 FN(c_OpenEventA) { UNUSED; w->last_error = 2; return 0; }
 FN(c_DdeInitializeA) { if (a[0]) WR32(a[0], 1); return 0; }
 FN(c_GetKeyboardLayoutList) { if (a[0] > 0 && a[1]) WR32(a[1], 0x04070407u); return 1; }
+/* ---- lz32: files packed with COMPRESS.EXE ("SZDD"), and plain ones, read through one call */
+#define LZ_MAX 16
+#define LZ_BASE 0x7A000000u
+static struct { uint8_t *data; uint32_t size, pos; } g_lz[LZ_MAX];
+static uint8_t *lz_expand(const uint8_t *src, uint32_t n, uint32_t *out_size)
+{
+    static const uint8_t magic[8] = { 'S', 'Z', 'D', 'D', 0x88, 0xF0, 0x27, 0x33 };
+    uint8_t win[4096], *out;
+    uint32_t want, i = 14, o = 0, w = 4096 - 16, k;
+    if (n < 14 || memcmp(src, magic, 8)) return NULL;
+    want = (uint32_t)src[10] | ((uint32_t)src[11] << 8) | ((uint32_t)src[12] << 16) | ((uint32_t)src[13] << 24);
+    out = (uint8_t *)malloc(want ? want : 1);
+    if (!out) return NULL;
+    memset(win, ' ', sizeof(win));
+    while (i < n && o < want) {
+        int flags = src[i++], b;
+        for (b = 0; b < 8 && i < n && o < want; b++, flags >>= 1) {
+            if (flags & 1) {
+                out[o++] = win[w] = src[i++];
+                w = (w + 1) & 4095;
+            } else {
+                uint32_t pos, len;
+                if (i + 1 >= n) break;
+                pos = src[i] | ((src[i + 1] & 0xF0u) << 4);
+                len = (src[i + 1] & 0x0Fu) + 3;
+                i += 2;
+                for (k = 0; k < len && o < want; k++) {
+                    out[o++] = win[w] = win[(pos + k) & 4095];
+                    w = (w + 1) & 4095;
+                }
+            }
+        }
+    }
+    *out_size = o;
+    return out;
+}
+FN(c_LZOpenFileA) {
+    const qhle *op = qw_find_hle("kernel32", "_lopen"), *sk = qw_find_hle("kernel32", "_llseek"),
+               *rd = qw_find_hle("kernel32", "_lread"), *cl = qw_find_hle("kernel32", "_lclose");
+    uint32_t b[16], h, size, tmp;
+    int i;
+    uint8_t *data, *x;
+    if (!op || !sk || !rd || !cl) return 0xFFFFFFFFu;
+    for (i = 0; i < LZ_MAX; i++) if (!g_lz[i].data) break;
+    if (i == LZ_MAX) return 0xFFFFFFFFu;
+    memset(b, 0, sizeof(b)); b[0] = a[0]; b[1] = 0;
+    h = op->fn(w, b);
+    if (h == 0xFFFFFFFFu) return 0xFFFFFFFFu;
+    memset(b, 0, sizeof(b)); b[0] = h; b[1] = 0; b[2] = 2;
+    size = sk->fn(w, b);
+    memset(b, 0, sizeof(b)); b[0] = h; b[1] = 0; b[2] = 0;
+    sk->fn(w, b);
+    tmp = qw_alloc(w, size ? size : 1);
+    data = (uint8_t *)malloc(size ? size : 1);
+    memset(b, 0, sizeof(b)); b[0] = h; b[1] = tmp; b[2] = size;
+    rd->fn(w, b);
+    if (data) x86_read_mem(C, tmp, data, size);
+    qw_free(w, tmp);
+    memset(b, 0, sizeof(b)); b[0] = h;
+    cl->fn(w, b);
+    if (!data) return 0xFFFFFFFFu;
+    x = lz_expand(data, size, &tmp);
+    if (x) { free(data); data = x; size = tmp; }
+    g_lz[i].data = data; g_lz[i].size = size; g_lz[i].pos = 0;
+    return LZ_BASE + (uint32_t)i;
+}
+FN(c_LZRead) {
+    uint32_t i = a[0] - LZ_BASE, n = a[2];
+    if (i >= LZ_MAX || !g_lz[i].data) return 0xFFFFFFFFu;
+    if (n > g_lz[i].size - g_lz[i].pos) n = g_lz[i].size - g_lz[i].pos;
+    x86_write_mem(C, a[1], g_lz[i].data + g_lz[i].pos, n);
+    g_lz[i].pos += n;
+    return n;
+}
+FN(c_LZSeek) {
+    uint32_t i = a[0] - LZ_BASE;
+    int64_t p;
+    (void)w;
+    if (i >= LZ_MAX || !g_lz[i].data) return 0xFFFFFFFFu;
+    p = a[2] == 0 ? (int64_t)(int32_t)a[1] : a[2] == 1 ? (int64_t)g_lz[i].pos + (int32_t)a[1] : (int64_t)g_lz[i].size + (int32_t)a[1];
+    if (p < 0 || p > (int64_t)g_lz[i].size) return 0xFFFFFFFFu;
+    g_lz[i].pos = (uint32_t)p;
+    return g_lz[i].pos;
+}
+FN(c_LZClose) {
+    uint32_t i = a[0] - LZ_BASE;
+    (void)w;
+    if (i < LZ_MAX && g_lz[i].data) { free(g_lz[i].data); g_lz[i].data = NULL; }
+    return 0;
+}
 FN(c_RegisterClipboardFormatA) { static uint32_t next = 0xC000u; UNUSED; return next++; }
 FN(c_CoRegisterClassObject) { if (a[4]) WR32(a[4], 1); return 0; }
 FN(c_acmMetrics) { if (a[2]) WR32(a[2], a[1] == 50 ? 50u : 0u); return 0; }
@@ -1306,6 +1396,8 @@ const qhle qw_compat[] = {
     { "msacm32", "acmStreamPrepareHeader", 3, c_acmNoDriver }, { "msacm32", "acmStreamUnprepareHeader", 3, c_ok0 }, { "msacm32", "acmStreamConvert", 3, c_acmNoDriver },
     { "kernel32", "LoadLibraryExA", 3, c_LoadLibraryExA }, { "kernel32", "DisableThreadLibraryCalls", 1, c_ok1 },
     { "user32", "RegisterClipboardFormatA", 1, c_RegisterClipboardFormatA },
+    { "lz32", "LZOpenFileA", 3, c_LZOpenFileA }, { "lz32", "LZRead", 3, c_LZRead }, { "lz32", "LZSeek", 3, c_LZSeek },
+    { "lz32", "LZClose", 1, c_LZClose }, { "lz32", "LZInit", 1, c_ok0 }, { "lz32", "LZStart", 0, c_ok1 }, { "lz32", "LZDone", 0, c_ok0 },
     { "user32", "SetMessageQueue", 1, c_ok1 }, { "user32", "GetKeyboardLayoutList", 2, c_GetKeyboardLayoutList },
     { "kernel32", "OpenMutexA", 3, c_OpenEventA },
     { "kernel32", "OpenEventA", 3, c_OpenEventA }, { "msacm32", "acmFormatSuggest", 5, c_acmNoDriver },

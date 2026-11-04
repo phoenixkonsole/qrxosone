@@ -1,3 +1,4 @@
 ; Start Grand Theft Auto from APPS:. Install it first with tools/armithlon/install-gta1.sh
 CD APPS:windows_games/gta1/WINO
-C:qrx-win32 "APPS:windows_games/gta1/WINO/Grand Theft Auto.exe"
+; In a window for now: fullscreen on the QRX desktop stalls after the menu, see docs/armithlon/performance-2026-11-03.md
+C:qrx-win32 --window "APPS:windows_games/gta1/WINO/Grand Theft Auto.exe"

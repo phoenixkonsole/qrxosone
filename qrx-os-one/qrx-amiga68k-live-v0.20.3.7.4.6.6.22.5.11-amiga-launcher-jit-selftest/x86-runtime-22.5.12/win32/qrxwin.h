@@ -275,6 +275,8 @@ int  qw_run(qwin *w);
 uint32_t qw_thunk(qwin *w, const char *dll, const char *name);
 /* Functions the host implements through the ARMithlon door (3D APIs). */
 void qw_api_report(struct qwin *w);
+void qw_dd_toggle_window(struct qwin *w);
+int qw_needs_256_colours(struct qwin *w);
 int qw_host_bind(qwin *w, uint32_t idx);
 int qw_host_has(qwin *w, const char *name);
 uint32_t qw_alloc(qwin *w, uint32_t n);

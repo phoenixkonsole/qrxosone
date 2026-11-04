@@ -1,5 +1,6 @@
 #include "qrx86_door.h"
 #include "qrx_hostmidi.h"
+void qrx_host_set_pointer(uint32_t index);
 #include "qrx_hostnet.h"
 /* The host build of the same interpreter the guest runs, with its internals in
  * reach: the door keeps a shadow page table of host pointers. */
@@ -215,6 +216,7 @@ static void api_service(QRXFullCPU *c,uint8_t *q){
 void qrx_host_midi_short(uint32_t msg){(void)msg;}
 void qrx_host_midi_sysex(const uint8_t *d,uint32_t n){(void)d;(void)n;}
 void qrx_host_midi_reset(void){}
+void qrx_host_set_pointer(uint32_t i){(void)i;}
 #endif
 static void midi_service(QRXFullCPU *c,uint8_t *q){
     uint32_t op=rd32(q+12);
@@ -321,6 +323,8 @@ static void service_call(QRXFullCPU *c,uint32_t block){
     if((uint64_t)block+128u>c->vm.ram.size)return;
     uint8_t *q=c->ram_owned+block;
     uint32_t svc=rd32(q);
+    /* Sent by the desktop without an x86 process around: no page table to look at. */
+    if(svc==6){qrx_host_set_pointer(rd32(q+12));return;}
     shadow_sync(c,rd32(q+8),rd32(q+4));
     if(svc==1)sound_service(c,q);
     else if(svc==2)api_service(c,q);

@@ -424,7 +424,7 @@ FN(dd_CreateSurface) {                  /* (this, desc, pp, outer) */
     if (!dd || !d) return DDERR_INVALIDPARAMS;
     flags = RD32(d + 4); caps = ((flags & 1) || RD32(d + 104)) ? RD32(d + 104) : 0x40;   /* Doom95 fills caps without the flag */
     if (w->verbose) qw_log(w, "DirectDraw: CreateSurface flags=%08x caps=%08x back=%u size=%ux%u", flags, caps, RD32(d + 20), RD32(d + 12), RD32(d + 8));
-    if (!dd->mw) { dd->mw = 640; dd->mh = 480; dd->mbpp = 16; }          /* no SetDisplayMode: desktop-like 640x480x16 */
+    if (!dd->mw) { dd->mw = 640; dd->mh = 480; dd->mbpp = qw_needs_256_colours(w) ? 8 : 16; }   /* no SetDisplayMode: the desktop's */
     bpp = (flags & 0x1000) ? (int)RD32(d + 84) : dd->mbpp;
     if (bpp != 8 && bpp != 16 && bpp != 24 && bpp != 32) bpp = dd->mbpp;
     if (caps & 0x200) {                                                    /* PRIMARYSURFACE */
@@ -562,6 +562,34 @@ static uint32_t set_mode(qwin *w, uint32_t self, uint32_t mw, uint32_t mh, uint3
     if (w->verbose) qw_log(w, "DirectDraw: display mode %ux%ux%u", mw, mh, bpp);
     fullscreen(w, dd, 1);
     return DD_OK;
+}
+/* Alt+Enter: the program keeps its mode, only where the frames go changes. */
+void qw_dd_toggle_window(qwin *w)
+{
+    int i;
+    for (i = 0; i < DX_MAX; i++) {
+        dxobj *dd = &g_o[i];
+        qwnd *t;
+        if (dd->type != OB_DD || !dd->exclusive || !dd->hwnd || !dd->mw) continue;
+        t = W(w, dd->hwnd);
+        if (t) t = win_top(w, t);
+        if (!t || !w->be->reopen) continue;
+        fb_detach(w, 1);
+        w->windowed = !w->windowed;
+        t->frame_direct = 0;
+        if (w->windowed) {
+            t->force_frame = 1;
+            t->fs_w = t->fs_h = t->fs_bpp = 0;
+            t->nl = t->nr = t->nt = t->nb = 0;
+        } else {
+            t->force_frame = 0;
+            t->fs_w = dd->mw; t->fs_h = dd->mh; t->fs_bpp = dd->mbpp;
+        }
+        t->cw = dd->mw; t->ch = dd->mh;
+        if (t->be) w->be->reopen(w, t);
+        if (w->verbose) qw_log(w, "DirectDraw: Alt+Enter, now %s", w->windowed ? "in a window" : "fullscreen");
+        return;
+    }
 }
 FN(dd_RestoreDisplayMode) { dxobj *dd = ob(w, a[0], OB_DD); if (dd) fullscreen(w, dd, 0); return DD_OK; }
 FN(dd_SetDisplayMode) { return set_mode(w, a[0], a[1], a[2], a[3]); }

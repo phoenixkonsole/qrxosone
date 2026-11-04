@@ -878,7 +878,7 @@ FN(g_Polygon) {
 }
 /* A few programs refuse anything but a 256 colour desktop. Windows would make the
  * user change it; here the desktop is whatever the program wants to hear. */
-static int qw_needs_256_colours(qwin *w)
+int qw_needs_256_colours(qwin *w)
 {
     static const char *const names[] = { "SONICCD.EXE", NULL };
     const char *base = strrchr(w->exe_path, '/');
@@ -895,7 +895,11 @@ FN(g_GetDeviceCaps) {
     case 8: return 1024; case 10: return 768;        /* HORZRES / VERTRES */
     case 12: return qw_needs_256_colours(w) ? 8 : 16; case 14: return 1;          /* BITSPIXEL / PLANES: games of the time refuse true colour desktops */
     case 88: case 90: return 96;                     /* LOGPIXELSX/Y */
-    case 24: return 0xFFFFFFFFu;                     /* NUMCOLORS */
+    case 24: return qw_needs_256_colours(w) ? 256u : 0xFFFFFFFFu;   /* NUMCOLORS */
+    case 38: return qw_needs_256_colours(w) ? 0x7E99u | 0x100u : 0x7E99u;   /* RASTERCAPS, RC_PALETTE */
+    case 104: return qw_needs_256_colours(w) ? 256u : 0;  /* SIZEPALETTE */
+    case 106: return qw_needs_256_colours(w) ? 20u : 0;   /* NUMRESERVED */
+    case 108: return qw_needs_256_colours(w) ? 18u : 0;   /* COLORRES */
     default: return 0;
     }
 }
@@ -927,7 +931,8 @@ FN(g_ExcludeClipRect) {
 /* palettes: surfaces are 32-bit true colour, palettes only need to exist */
 FN(g_CreatePalette) { UNUSED; return gdi_new(w, GO_PALETTE); }
 FN(g_SelectPalette) { qdc *d = DCP(w, a[0]); uint32_t o; if (!d) return 0; o = d->pal ? d->pal : STOCK(15); d->pal = a[1]; return o; }
-FN(g_RealizePalette) { UNUSED; return 0; }
+/* The count of entries it mapped. Sonic CD treats 0 as an error. */
+FN(g_RealizePalette) { UNUSED; return 256; }
 /* SaveDC/RestoreDC: drawing state incl. clip; the surface/membmp stay owned by the DC */
 FN(g_SaveDC) {
     qdc *d = DCP(w, a[0]), *c;

@@ -1148,12 +1148,14 @@ static void gen_ins(XT *t, XIns *x, int *nz, XOut *outs, int *nouts) {
 }
 
 /* ---- runtime ---- */
-static uint64_t xj_interp_helper(x86cpu *c, uint32_t eip) {
+/* next: where the block goes on. The interpreter can stay elsewhere: REP string
+ * instructions run in portions and leave eip on themselves until the count is done. */
+static uint64_t xj_interp_helper(x86cpu *c, uint32_t eip, uint32_t next) {
     c->eip = eip;
     c->left--;
     xj.interp_ins++;
     exec_one(c);
-    return (uint64_t)(c->xj_abort != 0);
+    return (uint64_t)(c->xj_abort != 0 || c->eip != next);
 }
 static uint64_t xj_cond_helper(x86cpu *c, uint32_t cc) { return (uint64_t)cond(c, (int)cc); }
 
@@ -1276,7 +1278,7 @@ static bool xj_gen_runtime(void) {
     E(&e, 0xA8C67BFDu);                            /* ldp x29,x30,[sp],#96 */
     E(&e, 0xD65F03C0u);
 
-    /* w0 = eip of the instruction: runs it in the interpreter, keeps NZCV.
+    /* w0 = eip of the instruction, w2 = the next one: runs it in the interpreter, keeps NZCV.
      * Returns with x0 != 0 when the block must end. */
     xj.interp_thunk = e.p;
     E(&e, 0xD53B4209u);                            /* mrs x9,nzcv */
@@ -1398,6 +1400,14 @@ static void xj_protect_page(uint32_t vpage) {
     }
 }
 
+/* QRX86_JITOFF=mask: instruction kinds (bit = K_ value) left to the interpreter, to find
+ * by bisection which translation a misbehaving program depends on. */
+static uint32_t xj_off_mask(void) {
+    static int have;
+    static uint32_t mask;
+    if (!have) { const char *e = getenv("QRX86_JITOFF"); mask = e ? (uint32_t)strtoul(e, NULL, 0) : 0; have = 1; }
+    return mask;
+}
 static XBlock *xj_translate(uint32_t eip) {
     static XIns ins[XJ_MAX_INS];
     static XT t;
@@ -1409,6 +1419,10 @@ static XBlock *xj_translate(uint32_t eip) {
     while (n < XJ_MAX_INS) {
         XIns *x = &ins[n];
         if (a >> 12 != vpage || !xj_decode(a, x)) break;
+        if (x->kind != K_FALL && x->kind != K_FALL_END && ((xj_off_mask() >> x->kind) & 1u)) {
+            bool control = x->kind == K_JCC || x->kind == K_JMP || x->kind == K_CALL || x->kind == K_RET || x->kind == K_JMPI || x->kind == K_CALLI;
+            x->kind = control ? K_FALL_END : K_FALL;
+        }
         n++;
         if (x->kind == K_FALL_END || x->kind == K_JCC || x->kind == K_JMP || x->kind == K_CALL ||
             x->kind == K_RET || x->kind == K_JMPI || x->kind == K_CALLI) break;
@@ -1445,6 +1459,7 @@ static XBlock *xj_translate(uint32_t eip) {
         t.cur = i;
         if (x->kind == K_FALL || x->kind == K_FALL_END) {
             mov_w(e, 0, x->eip);
+            mov_w(e, 2, x->next);
             bl_to(e, xj.interp_thunk);
             if (x->kind == K_FALL_END) b_to(e, xj.epi_plain);
             else {
@@ -1473,6 +1488,7 @@ static XBlock *xj_translate(uint32_t eip) {
         XIns *x = &ins[i];
         uint32_t *stub = e->p;
         mov_w(e, 0, x->eip);
+        mov_w(e, 2, x->next);
         bl_to(e, xj.interp_thunk);
         bool control = x->kind == K_JMP || x->kind == K_CALL || x->kind == K_RET || x->kind == K_JMPI ||
                        x->kind == K_CALLI || x->kind == K_JCC;

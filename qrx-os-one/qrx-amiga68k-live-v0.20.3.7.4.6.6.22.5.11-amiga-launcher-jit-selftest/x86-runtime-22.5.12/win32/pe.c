@@ -75,7 +75,7 @@ static void apply_relocs(qwin *w, uint32_t base, uint32_t rva, uint32_t size, ui
 
 int qw_is_hle_dll(const char *dll)
 {
-    static const char *hle[] = { "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll",
+    static const char *hle[] = { "lz32", "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll",
                                  "ddraw", "dsound", "dinput", "ole32", "oleaut32", "version", "imm32", "comdlg32", "msvcrt40", "crtdll", NULL };
     char n[64];
     size_t k;
@@ -131,6 +131,19 @@ static int find_dll_file(qwin *w, const char *name, char *out, size_t max)
         if (co) { size_t L = (size_t)(co - w->exe_path) + 1; memcpy(dir, w->exe_path, L); dir[L] = 0; }
         else if (!getcwd(dir, sizeof(dir))) strcpy(dir, ".");   /* AROS posixc: "." is not a directory name */
     }
+    /* A path in the name, as in LoadLibrary("TITLE\\OPENING\\OPENING.DLL"): below the program. */
+    {
+        const char *p = name, *end = NULL, *q;
+        size_t L = strlen(dir);
+        if (p[0] && p[1] == ':') p += 2;
+        while (*p == '\\' || *p == '/' || (p[0] == '.' && (p[1] == '\\' || p[1] == '/'))) p += p[0] == '.' ? 2 : 1;
+        for (q = p; *q; q++) if (*q == '\\' || *q == '/') end = q;
+        if (end && L + 1 + (size_t)(end - p) + 1 < sizeof(dir)) {
+            if (L && dir[L - 1] != ':' && dir[L - 1] != '/') dir[L++] = '/';
+            for (q = p; q < end; q++) dir[L++] = *q == '\\' ? '/' : *q;
+            dir[L] = 0;
+        }
+    }
     for (;;) {
     d = opendir(dir);
     if (!d && w->verbose) qw_log(w, "cannot list %s for %s", dir, want);
@@ -164,7 +177,7 @@ qmod *pe_load_dll(qwin *w, const char *name)
     qmod *m = pe_module_by_name(w, name);
     if (m) return m;
     lower_base(low, name, sizeof(low));
-    if (!find_dll_file(w, low, path, sizeof(path))) return NULL;
+    if (!find_dll_file(w, name, path, sizeof(path))) return NULL;
     f = fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END); n = ftell(f); fseek(f, 0, SEEK_SET);

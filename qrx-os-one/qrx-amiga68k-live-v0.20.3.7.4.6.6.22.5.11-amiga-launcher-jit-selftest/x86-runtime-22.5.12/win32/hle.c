@@ -246,6 +246,13 @@ static int hle_hook(x86cpu *c, uint32_t idx)
         r = e->fn(w, a);
         g_api_calls[idx]++;
         g_api_ms[idx] += (uint32_t)(w->be->now(w) - t0);
+        /* Also while no frames come: a stalled program shows where it spends its time. */
+        {
+            static uint64_t last;
+            uint64_t now = w->be->now(w);
+            if (!last) last = now;
+            if (now - last >= 10000u) { last = now; qw_log(w, "API time over the last 10 s, %d frames so far:", w->frames); qw_api_report(w); }
+        }
     } else
     r = e->fn(w, a);
 #ifdef QRX_EXEC_PROFILE

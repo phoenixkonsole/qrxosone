@@ -21,6 +21,7 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram) { (void)op; (void)
 void qrx_host_midi_short(uint32_t m) { (void)m; }
 void qrx_host_midi_sysex(const uint8_t *d, uint32_t n) { (void)d; (void)n; }
 void qrx_host_midi_reset(void) {}
+void qrx_host_set_pointer(uint32_t i) { (void)i; }
 
 enum { CODE = 0x400000u, END = 0x401F00u, DATA = 0x500000u, STACK = 0x600000u };
 #define DATA_BASE (DATA + 0xFC0u)   /* 64 bytes below a page end: some accesses cross it */
@@ -120,7 +121,16 @@ static void gen_one(void) {
         else if (f == 3) { c8(m); c8(0xC0); }
         c8(pick(2) ? 0xD9 : 0xDD); { unsigned at = cp - 1; c8(0x9B | 0); c32(0); code[cp - 5] = 0x9B; code[cp - 4] = (uint8_t)(code[at] == 0xD9 ? 192 + 8 * pick(8) : 128 + 8 * pick(8)); }
         break; }
-    case 22: c8(0xF7); modrm(4 + pick(2), 32, false); break;             /* mul, imul */
+    case 22:
+        if (pick(2)) { c8(0xF7); modrm(4 + pick(2), 32, false); break; } /* mul, imul */
+        /* A short REP string instruction, with the registers put back for what follows */
+        c8(0x60);                                                        /* pusha */
+        c8(0x8D); c8(0x73); c8(pick(32));                                /* lea esi,[ebx+d] */
+        c8(0x8D); c8(0x7B); c8(32 + pick(32));                           /* lea edi,[ebx+d] */
+        c8(0xB9); c32(pick(8));                                          /* mov ecx,n */
+        c8(0xF3); c8(pick(2) ? 0xA5 : 0xAB);                             /* rep movsd or stosd */
+        c8(0x61);                                                        /* popa */
+        break;
     default: gen_flagged(); break;
     }
 }
@@ -247,6 +257,38 @@ static void on_crash(int sig, siginfo_t *si, void *uc) {
     fprintf(stderr, "\n");
     _exit(3);
 }
+/* REP string instructions run in portions: a block must not go on until they are done. */
+static void test_rep_large(void) {
+    enum { BIG = 0x800000u, BYTES = 0x400000u };
+    x86_map(&host, BIG, BYTES, 1);
+    x86_map(&ref, BIG, BYTES, 1);
+    for (uint32_t a = BIG; a < BIG + BYTES; a += 0x1000) xj_table_page(a >> 12, pg(&host, a));
+    cp = 0;
+    memset(code, 0x90, sizeof code);
+    c8(0xB9); c32(BYTES / 4);                               /* mov ecx,count */
+    c8(0xBF); c32(BIG);                                     /* mov edi,start */
+    c8(0xB8); c32(0x12345678);                              /* mov eax,value */
+    c8(0xF3); c8(0xAB);                                     /* rep stosd */
+    c8(0x89); c8(0xCA);                                     /* mov edx,ecx: must see 0 */
+    c8(0xB9); c32(BYTES / 4);                               /* and the same for rep movsd */
+    c8(0xBE); c32(BIG);
+    c8(0xBF); c32(BIG + BYTES / 2);
+    c8(0xD1); c8(0xE9);                                     /* shr ecx,1 */
+    c8(0xF3); c8(0xA5);                                     /* rep movsd */
+    c8(0x89); c8(0xCD);                                     /* mov ebp,ecx */
+    c8(0xE9); c32(END - (CODE + cp + 4));
+    xj_kill_page(CODE >> 12);
+    xj.page_kills[CODE >> 12] = 0;
+    reset(&host, 1);
+    host.left = host.lbase = 0x7FFFFFFF;
+    (void)xj_run(&host, END);
+    assert(!host.fault);
+    assert(host.r[X86_EDX] == 0);
+    assert(host.r[X86_EBP] == 0);
+    assert(x86_rd32(&host, BIG + BYTES - 4) == 0x12345678);
+    assert(host.r[X86_EDI] == BIG + BYTES);
+    puts("large REP string instructions complete");
+}
 int main(int argc, char **argv) {
     struct sigaction sa = {0};
     sa.sa_sigaction = on_crash; sa.sa_flags = SA_SIGINFO;
@@ -271,6 +313,7 @@ int main(int argc, char **argv) {
     }
     test_self_modifying();
     test_budget();
+    test_rep_large();
     xj_report();
     printf("%u cases, %u differ\n", cases, failed);
     return failed != 0;

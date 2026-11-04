@@ -16,7 +16,7 @@
 #define WR32(x, v) x86_wr32(C, (x), (v))
 #define UNUSED (void)w; (void)a
 
-static const char *known_dlls[] = { "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll", "ddraw", "dsound", "dinput", "opengl32", "glide2x", "glide3x", "d3d8", "d3d9", "vulkan-1", "dplayx", "dplay", "ole32", "imm32", "version", "msacm32", "dinput8", "wsock32", "ws2_32", NULL };
+static const char *known_dlls[] = { "lz32", "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll", "ddraw", "dsound", "dinput", "opengl32", "glide2x", "glide3x", "d3d8", "d3d9", "vulkan-1", "dplayx", "dplay", "ole32", "imm32", "version", "msacm32", "dinput8", "wsock32", "ws2_32", NULL };
 #define QW_NKNOWN 27
 #define QW_MODBASE 0x7E000000u
 

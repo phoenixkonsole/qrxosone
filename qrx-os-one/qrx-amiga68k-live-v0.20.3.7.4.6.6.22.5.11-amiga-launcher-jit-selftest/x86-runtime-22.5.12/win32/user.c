@@ -1262,7 +1262,14 @@ static void key_event(qwin *w, int type, int vk, int ch)
     if (vk > 0 && vk < 256) {
         was_down = w->keystate[vk] != 0;
         w->keystate[vk] = type == QE_KEYDOWN ? 0x80 : 0;
+        if (w->verbose > 1 && type != QE_CHAR) qw_log(w, "key %02x %s%s", vk, type == QE_KEYDOWN ? "down" : "up", was_down && type == QE_KEYDOWN ? " repeat" : "");
         if (ch) g_vkchar[vk] = (uint8_t)ch;
+    }
+    /* Not a Windows function, but what people expect of it: works for every DirectDraw game. */
+    if (type == QE_KEYDOWN && vk == 0x0D && w->keystate[0x12] && w->frames > 0 && !was_down) {
+        qw_dd_toggle_window(w);
+        w->keystate[vk] = 0;
+        return;
     }
     if ((type == QE_KEYDOWN || type == QE_KEYUP) && kb_hook(w, vk, type == QE_KEYUP, was_down)) return;
     /* Engines such as SciTech MGL read the scan code in lParam, not the virtual key. */
