@@ -1,9 +1,7 @@
 /* Direct3D 8 and 9 for x86 programs on the host GPU: the fixed-function pipeline,
  * without lighting, shaders, cube or volume textures and DXT. COM objects live in x86
  * memory; their vtables point into a thunk range only the host door ever sees. A
- * method the host lacks returns D3DERR_INVALIDCALL with the right stack cleanup.
- * vulkan-1 is here too: without a Vulkan driver on the Mac it fails in the documented
- * way, so a program can fall back instead of crashing. */
+ * method the host lacks returns D3DERR_INVALIDCALL with the right stack cleanup. */
 #include "qrx_hostapi.h"
 #include "qrx_hostgpu.h"
 #include <stdlib.h>
@@ -69,6 +67,14 @@ static uint32_t ensure_vtable(x86cpu *c,unsigned which){
     v->vt=mem;v->count=n;
     return mem;
 }
+/* For function pointers handed out at run time, such as vkGetInstanceProcAddr's. */
+uint32_t qrx_hostapi_thunk_for(const QRXHostApi *f){
+    for(uint32_t i=HOST_THUNK_FIRST;i<next_thunk;i++)if(qrx_d3d_thunks[i]==f)return THUNK_BASE+i;
+    if(next_thunk>HOST_THUNK_LAST)return 0;
+    qrx_d3d_thunks[next_thunk]=f;
+    return THUNK_BASE+next_thunk++;
+}
+uint32_t qrx_hostapi_host_alloc(uint32_t size){return host_alloc(size);}
 static uint32_t new_object(x86cpu *c,unsigned which,uint32_t handle){
     uint32_t vt=ensure_vtable(c,which);
     if(!vt)return 0;
@@ -288,6 +294,8 @@ static void read_vertex(x86cpu *c,uint32_t p,const M4 *wvp,QRXHGVertex *v){
 }
 #define MAX_PRIM_VERTS 196608u
 static QRXHGVertex *scratch_tri;
+static uint32_t legacy_tex_override;
+static bool legacy_tex_active;
 /* type: 4 list, 5 strip, 6 fan. Vertices come from a reader. */
 static uint32_t index_count(uint32_t type,uint32_t prims){
     switch(type){case 4:return prims*3;case 5:case 6:return prims+2;default:return 0;}
@@ -326,8 +334,15 @@ static void draw_verts(x86cpu *c,uint32_t type,uint32_t prims,uint32_t base,uint
     }
 #undef FETCH
     st.texture=0;
-    if(cur_tex_handle&&cur_tex_handle<OBJ_MAX&&!tex_stage_disable)st.texture=objs[cur_tex_handle].hg;
+    if(legacy_tex_active){if(!tex_stage_disable)st.texture=legacy_tex_override;}
+    else if(cur_tex_handle&&cur_tex_handle<OBJ_MAX&&!tex_stage_disable)st.texture=objs[cur_tex_handle].hg;
     qrx_hg_triangles(&st,scratch_tri,out);
+}
+/* For Direct3D 5 to 7: a chosen texture and 16-bit indices, with the array as vertex base. */
+static void draw_verts_tex(x86cpu *c,uint32_t type,uint32_t prims,uint32_t verts,uint32_t stride,uint32_t idx,uint32_t tex){
+    legacy_tex_override=tex;legacy_tex_active=true;
+    draw_verts(c,type,prims,verts,stride,idx,false,0);
+    legacy_tex_active=false;
 }
 DF(DrawPrimitiveUP){draw_verts(c,a[1],a[2],a[3],a[4],0,false,0);return D3D_OK;}
 DF(DrawIndexedPrimitiveUP9){
@@ -442,6 +457,148 @@ DF(Texture_UnlockRect){
     return D3D_OK;
 }
 /* ---- which method runs what. An empty interface name matches them all. */
+
+/* ---- Direct3D 5, 6, 7: called through thunks from objects that live in the guest. */
+#define D3DL_ARGS x86cpu *c,const uint32_t *a
+typedef struct { uint32_t surface,gen; uint32_t hg; } LegacyTex;
+#define LTEX_MAX 2048u
+static LegacyTex ltex[LTEX_MAX];
+static uint32_t ltex_n;
+static uint8_t *ltex_buf;
+static bool lg_colorkey_on;
+static unsigned lg_tex_w,lg_tex_h;
+static inline unsigned mask_shift(uint32_t m){return m?(unsigned)__builtin_ctz(m):0u;}
+static inline uint32_t mask_expand(uint32_t v,uint32_t m){
+    if(!m)return 255u;
+    unsigned sh=mask_shift(m);
+    uint32_t top=m>>sh,val=(v&m)>>sh;
+    return top?(val*255u+top/2u)/top:255u;
+}
+/* A DirectDraw surface as a host texture, uploaded again whenever its generation moved. */
+static uint32_t legacy_texture(x86cpu *c,uint32_t surface){
+    if(!surface)return 0;
+    uint32_t gen=x86_rd32(c,surface+28);
+    LegacyTex *t=NULL;
+    for(uint32_t i=0;i<ltex_n;i++)if(ltex[i].surface==surface){t=&ltex[i];break;}
+    if(!t){
+        if(ltex_n>=LTEX_MAX)return 0;
+        t=&ltex[ltex_n++];t->surface=surface;t->hg=0;t->gen=gen-1u;
+    }
+    if(t->hg&&t->gen==gen)return t->hg;
+    uint32_t w=x86_rd32(c,surface+8),h=x86_rd32(c,surface+12),pitch=x86_rd32(c,surface+16),bpp=x86_rd32(c,surface+20),mem=x86_rd32(c,surface+24);
+    if(!w||!h||w>4096||h>4096||!mem)return 0;
+    uint32_t rm=x86_rd32(c,surface+32),gm=x86_rd32(c,surface+36),bm=x86_rd32(c,surface+40),am=x86_rd32(c,surface+44);
+    uint32_t ck_on=x86_rd32(c,surface+48),ck=x86_rd32(c,surface+52),pal=x86_rd32(c,surface+56);
+    if(!rm&&!gm&&!bm){
+        if(bpp==16){rm=0xF800;gm=0x07E0;bm=0x001F;}
+        else{rm=0xFF0000;gm=0xFF00;bm=0xFF;}
+    }
+    static size_t cap;
+    if(w*h*4u>cap){free(ltex_buf);cap=w*h*4u;ltex_buf=malloc(cap);}
+    if(!ltex_buf)return 0;
+    uint8_t *d=ltex_buf;
+    for(uint32_t y=0;y<h;y++){
+        uint32_t row=mem+y*pitch;
+        for(uint32_t x=0;x<w;x++,d+=4){
+            uint32_t px;
+            if(bpp==8){
+                uint32_t i=x86_rd8(c,row+x);
+                uint32_t e=pal?x86_rd32(c,pal+i*4u):i*0x010101u;
+                d[0]=(uint8_t)(e>>16);d[1]=(uint8_t)(e>>8);d[2]=(uint8_t)e;
+                d[3]=ck_on&&i==ck?0:255;
+                continue;
+            }
+            px=bpp==16?x86_rd16(c,row+x*2u):bpp==32?x86_rd32(c,row+x*4u):(uint32_t)x86_rd8(c,row+x*3u)|(uint32_t)x86_rd8(c,row+x*3u+1u)<<8|(uint32_t)x86_rd8(c,row+x*3u+2u)<<16;
+            d[0]=(uint8_t)mask_expand(px,rm);d[1]=(uint8_t)mask_expand(px,gm);d[2]=(uint8_t)mask_expand(px,bm);
+            d[3]=am?(uint8_t)mask_expand(px,am):255;
+            if(ck_on&&px==ck)d[3]=0;
+        }
+    }
+    t->hg=qrx_hg_texture(t->hg,w,h,ltex_buf,true,true,true);
+    t->gen=gen;
+    return t->hg;
+}
+static uint32_t legacy_cur;
+static void legacy_bind(x86cpu *c,uint32_t surface){legacy_cur=surface;(void)c;}
+DF(L_Open){NOARGS;bb_w=a[0];bb_h=a[1];qrx_hg_open(bb_w,bb_h);ensure_state();is8=false;return D3D_OK;}
+DF(L_Present){NOARGS;qrx_hg_present();return D3D_OK;}
+DF(L_Scene){NOARGS;return D3D_OK;}
+DF(L_Viewport){NOARGS;ensure_state();st.vx=(int)a[0];st.vy=(int)a[1];st.vw=(int)a[2];st.vh=(int)a[3];return D3D_OK;}
+DF(L_SetTransform){
+    /* D3DTRANSFORMSTATE_WORLD 1, VIEW 2, PROJECTION 3 */
+    M4 m;
+    for(uint32_t i=0;i<16;i++)m.m[i]=api_float(x86_rd32(c,a[2]+i*4u));
+    if(a[1]==2)m_view=m;
+    else if(a[1]==3)m_proj=m;
+    else if(a[1]==1||a[1]==256)m_world=m;
+    return D3D_OK;
+}
+DF(L_SetRenderState){
+    ensure_state();
+    uint32_t v=a[2];
+    switch(a[1]){
+    case 1:legacy_bind(c,v);break;                        /* TEXTUREHANDLE */
+    case 21:st.env=v==1?HG_ENV_REPLACE:v==2?HG_ENV_MODULATE:v==3?HG_ENV_DECAL:HG_ENV_MODULATE;break; /* TEXTUREMAPBLEND */
+    case 41:lg_colorkey_on=v!=0;break;                    /* COLORKEYENABLE */
+    case 7:st.depth_test=v!=0;break;
+    case 14:st.depth_write=v!=0;break;
+    case 15:st.alpha_test=v!=0;break;
+    case 19:st.src=blend_of(v);break;
+    case 20:st.dst=blend_of(v);break;
+    case 22:st.cull=v==1?HG_CULL_NONE:v==3?HG_CULL_BACK:HG_CULL_FRONT;break;
+    case 23:st.depth_func=(uint8_t)((v-1u)&7u);break;
+    case 24:st.alpha_ref=(v&255u)/255.f;break;
+    case 25:st.alpha_func=(uint8_t)((v-1u)&7u);break;
+    case 27:st.blend=v!=0;break;
+    default:break;
+    }
+    return D3D_OK;
+}
+DF(L_SetTexture3){if(a[1]==0)legacy_bind(c,a[2]?x86_rd32(c,a[2]+8):0);return D3D_OK;}
+DF(L_SetTexture7){if(a[1]==0)legacy_bind(c,a[2]);return D3D_OK;}
+DF(L_TextureStage){
+    NOARGS;ensure_state();
+    if(a[1]==0&&a[2]==1){tex_stage_disable=a[3]==1;tex_stage_replace=a[3]==2;st.env=tex_stage_replace?HG_ENV_REPLACE:HG_ENV_MODULATE;}
+    return D3D_OK;
+}
+static void legacy_draw(x86cpu *c,uint32_t type,uint32_t f,uint32_t verts,uint32_t stride,uint32_t nverts,uint32_t idx,uint32_t nidx){
+    if(type<4||type>6)return;                 /* points and lines are not drawn */
+    uint32_t n=idx?nidx:nverts;
+    uint32_t prims=type==4?n/3u:n>=2u?n-2u:0u;
+    if(!prims)return;
+    fvf=f;
+    if(!stride)stride=fvf_stride(f);
+    uint32_t saved=cur_tex_handle;
+    cur_tex_handle=0;
+    ensure_state();
+    uint32_t tex=legacy_texture(c,legacy_cur);
+    bool at=st.alpha_test;uint8_t af=st.alpha_func;float ar=st.alpha_ref;
+    if(lg_colorkey_on&&tex){st.alpha_test=true;st.alpha_func=HG_CMP_GREATER;st.alpha_ref=0;}
+    int vx=st.vx,vy=st.vy,vw=st.vw,vh=st.vh;
+    /* Transformed vertices are screen coordinates: the viewport does not apply. */
+    if((f&0xEu)==4){st.vx=st.vy=st.vw=st.vh=0;}
+    draw_verts_tex(c,type,prims,verts,stride,idx,tex);
+    st.vx=vx;st.vy=vy;st.vw=vw;st.vh=vh;
+    st.alpha_test=at;st.alpha_func=af;st.alpha_ref=ar;
+    cur_tex_handle=saved;
+}
+static uint32_t vtype_fvf(uint32_t t){return t==3?0x1C4u:t==2?0x1E2u:0x112u;}
+DF(L_Draw2){legacy_draw(c,a[1],vtype_fvf(a[2]),a[3],0,a[4],0,0);return D3D_OK;}
+DF(L_DrawIndexed2){legacy_draw(c,a[1],vtype_fvf(a[2]),a[3],0,a[4],a[5],a[6]);return D3D_OK;}
+DF(L_DrawFVF){legacy_draw(c,a[1],a[2],a[3],0,a[4],0,0);return D3D_OK;}
+DF(L_DrawIndexedFVF){legacy_draw(c,a[1],a[2],a[3],0,a[4],a[5],a[6]);return D3D_OK;}
+/* Vertex buffers: +8 memory, +12 fvf, +20 stride */
+DF(L_DrawVB){
+    uint32_t vb=a[2],stride=x86_rd32(c,vb+20);
+    legacy_draw(c,a[1],x86_rd32(c,vb+12),x86_rd32(c,vb+8)+a[3]*stride,stride,a[4],0,0);
+    return D3D_OK;
+}
+DF(L_DrawIndexedVB3){legacy_draw(c,a[1],x86_rd32(c,a[2]+12),x86_rd32(c,a[2]+8),x86_rd32(c,a[2]+20),0,a[3],a[4]);return D3D_OK;}
+DF(L_DrawIndexedVB7){
+    uint32_t vb=a[2],stride=x86_rd32(c,vb+20);
+    legacy_draw(c,a[1],x86_rd32(c,vb+12),x86_rd32(c,vb+8)+a[3]*stride,stride,a[4],a[5],a[6]);
+    return D3D_OK;
+}
 static const Impl impls[]={
     {"","QueryInterface",com_QI},{"","AddRef",com_AddRef},{"","Release",com_Release},
     {"D3D9","GetAdapterCount",d3d_one},{"D3D8","GetAdapterCount",d3d_one},{"D3D9","GetAdapterIdentifier",GetAdapterIdentifier},{"D3D8","GetAdapterIdentifier",GetAdapterIdentifier},
@@ -462,17 +619,11 @@ static const Impl impls[]={
     {"","LockRect",Texture_LockRect},{"","UnlockRect",Texture_UnlockRect},{"","PreLoad",d3d_ok},{"","SetLight",d3d_ok},{"","LightEnable",d3d_ok},{"","SetMaterial",d3d_ok},
     {NULL,NULL,NULL}
 };
-/* vulkan-1: no driver behind it. */
-#define VK_ERROR_INCOMPATIBLE_DRIVER 0xFFFFFFF7u
-DF(vkCreateInstance){NOARGS;return VK_ERROR_INCOMPATIBLE_DRIVER;}
-DF(vkEnumerateInstanceVersion){x86_wr32(c,a[0],(1u<<22));return 0;}
-DF(vkEnumerateInstanceExtensionProperties){x86_wr32(c,a[1],0);return 0;}
-DF(vkEnumerateInstanceLayerProperties){x86_wr32(c,a[0],0);return 0;}
-DF(vkGetInstanceProcAddr){NOARGS;return 0;}
 const QRXHostApi qrx_api_d3d[]={
+    {"D3DL_Open",2,L_Open},{"D3DL_Present",1,L_Present},{"D3DL_Scene",1,L_Scene},{"D3DL_Viewport",4,L_Viewport},{"D3DL_Clear",7,Clear},
+    {"D3DL_SetTransform",3,L_SetTransform},{"D3DL_SetRenderState",3,L_SetRenderState},{"D3DL_SetTexture3",3,L_SetTexture3},{"D3DL_SetTexture7",3,L_SetTexture7},
+    {"D3DL_TextureStage",4,L_TextureStage},{"D3DL_Draw2",6,L_Draw2},{"D3DL_DrawIndexed2",8,L_DrawIndexed2},{"D3DL_DrawFVF",6,L_DrawFVF},
+    {"D3DL_DrawIndexedFVF",8,L_DrawIndexedFVF},{"D3DL_DrawVB",6,L_DrawVB},{"D3DL_DrawIndexedVB3",6,L_DrawIndexedVB3},{"D3DL_DrawIndexedVB7",8,L_DrawIndexedVB7},
     {"Direct3DCreate9",1,Direct3DCreate9},{"Direct3DCreate8",1,Direct3DCreate8},
-    {"vkCreateInstance",3,vkCreateInstance},{"vkEnumerateInstanceVersion",1,vkEnumerateInstanceVersion},
-    {"vkEnumerateInstanceExtensionProperties",3,vkEnumerateInstanceExtensionProperties},
-    {"vkEnumerateInstanceLayerProperties",2,vkEnumerateInstanceLayerProperties},{"vkGetInstanceProcAddr",2,vkGetInstanceProcAddr},
     {NULL,0,NULL}
 };

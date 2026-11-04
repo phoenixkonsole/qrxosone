@@ -14,7 +14,7 @@ typedef struct QRXHostApi {
 const QRXHostApi *qrx_hostapi_find(const char *name);
 /* scratch: 4 KiB of x86 memory the host may fill, for returned strings. */
 void qrx_hostapi_context(QRXFullCPU *cpu, x86cpu *x86, uint32_t scratch);
-extern const QRXHostApi qrx_api_gl[], qrx_api_glide[], qrx_api_d3d[];
+extern const QRXHostApi qrx_api_gl[], qrx_api_glide[], qrx_api_d3d[], qrx_api_vk[], qrx_api_vk_procs[];
 extern uint32_t qrx_hostapi_scratch;
 /* A function needing x86 memory sets the request and returns; the door runs the
  * guest allocator and calls the function again. */

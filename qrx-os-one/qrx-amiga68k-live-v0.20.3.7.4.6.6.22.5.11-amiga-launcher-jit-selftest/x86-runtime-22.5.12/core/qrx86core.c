@@ -1594,6 +1594,7 @@ static int run_loop(x86cpu *c, uint32_t stop_eip, int single)
             if (!c->left && !budget_refill(c))
                 FAULT(c, X86_FAULT_BUDGET, c->eip, "instruction budget exhausted");
             if (c->door) {
+                if (c->yield_hook) c->yield_hook(c);
                 if (door_quantum(c, stop_eip)) continue;
                 if (c->eip == stop_eip) break;
                 if (!c->left) continue;

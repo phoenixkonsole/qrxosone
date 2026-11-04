@@ -66,6 +66,10 @@ static int ieq(const char *a, const char *b)
     return *a == *b;
 }
 
+/* Levels above the program's folder that the last path climbed: games often keep their data
+ * in ..\\data, and the program's folder is the root of the Windows paths here. */
+static int g_above;
+
 /* Windows path -> path relative to the root ("a/b/c"), with . and .. resolved */
 static void win_rel(const char *in, char *out, size_t max)
 {
@@ -73,6 +77,7 @@ static void win_rel(const char *in, char *out, size_t max)
     int n = 0, i;
     size_t k = 0;
     const char *p = in;
+    g_above = 0;
     if (isalpha((unsigned char)p[0]) && p[1] == ':') p += 2;                     /* drive letter */
     if (p[0] == '\\' || p[0] == '/') snprintf(tmp, sizeof(tmp), "%s", p + 1);
     else snprintf(tmp, sizeof(tmp), "%s%s%s", g_cwd, g_cwd[0] ? "/" : "", p);
@@ -83,7 +88,7 @@ static void win_rel(const char *in, char *out, size_t max)
             t = strchr(s, '/');
             if (t) *t = 0;
             if (!*s || !strcmp(s, ".")) {}
-            else if (!strcmp(s, "..")) { if (n) n--; }
+            else if (!strcmp(s, "..")) { if (n) n--; else g_above++; }
             else if (n < 64) comp[n++] = s;
             s = t ? t + 1 : NULL;
         }
@@ -104,6 +109,14 @@ static void host_path(const char *rel, char *out, size_t max)
     char cur[1200], part[256];
     const char *s = rel;
     snprintf(cur, sizeof(cur), "%s", g_root[0] ? g_root : ".");
+    {
+        int up;
+        for (up = 0; up < g_above; up++) {
+            char *b = strrchr(cur, '/');
+            if (b) *b = 0;
+            else if ((b = strchr(cur, ':')) != NULL) b[1] = 0;
+        }
+    }
     while (*s) {
         const char *t = strchr(s, '/');
         size_t L = t ? (size_t)(t - s) : strlen(s);

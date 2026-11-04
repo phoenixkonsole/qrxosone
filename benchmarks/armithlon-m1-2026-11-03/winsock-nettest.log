@@ -1,0 +1,4 @@
+TCP: 524288 bytes echoed, 0 wrong, server saw 524288, thread exit 0, 350 ms
+UDP: select 1, received 4 bytes 'qrx' from 127.0.0.1
+refused: connect -1, error 10061
+NETTEST PASSED

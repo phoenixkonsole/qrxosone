@@ -340,6 +340,24 @@ static void capture_guest(const char *path){
 }
 int qrx_aros_window_pump(void){@autoreleasepool{
  {
+  /* Unattended input check: QRX_TEST_KEYS=seconds:rawkey[:hold],... pressed in order. */
+  {
+   static NSDate *keysStart;static const char *keysNext;static double releaseAt;static unsigned heldKey;
+   if(!keysStart&&getenv("QRX_TEST_KEYS")){keysStart=[NSDate date];keysNext=getenv("QRX_TEST_KEYS");}
+   if(keysStart){
+    double t=-[keysStart timeIntervalSinceNow];
+    if(heldKey&&t>=releaseAt){qrx_media_push_input(&media,(2u<<24)|(heldKey<<16));heldKey=0;}
+    if(keysNext&&*keysNext&&!heldKey){
+     char *e;double at=strtod(keysNext,&e);
+     if(*e==':'&&t>=at){
+      unsigned k=(unsigned)strtoul(e+1,&e,0);double hold=0.15;
+      if(*e==':')hold=strtod(e+1,&e);
+      qrx_media_push_input(&media,(1u<<24)|(k<<16));heldKey=k;releaseAt=t+hold;
+      keysNext=*e==','?e+1:"";
+     }
+    }
+   }
+  }
   /* Unattended input check: QRX_TEST_KEY=rawkey pressed at QRX_TEST_KEY_AT seconds. */
   static NSDate *keyAt;static int keyStage;
   const char *key=getenv("QRX_TEST_KEY");
@@ -363,7 +381,7 @@ int qrx_aros_window_pump(void){@autoreleasepool{
     if(getenv("QRX_RTG_CAPTURE_COUNT"))snprintf(name,sizeof name,"%s.%d",path,captureIndex++);
     else snprintf(name,sizeof name,"%s",path);
     capture_guest(name);captureLeft--;
-    captureAt=[NSDate dateWithTimeIntervalSinceNow:0.067];
+    captureAt=[NSDate dateWithTimeIntervalSinceNow:getenv("QRX_RTG_CAPTURE_STEP")?atof(getenv("QRX_RTG_CAPTURE_STEP")):0.067];
    }
   }
  }

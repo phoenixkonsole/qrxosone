@@ -125,6 +125,7 @@ struct x86cpu {
     int door;
     uint32_t (*door_alloc)(x86cpu *c, uint32_t size);   /* memory requests from the host */
     uint32_t map_serial;                 /* bumped on any page mapping change */
+    void (*yield_hook)(x86cpu *c);       /* lets other guest threads run between door quanta */
     int stop;                            /* set by hooks to leave run() normally */
     int fault;
     uint32_t fault_eip, fault_addr;

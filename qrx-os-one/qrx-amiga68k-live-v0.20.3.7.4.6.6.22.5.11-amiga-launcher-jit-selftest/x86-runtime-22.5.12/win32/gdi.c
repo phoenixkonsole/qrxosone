@@ -866,7 +866,7 @@ FN(g_GetDeviceCaps) {
     UNUSED;
     switch (a[1]) {
     case 8: return 1024; case 10: return 768;        /* HORZRES / VERTRES */
-    case 12: return 32; case 14: return 1;          /* BITSPIXEL / PLANES */
+    case 12: return 16; case 14: return 1;          /* BITSPIXEL / PLANES: games of the time refuse true colour desktops */
     case 88: case 90: return 96;                     /* LOGPIXELSX/Y */
     case 24: return 0xFFFFFFFFu;                     /* NUMCOLORS */
     default: return 0;

@@ -1,6 +1,7 @@
 /* QRX OS One 22.5.12 - qrx-win32: PE image loader and resource lookup. */
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include "qrxwin.h"
 
 static uint16_t le16(const uint8_t *b) { return (uint16_t)(b[0] | (b[1] << 8)); }
@@ -130,9 +131,10 @@ static int find_dll_file(qwin *w, const char *name, char *out, size_t max)
         if (co) { size_t L = (size_t)(co - w->exe_path) + 1; memcpy(dir, w->exe_path, L); dir[L] = 0; }
         else if (!getcwd(dir, sizeof(dir))) strcpy(dir, ".");   /* AROS posixc: "." is not a directory name */
     }
+    for (;;) {
     d = opendir(dir);
     if (!d && w->verbose) qw_log(w, "cannot list %s for %s", dir, want);
-    if (!d) return 0;
+    if (d) {
     while ((e = readdir(d))) {
         char low[256];
         size_t k;
@@ -146,7 +148,11 @@ static int find_dll_file(qwin *w, const char *name, char *out, size_t max)
         }
     }
     closedir(d);
-    return 0;
+    }
+    /* Then where tools/armithlon/install-directx.sh puts Microsoft's helper DLLs. */
+    if (!strcmp(dir, "APPS:windows_system")) return 0;
+    strcpy(dir, "APPS:windows_system");
+    }
 }
 
 qmod *pe_load_dll(qwin *w, const char *name)
@@ -259,7 +265,11 @@ static qmod *pe_map(qwin *w, const uint8_t *b, size_t n, const char *name, int i
             if (!qw_is_hle_dll(dll)) {
                 dm = pe_load_dll(w, dll);
                 m = &w->mod[idx];                       /* (array is static; keep the pointer obvious) */
-                if (!dm) qw_log(w, "%s imports %s: not found next to the program", name, dll);
+                if (!dm) {
+                    qw_log(w, "%s imports %s: not found next to the program", name, dll);
+                    if (!strncasecmp(dll, "d3dx", 4) || !strncasecmp(dll, "xinput", 6) || !strncasecmp(dll, "d3dcompiler", 11) || !strncasecmp(dll, "x3daudio", 8) || !strncasecmp(dll, "xapofx", 6))
+                        qw_log(w, "%s belongs to Microsoft's DirectX runtime: run tools/armithlon/install-directx.sh on the Mac", dll);
+                }
             }
             if (!ilt) ilt = iat;
             for (k = 0; ; k++) {

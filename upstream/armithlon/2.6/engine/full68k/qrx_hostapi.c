@@ -14,7 +14,7 @@ const QRXHostApi *qrx_hostapi_find(const char *name){
     memcpy(plain,name,n);plain[n]=0;
     char *at=strchr(plain,'@');
     if(at)*at=0;
-    static const QRXHostApi *const tables[]={qrx_api_gl,qrx_api_glide,qrx_api_d3d,NULL};
+    static const QRXHostApi *const tables[]={qrx_api_gl,qrx_api_glide,qrx_api_d3d,qrx_api_vk,qrx_api_vk_procs,NULL};
     for(unsigned t=0;tables[t];t++)
         for(const QRXHostApi *f=tables[t];f->name;f++)
             if(!strcmp(f->name,plain))return f;

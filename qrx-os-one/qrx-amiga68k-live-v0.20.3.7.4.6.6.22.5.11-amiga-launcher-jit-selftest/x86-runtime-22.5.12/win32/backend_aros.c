@@ -78,17 +78,18 @@ static void latin1(char *d, const wchar16 *s, int max)
     d[i] = 0;
 }
 
-/* DirectDraw exclusive mode: an own 8-bit screen with a borderless backdrop window,
- * like Amiga games; returns 0 if no such display mode/screen is available */
+/* DirectDraw exclusive mode: an own screen of the mode's depth with a borderless backdrop
+ * window, like Amiga games; returns 0 if no such display mode/screen is available */
 static int open_fullscreen(qwin *w, qwnd *t, bew *b)
 {
     ULONG id = INVALID_ID;
-    if (w->verbose) qw_log(w, "AROS backend: looking for a %dx%dx8 display mode", t->fs_w, t->fs_h);
-    if (CyberGfxBase) id = BestCModeIDTags(CYBRBIDTG_NominalWidth, (ULONG)t->fs_w, CYBRBIDTG_NominalHeight, (ULONG)t->fs_h, CYBRBIDTG_Depth, 8, TAG_DONE);
-    if (id == INVALID_ID) id = BestModeID(BIDTAG_NominalWidth, (ULONG)t->fs_w, BIDTAG_NominalHeight, (ULONG)t->fs_h, BIDTAG_Depth, 8, TAG_DONE);
+    ULONG depth = t->fs_bpp > 8 ? (ULONG)t->fs_bpp : 8;
+    if (w->verbose) qw_log(w, "AROS backend: looking for a %dx%dx%d display mode", t->fs_w, t->fs_h, (int)depth);
+    if (CyberGfxBase) id = BestCModeIDTags(CYBRBIDTG_NominalWidth, (ULONG)t->fs_w, CYBRBIDTG_NominalHeight, (ULONG)t->fs_h, CYBRBIDTG_Depth, depth, TAG_DONE);
+    if (id == INVALID_ID) if (depth == 8) id = BestModeID(BIDTAG_NominalWidth, (ULONG)t->fs_w, BIDTAG_NominalHeight, (ULONG)t->fs_h, BIDTAG_Depth, 8, TAG_DONE);
     if (id == INVALID_ID) { qw_log(w, "AROS: no %dx%d 8-bit display mode, staying in a window", t->fs_w, t->fs_h); return 0; }
     if (w->verbose) qw_log(w, "AROS backend: mode %08lx, opening screen", (unsigned long)id);
-    b->scr = OpenScreenTags(NULL, SA_DisplayID, id, SA_Width, (ULONG)t->fs_w, SA_Height, (ULONG)t->fs_h, SA_Depth, 8,
+    b->scr = OpenScreenTags(NULL, SA_DisplayID, id, SA_Width, (ULONG)t->fs_w, SA_Height, (ULONG)t->fs_h, SA_Depth, depth,
                             SA_Quiet, TRUE, SA_ShowTitle, FALSE, SA_Type, CUSTOMSCREEN, SA_Title, (IPTR)"QRX DirectDraw", TAG_DONE);
     if (!b->scr) { qw_log(w, "AROS: OpenScreen %dx%dx8 failed, staying in a window", t->fs_w, t->fs_h); return 0; }
     if (w->verbose) qw_log(w, "AROS backend: screen open, opening backdrop window");
@@ -114,6 +115,9 @@ static void ar_create(qwin *w, qwnd *t)
         b->win->UserPort = g_port;
         b->win->UserData = (APTR)b;
         ModifyIDCMP(b->win, IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_ACTIVEWINDOW);
+        /* A screen opened right after closing another one does not always get the input. */
+        ScreenToFront(b->scr);
+        ActivateWindow(b->win);
         t->be = b;
         t->present = 1;
         b->full = 1;
@@ -481,6 +485,38 @@ static void ar_present8(qwin *w, qwnd *t, const uint8_t *pix, int pitch, const u
     }
 }
 
+/* Copies a whole 16 or 32-bit frame. The RTG bitmap is big endian, the guest writes little
+ * endian; even at 640x480 this loop is about a millisecond on the 68k JIT. */
+static int ar_present_deep(qwin *w, qwnd *t, uint32_t guest, int pitch, int sw, int sh, int bpp)
+{
+    bew *b = (bew *)t->be;
+    IPTR addr = 0;
+    ULONG bpr = 0, fmt = 0;
+    APTR lock;
+    int y;
+    if (!b || !b->scr || !CyberGfxBase) return 0;
+    lock = LockBitMapTags(b->scr->RastPort.BitMap, LBMI_BASEADDRESS, (IPTR)&addr, LBMI_BYTESPERROW, (IPTR)&bpr, LBMI_PIXFMT, (IPTR)&fmt, TAG_DONE);
+    if (!lock) return 0;
+    for (y = 0; y < sh; y++) {
+        uint8_t *d = (uint8_t *)addr + (size_t)y * bpr;
+        x86_read_mem(&w->cpu, guest + (uint32_t)y * (uint32_t)pitch, d, (uint32_t)sw * (uint32_t)bpp / 8u);
+        if (bpp == 16 && fmt != PIXFMT_RGB16PC) {
+            uint16_t *p = (uint16_t *)d;
+            int x;
+            for (x = 0; x < sw; x++) p[x] = (uint16_t)((p[x] << 8) | (p[x] >> 8));
+        } else if (bpp == 32 && fmt != PIXFMT_BGRA32) {
+            uint32_t *p = (uint32_t *)d;
+            int x;
+            for (x = 0; x < sw; x++) {
+                uint32_t v = p[x];
+                p[x] = (v >> 24) | ((v >> 8) & 0xFF00u) | ((v << 8) & 0xFF0000u) | (v << 24);
+            }
+        }
+    }
+    UnLockBitMap(lock);
+    return 1;
+}
+
 static void ar_reopen(qwin *w, qwnd *t)
 {
     if (w->verbose) qw_log(w, "AROS backend: reopening window %08x (%s)", t->h, t->fs_w ? "own screen" : "Workbench");
@@ -590,5 +626,5 @@ static uint8_t *ar_fb_show(qwin *w, qwnd *t, int i, const uint32_t *pal)
 }
 
 const qbackend qw_aros = { "aros", ar_init, ar_create, ar_destroy, ar_present, ar_title, ar_menu, ar_wait, ar_now, ar_shutdown, ar_present8, ar_reopen,
-                           ar_fb_open, ar_fb_show, ar_fb_close };
+                           ar_fb_open, ar_fb_show, ar_fb_close, ar_present_deep };
 #endif

@@ -166,6 +166,8 @@ typedef struct qbackend {
     int  (*fb_open)(struct qwin *w, qwnd *top, int nbuf, uint8_t **buf, int *pitch);
     uint8_t *(*fb_show)(struct qwin *w, qwnd *top, int i, const uint32_t *pal);
     void (*fb_close)(struct qwin *w, qwnd *top);
+    /* own 16/32-bit screen: copy one frame of little-endian guest pixels to it; 0 if not possible */
+    int (*present_deep)(struct qwin *w, struct qwnd *t, uint32_t guest, int pitch, int sw, int sh, int bpp);
 } qbackend;
 
 /* ------------------------------------------------------------------ instance */
@@ -344,6 +346,26 @@ extern const qhle qw_ansi[];   /* ansi.c */
 extern const qhle qw_files[];  /* files.c */
 extern const qhle qw_dx[];     /* dx.c: DirectDraw/DirectSound/DirectInput */
 extern const qhle qw_extra[];  /* extra.c */
+extern const qhle qw_compat[]; /* compat.c */
+extern const qhle qw_net[];    /* net.c */
+/* threads.c */
+void qw_thread_yield(qwin *w);
+void qw_thread_tick(qwin *w);
+void qw_thread_block(qwin *w, uint32_t max_rest_ms);
+void qw_thread_sleep(qwin *w, uint32_t ms);
+int  qw_be_wait(qwin *w, uint32_t timeout, qevent *ev);
+void qw_thread_spawn_service(qwin *w, void (*fn)(qwin *));
+uint32_t qw_thread_current_handle(qwin *w);
+uint32_t qw_thread_current_id(void);
+uint32_t qw_thread_current_teb(void);
+int  qw_thread_handle_index(uint32_t h);
+int  qw_thread_finished(int idx);
+uint32_t qw_api_CreateThread(qwin *w, uint32_t *a);
+uint32_t qw_api_ExitThread(qwin *w, uint32_t *a);
+uint32_t qw_api_ResumeThread(qwin *w, uint32_t *a);
+uint32_t qw_api_SuspendThread(qwin *w, uint32_t *a);
+uint32_t qw_api_TerminateThread(qwin *w, uint32_t *a);
+uint32_t qw_api_GetExitCodeThread(qwin *w, uint32_t *a);
 void qw_env_set(const char *name, const char *value);
 int qw_dinput_ready(qwin *w, uint32_t handles, uint32_t n);   /* dx.c */
 void user_input_event(qwin *w, qevent *ev);       /* feed one backend event into the window system */

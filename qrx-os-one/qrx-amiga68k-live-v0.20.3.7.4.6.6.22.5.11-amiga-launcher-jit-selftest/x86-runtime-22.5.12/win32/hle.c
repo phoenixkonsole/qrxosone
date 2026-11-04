@@ -147,7 +147,7 @@ uint32_t qw_data(qwin *w, uint32_t n)
 }
 
 /* ---------------------------------------------------------------- thunks */
-static const qhle *tables[] = { qw_files, qw_extra, qw_kernel32, qw_user32, qw_gdi32, qw_misc, qw_ansi, qw_dx, NULL };
+static const qhle *tables[] = { qw_compat, qw_net, qw_files, qw_extra, qw_kernel32, qw_user32, qw_gdi32, qw_misc, qw_ansi, qw_dx, NULL };
 
 static int dllcmp(const char *a, const char *b)
 {
@@ -238,6 +238,7 @@ static int hle_hook(x86cpu *c, uint32_t idx)
     c->r[X86_ESP] = sp + 4 + (e->nargs > 0 ? 4u * (uint32_t)e->nargs : 0u);
     c->r[X86_EAX] = r;
     c->eip = ret;
+    if (!(w->api_calls & 31u)) qw_thread_tick(w);
     return 1;
 }
 

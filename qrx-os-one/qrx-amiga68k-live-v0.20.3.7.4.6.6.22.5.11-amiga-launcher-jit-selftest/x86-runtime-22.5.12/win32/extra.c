@@ -234,7 +234,7 @@ FN(x_MsgWaitForMultipleObjects) {        /* (n, handles, waitall, ms, mask): sin
     int r, k = qw_dinput_ready(w, a[1], a[0]);
     if (k >= 0) return (uint32_t)k;                          /* DirectInput device has data */
     memset(&ev, 0, sizeof(ev));
-    r = w->be->wait(w, ms, &ev);
+    r = qw_be_wait(w, ms, &ev);
     if (r > 0) {
         user_input_event(w, &ev);
         k = qw_dinput_ready(w, a[1], a[0]);

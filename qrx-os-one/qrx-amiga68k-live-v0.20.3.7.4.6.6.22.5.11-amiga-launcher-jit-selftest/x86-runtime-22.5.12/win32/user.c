@@ -1217,6 +1217,10 @@ static uint32_t scan_of_vk(int vk)
     case 0x11: return 0x1D; case 0x12: return 0x38; case 0x1B: return 0x01; case 0x20: return 0x39;
     case 0x25: return 0x4B; case 0x26: return 0x48; case 0x27: return 0x4D; case 0x28: return 0x50;
     case 0x7A: return 0x57; case 0x7B: return 0x58;
+    case 0xBC: return 0x33; case 0xBE: return 0x34; case 0xBF: return 0x35; case 0xBA: return 0x27;
+    case 0xBB: return 0x0D; case 0xBD: return 0x0C; case 0xC0: return 0x29;
+    case 0x21: return 0x49; case 0x22: return 0x51; case 0x23: return 0x4F; case 0x24: return 0x47;
+    case 0x2D: return 0x52; case 0x2E: return 0x53;
     }
     return 0;
 }
@@ -1261,9 +1265,14 @@ static void key_event(qwin *w, int type, int vk, int ch)
         if (ch) g_vkchar[vk] = (uint8_t)ch;
     }
     if ((type == QE_KEYDOWN || type == QE_KEYUP) && kb_hook(w, vk, type == QE_KEYUP, was_down)) return;
-    if (type == QE_KEYDOWN) win_post(w, tgt->h, WM_KEYDOWN, (uint32_t)vk, 1);
-    else if (type == QE_KEYUP) win_post(w, tgt->h, WM_KEYUP, (uint32_t)vk, 0xC0000001u);
-    else if (type == QE_CHAR) win_post(w, tgt->h, WM_CHAR, (uint32_t)ch, 1);
+    /* Engines such as SciTech MGL read the scan code in lParam, not the virtual key. */
+    {
+        uint32_t scan = scan_of_vk(vk) << 16;
+        if (vk >= 0x21 && vk <= 0x28) scan |= 0x01000000u;         /* extended: arrows, page keys */
+        if (type == QE_KEYDOWN) win_post(w, tgt->h, WM_KEYDOWN, (uint32_t)vk, 1u | scan | (was_down ? 0x40000000u : 0));
+        else if (type == QE_KEYUP) win_post(w, tgt->h, WM_KEYUP, (uint32_t)vk, 0xC0000001u | scan);
+    }
+    if (type == QE_CHAR) win_post(w, tgt->h, WM_CHAR, (uint32_t)ch, 1);
 }
 
 static qwnd *find_ctl(qwin *w, qwnd *p, uint32_t id)
@@ -1466,7 +1475,7 @@ int user_pump(qwin *w, int block, qmsg *out, uint32_t filt)
             qevent ev;
             int r;
             memset(&ev, 0, sizeof(ev));
-            r = spins < 8 ? w->be->wait(w, 0, &ev) : 0;
+            r = spins < 8 ? qw_be_wait(w, 0, &ev) : 0;
             if (r > 0) { spins++; script_event(w, &ev); continue; }
             if (r < 0) {
                 qwnd *t = active_top(w);
@@ -1484,7 +1493,7 @@ int user_pump(qwin *w, int block, qmsg *out, uint32_t filt)
             for (i = 0; i < QW_MAXTIMER; i++) if (w->timer[i].used && w->timer[i].next < next) next = w->timer[i].next;
             memset(&ev, 0, sizeof(ev));
             if (w->verbose > 1) { static int nw; if (nw++ < 40) qw_log(w, "pump: wait %lu ms", (unsigned long)(next > now ? next - now : 0)); }
-            r = w->be->wait(w, (uint32_t)(next > now ? next - now : 0), &ev);
+            r = qw_be_wait(w, (uint32_t)(next > now ? next - now : 0), &ev);
             if (r < 0) {
                 /* backend finished (script end / window system gone): ask the program to close */
                 qwnd *t = active_top(w);
