@@ -463,7 +463,21 @@ Visible in the survey: Rat Poker shows its window with its picture, and GEX show
 
 Still open:
 
-- Tomb Raider II after OK in that sheet has faulted at `eip=00444aab`, on a surface without a vtable, when it was set to its default of hardware 3D at 640x480.
 - There is no progress bar or animation control: `msctls_progress32` and `SysAnimate32` appear as empty static controls.
 - `ff7demo.exe` waits for `ff7config.exe` on a first run; see the log of the child.
 - Window captions on popup windows appear without text.
+
+## Update 2026-11-06: Tomb Raider II in hardware 3D
+
+Tomb Raider II now gets into its level with textures, in hardware 3D and in its software renderer, at 30 flips a second, and Lara answers the keyboard.
+
+- `com_new` allocated 32 bytes, but a viewport keeps its rectangle at +32, so `SetViewport` overwrote the start of the next object. Here that was a surface, and the game faulted on its missing vtable. This could hit any Direct3D 3 to 7 program.
+- `DX_MAX` went from 128 to 1024 objects: the game uses more texture surfaces than that.
+- `IDirect3DTexture2::Load` did nothing, so textures stayed empty. It now copies the source surface.
+- A surface created with a pixel format of its own kept the default 565 masks, which gave wrong colours for formats with alpha. It now uses the format it asked for.
+
+Rogue Squadron no longer stops at its assertion and draws frames; how well it runs has not been looked at.
+
+To check a hardware 3D picture, use `QRX_HG_CAPTURE=file QRX_HG_CAPTURE_FRAME=n`. `QRX_RTG_CAPTURE` shows guest video memory only, where such a program is simply black.
+
+Still open: the level looks dark in both renderers, with or without the JIT (mean brightness 11 of 255 in the software renderer). Whether that is correct has not been settled.

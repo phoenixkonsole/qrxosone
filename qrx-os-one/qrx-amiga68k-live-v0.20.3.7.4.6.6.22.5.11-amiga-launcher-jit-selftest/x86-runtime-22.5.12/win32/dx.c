@@ -69,7 +69,7 @@ typedef struct dxobj {
     uint32_t event;                  /* SetEventNotification handle */
     uint8_t prevbtn[3];
 } dxobj;
-#define DX_MAX 128
+#define DX_MAX 1024
 static dxobj g_o[DX_MAX];
 static uint32_t g_vt[24];           /* guest vtables per interface */
 enum { VT_DD, VT_DD2, VT_SURF, VT_PAL, VT_CLIP, VT_DS, VT_DSB, VT_DI, VT_DID };
@@ -505,6 +505,12 @@ FN(dd_CreateSurface) {                  /* (this, desc, pp, outer) */
         if (!id) return E_FAIL_;
         s = &g_o[id - 1]; s->offscreen = 1;
         if (flags & 0x10000) { s->ck_on = 1; s->ck_lo = RD32(d + 64); s->ck_hi = RD32(d + 68); }
+        /* The format the program chose, usually one with alpha for its textures. */
+        if ((flags & 0x1000) && (RD32(d + 76) & 0x40u) && bpp >= 16) {
+            s->rm = RD32(d + 88); s->gm = RD32(d + 92); s->bm = RD32(d + 96);
+            s->am = (RD32(d + 76) & 1u) ? RD32(d + 100) : 0;
+            publish(w, s);
+        }
     }
     WR32(a[2], s->guest);
     return DD_OK;
@@ -1297,7 +1303,7 @@ static uint32_t call_host(qwin *w, const char *name, int n, const uint32_t *args
 static void d3d_host_present(qwin *w) { uint32_t self = 0; call_host(w, LG("Present"), 1, &self); }
 static uint32_t com_new(qwin *w, int vt, uint32_t data)
 {
-    uint32_t g = qw_alloc(w, 32);
+    uint32_t g = qw_alloc(w, 64);                     /* a viewport keeps its rectangle at +32 */
     WR32(g, g_vt[vt]); WR32(g + 4, 1); WR32(g + 8, data); WR32(g + 12, 0);
     return g;
 }
@@ -1466,6 +1472,36 @@ FN(lg_VB_Lock) {                          /* (this, flags, pp, size) */
 FN(lg_VB_GetDesc) { WR32(a[1], 16); WR32(a[1] + 4, 0); WR32(a[1] + 8, RD32(a[0] + 12)); WR32(a[1] + 12, RD32(a[0] + 16)); return DD_OK; }
 static uint32_t d3d_new_texture(qwin *w, uint32_t surface, int v2) { (void)v2; return com_new(w, VT_TEX2, surface); }
 static uint32_t d3d_new_root(qwin *w, int ver) { return com_new(w, ver == 7 ? VT_D3D7 : ver == 3 ? VT_D3D3 : VT_D3D2, 0); }
+/* (this, source): the system memory copy goes to the texture the card would hold. */
+FN(lg_Tex_Load) {
+    dxobj *d, *src;
+    int y, h, n;
+    uint8_t row[4096];
+    if (!a[1]) return E_FAIL_;
+    d = sf(w, RD32(a[0] + 8));
+    src = sf(w, RD32(a[1] + 8));
+    if (!d || !src || !d->mem || !src->mem) return E_FAIL_;
+    if (d->sw != src->sw || d->sh != src->sh || d->bpp != src->bpp) {
+        qw_log(w, "Direct3D: Load between %dx%dx%d and %dx%dx%d", src->sw, src->sh, src->bpp, d->sw, d->sh, d->bpp);
+        return E_FAIL_;
+    }
+    h = d->sh;
+    n = d->sw * d->bpp / 8;
+    for (y = 0; y < h; y++) {
+        int x;
+        for (x = 0; x < n; x += (int)sizeof(row)) {
+            uint32_t k = (uint32_t)(n - x) < sizeof(row) ? (uint32_t)(n - x) : (uint32_t)sizeof(row);
+            x86_read_mem(C, src->mem + (uint32_t)y * (uint32_t)src->pitch + (uint32_t)x, row, k);
+            x86_write_mem(C, d->mem + (uint32_t)y * (uint32_t)d->pitch + (uint32_t)x, row, k);
+        }
+    }
+    d->ck_on = src->ck_on;
+    d->ck_lo = src->ck_lo;
+    if (src->pal >= 0) d->pal = src->pal;
+    d->rm = src->rm; d->gm = src->gm; d->bm = src->bm; d->am = src->am;
+    publish(w, d);
+    return DD_OK;
+}
 FN(lg_Tex_GetHandle) { if (a[2]) WR32(a[2], RD32(a[0] + 8)); (void)w; return DD_OK; }  /* the surface is the handle */
 /* Materials: D3DMATERIAL {size, diffuse r,g,b,a ...}; the handle is the object. */
 FN(lg_Mat_SetMaterial) {
@@ -1655,7 +1691,7 @@ static const vslot vt_vp3[] = { LG_COM, VD("Initialize", 2), VG("GetViewport", l
     VG("SetBackground", lg_VP_SetBackground, 2), VD("GetBackground", 3), VD("SetBackgroundDepth", 2), VD("GetBackgroundDepth", 3), VG("Clear", lg_VP_Clear, 4), VD("AddLight", 2), VD("DeleteLight", 2),
     VD("NextLight", 4), VG("GetViewport2", lg_VP_GetViewport, 2), VG("SetViewport2", lg_VP_SetViewport, 2), VD("SetBackgroundDepth2", 2), VD("GetBackgroundDepth2", 3), VG("Clear2", lg_VP_Clear2, 7), { NULL, NULL, 0, NULL } };
 static const vslot vt_mat3[] = { LG_COM, VG("SetMaterial", lg_Mat_SetMaterial, 2), VD("GetMaterial", 2), VG("GetHandle", lg_Mat_GetHandle, 3), { NULL, NULL, 0, NULL } };
-static const vslot vt_tex2[] = { LG_COM, VG("GetHandle", lg_Tex_GetHandle, 3), VD("PaletteChanged", 3), VD("Load", 2), { NULL, NULL, 0, NULL } };
+static const vslot vt_tex2[] = { LG_COM, VG("GetHandle", lg_Tex_GetHandle, 3), VD("PaletteChanged", 3), VG("Load", lg_Tex_Load, 2), { NULL, NULL, 0, NULL } };
 static const vslot vt_vb7[] = { LG_COM, VG("Lock", lg_VB_Lock, 4), VD("Unlock", 1), VD("ProcessVertices", 8), VG("GetVertexBufferDesc", lg_VB_GetDesc, 2), VD("Optimize", 3), VD("ProcessVerticesStrided", 8), { NULL, NULL, 0, NULL } };
 static const vslot vt_light[] = { LG_COM, VD("Initialize", 2), VD("SetLight", 2), VD("GetLight", 2), { NULL, NULL, 0, NULL } };
 #define VMAX 60
