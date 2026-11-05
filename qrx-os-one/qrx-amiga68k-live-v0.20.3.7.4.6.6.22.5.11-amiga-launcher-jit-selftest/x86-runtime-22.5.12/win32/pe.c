@@ -76,7 +76,7 @@ static void apply_relocs(qwin *w, uint32_t base, uint32_t rva, uint32_t size, ui
 int qw_is_hle_dll(const char *dll)
 {
     static const char *hle[] = { "lz32", "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll",
-                                 "ddraw", "dsound", "dinput", "ole32", "oleaut32", "version", "imm32", "comdlg32", "msvcrt40", "crtdll", NULL };
+                                 "ddraw", "dsound", "dinput", "ole32", "oleaut32", "version", "imm32", "comdlg32", "msvcrt40", "crtdll", "dsetup", NULL };
     char n[64];
     size_t k;
     int i;
@@ -164,7 +164,8 @@ static int find_dll_file(qwin *w, const char *name, char *out, size_t max)
     }
     /* Then where tools/armithlon/install-directx.sh puts Microsoft's helper DLLs. */
     if (!strcmp(dir, "APPS:windows_system")) return 0;
-    strcpy(dir, "APPS:windows_system");
+    if (strcmp(dir, "SYS:WINDOWS/SYSTEM")) strcpy(dir, "SYS:WINDOWS/SYSTEM");      /* what installers put there */
+    else strcpy(dir, "APPS:windows_system");
     }
 }
 

@@ -16,7 +16,7 @@
 #define WR32(x, v) x86_wr32(C, (x), (v))
 #define UNUSED (void)w; (void)a
 
-static const char *known_dlls[] = { "lz32", "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll", "ddraw", "dsound", "dinput", "opengl32", "glide2x", "glide3x", "d3d8", "d3d9", "vulkan-1", "dplayx", "dplay", "ole32", "imm32", "version", "msacm32", "dinput8", "wsock32", "ws2_32", NULL };
+static const char *known_dlls[] = { "lz32", "dsetup", "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll", "ddraw", "dsound", "dinput", "opengl32", "glide2x", "glide3x", "d3d8", "d3d9", "vulkan-1", "dplayx", "dplay", "ole32", "imm32", "version", "msacm32", "dinput8", "wsock32", "ws2_32", NULL };
 #define QW_NKNOWN 27
 #define QW_MODBASE 0x7E000000u
 
@@ -523,12 +523,22 @@ static void systime(qwin *w, uint32_t p, int local)
 FN(k_GetLocalTime) { systime(w, a[0], 1); return 0; }
 FN(k_GetSystemTime) { systime(w, a[0], 0); return 0; }
 FN(k_GetStartupInfo) { uint32_t i; for (i = 0; i < 68; i += 4) WR32(a[0] + i, 0); WR32(a[0], 68); return 0; }
-FN(k_GetVersion) { UNUSED; return 0x0A280105u; }    /* 5.1 build 2600 */
+/* Programs linked before 1998 were written for Windows 95, and some refuse NT outright. */
+static int is_win95_program(qwin *w)
+{
+    uint32_t t = RD32(w->image_base + RD32(w->image_base + 0x3C) + 8);
+    return t && t < 883612800u;
+}
+FN(k_GetVersion) { UNUSED; return is_win95_program(w) ? 0xC3B60004u : 0x0A280105u; }    /* 4.0 build 950, or 5.1 build 2600 */
 FN(k_GetVersionEx) {
     static const char sp[] = "Service Pack 3";
-    uint32_t i, wide = RD32(a[0]) >= 276;
-    WR32(a[0] + 4, 5); WR32(a[0] + 8, 1); WR32(a[0] + 12, 2600); WR32(a[0] + 16, 2);
-    for (i = 0; i < sizeof(sp); i++) { if (wide) x86_wr16(C, a[0] + 20 + i * 2, (uint8_t)sp[i]); else x86_wr8(C, a[0] + 20 + i, (uint8_t)sp[i]); }
+    uint32_t i, wide = RD32(a[0]) >= 276, old = (uint32_t)is_win95_program(w);
+    if (old) { WR32(a[0] + 4, 4); WR32(a[0] + 8, 0); WR32(a[0] + 12, 0x040003B6u); WR32(a[0] + 16, 1); }
+    else { WR32(a[0] + 4, 5); WR32(a[0] + 8, 1); WR32(a[0] + 12, 2600); WR32(a[0] + 16, 2); }
+    for (i = 0; i < sizeof(sp); i++) {
+        uint8_t c = old ? 0 : (uint8_t)sp[i];
+        if (wide) x86_wr16(C, a[0] + 20 + i * 2, c); else x86_wr8(C, a[0] + 20 + i, c);
+    }
     return 1;
 }
 static uint32_t modhandle_for(const char *name)

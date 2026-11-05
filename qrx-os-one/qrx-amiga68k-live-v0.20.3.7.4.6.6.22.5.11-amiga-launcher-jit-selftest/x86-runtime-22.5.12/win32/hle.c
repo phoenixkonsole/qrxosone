@@ -108,8 +108,9 @@ got:
     if (!b) return 0;
     b->a = a; b->n = n; b->next = g_hash[hb(a)]; g_hash[hb(a)] = b;
     {   /* fresh memory is zeroed (several programs rely on calloc-like behaviour) */
+        static const uint8_t zero[4096];
         uint32_t i;
-        for (i = 0; i < n; i += 4) x86_wr32(&w->cpu, a + i, 0);
+        for (i = 0; i < n; i += sizeof(zero)) x86_write_mem(&w->cpu, a + i, zero, n - i < sizeof(zero) ? n - i : (uint32_t)sizeof(zero));
     }
     return a;
 }

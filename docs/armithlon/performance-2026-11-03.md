@@ -382,11 +382,24 @@ Measured and found not to be the cause, during play in GTA 1 and Daytona's demo:
 
 ### Sonic CD
 
-It now shows its title screen in colour at the right place in its window, and runs on until a fault in `DMIX.DLL`, where an object handle is 0. On the way:
+It installs with its own `SETUP.EXE` and runs its level demo in colour, in its window, at an even 30 frames a second. Run the game from where the setup put it; a copy in another folder faults, because `sonic.ini` names the install path.
+
+What it took, and what other programs gain from it:
 
 - `LZInit` returned 0 instead of the handle.
-- GDI palettes are real: `CreatePalette`, `RealizePalette`, `AnimatePalette` and the system palette, which an 8-bit DirectDraw primary without a palette of its own shows.
-- A DirectDraw program without exclusive mode gets a primary as large as the desktop, and its window shows the part under it. Before, the window was resized to the primary.
-- A program fault logs the top of the x86 stack.
+- GDI palettes are real: `CreatePalette`, `RealizePalette`, `AnimatePalette` and the system palette, which an 8-bit DirectDraw primary without a palette shows.
+- A DirectDraw program without exclusive mode gets a primary as large as the desktop, and its window shows the part under it. If a program draws at a fixed place that the window does not cover, as Norse by Norse West does, the window follows the picture.
+- There is one registry for all programs, `SYS:QRXREG.TXT`. Setup and game now share it, and an old `QRXREG.TXT` in a program folder is merged once. Subkeys can be listed and deleted: `DMIX.DLL` finds its effects by listing `HKLM\SOFTWARE\Intel\RDX\Effects`. Without that the effect handle stayed 0, which was the fault in `DMIX.DLL`.
+- `C:\WINDOWS` is one folder for all programs, `SYS:WINDOWS`, and DLLs are searched in `SYS:WINDOWS/SYSTEM`. `C:\` is still the program's folder. An absolute path that repeats the end of that folder is shortened, so `C:\SEGA\SONICCD\R1` works from `SEGA/SONICCD`.
+- Programs linked before 1998 are told they run on Windows 95. The setup refuses NT.
+- Dialogs load from the module the program names, not always from the EXE. Dialog controls keep `WS_VISIBLE` in their style; a program that read and wrote back the style hid its buttons.
+- INI files are written for real. `WritePrivateProfileStringA` did nothing before, so settings were lost.
+- `DSETUP.DLL` is built in and reports DirectX 9, and the registry holds the DirectX version. Without this Need for Speed II SE stops with "requires DirectX 5" once it is told it runs on Windows 95.
+- `qw_alloc` zeroes in blocks instead of word by word. Sonic CD allocates 16 MB per frame in its levels, which took about 100 ms a call: 4 frames a second before, 30 now.
 
-The game folder needs the DLLs its setup would copy, from `RDX` and the top level. Nothing does that yet.
+Still open with this game:
+
+- `Play` at the end of the setup fails with "Can't executed SONIC CD !": `CreateProcessA` and `WinExec` do not start anything. Installers that hand over to a second program will stop there as well.
+- Dialogs have no keyboard control: Return, Escape and Tab do nothing, because `IsDialogMessage` is a stub. The mouse works.
+- Static texts in the setup are cut off at their last lines, because our font is wider than Windows' system font.
+- Only the demo has been seen. Playing it by keyboard has not been tested, and neither has sound.

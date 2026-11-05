@@ -39,6 +39,7 @@ typedef struct dxobj {
     /* DirectDraw */
     uint32_t hwnd;
     int mw, mh, mbpp, exclusive;
+    int drawn[4];                       /* surface: where the last Blt on it went */
     /* surface */
     int sw, sh, bpp, pitch, primary, back, offscreen;
     uint32_t mem, caps;
@@ -271,6 +272,13 @@ static void present(qwin *w, dxobj *prim)
     if (dd && !dd->exclusive && prim->sw >= 1024) {
         /* Show the part of the desktop-sized primary that lies under the window. */
         int cx = t->x, cy = t->y, cw = t->cw, ch = t->ch;
+        /* Some programs draw at a fixed place and expect their window to be there. It is
+           elsewhere here, so the window follows the picture when they do not meet. */
+        if (prim->drawn[2] > prim->drawn[0] && (prim->drawn[2] <= cx || prim->drawn[0] >= cx + cw || prim->drawn[3] <= cy || prim->drawn[1] >= cy + ch)) {
+            cx = prim->drawn[0]; cy = prim->drawn[1];
+            if (cw > prim->drawn[2] - cx) cw = prim->drawn[2] - cx;
+            if (ch > prim->drawn[3] - cy) ch = prim->drawn[3] - cy;
+        }
         const uint32_t *p8 = pal ? pal : qw_sys_palette();
         uint32_t src;
         if (cx < 0) cx = 0;
@@ -750,6 +758,7 @@ FN(s_Blt) {                              /* (this, destrect, src, srcrect, flags
         return DD_OK;
     }
     if (!rect_of(w, a[3], sr, s->sw, s->sh)) return DD_OK;
+    memcpy(d->drawn, dr, sizeof(d->drawn));
     if (fl & 0x10000) blit(w, d, dr, s, sr, 1, RD32(fx + 92), RD32(fx + 96));          /* KEYSRCOVERRIDE */
     else blit(w, d, dr, s, sr, (fl & 0x8000) && s->ck_on, s->ck_lo, s->ck_hi);           /* KEYSRC */
     after_draw(w, d);
@@ -761,6 +770,7 @@ FN(s_BltFast) {                          /* (this, x, y, src, srcrect, trans) */
     if (!d || !s) return DDERR_INVALIDPARAMS;
     if (!rect_of(w, a[4], sr, s->sw, s->sh)) return DD_OK;
     dr[0] = (int32_t)a[1]; dr[1] = (int32_t)a[2]; dr[2] = dr[0] + sr[2] - sr[0]; dr[3] = dr[1] + sr[3] - sr[1];
+    memcpy(d->drawn, dr, sizeof(d->drawn));
     blit(w, d, dr, s, sr, (a[5] & 1) && s->ck_on, s->ck_lo, s->ck_hi);
     after_draw(w, d);
     return DD_OK;

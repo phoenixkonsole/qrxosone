@@ -147,6 +147,33 @@ static void map_path(qwin *w, const char *win, char *host, size_t max)
     char rel[1024];
     init_root(w);
     win_rel(win, rel, sizeof(rel));
+#ifdef __AROS__
+    /* C:\ is the program's folder, but C:\WINDOWS is one place for all of them: what an
+       installer puts there has to reach the game it installed. */
+    if (!g_above && !strncasecmp(rel, "windows", 7) && (rel[7] == 0 || rel[7] == '/') &&
+        ((isalpha((unsigned char)win[0]) && win[1] == ':') || win[0] == '\\' || win[0] == '/')) {
+        char keep[sizeof(g_root)];
+        static int made;
+        if (!made) { made = 1; mkdir("SYS:WINDOWS", 0777); mkdir("SYS:WINDOWS/SYSTEM", 0777); }
+        memcpy(keep, g_root, sizeof(keep));
+        strcpy(g_root, "SYS:");
+        host_path(rel, host, max);
+        memcpy(g_root, keep, sizeof(keep));
+        return;
+    }
+#endif
+    /* An installer running elsewhere stored C:\\GAMES\\X, and C:\\ here is GAMES\\X itself:
+       drop what the program's own folder already says. */
+    if (!g_above && ((isalpha((unsigned char)win[0]) && win[1] == ':') || win[0] == '\\')) {
+        size_t rl = strlen(g_root), k;
+        for (k = strlen(rel); k > 0; k--) {
+            if (rel[k] != 0 && rel[k] != '/') continue;
+            if (k < rl && (g_root[rl - k - 1] == '/' || g_root[rl - k - 1] == ':') && !strncasecmp(g_root + rl - k, rel, k)) {
+                memmove(rel, rel + k + (rel[k] == '/'), strlen(rel + k + (rel[k] == '/')) + 1);
+                break;
+            }
+        }
+    }
     host_path(rel, host, max);
 }
 

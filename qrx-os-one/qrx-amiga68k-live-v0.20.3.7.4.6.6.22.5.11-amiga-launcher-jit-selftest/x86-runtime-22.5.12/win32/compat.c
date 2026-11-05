@@ -201,18 +201,26 @@ FN(c_TlsSetValue) { if (a[0] < 64) WR32(qw_thread_current_teb() + 0x1000 + a[0] 
 FN(c_DuplicateHandle) { if (a[3]) WR32(a[3], a[1] == 0xFFFFFFFEu ? qw_thread_current_handle(w) : a[1]); return 1; }
 
 /* ================================================================ registry */
-#define REG_FILE "QRXREG.TXT"
+/* One registry for all programs, as on Windows: an installer's entries must reach the
+   game it installs. Older versions kept a file per program folder; it is merged once. */
+#define REG_FILE_OLD "QRXREG.TXT"
+#ifdef __AROS__
+#define REG_FILE "SYS:QRXREG.TXT"
+#else
+#define REG_FILE REG_FILE_OLD
+#endif
+#define REG_KEYS 512
 typedef struct qval { char key[160], name[64]; uint32_t type, size; uint8_t *data; struct qval *next; } qval;
 static qval *g_vals;
 static struct { int used; char path[160]; } g_hk[64];
-static char g_known[128][160];
+static char g_known[REG_KEYS][160];
 static int g_loaded;
 
 static void key_lower(char *s) { for (; *s; s++) *s = *s == '/' ? '\\' : (char)tolower((unsigned char)*s); }
 static void key_known(const char *p)
 {
     int i;
-    for (i = 0; i < 128; i++) {
+    for (i = 0; i < REG_KEYS; i++) {
         if (!strcmp(g_known[i], p)) return;
         if (!g_known[i][0]) { snprintf(g_known[i], sizeof(g_known[i]), "%s", p); return; }
     }
@@ -238,13 +246,10 @@ static void val_set(const char *k, const char *n, uint32_t type, const uint8_t *
     v->type = type; v->size = size;
     key_known(k);
 }
-static void reg_load(void)
+static void reg_read(const char *file)
 {
-    FILE *f;
+    FILE *f = fopen(file, "r");
     char line[1024];
-    if (g_loaded) return;
-    g_loaded = 1;
-    f = fopen(REG_FILE, "r");
     if (!f) return;
     while (fgets(line, sizeof(line), f)) {
         char *k = line, *n = strchr(line, '|'), *t, *h;
@@ -265,23 +270,49 @@ static void reg_load(void)
             h += 2;
         }
         key_lower(k);
-        val_set(k, n, (uint32_t)strtoul(t, NULL, 10), buf, size);
+        if (t[0] == 'k') key_known(k);                     /* a key without values */
+        else val_set(k, n, (uint32_t)strtoul(t, NULL, 10), buf, size);
     }
     fclose(f);
 }
-static void reg_save(void)
+static int reg_write(const char *file)
 {
-    FILE *f = fopen(REG_FILE, "w");
+    FILE *f = fopen(file, "w");
     qval *v;
-    if (!f) return;
+    int i;
+    if (!f) return 0;
+    for (i = 0; i < REG_KEYS && g_known[i][0]; i++) fprintf(f, "%s||k|\n", g_known[i]);
     for (v = g_vals; v; v = v->next) {
-        uint32_t i;
+        uint32_t j;
         if (v->size > 256) continue;
         fprintf(f, "%s|%s|%u|", v->key, v->name, (unsigned)v->type);
-        for (i = 0; i < v->size; i++) fprintf(f, "%02x", v->data[i]);
+        for (j = 0; j < v->size; j++) fprintf(f, "%02x", v->data[j]);
         fputc('\n', f);
     }
     fclose(f);
+    return 1;
+}
+static void reg_save(void)
+{
+    if (!reg_write(REG_FILE)) reg_write(REG_FILE_OLD);     /* a read-only system disk */
+}
+static void reg_load(void)
+{
+    FILE *old;
+    if (g_loaded) return;
+    g_loaded = 1;
+    reg_read(REG_FILE);
+    {   /* Programs read the DirectX version from here. */
+        static const char ver[] = "4.09.00.0904";
+        static const uint8_t inst[] = { 0, 0, 0, 4, 0, 9, 0, 0 };  
+        val_set("hklm\\software\\microsoft\\directx", "Version", 1, (const uint8_t *)ver, sizeof(ver));
+        val_set("hklm\\software\\microsoft\\directx", "InstalledVersion", 3, inst, sizeof(inst));
+    }
+    if (strcmp(REG_FILE, REG_FILE_OLD) && (old = fopen(REG_FILE_OLD, "r")) != NULL) {
+        fclose(old);
+        reg_read(REG_FILE_OLD);
+        if (reg_write(REG_FILE)) remove(REG_FILE_OLD);
+    }
 }
 static void reg_path(qwin *w, uint32_t hk, uint32_t sub, char *out, size_t n)
 {
@@ -308,7 +339,7 @@ static int key_exists(const char *p)
 {
     size_t L = strlen(p);
     int i;
-    for (i = 0; i < 128 && g_known[i][0]; i++) {
+    for (i = 0; i < REG_KEYS && g_known[i][0]; i++) {
         if (!strncmp(g_known[i], p, L) && (g_known[i][L] == 0 || g_known[i][L] == '\\')) return 1;
     }
     return 0;
@@ -396,25 +427,238 @@ FN(c_RegEnumValueA) {
     }
     return 259;   /* ERROR_NO_MORE_ITEMS */
 }
-FN(c_RegNoMore) { UNUSED; return 259; }
-FN(c_RegQueryInfoKeyA) { uint32_t i; for (i = 4; i < 11; i++) if (a[i]) WR32(a[i], 0); if (a[2]) WR32(a[2], 0); (void)w; return 0; }
+/* The index-th direct child of key p, also when only a deeper key was ever created. */
+static int key_child(const char *p, uint32_t index, char *out, size_t max)
+{
+    size_t L = strlen(p);
+    uint32_t n = 0;
+    int i, j;
+    for (i = 0; i < REG_KEYS && g_known[i][0]; i++) {
+        const char *c = g_known[i] + L + 1, *e;
+        size_t cl;
+        int seen = 0;
+        if (strncmp(g_known[i], p, L) || g_known[i][L] != '\\') continue;
+        e = strchr(c, '\\');
+        cl = e ? (size_t)(e - c) : strlen(c);
+        for (j = 0; j < i && !seen; j++)
+            if (!strncmp(g_known[j], p, L) && g_known[j][L] == '\\' && !strncmp(g_known[j] + L + 1, c, cl)
+                && (g_known[j][L + 1 + cl] == 0 || g_known[j][L + 1 + cl] == '\\')) seen = 1;
+        if (seen) continue;
+        if (n++ == index) {
+            if (cl >= max) cl = max - 1;
+            memcpy(out, c, cl); out[cl] = 0;
+            return 1;
+        }
+    }
+    return 0;
+}
+FN(c_RegEnumKeyExA) {
+    char p[160], c[160];
+    uint32_t cap = RD32(a[3]), L, i;
+    reg_load();
+    reg_path(w, a[0], 0, p, sizeof(p));
+    if (!key_child(p, a[1], c, sizeof(c))) return 259;     /* ERROR_NO_MORE_ITEMS */
+    L = (uint32_t)strlen(c);
+    if (L + 1 > cap) return 234;                           /* ERROR_MORE_DATA */
+    wr_str(w, a[2], cap, c);
+    WR32(a[3], L);
+    if (a[6]) WR32(a[6], 0);
+    if (a[7]) for (i = 0; i < 8; i++) WR8(a[7] + i, 0);
+    return 0;
+}
+FN(c_RegEnumKeyA) {
+    char p[160], c[160];
+    reg_load();
+    reg_path(w, a[0], 0, p, sizeof(p));
+    if (!key_child(p, a[1], c, sizeof(c))) return 259;
+    if (strlen(c) + 1 > a[3]) return 234;
+    wr_str(w, a[2], a[3], c);
+    return 0;
+}
+/* Removes the whole subtree, as Windows 95 does. */
+static int key_within(const char *k, const char *p, size_t L) { return !strncmp(k, p, L) && (k[L] == 0 || k[L] == '\\'); }
+FN(c_RegDeleteKeyA) {
+    char p[160];
+    qval **pv, *v;
+    int i, n = 0;
+    size_t L;
+    reg_load();
+    reg_path(w, a[0], a[1], p, sizeof(p));
+    if (!key_exists(p)) return 2;
+    L = strlen(p);
+    for (pv = &g_vals; (v = *pv) != NULL; ) {
+        if (key_within(v->key, p, L)) { *pv = v->next; free(v->data); free(v); }
+        else pv = &v->next;
+    }
+    for (i = 0; i < REG_KEYS && g_known[i][0]; i++) {
+        if (key_within(g_known[i], p, L)) continue;
+        if (n != i) memcpy(g_known[n], g_known[i], sizeof(g_known[n]));
+        n++;
+    }
+    if (n < REG_KEYS) g_known[n][0] = 0;
+    reg_save();
+    return 0;
+}
+FN(c_RegQueryInfoKeyA) {
+    char p[160], c[160];
+    uint32_t i, subs = 0, maxsub = 0, vals = 0, maxname = 0, maxdata = 0;
+    qval *v;
+    reg_load();
+    reg_path(w, a[0], 0, p, sizeof(p));
+    while (key_child(p, subs, c, sizeof(c))) { if (strlen(c) > maxsub) maxsub = (uint32_t)strlen(c); subs++; }
+    for (v = g_vals; v; v = v->next) if (!strcmp(v->key, p)) {
+        vals++;
+        if (strlen(v->name) > maxname) maxname = (uint32_t)strlen(v->name);
+        if (v->size > maxdata) maxdata = v->size;
+    }
+    if (a[2]) WR32(a[2], 0);
+    for (i = 4; i < 11; i++) if (a[i]) WR32(a[i], 0);
+    if (a[4]) WR32(a[4], subs);
+    if (a[5]) WR32(a[5], maxsub);
+    if (a[7]) WR32(a[7], vals);
+    if (a[8]) WR32(a[8], maxname);
+    if (a[9]) WR32(a[9], maxdata);
+    return 0;
+}
 
 /* ================================================================ INI files */
-static FILE *ini_open(qwin *w, uint32_t path)
+static void ini_path(qwin *w, uint32_t path, char *out, size_t max)
 {
     char p[300], *s;
-    FILE *f;
-    (void)w;
     rd_str(w, path, p, sizeof(p));
-    /* Windows paths from a game: a plain name lives in \WINDOWS, here beside the game. */
     for (s = p; *s; s++) if (*s == '\\') *s = '/';
     s = p;
     if (isalpha((unsigned char)s[0]) && s[1] == ':') s += 2;
     while (*s == '/') s++;
+#ifdef __AROS__
+    if (!strncasecmp(s, "windows/", 8)) { snprintf(out, max, "SYS:%s", s); return; }   /* one C:\WINDOWS for all programs */
+#endif
+    snprintf(out, max, "%s", s);
+}
+static FILE *ini_open(qwin *w, uint32_t path)
+{
+    char s[310];
+    FILE *f;
+    ini_path(w, path, s, sizeof(s));
+    /* Windows paths from a game: a plain name lives in \WINDOWS, here beside the game. */
     f = fopen(s, "r");
     if (!f) { char *b = strrchr(s, '/'); if (b) f = fopen(b + 1, "r"); }
+#ifdef __AROS__
+    if (!f) {
+        char g[330], *b = strrchr(s, '/');
+        snprintf(g, sizeof(g), "SYS:WINDOWS/%s", b ? b + 1 : s);
+        f = fopen(g, "r");
+    }
+#endif
     return f;
 }
+/* Rewrites file: key = val in section sec. val NULL removes the key, key NULL the section. */
+static int ini_update(const char *file, const char *sec, const char *key, const char *val)
+{
+    FILE *f = fopen(file, "r");
+    char *old = NULL, *neu, *p;
+    long n = 0;
+    size_t k = 0, room;
+    int in = 0, seen = 0, done = 0;
+    if (f) {
+        fseek(f, 0, SEEK_END); n = ftell(f); fseek(f, 0, SEEK_SET);
+        if (n < 0) n = 0;
+        old = (char *)malloc((size_t)n + 1);
+        if (!old) { fclose(f); return 0; }
+        n = (long)fread(old, 1, (size_t)n, f);
+        old[n] = 0;
+        fclose(f);
+    }
+    room = (size_t)n + strlen(sec) + (key ? strlen(key) : 0) + (val ? strlen(val) : 0) + 16;
+    neu = (char *)malloc(room);
+    if (!neu) { free(old); return 0; }
+    for (p = old; p && *p; ) {
+        char *e = strchr(p, '\n'), *s = p, *t;
+        size_t L = e ? (size_t)(e - p) + 1 : strlen(p);
+        int drop = 0;
+        while (*s == ' ' || *s == '\t') s++;
+        if (*s == '[' && (t = strchr(s, ']')) != NULL && t < p + L) {
+            if (in && !done && key && val) { k += (size_t)sprintf(neu + k, "%s=%s\r\n", key, val); done = 1; }
+            in = (size_t)(t - s - 1) == strlen(sec) && !strncasecmp(s + 1, sec, strlen(sec));
+            if (in) seen = 1;
+            if (in && !key) drop = 1;
+        } else if (in && !key) drop = 1;
+        else if (in && !done && *s != ';' && (t = strchr(s, '=')) != NULL && t < p + L) {
+            char *q = t;
+            while (q > s && (q[-1] == ' ' || q[-1] == '\t')) q--;
+            if ((size_t)(q - s) == strlen(key) && !strncasecmp(s, key, strlen(key))) {
+                drop = 1; done = 1;
+                if (val) k += (size_t)sprintf(neu + k, "%s=%s\r\n", key, val);
+            }
+        }
+        if (!drop) { memcpy(neu + k, p, L); k += L; }
+        p += L;
+    }
+    if (!done && key && val) {
+        if (!seen) k += (size_t)sprintf(neu + k, "[%s]\r\n", sec);
+        k += (size_t)sprintf(neu + k, "%s=%s\r\n", key, val);
+    }
+    f = fopen(file, "w");
+    if (f) { fwrite(neu, 1, k, f); fclose(f); }
+    free(old); free(neu);
+    return f != NULL;
+}
+FN(c_WritePrivateProfileStringA) {
+    char file[310], sec[128], key[128], val[512];
+    if (!a[3]) return 1;                                    /* flush */
+    ini_path(w, a[3], file, sizeof(file));
+    rd_str(w, a[0], sec, sizeof(sec));
+    rd_str(w, a[1], key, sizeof(key));
+    rd_str(w, a[2], val, sizeof(val));
+    return (uint32_t)ini_update(file, sec, a[1] ? key : NULL, a[2] ? val : NULL);
+}
+FN(c_GetPrivateProfileSectionA) {
+    char sec[128], line[512];
+    FILE *f = ini_open(w, a[3]);
+    uint32_t k = 0, cap = a[2];
+    int in = 0;
+    rd_str(w, a[0], sec, sizeof(sec));
+    if (f) {
+        while (fgets(line, sizeof(line), f)) {
+            char *s = line, *e;
+            uint32_t L, i;
+            while (*s == ' ' || *s == '\t') s++;
+            for (e = s + strlen(s); e > s && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' '); ) *--e = 0;
+            if (*s == '[') { e = strchr(s, ']'); if (e) *e = 0; in = !strcasecmp(s + 1, sec); continue; }
+            if (!in || !*s || *s == ';') continue;
+            L = (uint32_t)strlen(s);
+            if (k + L + 2 > cap) break;
+            for (i = 0; i <= L; i++) WR8(a[1] + k + i, (uint8_t)s[i]);
+            k += L + 1;
+        }
+        fclose(f);
+    }
+    if (cap) WR8(a[1] + k, 0);
+    return k;
+}
+FN(c_WritePrivateProfileSectionA) {
+    char file[310], sec[128], line[512];
+    uint32_t p = a[1];
+    ini_path(w, a[2], file, sizeof(file));
+    rd_str(w, a[0], sec, sizeof(sec));
+    ini_update(file, sec, NULL, NULL);
+    for (; p && RD8(p); ) {
+        char *e;
+        uint32_t L;
+        rd_str(w, p, line, sizeof(line));
+        L = (uint32_t)strlen(line);
+        p += L + 1;
+        e = strchr(line, '=');
+        if (!e) continue;
+        *e++ = 0;
+        ini_update(file, sec, line, e);
+    }
+    return 1;
+}
+/* DirectX is built in: the setup a game ships finds it installed. */
+FN(c_DirectXSetupGetVersion) { if (a[0]) WR32(a[0], 0x00040009u); if (a[1]) WR32(a[1], 904u); return 1; }
+FN(c_VerLanguageNameA) { return wr_str(w, a[1], a[2], "English (United States)"); }
+FN(c_efail) { (void)w; (void)a; return 0x80004005u; }
 static int ini_find(FILE *f, const char *sec, const char *key, char *out, size_t max)
 {
     char line[512];
@@ -1320,11 +1564,11 @@ const qhle qw_compat[] = {
     ADV("RegOpenKeyA", c_RegOpenKeyA, 3), ADV("RegOpenKeyExA", c_RegOpenKeyExA, 5), ADV("RegCreateKeyA", c_RegCreateKeyA, 3),
     ADV("RegCreateKeyExA", c_RegCreateKeyExA, 9), ADV("RegCloseKey", c_RegCloseKey, 1), ADV("RegQueryValueExA", c_RegQueryValueExA, 6),
     ADV("RegSetValueExA", c_RegSetValueExA, 6), ADV("RegDeleteValueA", c_RegDeleteValueA, 2), ADV("RegEnumValueA", c_RegEnumValueA, 8),
-    ADV("RegEnumKeyExA", c_RegNoMore, 8), ADV("RegEnumKeyA", c_RegNoMore, 4), ADV("RegFlushKey", c_ok0, 1), ADV("RegDeleteKeyA", c_ok0, 2),
+    ADV("RegEnumKeyExA", c_RegEnumKeyExA, 8), ADV("RegEnumKeyA", c_RegEnumKeyA, 4), ADV("RegFlushKey", c_ok0, 1), ADV("RegDeleteKeyA", c_RegDeleteKeyA, 2),
     ADV("RegQueryInfoKeyA", c_RegQueryInfoKeyA, 12),
     /* INI files */
     K("GetPrivateProfileStringA", c_GetPrivateProfileStringA, 6), K("GetPrivateProfileIntA", c_GetPrivateProfileIntA, 4),
-    K("WritePrivateProfileStringA", c_ok1, 4), K("GetProfileStringA", c_GetProfileStringA, 5), K("GetProfileIntA", c_GetProfileIntA, 3),
+    K("WritePrivateProfileStringA", c_WritePrivateProfileStringA, 4), K("GetPrivateProfileSectionA", c_GetPrivateProfileSectionA, 4), K("WritePrivateProfileSectionA", c_WritePrivateProfileSectionA, 3), K("GetProfileStringA", c_GetProfileStringA, 5), K("GetProfileIntA", c_GetProfileIntA, 3),
     /* old-style files */
     K("_lopen", c_lopen, 2), K("_lcreat", c_lcreat, 2), K("_lclose", c_lclose, 1), K("_lread", c_lread, 3), K("_hread", c_lread, 3),
     K("_lwrite", c_lwrite, 3), K("_hwrite", c_lwrite, 3), K("_llseek", c_llseek, 3), K("OpenFile", c_OpenFile, 3),
@@ -1399,7 +1643,12 @@ const qhle qw_compat[] = {
     K("GetStringTypeExA", c_ok1, 5), K("LockFile", c_ok1, 5), K("UnlockFile", c_ok1, 5), K("GetProcessAffinityMask", c_ok0, 3), K("IsProcessorFeaturePresent", c_ok0, 1),
     ADV("RegQueryValueA", c_RegQueryValueA, 4), ADV("RegSetValueA", c_ok0, 5), ADV("SetFileSecurityA", c_ok1, 3), ADV("GetFileSecurityA", c_ok0, 5),
     { "shell32", "ShellExecuteA", 6, c_ShellExecuteA }, { "shell32", "DragFinish", 1, c_ok0 }, { "shell32", "DragQueryFileA", 4, c_ok0 }, { "shell32", "DragAcceptFiles", 2, c_ok0 },
-    { "shell32", "SHGetFileInfoA", 5, c_ok0 },
+    { "shell32", "SHGetFileInfoA", 5, c_ok0 }, { "shell32", "SHBrowseForFolder", 1, c_ok0 }, { "shell32", "SHGetMalloc", 1, c_efail }, { "shell32", "SHGetPathFromIDList", 2, c_ok0 },
+    { "version", "VerLanguageNameA", 3, c_VerLanguageNameA }, { "dsetup", "DirectXSetupGetVersion", 2, c_DirectXSetupGetVersion },
+    { "dsetup", "DirectXSetupA", 3, c_ok0 }, { "dsetup", "DirectXSetupW", 3, c_ok0 }, { "dsetup", "DirectXSetup", 3, c_ok0 }, { "dsetup", "DirectXDeviceDriverSetupA", 4, c_ok0 },
+    { "dsetup", "DirectXRegisterApplicationA", 2, c_ok1 }, { "dsetup", "DirectXRegisterApplicationW", 2, c_ok1 }, { "dsetup", "DirectXUnRegisterApplication", 2, c_ok1 },
+    { "dsetup", "DirectXSetupSetCallback", 1, c_ok0 }, { "dsetup", "DirectXSetupGetEULAA", 3, c_ok1 }, { "user32", "ExitWindowsEx", 2, c_ok0 },
+    { "user32", "DdeDisconnect", 1, c_ok1 }, { "user32", "DdeClientTransaction", 8, c_ok0 }, { "user32", "DdeCreateDataHandle", 7, c_ok0 },
     { "comctl32", "ImageList_Create", 5, c_ok1 }, { "comctl32", "ImageList_Add", 3, c_ok0 }, { "comctl32", "ImageList_Destroy", 1, c_ok1 },
     { "imm32", "ImmGetContext", 1, c_ok0 }, { "imm32", "ImmReleaseContext", 2, c_ok1 }, { "imm32", "ImmSetOpenStatus", 2, c_ok1 }, { "imm32", "ImmGetOpenStatus", 1, c_ok0 },
     { "imm32", "ImmAssociateContext", 2, c_ok0 }, { "imm32", "ImmNotifyIME", 4, c_ok1 }, { "imm32", "ImmGetDefaultIMEWnd", 1, c_ok0 },

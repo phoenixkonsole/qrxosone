@@ -785,7 +785,7 @@ static uint32_t create_dialog(qwin *w, uint32_t tpl, uint32_t parent, uint32_t d
         ch = create_window(w, cex, cc, ctext, (cstyle | WS_CHILD) & ~WS_VISIBLE, ix * BASEX / 4, iy * BASEY / 8, icx * BASEX / 4, icy * BASEY / 8, h, id, hinst, 0);
         if (ch) {
             qwnd *cw = W(w, ch);
-            if (cw) { cw->font = font; cw->visible = (cstyle & WS_VISIBLE) != 0; }
+            if (cw) { cw->font = font; cw->visible = (cstyle & WS_VISIBLE) != 0; if (cw->visible) cw->style |= WS_VISIBLE; }
             if (!focusctl && (cstyle & WS_TABSTOP) && !(cstyle & WS_DISABLED)) focusctl = ch;
         }
     }
@@ -799,10 +799,10 @@ static uint32_t create_dialog(qwin *w, uint32_t tpl, uint32_t parent, uint32_t d
     return h;
 }
 
-static uint32_t dialog_template(qwin *w, uint32_t name)
+static uint32_t dialog_template(qwin *w, uint32_t hmod, uint32_t name)
 {
     uint32_t d, s;
-    if (!res_find(w, 5, name, &d, &s)) { qw_log(w, "dialog resource %u not found", name); return 0; }
+    if (!res_find_in(w, hmod ? hmod : w->image_base, 5, name, &d, &s)) { qw_log(w, "dialog resource %u not found", name); return 0; }
     return d;
 }
 
@@ -2094,12 +2094,12 @@ FN(u_SetClassLongW) {
 }
 FN(u_TrackMouseEvent) { qwnd *x = W(w, RD32(a[0] + 8)); if (x && (RD32(a[0] + 4) & 2)) x->tme = 2; return 1; }
 FN(u_CreateDialogParamW) {
-    uint32_t t = dialog_template(w, a[1]);
+    uint32_t t = dialog_template(w, a[0], a[1]);
     return t ? create_dialog(w, t, a[2], a[3], a[4], a[0]) : 0;
 }
 FN(u_CreateDialogIndirectParamW) { return create_dialog(w, a[1], a[2], a[3], a[4], a[0]); }
 FN(u_DialogBoxParamW) {
-    uint32_t t = dialog_template(w, a[1]), h;
+    uint32_t t = dialog_template(w, a[0], a[1]), h;
     if (!t) return 0xFFFFFFFFu;
     h = create_dialog(w, t, a[2], a[3], a[4], a[0]);
     if (!h) return 0xFFFFFFFFu;
