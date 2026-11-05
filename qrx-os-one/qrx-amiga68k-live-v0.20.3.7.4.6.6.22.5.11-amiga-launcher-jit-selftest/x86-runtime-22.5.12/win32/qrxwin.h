@@ -197,6 +197,11 @@ typedef struct qmod {
     char name[64];                    /* lower-case file name, e.g. "cards.dll" */
     uint32_t base, size, entry, res_rva, exp_rva, exp_size;
     int is_dll, inited;
+    /* A DLL from LoadLibrary can really go away; another module's import keeps it. */
+    int refs, pinned, unloaded;
+    uint8_t *snap;                    /* its writable sections as they were before DllMain */
+    uint32_t snap_va[16], snap_size[16];
+    int snap_n;
 } qmod;
 
 typedef struct qwin {
@@ -312,6 +317,7 @@ qmod *pe_find_module(qwin *w, uint32_t hmod);            /* by handle (= base) *
 qmod *pe_module_by_name(qwin *w, const char *name);
 qmod *pe_load_dll(qwin *w, const char *name);            /* load or return loaded; NULL if absent */
 uint32_t pe_export(qwin *w, qmod *m, const char *name, uint32_t ordinal);   /* 0 if missing */
+void pe_free_dll(qwin *w, qmod *m);                      /* FreeLibrary: DllMain(PROCESS_DETACH) at the last reference */
 void pe_init_dlls(qwin *w);                              /* DllMain(PROCESS_ATTACH) of pending DLLs */
 int  qw_is_hle_dll(const char *dll);
 /* find resource; type/name: id if < 0x10000 else guest pointer to string */

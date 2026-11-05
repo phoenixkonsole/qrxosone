@@ -561,7 +561,8 @@ static uint32_t module_handle(qwin *w, const char *n, int load)
     qmod *m;
     if (h) return h;
     m = load ? pe_load_dll(w, n) : pe_module_by_name(w, n);
-    if (m) return m->base;
+    if (m && load) m->refs++;
+    if (m && !m->unloaded) return m->base;
     if (load) { qw_log(w, "LoadLibrary(%s): not available in QRX (program continues without it)", n); w->last_error = 126; }
     return 0;
 }
@@ -713,7 +714,7 @@ FN(k_GetSystemInfo) {
     return 0;
 }
 FN(k_RaiseException) { qw_log(w, "RaiseException(%08x): structured exceptions are not supported", a[0]); w->exit_code = a[0]; w->exiting = 1; return 0; }
-FN(k_FreeLibrary) { UNUSED; return 1; }
+FN(k_FreeLibrary) { qmod *m = pe_find_module(w, a[0]); if (m) pe_free_dll(w, m); return 1; }
 FN(k_IsBadReadPtr) { UNUSED; return !x86_is_mapped(C, a[0]); }
 FN(k_FindResourceW) { uint32_t d, s; if (!res_find_in(w, a[0], a[2], a[1], &d, &s)) return 0; { uint32_t h = qw_alloc(w, 8); WR32(h, d); WR32(h + 4, s); return h; } }
 FN(k_LoadResource) { UNUSED; return a[1] ? RD32(a[1]) : 0; }

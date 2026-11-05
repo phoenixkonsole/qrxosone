@@ -1114,9 +1114,7 @@ FN(c_MapViewOfFile) {
     p = qw_alloc(w, size + 16);
     if (!p) return 0;
     if (g_map[i].file == 0xFFFFFFFFu) {
-        uint8_t *h = x86_host_ptr(C, p);
-        if (h) memset(h, 0, size);
-        g_map[i].view = p;
+        g_map[i].view = p;                      /* qw_alloc has zeroed it */
         return p + off;
     }
     b[0] = g_map[i].file; b[1] = off; b[2] = 0; b[3] = 0;
@@ -1328,11 +1326,16 @@ FN(c_waveOutWrite) {
         }
     }
     wp = (uint32_t)(o->written & (WO_RING - 1u));
-    n = len < WO_RING - wp ? len : WO_RING - wp;
-    {
-        uint8_t *dst = x86_host_ptr(C, o->ring + wp);
-        if (dst) x86_read_mem(C, data, dst, n);
-        if (n < len) { dst = x86_host_ptr(C, o->ring); if (dst) x86_read_mem(C, data + n, dst, len - n); }
+    /* Guest pages do not lie next to each other in our memory: never copy past one. */
+    for (n = 0; n < len; ) {
+        uint8_t chunk[1024];
+        uint32_t k = len - n, room = WO_RING - wp;
+        if (k > sizeof(chunk)) k = (uint32_t)sizeof(chunk);
+        if (k > room) k = room;
+        x86_read_mem(C, data + n, chunk, k);
+        x86_write_mem(C, o->ring + wp, chunk, k);
+        n += k;
+        wp = (wp + k) & (WO_RING - 1u);
     }
     o->written += len;
     WR32(hdr + 16, (RD32(hdr + 16) | 0x10u) & ~1u);

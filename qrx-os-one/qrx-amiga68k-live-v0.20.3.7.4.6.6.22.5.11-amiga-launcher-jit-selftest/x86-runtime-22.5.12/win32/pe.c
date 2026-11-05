@@ -176,7 +176,19 @@ qmod *pe_load_dll(qwin *w, const char *name)
     long n;
     uint8_t *b;
     qmod *m = pe_module_by_name(w, name);
-    if (m) return m;
+    if (m) {
+        if (m->unloaded) {
+            /* Loaded again: its globals must be as new, games count on it. The pages and the
+               code stayed, so only the writable sections go back. */
+            uint32_t at = 0;
+            int i;
+            for (i = 0; i < m->snap_n; i++) { x86_write_mem(&w->cpu, m->base + m->snap_va[i], m->snap + at, m->snap_size[i]); at += m->snap_size[i]; }
+            m->unloaded = 0;
+            m->inited = 0;
+            if (w->started) pe_init_dlls(w);
+        }
+        return m;
+    }
     lower_base(low, name, sizeof(low));
     if (!find_dll_file(w, name, path, sizeof(path))) return NULL;
     f = fopen(path, "rb");
@@ -190,6 +202,16 @@ qmod *pe_load_dll(qwin *w, const char *name)
     if (m && w->verbose) qw_log(w, "loaded %s at %08x (%u bytes)", m->name, m->base, m->size);
     if (m && w->started) pe_init_dlls(w);
     return m;
+}
+
+void pe_free_dll(qwin *w, qmod *m)
+{
+    if (!m->is_dll || !m->snap || m->pinned || m->unloaded || m->refs <= 0 || --m->refs > 0) return;
+    if (m->entry && m->inited) {
+        uint32_t r = qw_call(w, m->base + m->entry, 3, m->base, 0 /* DLL_PROCESS_DETACH */, 0, 0);
+        if (w->verbose) qw_log(w, "DllMain(%s, PROCESS_DETACH) = %u", m->name, r);
+    }
+    m->unloaded = 1;
 }
 
 void pe_init_dlls(qwin *w)
@@ -278,6 +300,7 @@ static qmod *pe_map(qwin *w, const uint8_t *b, size_t n, const char *name, int i
             qw_rd_str(w, base + nm, dll, sizeof(dll));
             if (!qw_is_hle_dll(dll)) {
                 dm = pe_load_dll(w, dll);
+                if (dm) dm->pinned = 1;
                 m = &w->mod[idx];                       /* (array is static; keep the pointer obvious) */
                 if (!dm) {
                     qw_log(w, "%s imports %s: not found next to the program", name, dll);
@@ -297,6 +320,19 @@ static qmod *pe_map(qwin *w, const uint8_t *b, size_t n, const char *name, int i
                 x86_wr32(c, base + iat + k * 4, addr);
             }
         }
+    }
+    if (is_dll && w->started) {                  /* LoadLibrary: keep what a later reload restores */
+        uint32_t total = 0, at = 0;
+        for (i = 0; i < nsec && m->snap_n < 16; i++) {
+            const uint8_t *s = b + opt + optsz + i * 40;
+            uint32_t sz = le32(s + 8) ? le32(s + 8) : le32(s + 16);
+            if (!(le32(s + 36) & 0x80000000u) || !sz) continue;
+            m->snap_va[m->snap_n] = le32(s + 12);
+            m->snap_size[m->snap_n++] = sz;
+            total += sz;
+        }
+        m->snap = total ? (uint8_t *)malloc(total) : NULL;
+        if (m->snap) for (i = 0; i < (uint32_t)m->snap_n; i++) { x86_read_mem(c, base + m->snap_va[i], m->snap + at, m->snap_size[i]); at += m->snap_size[i]; }
     }
     if (is_dll && w->ninit < QW_MAXMOD) w->init_order[w->ninit++] = idx;   /* after its own imports */
     /* read-only protection is not applied: many old programs write to .rdata-adjacent data */

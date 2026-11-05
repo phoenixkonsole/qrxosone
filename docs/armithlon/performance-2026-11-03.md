@@ -399,10 +399,9 @@ What it took, and what other programs gain from it:
 
 Still open with this game:
 
-- After the first demo, about 100 seconds in, the return to the title leaves the game window black, with an empty blue box 616x112 in the middle of the screen. The game goes on at 30 frames a second. It happens with and without the setup, and the cause is not known yet.
 - Dialogs have no keyboard control: Return, Escape and Tab do nothing, because `IsDialogMessage` is a stub. The mouse works.
 - Static texts in the setup are cut off at their last lines, because our font is wider than Windows' system font.
-- Only the demo has been seen. Playing it by keyboard has not been tested, and neither has sound.
+- Only the demos have been seen, through levels and a special stage. Playing by keyboard has not been tested, and sound has not been listened to.
 
 ## Update 2026-11-05, third part: child processes
 
@@ -422,3 +421,17 @@ Limits:
 - Named mutexes, `FindWindow` and DDE do not reach across processes.
 - Documents in `ShellExecuteA` report that no application is associated.
 - A status file stays in `T:` until reboot if a child outlives the program that started it.
+
+## Update 2026-11-05, fourth part: a heap overrun in waveOut, FreeLibrary
+
+Sonic CD stopped after its first demo, about 100 seconds in, with a black window and an empty blue box. The box was AROS's "Software Failure" window, its dark text unreadable on our theme: "Sanity check on memory list failed" in `C:qrx-win32`.
+
+- `waveOutWrite` copied each buffer in one piece through a host pointer into its ring. Guest pages do not lie next to each other in our memory, so the copy ran past the page and over the heap of qrx-win32. Any `waveOut` program could be hit, and the ring held wrong audio. It now copies through the page-safe accessors.
+- `MapViewOfFile` had the same mistake in a `memset`, which is gone: `qw_alloc` has already zeroed the memory.
+- `FreeLibrary` did nothing, so a DLL loaded again kept its used globals. A DLL from `LoadLibrary` now gets `DLL_PROCESS_DETACH` at its last reference and, when loaded again, its writable sections as they were and a new `DLL_PROCESS_ATTACH`. Its pages stay mapped, and DLLs that other modules import stay loaded. Sonic CD loads a DLL per stage.
+
+How it was found, for next time: enhancing the blue box in a capture showed the text. Guard bytes around every `malloc` of `win32/*.c` then showed the overwritten blocks, and their contents were found in the game's `PCM8.CMP`.
+
+Sonic CD now cycles through level, title, special stage and the next level, from the setup's `Play` too; eight captures over 160 seconds all show a picture. The 68 programs report the same as before.
+
+Still open: AROS's Software Failure window has unreadable text on the QRX theme, so a crashed program looks like an empty box.
