@@ -232,7 +232,9 @@ FN(x_MsgWaitForMultipleObjects) {        /* (n, handles, waitall, ms, mask): sin
     qevent ev;
     uint32_t ms = a[3] == 0xFFFFFFFFu ? 100 : a[3];
     int r, k = qw_dinput_ready(w, a[1], a[0]);
+    uint32_t i;
     if (k >= 0) return (uint32_t)k;                          /* DirectInput device has data */
+    for (i = 0; i < a[0] && i < 64; i++) if (qw_proc_signalled(w, x86_rd32(&w->cpu, a[1] + i * 4)) > 0) return i;
     memset(&ev, 0, sizeof(ev));
     r = qw_be_wait(w, ms, &ev);
     if (r > 0) {

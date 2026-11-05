@@ -399,7 +399,26 @@ What it took, and what other programs gain from it:
 
 Still open with this game:
 
-- `Play` at the end of the setup fails with "Can't executed SONIC CD !": `CreateProcessA` and `WinExec` do not start anything. Installers that hand over to a second program will stop there as well.
+- After the first demo, about 100 seconds in, the return to the title leaves the game window black, with an empty blue box 616x112 in the middle of the screen. The game goes on at 30 frames a second. It happens with and without the setup, and the cause is not known yet.
 - Dialogs have no keyboard control: Return, Escape and Tab do nothing, because `IsDialogMessage` is a stub. The mouse works.
 - Static texts in the setup are cut off at their last lines, because our font is wider than Windows' system font.
 - Only the demo has been seen. Playing it by keyboard has not been tested, and neither has sound.
+
+## Update 2026-11-05, third part: child processes
+
+`CreateProcessA` and `CreateProcessW`, `WinExec` and `ShellExecuteA` on a program now start a second qrx-win32 task with its own x86 memory and window. `Play` in the Sonic CD setup starts the game, and the setup then ends.
+
+- The child gets its command line, drive C:, current directory and Windows path from a file in `T:`, because quotes do not survive the shell. Its exit code comes back in a second file, which `WaitForSingleObject`, `WaitForMultipleObjects`, `MsgWaitForMultipleObjects` and `GetExitCodeProcess` read.
+- A child sees the same C: as the program that started it, and `GetModuleFileName` gives it its real path. A program started directly still sees `C:\NAME.EXE`.
+- The door keeps thunk bindings and sound voices per page directory, and forgets all it knows about an address when a new program starts. Direct3D 8 and 9 vtables are written again into each new process. Before this, a second program in one session could inherit the first one's bindings.
+- Only the process that ran x86 last is heard.
+
+Checked with a small test pair: exit code, quotes in the command line, current directory, module path, a missing program, and two processes computing at once without mixing their results. The 68 programs show no regression. `mscasino.exe` now starts its `EBU0001.exe`, and Final Fantasy VII's `demo1.exe` starts `ff7config.exe`, which asks for a reinstall because a registry key is missing, where the program used to fault.
+
+Limits:
+
+- `TerminateProcess` on a child only marks it as ended; the task goes on.
+- 16-bit and DOS programs are refused with error 193.
+- Named mutexes, `FindWindow` and DDE do not reach across processes.
+- Documents in `ShellExecuteA` report that no application is associated.
+- A status file stays in `T:` until reboot if a child outlives the program that started it.

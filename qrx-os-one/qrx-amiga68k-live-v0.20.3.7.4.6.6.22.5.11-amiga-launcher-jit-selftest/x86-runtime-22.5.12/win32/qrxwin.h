@@ -211,6 +211,8 @@ typedef struct qwin {
     /* image */
     uint32_t image_base, image_size, entry, res_rva, res_size;
     char exe_path[1024];
+    char exe_win[600];                /* Windows path of a program started by another one */
+    char log_path[512];
     qmod mod[QW_MAXMOD];
     int nmod;
     int init_order[QW_MAXMOD], ninit;   /* DLLs in dependency order (DllMain) */
@@ -382,6 +384,16 @@ uint32_t qw_thread_current_id(void);
 uint32_t qw_thread_current_teb(void);
 int  qw_thread_handle_index(uint32_t h);
 int  qw_thread_finished(int idx);
+/* compat.c: child processes */
+int  qw_proc_signalled(qwin *w, uint32_t h);     /* -1 not a process handle, else 1 when it has ended */
+int  qw_proc_close(uint32_t h);
+int  qw_proc_resume(qwin *w, uint32_t h);
+/* files.c: the drive a child inherits */
+void qw_fs_map(qwin *w, const char *win, char *host, size_t max);
+void qw_fs_rel(qwin *w, const char *win, char *rel, size_t max);
+void qw_fs_state(qwin *w, char *root, size_t rmax, char *cwd, size_t cmax);
+void qw_fs_inherit(const char *root, const char *cwd);
+void qw_fs_cwd_win(qwin *w, char *out, int max);
 uint32_t qw_api_CreateThread(qwin *w, uint32_t *a);
 uint32_t qw_api_ExitThread(qwin *w, uint32_t *a);
 uint32_t qw_api_ResumeThread(qwin *w, uint32_t *a);

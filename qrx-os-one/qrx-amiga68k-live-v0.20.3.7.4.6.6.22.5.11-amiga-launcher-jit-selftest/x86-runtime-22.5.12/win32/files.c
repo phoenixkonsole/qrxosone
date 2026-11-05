@@ -177,6 +177,22 @@ static void map_path(qwin *w, const char *win, char *host, size_t max)
     host_path(rel, host, max);
 }
 
+/* For CreateProcess: a child sees the same drive C: as the program that started it. */
+void qw_fs_map(qwin *w, const char *win, char *host, size_t max) { map_path(w, win, host, max); }
+void qw_fs_rel(qwin *w, const char *win, char *rel, size_t max) { init_root(w); win_rel(win, rel, max); }
+void qw_fs_state(qwin *w, char *root, size_t rmax, char *cwd, size_t cmax)
+{
+    init_root(w);
+    snprintf(root, rmax, "%s", g_root);
+    snprintf(cwd, cmax, "%s", g_cwd);
+}
+void qw_fs_inherit(const char *root, const char *cwd)
+{
+    snprintf(g_root, sizeof(g_root), "%s", root);
+    snprintf(g_cwd, sizeof(g_cwd), "%s", cwd);
+    g_init = 1;
+}
+
 static void rd_path(qwin *w, uint32_t p, int wide, char *out, int max)
 {
     if (wide) { wchar16 t[600]; qw_rd_wstr(w, p, t, 600); w2a(out, t, max); }
@@ -362,6 +378,7 @@ static uint32_t put_str(qwin *w, uint32_t dst, uint32_t max, const char *s, int 
     for (i = 0; i <= n; i++) { if (wide) x86_wr16(C, dst + i * 2, (uint8_t)s[i]); else x86_wr8(C, dst + i, (uint8_t)s[i]); }
     return n;
 }
+void qw_fs_cwd_win(qwin *w, char *out, int max) { init_root(w); full_of(g_cwd, out, max); }
 FN(f_GetCurrentDirectoryA) { char b[600]; init_root(w); full_of(g_cwd, b, sizeof(b)); return put_str(w, a[1], a[0], b, 0); }
 FN(f_GetCurrentDirectoryW) { char b[600]; init_root(w); full_of(g_cwd, b, sizeof(b)); return put_str(w, a[1], a[0], b, 1); }
 static uint32_t set_cwd(qwin *w, uint32_t p, int wide)

@@ -315,6 +315,7 @@ FN(qw_api_ResumeThread)
 {
     int i = qw_thread_handle_index(a[0]);
     uint32_t was;
+    if (qw_proc_resume(w, a[0])) return 1;
     if (i < 0) return 0xFFFFFFFFu;
     was = (uint32_t)g_t[i].suspended;
     if (g_t[i].suspended) g_t[i].suspended--;

@@ -73,11 +73,57 @@ static void shadow_rebuild(QRXFullCPU *c,uint32_t dir){
     shadow_dir=dir;
     shadow_valid=true;
 }
+/* ---- Each Windows process in the guest has its own thunk numbers and sound voices. The
+ * page directory tells them apart; only the process that ran last is heard. */
+#define MIX_RATE 48000u
+#define MIX_TARGET_FRAMES 2400u   /* 50 ms */
+#define MIX_VOICES 128u
+#define DOOR_PROCS 8u
+typedef struct {
+    bool used,playing,looping;
+    uint32_t mem,size,rate,chans,bits;
+    float gain_l,gain_r;
+    double pos;                   /* in source frames */
+} MixVoice;
+typedef struct {
+    uint32_t dir;
+    const QRXHostApi *api_bound[QW_THUNKS];
+    MixVoice voices[MIX_VOICES];
+    unsigned voices_live;
+} DoorProc;
+static DoorProc door_procs[DOOR_PROCS];
+static DoorProc *cur_proc=&door_procs[0];
+static void proc_select(uint32_t dir){
+    static unsigned victim;
+    DoorProc *free_slot=NULL;
+    if(cur_proc->dir==dir)return;
+    for(unsigned i=0;i<DOOR_PROCS;i++){
+        if(door_procs[i].dir==dir){cur_proc=&door_procs[i];return;}
+        if(!door_procs[i].dir&&!free_slot)free_slot=&door_procs[i];
+    }
+    if(!free_slot){
+        do{free_slot=&door_procs[victim];victim=(victim+1u)%DOOR_PROCS;}while(free_slot==cur_proc);
+        memset(free_slot,0,sizeof(*free_slot));
+    }
+    free_slot->dir=dir;
+    cur_proc=free_slot;
+}
+/* A new program: its page directory may sit where a finished one's did, and its code where
+ * that one's code was, so nothing known about that address carries over. */
+static void proc_begin(uint32_t dir){
+    proc_select(dir);
+    memset(cur_proc,0,sizeof(*cur_proc));
+    cur_proc->dir=dir;
+    shadow_valid=false;
+#ifdef QRX86_HOST_JIT_ACTIVE
+    if(xj.cpu)xj_flush_all();
+#endif
+    qrx_d3d_new_process();
+}
 /* Anything the guest must decide stops the run with eip on that instruction;
  * the guest interprets it, so its behaviour stays in exactly one place. */
-static const QRXHostApi *api_bound[QW_THUNKS];
 static int door_hle_hook(x86cpu *h,uint32_t index){
-    const QRXHostApi *f=index<QW_THUNKS?api_bound[index]:NULL;
+    const QRXHostApi *f=index<QW_THUNKS?cur_proc->api_bound[index]:NULL;
     if(!f&&index<QW_THUNKS)f=qrx_d3d_thunks[index];
     if(!f){h->stop=1;return 1;}
     /* The guest told us this thunk is ours: stdcall (or cdecl with nargs<0). */
@@ -96,17 +142,6 @@ static int door_int_hook(x86cpu *h,int vector){(void)vector;h->eip=h->cur_eip;h-
 
 /* ---- DirectSound mixer. Runs on the CPU thread between x86 quanta, so the shadow
  * page table never changes under it, and tops up the host ring to a fixed latency. */
-#define MIX_RATE 48000u
-#define MIX_TARGET_FRAMES 2400u   /* 50 ms */
-#define MIX_VOICES 128u
-typedef struct {
-    bool used,playing,looping;
-    uint32_t mem,size,rate,chans,bits;
-    float gain_l,gain_r;
-    double pos;                   /* in source frames */
-} MixVoice;
-static MixVoice voices[MIX_VOICES];
-static unsigned voices_live;
 static QRXFullCPU *door_cpu;
 static inline const uint8_t *x86_page_ptr(uint32_t a){
     x86page *t=host.dir[a>>22];
@@ -126,7 +161,7 @@ static inline float voice_sample(const MixVoice *v,uint32_t frame,unsigned ch){
 }
 static int stall_on=-1;
 static void mix_tick(void){
-    if(!voices_live||!door_cpu||!door_cpu->vm.media)return;
+    if(!cur_proc->voices_live||!door_cpu||!door_cpu->vm.media)return;
     QRXMediaDevice *m=door_cpu->vm.media;
     unsigned queued=qrx_media_audio_queued(m);
     if(stall_on>0){
@@ -142,7 +177,7 @@ static void mix_tick(void){
     static uint32_t out[MIX_TARGET_FRAMES];
     memset(left,0,n*sizeof(float));memset(right,0,n*sizeof(float));
     for(unsigned vi=0;vi<MIX_VOICES;vi++){
-        MixVoice *v=&voices[vi];
+        MixVoice *v=&cur_proc->voices[vi];
         if(!v->used||!v->playing||!v->size||!v->chans||!v->bits)continue;
         uint32_t frames=v->size/(v->chans*(v->bits/8u));
         if(!frames)continue;
@@ -154,7 +189,7 @@ static void mix_tick(void){
             v->pos+=step;
             if((uint32_t)v->pos>=frames){
                 if(v->looping)v->pos-=frames;
-                else{v->playing=false;v->pos=0;voices_live--;break;}
+                else{v->playing=false;v->pos=0;cur_proc->voices_live--;break;}
             }
         }
     }
@@ -181,18 +216,18 @@ static void shadow_sync(QRXFullCPU *c,uint32_t dir,uint32_t serial);
 static void sound_service(QRXFullCPU *c,uint8_t *q){
     uint32_t op=rd32(q+12),idx=rd32(q+16);
     if(idx>=MIX_VOICES)return;
-    MixVoice *v=&voices[idx];
+    MixVoice *v=&cur_proc->voices[idx];
     door_cpu=c;
     switch(op){
     case 1:{ /* start */
         bool was=v->used&&v->playing;
         voice_set(v,q);
         v->used=true;v->playing=true;
-        if(!was)voices_live++;
+        if(!was)cur_proc->voices_live++;
         mix_tick();
         break;
     }
-    case 2: if(v->used&&v->playing){v->playing=false;voices_live--;} break;
+    case 2: if(v->used&&v->playing){v->playing=false;cur_proc->voices_live--;} break;
     case 3:{ /* volume, pan, frequency, position+1 */
         uint32_t arg=rd32(q+52);
         voice_set(v,q);
@@ -205,7 +240,7 @@ static void sound_service(QRXFullCPU *c,uint8_t *q){
         wr32(q+56,pos);wr32(q+60,v->used&&v->playing);
         break;
     }
-    case 5: if(v->used&&v->playing)voices_live--; memset(v,0,sizeof(*v)); break;
+    case 5: if(v->used&&v->playing)cur_proc->voices_live--; memset(v,0,sizeof(*v)); break;
     default: break;
     }
 }
@@ -216,7 +251,7 @@ static void api_service(QRXFullCPU *c,uint8_t *q){
     memcpy(name,q+28,63);name[63]=0;
     const QRXHostApi *f=qrx_hostapi_find(name);
     qrx_hostapi_context(c,&host,rd32(q+20));
-    if(f&&op==1&&idx<QW_THUNKS)api_bound[idx]=f;
+    if(f&&op==1&&idx<QW_THUNKS)cur_proc->api_bound[idx]=f;
     wr32(q+24,f?1u:0u);
 }
 /* ---- MIDI: played by the host's synthesizer */
@@ -333,6 +368,7 @@ static void service_call(QRXFullCPU *c,uint32_t block){
     uint32_t svc=rd32(q);
     /* Sent by the desktop without an x86 process around: no page table to look at. */
     if(svc==6){qrx_host_set_pointer(rd32(q+12));return;}
+    if(svc==7){proc_begin(rd32(q+8));return;}
     shadow_sync(c,rd32(q+8),rd32(q+4));
     if(svc==1)sound_service(c,q);
     else if(svc==2)api_service(c,q);
@@ -341,6 +377,7 @@ static void service_call(QRXFullCPU *c,uint32_t block){
     else if(svc==5)frame_service(c,q);
 }
 static void shadow_sync(QRXFullCPU *c,uint32_t dir,uint32_t serial){
+    proc_select(dir);
     if(!shadow_valid||dir!=shadow_dir||serial!=shadow_serial){
         shadow_serial=serial;
         shadow_rebuild(c,dir);

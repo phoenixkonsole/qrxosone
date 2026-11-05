@@ -595,7 +595,8 @@ FN(k_GetModuleFileNameW) {
     const char *b = strrchr(w->exe_path, '/');
     char p[300]; wchar16 t[300];
     int n;
-    snprintf(p, sizeof(p), "C:\\%s", b ? b + 1 : w->exe_path);
+    if (w->exe_win[0]) snprintf(p, sizeof(p), "%s", w->exe_win);
+    else snprintf(p, sizeof(p), "C:\\%s", b ? b + 1 : w->exe_path);
     a2w(t, p, 300);
     n = qw_wr_wstr(w, a[1], t, (int)a[2]);
     return (uint32_t)n;
@@ -603,7 +604,8 @@ FN(k_GetModuleFileNameW) {
 FN(k_GetModuleFileNameA) {
     const char *b = strrchr(w->exe_path, '/');
     char p[300]; uint32_t i;
-    snprintf(p, sizeof(p), "C:\\%s", b ? b + 1 : w->exe_path);
+    if (w->exe_win[0]) snprintf(p, sizeof(p), "%s", w->exe_win);
+    else snprintf(p, sizeof(p), "C:\\%s", b ? b + 1 : w->exe_path);
     for (i = 0; p[i] && i + 1 < a[2]; i++) x86_wr8(C, a[1] + i, (uint8_t)p[i]);
     if (a[2]) x86_wr8(C, a[1] + i, 0);
     return i;

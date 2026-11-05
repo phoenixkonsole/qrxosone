@@ -8,6 +8,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#ifdef __AROS__
+#include <proto/exec.h>
+#include <proto/dos.h>
+#include <dos/dostags.h>
+#endif
 
 #define FN(name) static uint32_t name(qwin *w, uint32_t *a)
 #define C (&w->cpu)
@@ -119,8 +124,9 @@ static int sig_try(qwin *w, uint32_t h, int take)
 {
     int t = qw_thread_handle_index(h);
     qsync *s;
-    (void)w;
     if (t >= 0) return qw_thread_finished(t);
+    t = qw_proc_signalled(w, h);
+    if (t >= 0) return t;
     s = sync_of(h);
     if (!s) return 1;
     if (s->type == S_MUTEX) {
@@ -163,7 +169,262 @@ FN(c_CloseHandle) {
     qsync *s = sync_of(a[0]);
     if (s) { s->type = S_FREE; return 1; }
     if (qw_thread_handle_index(a[0]) >= 0) return 1;
+    if (qw_proc_close(a[0])) return 1;
     return qw_file_close(w, a[0]);
+}
+/* ------------------------------------------------------------------ child processes
+ * A child is another qrx-win32 task with its own x86 memory and window. What it must know
+ * goes through a file in T:, because quotes in a command line do not survive the shell; it
+ * reports its exit code in a second file, the file name plus ".x". */
+#define QP_MAX 32
+#define QP_BASE 0x7E300000u
+#define QP_THREADS 0x100u
+typedef struct qproc { int used, started, done, open; uint32_t code; char file[64]; uint64_t next_poll; } qproc;
+static qproc g_p[QP_MAX];
+static qproc *proc_of(uint32_t h)
+{
+    uint32_t i = h - QP_BASE;
+    if (i >= QP_THREADS) i -= QP_THREADS;
+    return i < QP_MAX && g_p[i].used ? &g_p[i] : NULL;
+}
+static void proc_poll(qwin *w, qproc *p)
+{
+    uint64_t now;
+    FILE *f;
+    if (p->done || !p->started) return;
+    now = w->be->now(w);
+    if (now < p->next_poll) return;
+    p->next_poll = now + 20;
+    {
+        char x[80];
+        snprintf(x, sizeof(x), "%s.x", p->file);
+        f = fopen(x, "r");
+    }
+    if (f) {
+        unsigned code;
+        if (fscanf(f, "%u\n", &code) == 1) { p->code = code; p->done = 1; }
+        fclose(f);
+    }
+}
+int qw_proc_signalled(qwin *w, uint32_t h)
+{
+    qproc *p = proc_of(h);
+    if (!p) return -1;
+    proc_poll(w, p);
+    return p->done;
+}
+int qw_proc_close(uint32_t h)
+{
+    qproc *p = proc_of(h);
+    if (!p) return 0;
+    if (--p->open <= 0) {
+        if (p->done) { char x[80]; snprintf(x, sizeof(x), "%s.x", p->file); remove(x); }
+        p->used = 0;
+    }
+    return 1;
+}
+static int proc_start(qwin *w, qproc *p)
+{
+#ifdef __AROS__
+    char cmd[120];
+    BPTR in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE), out = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+    LONG r;
+    (void)w;
+    snprintf(cmd, sizeof(cmd), "C:qrx-win32 -P \"%s\"", p->file);
+    r = SystemTags((CONST_STRPTR)cmd, SYS_Input, (IPTR)in, SYS_Output, (IPTR)out, SYS_Asynch, TRUE, TAG_END);
+    if (r == -1) { Close(in); Close(out); return 0; }
+    p->started = 1;
+    return 1;
+#else
+    (void)w; (void)p;
+    return 0;
+#endif
+}
+int qw_proc_resume(qwin *w, uint32_t h)
+{
+    qproc *p = proc_of(h);
+    if (!p) return 0;
+    if (!p->started && !proc_start(w, p)) { p->done = 1; p->code = 1; }
+    return 1;
+}
+/* 0 no such file, 1 a 32-bit Windows program, 2 anything else */
+static int exe_kind(const char *host)
+{
+    uint8_t b[64], pe[4];
+    FILE *f = fopen(host, "rb");
+    int k = 2;
+    if (!f) return 0;
+    if (fread(b, 1, 64, f) == 64 && b[0] == 'M' && b[1] == 'Z') {
+        long off = (long)b[60] | (long)b[61] << 8 | (long)b[62] << 16 | (long)b[63] << 24;
+        if (off > 0 && !fseek(f, off, SEEK_SET) && fread(pe, 1, 4, f) == 4 && !memcmp(pe, "PE\0\0", 4)) k = 1;
+    }
+    fclose(f);
+    return k;
+}
+static int try_exe(qwin *w, const char *dir, const char *name, char *host, size_t hmax, char *win, size_t wmax)
+{
+    const char *base = strrchr(name, '\\');
+    int ext = strchr(base ? base : name, '.') != NULL, round;
+    size_t L = strlen(dir);
+    for (round = ext ? 1 : 0; round < 2; round++) {
+        int k;
+        if (L) snprintf(win, wmax, "%s%s%s%s", dir, dir[L - 1] == '\\' ? "" : "\\", name, round ? "" : ".exe");
+        else snprintf(win, wmax, "%s%s", name, round ? "" : ".exe");
+        qw_fs_map(w, win, host, hmax);
+        k = exe_kind(host);
+        if (k) return k;
+    }
+    return 0;
+}
+static int find_exe(qwin *w, const char *name, char *host, size_t hmax, char *win, size_t wmax)
+{
+    int k;
+    char dir[600];
+    uint32_t n;
+    if (strchr(name, ':') || name[0] == '\\' || name[0] == '/') return try_exe(w, "", name, host, hmax, win, wmax);
+    qw_fs_cwd_win(w, dir, sizeof(dir));
+    if ((k = try_exe(w, dir, name, host, hmax, win, wmax))) return k;
+    if (w->exe_win[0]) {
+        snprintf(dir, sizeof(dir), "%s", w->exe_win);
+        n = (uint32_t)(strrchr(dir, '\\') ? strrchr(dir, '\\') - dir : 0);
+        dir[n] = 0;
+    } else snprintf(dir, sizeof(dir), "C:\\");
+    if ((k = try_exe(w, dir, name, host, hmax, win, wmax))) return k;
+    if ((k = try_exe(w, "C:\\WINDOWS\\SYSTEM", name, host, hmax, win, wmax))) return k;
+    return try_exe(w, "C:\\WINDOWS", name, host, hmax, win, wmax);
+}
+/* The program a command line names: an unquoted one may contain spaces, as on Windows. */
+static int find_cmd(qwin *w, const char *cmd, char *host, size_t hmax, char *win, size_t wmax)
+{
+    char name[600];
+    size_t i = 0;
+    int k;
+    while (*cmd == ' ') cmd++;
+    if (*cmd == '"') {
+        for (cmd++; cmd[i] && cmd[i] != '"' && i + 1 < sizeof(name); i++) name[i] = cmd[i];
+        name[i] = 0;
+        return find_exe(w, name, host, hmax, win, wmax);
+    }
+    for (;; i++) {
+        if (i + 1 >= sizeof(name)) return 0;
+        if (!cmd[i] || cmd[i] == ' ') {
+            name[i] = 0;
+            if (i && (k = find_exe(w, name, host, hmax, win, wmax))) return k;
+            if (!cmd[i]) return 0;
+        }
+        name[i] = cmd[i];
+    }
+}
+/* Returns the slot, or -1 with last_error set. */
+static int proc_create(qwin *w, const char *app, const char *cmd, const char *cwd, int suspended, int report)
+{
+    char host[1200], win[600], root[1024], cur[512], rel[1024], line[1100];
+    static int seq;
+    int i, kind;
+    qproc *p;
+    FILE *f;
+    kind = app && app[0] ? find_exe(w, app, host, sizeof(host), win, sizeof(win)) : cmd ? find_cmd(w, cmd, host, sizeof(host), win, sizeof(win)) : 0;
+    if (kind != 1) {
+        qw_log(w, "CreateProcess(%s, %s): %s", app ? app : "", cmd ? cmd : "", kind ? "not a 32-bit Windows program" : "not found");
+        w->last_error = kind ? 193 : 2;
+        return -1;
+    }
+    for (i = 0; i < QP_MAX; i++) if (!g_p[i].used) break;
+    if (i >= QP_MAX) { w->last_error = 8; return -1; }
+    p = &g_p[i];
+    memset(p, 0, sizeof(*p));
+    if (cmd && cmd[0]) snprintf(line, sizeof(line), "%s", cmd);
+    else snprintf(line, sizeof(line), "\"%s\"", win);
+    qw_fs_state(w, root, sizeof(root), cur, sizeof(cur));
+    if (cwd && cwd[0]) { qw_fs_rel(w, cwd, rel, sizeof(rel)); snprintf(cur, sizeof(cur), "%s", rel); }
+#ifdef __AROS__
+    snprintf(p->file, sizeof(p->file), "T:qrxp.%lx.%d", (unsigned long)(uintptr_t)FindTask(NULL), ++seq);
+#else
+    snprintf(p->file, sizeof(p->file), "qrxp.%d", ++seq);
+#endif
+    f = fopen(p->file, "w");
+    if (!f) { w->last_error = 5; return -1; }
+    fprintf(f, "%s\n%s\n%s\n%s\n%s\n", host, win, root, cur, line);
+    if (w->log_path[0]) fprintf(f, "%s.%d\n", w->log_path, seq); else fprintf(f, "\n");
+    fprintf(f, "%d\n%d\n%d\n", w->windowed, w->verbose, report);
+    fclose(f);
+    p->used = 1;
+    p->open = 2;
+    if (!suspended && !proc_start(w, p)) { remove(p->file); p->used = 0; w->last_error = 8; return -1; }
+    qw_log(w, "started %s: %s", win, line);
+    return i;
+}
+static uint32_t create_process(qwin *w, uint32_t *a, const char *app, const char *cmd, const char *cwd)
+{
+    int i = proc_create(w, app, cmd, cwd, (a[5] & 4u) != 0, 1);    /* CREATE_SUSPENDED */
+    if (i < 0) return 0;
+    if (a[9]) {
+        WR32(a[9], QP_BASE + (uint32_t)i);
+        WR32(a[9] + 4, QP_BASE + QP_THREADS + (uint32_t)i);
+        WR32(a[9] + 8, 0x1000u + (uint32_t)i * 4u);
+        WR32(a[9] + 12, 0x1004u + (uint32_t)i * 4u);
+    }
+    return 1;
+}
+FN(c_CreateProcessA) {
+    char app[600], cmd[1024], cwd[600];
+    if (a[0]) rd_str(w, a[0], app, sizeof(app));
+    if (a[1]) rd_str(w, a[1], cmd, sizeof(cmd));
+    if (a[7]) rd_str(w, a[7], cwd, sizeof(cwd));
+    return create_process(w, a, a[0] ? app : NULL, a[1] ? cmd : NULL, a[7] ? cwd : NULL);
+}
+FN(c_CreateProcessW) {
+    char app[600], cmd[1024], cwd[600];
+    wchar16 t[1024];
+    if (a[0]) { qw_rd_wstr(w, a[0], t, 1024); w2a(app, t, sizeof(app)); }
+    if (a[1]) { qw_rd_wstr(w, a[1], t, 1024); w2a(cmd, t, sizeof(cmd)); }
+    if (a[7]) { qw_rd_wstr(w, a[7], t, 1024); w2a(cwd, t, sizeof(cwd)); }
+    return create_process(w, a, a[0] ? app : NULL, a[1] ? cmd : NULL, a[7] ? cwd : NULL);
+}
+FN(c_WinExec) {
+    char cmd[1024];
+    int i;
+    rd_str(w, a[0], cmd, sizeof(cmd));
+    i = proc_create(w, NULL, cmd, NULL, 0, 0);
+    if (i < 0) return w->last_error == 2 ? 2 : 11;                 /* file not found, bad format */
+    g_p[i].used = 0;                                               /* no handle: nobody can ask */
+    return 33;
+}
+FN(c_ShellExecuteA) {                    /* (hwnd, verb, file, params, dir, show) */
+    char file[600], params[400], dir[600], cmd[1024], host[1200], win[600];
+    int i, k;
+    rd_str(w, a[2], file, sizeof(file));
+    params[0] = dir[0] = 0;
+    if (a[3]) rd_str(w, a[3], params, sizeof(params));
+    if (a[4]) rd_str(w, a[4], dir, sizeof(dir));
+    k = find_exe(w, file, host, sizeof(host), win, sizeof(win));
+    if (!k) return 2;                                              /* file not found */
+    if (k != 1) return 31;                                         /* documents have no application here */
+    snprintf(cmd, sizeof(cmd), "\"%s\"%s%s", win, params[0] ? " " : "", params);
+    i = proc_create(w, NULL, cmd, dir[0] ? dir : NULL, 0, 0);
+    if (i < 0) return 2;
+    g_p[i].used = 0;
+    return 33;
+}
+FN(c_GetExitCodeProcess) {
+    qproc *p = proc_of(a[0]);
+    uint32_t code = 259;                                           /* STILL_ACTIVE */
+    if (p) { proc_poll(w, p); if (p->done) code = p->code; }
+    if (a[1]) WR32(a[1], code);
+    return 1;
+}
+FN(c_TerminateProcess) {
+    qproc *p = proc_of(a[0]);
+    if (p) {
+        /* The task cannot be stopped from here; the program that asked goes on as if it had. */
+        qw_log(w, "TerminateProcess on a child: it keeps running");
+        p->done = 1;
+        p->code = a[1];
+        return 1;
+    }
+    w->exit_code = a[1];
+    w->exiting = 1;
+    return 1;
 }
 FN(c_Sleep) { qw_thread_sleep(w, a[0]); return 0; }
 FN(c_SleepEx) { qw_thread_sleep(w, a[0]); return 0; }
@@ -904,7 +1165,6 @@ FN(c_MulDiv) {
 FN(c_GetComputerNameA) { uint32_t n = wr_str(w, a[0], RD32(a[1]), "QRXOSONE"); WR32(a[1], n); return 1; }
 FN(c_LangId) { UNUSED; return 0x409; }
 FN(c_SystemTimeToFileTime) { WR32(a[1], 0xD53E8000u); WR32(a[1] + 4, 0x019DB1DEu); return 1; }
-FN(c_GetExitCodeProcess) { if (a[1]) WR32(a[1], 0); return 1; }
 FN(c_FormatDT) { uint32_t cap = a[5]; return cap ? wr_str(w, a[4], cap, "1998-01-01") + 1 : 11; }
 FN(c_CharUpperBuffA) { uint32_t i; for (i = 0; i < a[1]; i++) WR8(a[0] + i, (uint8_t)toupper(RD8(a[0] + i))); return a[1]; }
 FN(c_CharToOemA) {
@@ -1532,7 +1792,6 @@ FN(c_acmNoDriver) { UNUSED; return 0x200u + 11u; /* ACMERR: not possible */ }
 FN(c_FileVersionNone) { UNUSED; return 0; }
 FN(c_GetCharWidthA) { uint32_t i; for (i = a[1]; i <= a[2] && i - a[1] < 256; i++) WR32(a[3] + (i - a[1]) * 4, 8); return 1; }
 FN(c_CharPrevA) { (void)w; return a[1] > a[0] ? a[1] - 1 : a[0]; }
-FN(c_ShellExecuteA) { UNUSED; return 2; /* file not found */ }
 FN(c_atom_add) { static uint32_t n = 0xC100; UNUSED; return n++; }
 FN(c_BeginDeferWindowPos) { UNUSED; return 0x7E900001u; }
 
@@ -1583,7 +1842,7 @@ const qhle qw_compat[] = {
     K("lstrcmpA", c_lstrcmpA, 2), K("lstrcmpiA", c_lstrcmpiA, 2), K("lstrcpynA", c_lstrcpynA, 3), K("MulDiv", c_MulDiv, 3),
     K("SetConsoleCtrlHandler", c_ok1, 2), K("GetComputerNameA", c_GetComputerNameA, 2), K("GetSystemDefaultLangID", c_LangId, 0),
     K("GetUserDefaultLangID", c_LangId, 0), K("GetThreadLocale", c_LangId, 0), K("SystemTimeToFileTime", c_SystemTimeToFileTime, 2),
-    K("GetExitCodeProcess", c_GetExitCodeProcess, 2), K("WinExec", c_ok0, 2), K("GetDateFormatA", c_FormatDT, 6), K("GetTimeFormatA", c_FormatDT, 6),
+    K("GetExitCodeProcess", c_GetExitCodeProcess, 2), K("WinExec", c_WinExec, 2), K("CreateProcessA", c_CreateProcessA, 10), K("CreateProcessW", c_CreateProcessW, 10), K("TerminateProcess", c_TerminateProcess, 2), K("GetDateFormatA", c_FormatDT, 6), K("GetTimeFormatA", c_FormatDT, 6),
     K("IsValidLocale", c_ok1, 2), K("IsValidCodePage", c_ok1, 1), K("SetEnvironmentVariableW", c_ok1, 2), K("UTRegister", c_ok0, 7), K("UTUnRegister", c_ok0, 1),
     K("GetOverlappedResult", c_ok0, 4), K("PeekNamedPipe", c_ok0, 6), K("GetCommState", c_ok0, 2), K("SetCommState", c_ok0, 2), K("SetCommTimeouts", c_ok0, 2),
     K("GetCommModemStatus", c_ok0, 2), K("GetCommProperties", c_ok0, 2), K("PurgeComm", c_ok0, 2), K("EscapeCommFunction", c_ok0, 2),

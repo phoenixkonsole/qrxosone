@@ -43,7 +43,7 @@ static const QRXHostApi *make_entry(const char *iface,const VMethod *m){
     e->name=m->name;e->nargs=m->nargs;e->fn=fn?fn:qrx_d3d_unimpl;
     return e;
 }
-typedef struct { const char *name; const VMethod *m; uint32_t vt; unsigned count; } VTable;
+typedef struct { const char *name; const VMethod *m; uint32_t vt; unsigned count; uint32_t first_thunk; } VTable;
 static VTable vtables[]={
     {"D3D9",vt_IDirect3D9,0,0},{"Dev9",vt_IDirect3DDevice9,0,0},{"VB9",vt_IDirect3DVertexBuffer9,0,0},{"IB9",vt_IDirect3DIndexBuffer9,0,0},{"Tex9",vt_IDirect3DTexture9,0,0},{"Surf9",vt_IDirect3DSurface9,0,0},
     {"D3D8",vt_IDirect3D8,0,0},{"Dev8",vt_IDirect3DDevice8,0,0},{"VB8",vt_IDirect3DVertexBuffer8,0,0},{"IB8",vt_IDirect3DIndexBuffer8,0,0},{"Tex8",vt_IDirect3DTexture8,0,0},{"Surf8",vt_IDirect3DSurface8,0,0},
@@ -58,6 +58,13 @@ static uint32_t ensure_vtable(x86cpu *c,unsigned which){
     while(v->m[n].name)n++;
     uint32_t mem=host_alloc(n*4u);
     if(!mem)return 0;
+    /* A later process needs the table in its own memory, with the same thunks. */
+    if(v->first_thunk){
+        for(unsigned i=0;i<n;i++)x86_wr32(c,mem+i*4u,THUNK_BASE+v->first_thunk+i);
+        v->vt=mem;
+        return mem;
+    }
+    v->first_thunk=next_thunk;
     for(unsigned i=0;i<n;i++){
         if(next_thunk>HOST_THUNK_LAST)break;
         qrx_d3d_thunks[next_thunk]=make_entry(v->name,&v->m[i]);
@@ -66,6 +73,9 @@ static uint32_t ensure_vtable(x86cpu *c,unsigned which){
     }
     v->vt=mem;v->count=n;
     return mem;
+}
+void qrx_d3d_new_process(void){
+    for(size_t i=0;i<sizeof(vtables)/sizeof(vtables[0]);i++)vtables[i].vt=0;
 }
 /* For function pointers handed out at run time, such as vkGetInstanceProcAddr's. */
 uint32_t qrx_hostapi_thunk_for(const QRXHostApi *f){

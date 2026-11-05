@@ -22,6 +22,7 @@ extern uint32_t qrx_hostapi_alloc_request;
 void qrx_hostapi_alloc_result(uint32_t addr,uint32_t size);
 /* Vtable slots of host COM objects, indexed by thunk number. */
 extern const QRXHostApi *qrx_d3d_thunks[];
+void qrx_d3d_new_process(void);
 static inline float api_float(uint32_t v){float f;__builtin_memcpy(&f,&v,4);return f;}
 static inline double api_double(const uint32_t *a){uint64_t u=(uint64_t)a[0]|((uint64_t)a[1]<<32);double d;__builtin_memcpy(&d,&u,8);return d;}
 #endif

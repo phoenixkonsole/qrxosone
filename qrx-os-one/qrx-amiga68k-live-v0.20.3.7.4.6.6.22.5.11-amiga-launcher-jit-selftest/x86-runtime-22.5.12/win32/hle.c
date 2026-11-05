@@ -368,7 +368,13 @@ int qw_run(qwin *w)
     pe_init_dlls(w);                              /* DllMain of DLLs loaded with the program */
     c->eip = w->image_base + w->entry;
     /* SetEnv QRX86_HOST 1 in the board's startup: QRX86 runs on the host CPU. */
-    if (getenv("QRX86_HOST") && x86_door_enable(c)) { c->door_alloc = door_alloc_cb; qw_log(w, "x86 runs on the host door"); }
+    if (getenv("QRX86_HOST") && x86_door_enable(c)) {
+        static uint32_t begin[3];
+        c->door_alloc = door_alloc_cb;
+        begin[0] = 7;                             /* a new process: the door forgets this page directory */
+        x86_door_call(c, begin);
+        qw_log(w, "x86 runs on the host door");
+    }
     f = w->cpu.fault ? w->cpu.fault : x86_run(c, 0xFFFFFFFFu);
     if (f && !w->exiting) {
         char d[400];
