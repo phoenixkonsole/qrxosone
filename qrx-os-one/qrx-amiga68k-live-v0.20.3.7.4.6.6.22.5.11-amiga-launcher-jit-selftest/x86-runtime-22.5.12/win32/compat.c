@@ -426,6 +426,36 @@ FN(c_TerminateProcess) {
     w->exiting = 1;
     return 1;
 }
+/* (locale, flags, value, format, out, size) */
+FN(c_GetNumberFormatA) {
+    char v[64], res[128], dec[8] = ".", sep[8] = ",";
+    int digits = 2, group = 3, o = 0, i, L, intlen, have;
+    const char *dot;
+    rd_str(w, a[2], v, sizeof(v));
+    if (a[3]) {
+        digits = (int)RD32(a[3]); group = (int)RD32(a[3] + 8);
+        rd_str(w, RD32(a[3] + 12), dec, sizeof(dec)); rd_str(w, RD32(a[3] + 16), sep, sizeof(sep));
+    }
+    i = v[0] == '-' ? 1 : 0;
+    if (i) res[o++] = '-';
+    dot = strchr(v, '.');
+    L = (int)strlen(v);
+    intlen = (dot ? (int)(dot - v) : L) - i;
+    for (have = 0; have < intlen && o < 100; have++) {
+        res[o++] = v[i + have];
+        if (group > 0 && have + 1 < intlen && (intlen - have - 1) % group == 0) { int k; for (k = 0; sep[k]; k++) res[o++] = sep[k]; }
+    }
+    if (digits > 0) {
+        const char *f = dot ? dot + 1 : "";
+        int k;
+        for (k = 0; dec[k]; k++) res[o++] = dec[k];
+        for (k = 0; k < digits && o < 120; k++) res[o++] = *f ? *f++ : '0';
+    }
+    res[o] = 0;
+    if (!a[5]) return (uint32_t)o + 1;
+    if ((uint32_t)o + 1 > a[5]) { w->last_error = 122; return 0; }
+    return wr_str(w, a[4], a[5], res) + 1;
+}
 FN(c_Sleep) { qw_thread_sleep(w, a[0]); return 0; }
 FN(c_SleepEx) { qw_thread_sleep(w, a[0]); return 0; }
 FN(c_GetCurrentThreadId) { UNUSED; return qw_thread_current_id(); }
@@ -1845,7 +1875,7 @@ const qhle qw_compat[] = {
     K("lstrcmpA", c_lstrcmpA, 2), K("lstrcmpiA", c_lstrcmpiA, 2), K("lstrcpynA", c_lstrcpynA, 3), K("MulDiv", c_MulDiv, 3),
     K("SetConsoleCtrlHandler", c_ok1, 2), K("GetComputerNameA", c_GetComputerNameA, 2), K("GetSystemDefaultLangID", c_LangId, 0),
     K("GetUserDefaultLangID", c_LangId, 0), K("GetThreadLocale", c_LangId, 0), K("SystemTimeToFileTime", c_SystemTimeToFileTime, 2),
-    K("GetExitCodeProcess", c_GetExitCodeProcess, 2), K("WinExec", c_WinExec, 2), K("CreateProcessA", c_CreateProcessA, 10), K("CreateProcessW", c_CreateProcessW, 10), K("TerminateProcess", c_TerminateProcess, 2), K("GetDateFormatA", c_FormatDT, 6), K("GetTimeFormatA", c_FormatDT, 6),
+    K("GetExitCodeProcess", c_GetExitCodeProcess, 2), K("WinExec", c_WinExec, 2), K("CreateProcessA", c_CreateProcessA, 10), K("GetNumberFormatA", c_GetNumberFormatA, 6), K("CreateProcessW", c_CreateProcessW, 10), K("TerminateProcess", c_TerminateProcess, 2), K("GetDateFormatA", c_FormatDT, 6), K("GetTimeFormatA", c_FormatDT, 6),
     K("IsValidLocale", c_ok1, 2), K("IsValidCodePage", c_ok1, 1), K("SetEnvironmentVariableW", c_ok1, 2), K("UTRegister", c_ok0, 7), K("UTUnRegister", c_ok0, 1),
     K("GetOverlappedResult", c_ok0, 4), K("PeekNamedPipe", c_ok0, 6), K("GetCommState", c_ok0, 2), K("SetCommState", c_ok0, 2), K("SetCommTimeouts", c_ok0, 2),
     K("GetCommModemStatus", c_ok0, 2), K("GetCommProperties", c_ok0, 2), K("PurgeComm", c_ok0, 2), K("EscapeCommFunction", c_ok0, 2),
@@ -1905,7 +1935,7 @@ const qhle qw_compat[] = {
     K("GetStringTypeExA", c_ok1, 5), K("LockFile", c_ok1, 5), K("UnlockFile", c_ok1, 5), K("GetProcessAffinityMask", c_ok0, 3), K("IsProcessorFeaturePresent", c_ok0, 1),
     ADV("RegQueryValueA", c_RegQueryValueA, 4), ADV("RegSetValueA", c_ok0, 5), ADV("SetFileSecurityA", c_ok1, 3), ADV("GetFileSecurityA", c_ok0, 5),
     { "shell32", "ShellExecuteA", 6, c_ShellExecuteA }, { "shell32", "DragFinish", 1, c_ok0 }, { "shell32", "DragQueryFileA", 4, c_ok0 }, { "shell32", "DragAcceptFiles", 2, c_ok0 },
-    { "shell32", "SHGetFileInfoA", 5, c_ok0 }, { "shell32", "SHBrowseForFolder", 1, c_ok0 }, { "shell32", "SHGetMalloc", 1, c_efail }, { "shell32", "SHGetPathFromIDList", 2, c_ok0 },
+    { "shell32", "SHGetFileInfoA", 5, c_ok0 }, { "shell32", "SHChangeNotify", 4, c_ok0 }, { "shell32", "SHBrowseForFolder", 1, c_ok0 }, { "shell32", "SHGetMalloc", 1, c_efail }, { "shell32", "SHGetPathFromIDList", 2, c_ok0 },
     { "version", "VerLanguageNameA", 3, c_VerLanguageNameA }, { "dsetup", "DirectXSetupGetVersion", 2, c_DirectXSetupGetVersion },
     { "dsetup", "DirectXSetupA", 3, c_ok0 }, { "dsetup", "DirectXSetupW", 3, c_ok0 }, { "dsetup", "DirectXSetup", 3, c_ok0 }, { "dsetup", "DirectXDeviceDriverSetupA", 4, c_ok0 },
     { "dsetup", "DirectXRegisterApplicationA", 2, c_ok1 }, { "dsetup", "DirectXRegisterApplicationW", 2, c_ok1 }, { "dsetup", "DirectXUnRegisterApplication", 2, c_ok1 },

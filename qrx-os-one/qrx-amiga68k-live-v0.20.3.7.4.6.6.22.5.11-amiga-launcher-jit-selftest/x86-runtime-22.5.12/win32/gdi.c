@@ -507,6 +507,24 @@ FN(g_GetTextExtentPoint32W) {
     WR32(a[3] + 4, (uint32_t)FD(fi)->height);
     return 1;
 }
+FN(g_GetTextExtentExPointW) {            /* (hdc, str, n, max extent, *fit, *widths, *size) */
+    uint32_t b[4];
+    wchar16 t[512];
+    qdc *d = DCP(w, a[0]);
+    int n = (int)a[2], bold = 0, fi, i, x = 0, fit = 0;
+    if (n > 511) n = 511;
+    for (i = 0; i < n; i++) t[i] = x86_rd16(C, a[1] + (uint32_t)i * 2);
+    fi = d ? font_of(w, d, &bold) : 0;
+    for (i = 0; i < n; i++) {
+        x = gdi_text_width(fi, t, i + 1);
+        if (a[4] && (int32_t)a[3] >= 0 && x > (int)a[3]) break;
+        fit = i + 1;
+        if (a[5]) x86_wr32(C, a[5] + (uint32_t)i * 4, (uint32_t)x);
+    }
+    if (a[4]) x86_wr32(C, a[4], (uint32_t)fit);
+    b[0] = a[0]; b[1] = a[1]; b[2] = a[2]; b[3] = a[6];
+    return g_GetTextExtentPoint32W(w, b);
+}
 FN(g_GetTextMetricsW) {
     qdc *d = DCP(w, a[0]);
     int bold = 0, fi = d ? font_of(w, d, &bold) : 0, i;
@@ -781,6 +799,80 @@ static int blt(qwin *w, qdc *d, int x, int y, int cw, int ch, qdc *s, int sx, in
         }
     }
     return 1;
+}
+/* Device-independent bits onto a DC; source y counts from the picture's top. */
+static uint32_t dib_draw(qwin *w, qdc *d, int x, int y, int cw, int ch, int sx, int sy, int sw, int sh, uint32_t bits, uint32_t bmi, uint32_t usage)
+{
+    uint32_t hsize, ncol, comp, stride, pal[256];
+    int bw, bh, top, bpp, i, j, have = -1;
+    uint8_t *row;
+    if (!d || !d->s || !d->s->pix || !bits || !bmi || cw <= 0 || ch <= 0 || sw <= 0 || sh <= 0) return 0;
+    hsize = RD32(bmi);
+    bw = (int)RD32(bmi + 4);
+    bh = (int)RD32(bmi + 8);
+    bpp = x86_rd16(C, bmi + 14);
+    comp = RD32(bmi + 16);
+    ncol = RD32(bmi + 32);
+    top = bh < 0;
+    if (top) bh = -bh;
+    if (bw <= 0 || !bh || (bpp != 1 && bpp != 4 && bpp != 8 && bpp != 16 && bpp != 24 && bpp != 32) || (comp != 0 && comp != 3)) return 0;
+    if (bpp <= 8) {
+        uint32_t n = ncol ? ncol : 1u << bpp, k;
+        const uint32_t *sys = qw_sys_palette();
+        if (n > 256) n = 256;
+        memset(pal, 0, sizeof(pal));
+        for (k = 0; k < n; k++) {
+            if (usage == 1) pal[k] = sys[x86_rd16(C, bmi + hsize + k * 2) & 255];
+            else { uint32_t q = RD32(bmi + hsize + k * 4); pal[k] = q & 0xFFFFFF; }
+        }
+    }
+    stride = (((uint32_t)bw * (uint32_t)bpp + 31u) / 32u) * 4u;
+    row = (uint8_t *)malloc(stride);
+    if (!row) return 0;
+    for (j = 0; j < ch; j++) {
+        int dy = TY(d, y + j), yy = sy + j * sh / ch;
+        if (dy < d->cy0 || dy >= d->cy1 || dy < 0 || dy >= d->s->h || yy < 0 || yy >= bh) continue;
+        if (yy != have) { x86_read_mem(C, bits + (uint32_t)(top ? yy : bh - 1 - yy) * stride, row, stride); have = yy; }
+        for (i = 0; i < cw; i++) {
+            int dx = TX(d, x + i), xx = sx + i * sw / cw;
+            uint32_t v;
+            if (dx < d->cx0 || dx >= d->cx1 || dx < 0 || dx >= d->s->w || xx < 0 || xx >= bw) continue;
+            switch (bpp) {
+            case 1: v = pal[(row[xx >> 3] >> (7 - (xx & 7))) & 1]; break;
+            case 4: v = pal[(row[xx >> 1] >> ((xx & 1) ? 0 : 4)) & 15]; break;
+            case 8: v = pal[row[xx]]; break;
+            case 16: { uint32_t p = row[xx * 2] | ((uint32_t)row[xx * 2 + 1] << 8);
+                v = comp == 3 ? ((p >> 11 & 31) << 19) | ((p >> 5 & 63) << 10) | ((p & 31) << 3)
+                              : ((p >> 10 & 31) << 19) | ((p >> 5 & 31) << 11) | ((p & 31) << 3); break; }
+            case 24: v = row[xx * 3] | ((uint32_t)row[xx * 3 + 1] << 8) | ((uint32_t)row[xx * 3 + 2] << 16); break;
+            default: v = row[xx * 4] | ((uint32_t)row[xx * 4 + 1] << 8) | ((uint32_t)row[xx * 4 + 2] << 16); break;
+            }
+            d->s->pix[(size_t)dy * (size_t)d->s->w + (size_t)dx] = v;
+        }
+    }
+    free(row);
+    return 1;
+}
+FN(g_StretchDIBits) {                    /* (hdc, x, y, w, h, xsrc, ysrc, wsrc, hsrc, bits, info, usage, rop) */
+    return dib_draw(w, DCP(w, a[0]), (int32_t)a[1], (int32_t)a[2], (int32_t)a[3], (int32_t)a[4], (int32_t)a[5], (int32_t)a[6], (int32_t)a[7], (int32_t)a[8], a[9], a[10], a[11]) ? a[8] : 0;
+}
+FN(g_SetDIBitsToDevice) {                /* (hdc, x, y, w, h, xsrc, ysrc, first line, lines, bits, info, usage) */
+    /* ysrc counts from the bottom of a bottom-up picture. */
+    int bh = (int)RD32(a[10] + 8), h = (int32_t)a[4], ys = (int32_t)a[6];
+    if (bh > 0) ys = bh - ys - h;
+    return dib_draw(w, DCP(w, a[0]), (int32_t)a[1], (int32_t)a[2], (int32_t)a[3], h, (int32_t)a[5], ys, (int32_t)a[3], h, a[9], a[10], a[11]) ? a[8] : 0;
+}
+FN(g_SetDIBits) {                        /* (hdc, bitmap, first line, lines, bits, info, usage) */
+    qobj *o = O(w, a[1], GO_BITMAP);
+    qdc d;
+    int bh;
+    if (!o || !o->bmp.pix) return 0;
+    memset(&d, 0, sizeof(d));
+    d.s = &o->bmp;
+    d.cx1 = o->bmp.w; d.cy1 = o->bmp.h;
+    bh = (int)RD32(a[5] + 8);
+    if (bh < 0) bh = -bh;
+    return dib_draw(w, &d, 0, 0, o->bmp.w, o->bmp.h, 0, 0, o->bmp.w, bh, a[4], a[5], a[6]) ? a[3] : 0;
 }
 FN(g_BitBlt) { return (uint32_t)blt(w, DCP(w, a[0]), (int32_t)a[1], (int32_t)a[2], (int32_t)a[3], (int32_t)a[4], DCP(w, a[5]), (int32_t)a[6], (int32_t)a[7], (int32_t)a[3], (int32_t)a[4], a[8]); }
 FN(g_StretchBlt) { return (uint32_t)blt(w, DCP(w, a[0]), (int32_t)a[1], (int32_t)a[2], (int32_t)a[3], (int32_t)a[4], DCP(w, a[5]), (int32_t)a[6], (int32_t)a[7], (int32_t)a[8], (int32_t)a[9], a[10]); }
@@ -1173,7 +1265,7 @@ const qhle qw_gdi32[] = {
     G("GetStockObject", g_GetStockObject, 1), G("SetBkMode", g_SetBkMode, 2), G("SetTextColor", g_SetTextColor, 2),
     G("SetBkColor", g_SetBkColor, 2), G("GetTextColor", g_GetTextColor, 1), G("GetBkColor", g_GetBkColor, 1),
     G("SetTextAlign", g_SetTextAlign, 2), G("SetROP2", g_SetROP2, 2),
-    G("GetTextExtentPoint32W", g_GetTextExtentPoint32W, 4), G("GetTextExtentPointW", g_GetTextExtentPoint32W, 4),
+    G("GetTextExtentPoint32W", g_GetTextExtentPoint32W, 4), G("GetTextExtentPointW", g_GetTextExtentPoint32W, 4), G("GetTextExtentExPointW", g_GetTextExtentExPointW, 7), G("StretchDIBits", g_StretchDIBits, 13), G("SetDIBitsToDevice", g_SetDIBitsToDevice, 12), G("SetDIBits", g_SetDIBits, 7),
     G("GetTextMetricsW", g_GetTextMetricsW, 2), G("TextOutW", g_TextOutW, 5), G("ExtTextOutW", g_ExtTextOutW, 8),
     G("CreateCompatibleDC", g_CreateCompatibleDC, 1), G("DeleteDC", g_DeleteDC, 1),
     G("CreateCompatibleBitmap", g_CreateCompatibleBitmap, 3), G("CreateBitmap", g_CreateBitmap, 5),

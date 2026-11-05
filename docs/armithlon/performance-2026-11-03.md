@@ -443,4 +443,27 @@ Dialogs now answer the keyboard, modal ones and through `IsDialogMessage` the ot
 
 Checked with a scripted test program: every button set, default button, Escape, typing, Tab, arrows, space and a modeless dialog. The 68 programs report the same as before, which says little here, since the survey presses no keys.
 
-`J2swc123.exe` (Jazz Jackrabbit 2) now gets its Yes and then ends at once, because `PropertySheetA` does nothing. Wizards of that kind need a real property sheet next.
+## Update 2026-11-05, sixth part: property sheets and wizards
+
+`PropertySheetA` and `W`, `CreatePropertySheetPage` and the `PSM_` messages are real, with wizards and with plain sheets, modal and modeless. Pages are created when first shown and get the `PSN_` notifications. Tabs are a row of buttons, since there is no tab control.
+
+`J2swc123.exe` (Jazz Jackrabbit 2) installs from start to end: 58 files and 40 MB. The installed `Jazz2.exe` then faults at `eip=0049c38b`.
+
+This work uncovered general faults that were hiding behind the stub:
+
+- Combo boxes ran on the list box code but did not know a single `CB_` message. They now do, and they show the selected entry; a click or an arrow takes the next one, as there is no open list.
+- ANSI programs put list and combo entries in through a wide call, which garbled them. They are now converted, in both directions.
+- `FindResourceA` passed ANSI names to the wide version, so named resources were never found. Tomb Raider's Lara and the picture on GEX's start screen depend on it.
+- A text message could pass through a program's ANSI window procedure and be converted twice.
+- Group boxes filled their whole area and painted over the controls inside them.
+- `StretchDIBits` did nothing, and `SetDIBitsToDevice`, `SetDIBits`, `GetTextExtentExPointA`, `GetNumberFormatA` and `SHChangeNotify` were missing.
+- A modal loop went on for ever after a fault in guest code, because nothing could end it. It now stops, and the fault is reported.
+
+Visible in the survey: Rat Poker shows its window with its picture, and GEX shows its start screen. Both Tomb Raider II demos start with their configuration sheet on a first run, as the real program does, and the sheet works with mouse and keyboard.
+
+Still open:
+
+- Tomb Raider II after OK in that sheet has faulted at `eip=00444aab`, on a surface without a vtable, when it was set to its default of hardware 3D at 640x480.
+- There is no progress bar or animation control: `msctls_progress32` and `SysAnimate32` appear as empty static controls.
+- `ff7demo.exe` waits for `ff7config.exe` on a first run; see the log of the child.
+- Window captions on popup windows appear without text.

@@ -120,6 +120,7 @@ typedef struct qwnd {
     uint32_t font;
     uint32_t dlgproc;                 /* dialogs: guest DLGPROC */
     int modal_done, modal_result, is_dialog;
+    void *sheet;                      /* property sheet frame: its pages and buttons */
     uint32_t focus_child;
     int caret;
     uint32_t tme;                     /* TrackMouseEvent flags */

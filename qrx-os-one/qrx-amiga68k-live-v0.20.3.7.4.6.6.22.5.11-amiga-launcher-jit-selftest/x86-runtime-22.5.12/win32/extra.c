@@ -394,7 +394,6 @@ FN(x_RegNotFound) { UNUSED; return REG_NOT_FOUND; }
 FN(x_RegCreateKeyA) { if (a[2]) x86_wr32(C, a[2], 0x7E000001u); return 0; }
 FN(x_MidiFail) { UNUSED; return 2u; /* MMSYSERR_BADDEVICEID */ }
 FN(x_DeviceIoControl) { UNUSED; return 0; }
-FN(x_StretchDIBits) { UNUSED; return a[6]; /* lines copied; the RTG surface is the real output */ }
 FN(x_CreateDCA) { UNUSED; return 0x7E100001u; }
 FN(x_CreateDIBitmap) { UNUSED; return 0x7E100002u; }
 #define K(n, f, c) { "kernel32", n, c, f }
@@ -413,7 +412,6 @@ const qhle qw_extra[] = {
     ADV("GetUserNameA", x_GetUserNameA, 2), ADV("RegDeleteKeyA", x_ok0, 2), ADV("RegEnumKeyExA", x_RegNotFound, 8),
     U("WinHelpA", x_ok1, 4), U("PostThreadMessageA", x_ok1, 4), U("GetWindowPlacement", x_ok0, 2), U("SetWindowPlacement", x_ok1, 2),
     U("CreateDialogIndirectParamA", x_ok0, 5),
-    { "comctl32", "PropertySheetA", 1, x_fail_m1 },
     { "comdlg32", "GetOpenFileNameA", 1, x_ok0 }, { "comdlg32", "GetSaveFileNameA", 1, x_ok0 }, { "comdlg32", "CommDlgExtendedError", 0, x_ok0 },
     K("GetEnvironmentStrings", x_GetEnvironmentStrings, 0), K("SetStdHandle", x_ok1, 2), K("GetConsoleMode", x_ok0, 2),
     K("SetConsoleMode", x_ok1, 2), K("WriteConsoleA", x_WriteConsoleA, 5), K("ReadConsoleInputA", x_ok0, 4),
@@ -426,7 +424,7 @@ const qhle qw_extra[] = {
     W_("midiStreamOpen", x_MidiFail, 6), W_("midiStreamClose", x_ok0, 1), W_("midiStreamOut", x_MidiFail, 3),
     W_("midiStreamPause", x_ok0, 1), W_("midiStreamRestart", x_ok0, 1), W_("midiStreamProperty", x_MidiFail, 3),
     W_("midiOutPrepareHeader", x_MidiFail, 3), W_("midiOutUnprepareHeader", x_ok0, 3), W_("midiOutReset", x_ok0, 1),
-    G("CreateDCA", x_CreateDCA, 4), G("CreateDIBitmap", x_CreateDIBitmap, 6), G("StretchDIBits", x_StretchDIBits, 13),
+    G("CreateDCA", x_CreateDCA, 4), G("CreateDIBitmap", x_CreateDIBitmap, 6),
     K("GetEnvironmentVariableA", x_GetEnvironmentVariableA, 3), K("GetEnvironmentVariableW", x_GetEnvironmentVariableW, 3),
     K("SetEnvironmentVariableA", x_SetEnvironmentVariableA, 2), K("FormatMessageA", x_ok0, 7), K("GetLocaleInfoA", x_GetLocaleInfoA, 4),
     K("GetCPInfo", x_GetCPInfo, 2), K("IsDBCSLeadByte", x_ok0, 1), K("GetFileInformationByHandle", x_ok0, 2),

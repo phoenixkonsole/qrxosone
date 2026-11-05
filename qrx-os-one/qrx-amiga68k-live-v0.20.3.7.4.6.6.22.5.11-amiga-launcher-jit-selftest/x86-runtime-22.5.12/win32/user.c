@@ -22,6 +22,10 @@ static uint32_t def_window_proc(qwin *w, uint32_t h, uint32_t msg, uint32_t wp, 
 static void win_destroy(qwin *w, qwnd *x);
 static void set_focus(qwin *w, uint32_t h);
 static qwnd *find_ctl(qwin *w, qwnd *p, uint32_t id);
+struct qsheet;
+static int sheet_proc(qwin *w, struct qsheet *s, uint32_t *a, uint32_t *ret);
+static int sheet_key(qwin *w, qwnd *f, uint32_t hwnd, uint32_t msg, uint32_t wp);
+static int g_dlg_child;                                 /* the next dialog is a page inside a frame */
 
 /* ====================================================================== handles */
 qwnd *W(qwin *w, uint32_t h)
@@ -324,8 +328,7 @@ static void button_paint(qwin *w, qwnd *x, uint32_t hdc)
     br = ctlcolor(w, x, hdc, t == 0 || t == 1 ? WM_CTLCOLORBTN : WM_CTLCOLORSTATIC);
     if (t == 7) {                                    /* BS_GROUPBOX */
         int fh = gdi_font_height(0), tw = gdi_text_width(0, x->text, wlen16(x->text));
-        gdi_fill(d, 0, 0, x->cw, x->ch, brush_rgb(w, br, sys_color(15)));
-        d->cx0 = d->cx0; /* keep */
+        /* Only a frame: the controls inside it are its siblings and may be painted before it. */
         gdi_frame3d(d, 0, fh / 2, x->cw, x->ch, 1, 0);
         gdi_frame3d(d, 1, fh / 2 + 1, x->cw, x->ch, 0, 0);
         if (x->text[0]) {
@@ -485,7 +488,8 @@ static uint32_t static_proc(qwin *w, uint32_t *a)
         if (d) {
             br = ctlcolor(w, x, hdc, WM_CTLCOLORSTATIC);
             rc[0] = 0; rc[1] = 0; rc[2] = x->cw; rc[3] = x->ch;
-            if (st == 4 || st == 7) gdi_fill(d, 0, 0, x->cw, x->ch, st == 4 ? 0 : sys_color(15));
+            if (st == 4) gdi_fill(d, 0, 0, x->cw, x->ch, 0);
+            else if (st == 7) gdi_frame3d(d, 0, 0, x->cw, x->ch, 1, 0);
             else if (st == 5 || st == 8) gdi_fill(d, 0, 0, x->cw, x->ch, 0x808080);
             else if (st == 6) gdi_fill(d, 0, 0, x->cw, x->ch, 0xFFFFFF);
             else if (st == 0x10) { gdi_fill(d, 0, 0, x->cw, 1, 0x808080); gdi_fill(d, 0, 1, x->cw, 2, 0xFFFFFF); }
@@ -589,8 +593,54 @@ static uint32_t listbox_proc(qwin *w, uint32_t *a)
     qwnd *x = W(w, a[0]);
     qlb *l;
     uint32_t msg = a[1];
+    int combo;
     if (!x) return 0;
     l = lb_of(w, x);
+    combo = x->cls && x->cls->builtin == B_COMBOBOX;
+    if (combo) {                                           /* the same list, under other numbers */
+        static const struct { uint16_t cb, lb; } map[] = {
+            { 0x143, 0x180 }, { 0x144, 0x182 }, { 0x146, 0x18B }, { 0x147, 0x188 }, { 0x148, 0x189 }, { 0x149, 0x18A }, { 0x14A, 0x181 },
+            { 0x14B, 0x184 }, { 0x14C, 0x18F }, { 0x14D, 0x18C }, { 0x14E, 0x186 }, { 0x150, 0x199 }, { 0x151, 0x19A }, { 0x158, 0x1A2 },
+        };
+        unsigned k;
+        for (k = 0; k < sizeof(map) / sizeof(map[0]); k++) if (map[k].cb == msg) { msg = map[k].lb; break; }
+        switch (msg) {
+        case WM_CREATE: x->ch = gdi_font_height(0) + 8; break;    /* the template's height includes the open list */
+        case 0x0141: case 0x014F: case 0x0155: case 0x0157: return 0;   /* limit text, drop down, UI, dropped state */
+        case 0x0142: return 1;                                 /* CB_SETEDITSEL */
+        case 0x0153: return 0;                                 /* CB_SETITEMHEIGHT */
+        case 0x0154: return (uint32_t)gdi_font_height(0) + 2;  /* CB_GETITEMHEIGHT */
+        case WM_GETDLGCODE: return 1;                          /* wants the arrows */
+        case WM_GETTEXT: return l->sel >= 0 && l->sel < l->n ? (uint32_t)qw_wr_wstr(w, a[3], l->item[l->sel], (int)a[2]) : (a[2] ? (x86_wr16(C, a[3], 0), 0u) : 0u);
+        case WM_GETTEXTLENGTH: return l->sel >= 0 && l->sel < l->n ? (uint32_t)wlen16(l->item[l->sel]) : 0;
+        case WM_KEYDOWN:
+            if ((a[2] == 0x26 || a[2] == 0x28) && l->n) {
+                int to = l->sel + (a[2] == 0x28 ? 1 : -1);
+                if (to >= 0 && to < l->n && to != l->sel) { l->sel = to; win_invalidate(w, x, 1); notify_parent(w, x, 1); }
+            }
+            return 0;
+        case WM_LBUTTONDOWN:                                   /* no open list here: a click takes the next entry */
+            set_focus(w, x->h);
+            if (l->n) { l->sel = (l->sel + 1) % l->n; win_invalidate(w, x, 1); notify_parent(w, x, 1); }
+            return 0;
+        case WM_PAINT: {
+            uint32_t ps = qw_alloc(w, 64), hdc = qw_call(w, qw_thunk(w, "user32", "BeginPaint"), 2, x->h, ps, 0, 0);
+            qdc *d = DCP(w, hdc);
+            if (d) {
+                int rc[4];
+                gdi_fill(d, 0, 0, x->cw, x->ch, 0x808080);
+                gdi_fill(d, 1, 1, x->cw - 1, x->ch - 1, x->enabled ? 0xFFFFFF : sys_color(15));
+                gdi_fill(d, x->cw - 16, 1, x->cw - 1, x->ch - 1, sys_color(15));
+                rc[0] = 4; rc[1] = 2; rc[2] = x->cw - 18; rc[3] = x->ch - 2;
+                d->bkmode = 1; d->textcol = 0;
+                if (l->sel >= 0 && l->sel < l->n) gdi_drawtext(d, l->item[l->sel], wlen16(l->item[l->sel]), rc, 0x820);
+                { static wchar16 arrow[2] = { 'v', 0 }; rc[0] = x->cw - 13; rc[2] = x->cw - 2; gdi_drawtext(d, arrow, 1, rc, 0x820); }
+            }
+            qw_call(w, qw_thunk(w, "user32", "EndPaint"), 2, x->h, ps, 0, 0);
+            qw_free(w, ps);
+            return 0; }
+        }
+    }
     switch (msg) {
     case WM_PAINT: {
         uint32_t ps = qw_alloc(w, 64), hdc;
@@ -632,6 +682,19 @@ static uint32_t listbox_proc(qwin *w, uint32_t *a)
     case 0x0189: if ((int32_t)a[2] < 0 || (int)a[2] >= l->n) return 0xFFFFFFFFu; return (uint32_t)qw_wr_wstr(w, a[3], l->item[a[2]], 64);  /* LB_GETTEXT */
     case 0x018A: return (int32_t)a[2] >= 0 && (int)a[2] < l->n ? (uint32_t)wlen16(l->item[a[2]]) : 0xFFFFFFFFu;
     case 0x018B: return (uint32_t)l->n;                   /* LB_GETCOUNT */
+    case 0x018F: case 0x018C: case 0x01A2: {               /* LB_FINDSTRING, LB_SELECTSTRING, LB_FINDSTRINGEXACT */
+        wchar16 t[64];
+        int k, L, from = (int32_t)a[2] < 0 ? 0 : (int)a[2] + 1;
+        L = qw_rd_wstr(w, a[3], t, 64);
+        for (k = 0; k < l->n; k++) {
+            int at = (from + k) % l->n, c, same = 1;
+            if (msg == 0x01A2 && wlen16(l->item[at]) != L) continue;
+            for (c = 0; c < L && same; c++) same = toupper(l->item[at][c] & 255) == toupper(t[c] & 255) && l->item[at][c];
+            if (!same) continue;
+            if (msg == 0x018C) { l->sel = at; win_invalidate(w, x, 1); }
+            return (uint32_t)at;
+        }
+        return 0xFFFFFFFFu; }
     case 0x0199: return (int)a[2] < l->n ? l->data[a[2]] : 0xFFFFFFFFu;
     case 0x019A: if ((int)a[2] < l->n) l->data[a[2]] = a[3]; return 0;
     case WM_LBUTTONDOWN: {
@@ -667,6 +730,7 @@ static uint32_t dlg_proc(qwin *w, uint32_t *a)
     qwnd *x = W(w, a[0]);
     uint32_t msg = a[1], r = 0;
     if (!x) return 0;
+    if (x->sheet && sheet_proc(w, (struct qsheet *)x->sheet, a, &r)) return r;
     if (x->dlgproc) {
         r = qw_call(w, x->dlgproc, 4, a[0], msg, a[2], a[3]);
         x = W(w, a[0]);
@@ -737,6 +801,11 @@ static uint32_t create_dialog(qwin *w, uint32_t tpl, uint32_t parent, uint32_t d
     else { style = t32(w, &t); exstyle = t32(w, &t); }
     n = t16(w, &t);
     x = (int16_t)t16(w, &t); y = (int16_t)t16(w, &t); cx = (int16_t)t16(w, &t); cy = (int16_t)t16(w, &t);
+    if (g_dlg_child) {
+        style = (style & ~(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_VISIBLE | 0x80u)) | WS_CHILD;
+        g_dlg_child = 0;
+        x = y = 0;
+    }
     menuord = tsz(w, &t, menuname, 64);
     clsord = tsz(w, &t, clsname, 64);
     tsz(w, &t, title, 256);
@@ -892,31 +961,36 @@ static int dlg_mnemonic(const wchar16 *t)
     for (i = 0; t[i]; i++) if (t[i] == '&') { if (t[i + 1] != '&') return t[i + 1]; i++; }
     return 0;
 }
+static int dlg_char(qwin *w, uint32_t hdlg, uint32_t wp, uint32_t code)
+{
+    qwnd *list[DLG_MAXCTL];
+    uint32_t wanted;
+    int n, i;
+    if ((code & 0x80) || wp < 33 || wp > 255) return 0;
+    wanted = (uint32_t)toupper((int)wp);
+    n = dlg_controls(w, hdlg, list);
+    for (i = 0; i < n; i++) {
+        int m = dlg_mnemonic(list[i]->text), k;
+        if (!m || (uint32_t)toupper(m) != wanted) continue;
+        /* A label names the control after it. */
+        for (k = i; k < n && !dlg_can_focus(list[k]); k++) {}
+        if (k >= n) return 0;
+        set_focus(w, list[k]->h);
+        if (list[k]->cls && list[k]->cls->builtin == B_BUTTON) button_activate(w, list[k]);
+        return 1;
+    }
+    return 0;
+}
 static int dlg_key(qwin *w, uint32_t hdlg, uint32_t hwnd, uint32_t msg, uint32_t wp)
 {
-    uint32_t code, next, wanted = 0;
+    uint32_t code, next;
     qwnd *c;
     if (msg != WM_KEYDOWN && msg != WM_CHAR) return 0;
+    c = W(w, hdlg);
+    if (c && c->sheet) return sheet_key(w, c, hwnd, msg, wp);
     code = W(w, hwnd) && hwnd != hdlg ? win_send(w, hwnd, WM_GETDLGCODE, wp, 0) : 0;
     if (code & 4) return 0;                                /* wants everything */
-    if (msg == WM_CHAR) {
-        qwnd *list[DLG_MAXCTL];
-        int n, i;
-        if ((code & 0x80) || wp < 33 || wp > 255) return 0;
-        wanted = (uint32_t)toupper((int)wp);
-        n = dlg_controls(w, hdlg, list);
-        for (i = 0; i < n; i++) {
-            int m = dlg_mnemonic(list[i]->text), k;
-            if (!m || (uint32_t)toupper(m) != wanted) continue;
-            /* A label names the control after it. */
-            for (k = i; k < n && !dlg_can_focus(list[k]); k++) {}
-            if (k >= n) return 0;
-            set_focus(w, list[k]->h);
-            if (list[k]->cls && list[k]->cls->builtin == B_BUTTON) button_activate(w, list[k]);
-            return 1;
-        }
-        return 0;
-    }
+    if (msg == WM_CHAR) return dlg_char(w, hdlg, wp, code);
     switch (wp) {
     case 0x09:                                             /* Tab */
         if (code & 2) return 0;
@@ -960,7 +1034,8 @@ static int run_modal(qwin *w, uint32_t h)
     show_top(w, x);
     win_invalidate(w, x, 1);
     w->modal_depth++;
-    while ((x = W(w, h)) && !x->modal_done && !w->exiting) {
+    /* A fault in a window procedure stops all guest code: nothing could end this loop. */
+    while ((x = W(w, h)) && !x->modal_done && !w->exiting && !C->fault) {
         if (!user_pump(w, 1, &m, 0)) { if (w->quit_posted) break; continue; }
         if (m.msg == WM_QUIT) { w->quit_posted = 1; break; }
         if (dlg_key(w, h, m.hwnd, m.msg, m.wp)) continue;
@@ -2381,7 +2456,469 @@ static uint32_t h_ScrollBarProc(qwin *w, uint32_t *a) { return scrollbar_proc(w,
 static uint32_t h_MenuProc(qwin *w, uint32_t *a) { return menu_popup_proc(w, a); }
 
 #define U(n, f, c) { "user32", n, c, f }
+/* ====================================================================== property sheets
+ * The frame is a dialog of ours, with the pages as child dialogs under it. Pages are created
+ * when first shown, and everything a page decides reaches it as WM_NOTIFY. */
+#define QS_MAX 32
+#define QS_BACK 0x3023u
+#define QS_NEXT 0x3024u
+#define QS_FINISH 0x3025u
+#define QS_APPLY 0x3021u
+#define QS_TAB 0x3100u
+enum { PSN_SETACTIVE = -200, PSN_KILLACTIVE = -201, PSN_APPLY = -202, PSN_RESET = -203, PSN_WIZBACK = -206, PSN_WIZNEXT = -207, PSN_WIZFINISH = -208, PSN_QUERYCANCEL = -209 };
+typedef struct qspage { uint32_t psp, hwnd, tpl; } qspage;
+struct qsheet {
+    uint32_t h, flags, hinst, wizbtn;
+    int n, cur, wizard, wide, modeless, pw, ph, top, result, done, saved;
+    wchar16 caption[128];
+    qspage page[QS_MAX];
+};
+typedef struct qsheet qsheet;
+
+/* A string argument that may be a resource number. */
+static void sheet_text(qwin *w, qsheet *s, uint32_t hinst, uint32_t p, wchar16 *out, int max)
+{
+    out[0] = 0;
+    if (!p) return;
+    if (p < 0x10000u) {
+        uint32_t b[4], g = qw_alloc(w, (uint32_t)max * 2u);
+        b[0] = hinst; b[1] = p; b[2] = g; b[3] = (uint32_t)max;
+        u_LoadStringW(w, b);
+        qw_rd_wstr(w, g, out, max);
+        qw_free(w, g);
+    } else if (s->wide) qw_rd_wstr(w, p, out, max);
+    else { char t[260]; qw_rd_str(w, p, t, sizeof(t)); a2w(out, t, max); }
+}
+static uint32_t sheet_template(qwin *w, qsheet *s, uint32_t psp)
+{
+    uint32_t flags = RD32(psp + 4), name = RD32(psp + 12), hinst = RD32(psp + 8), r;
+    if (flags & 1u) return name;                           /* PSP_DLGINDIRECT */
+    if (!hinst) hinst = s->hinst;
+    if (name < 0x10000u || s->wide) return dialog_template(w, hinst, name);
+    {
+        wchar16 t[64];
+        uint32_t g = qw_alloc(w, 128);
+        char c[64];
+        qw_rd_str(w, name, c, sizeof(c));
+        a2w(t, c, 64);
+        qw_wr_wstr(w, g, t, 64);
+        r = dialog_template(w, hinst, g);
+        qw_free(w, g);
+    }
+    return r;
+}
+static int32_t sheet_notify(qwin *w, qsheet *s, int i, int code, uint32_t lp)
+{
+    uint32_t nm, r;
+    qwnd *x;
+    if (i < 0 || i >= s->n || !W(w, s->page[i].hwnd)) return 0;
+    nm = qw_alloc(w, 16);
+    WR32(nm, s->h); WR32(nm + 4, 0); WR32(nm + 8, (uint32_t)code); WR32(nm + 12, lp);
+    x = W(w, s->page[i].hwnd);
+    if (x->extra) memset(x->extra, 0, 4);
+    r = win_send(w, s->page[i].hwnd, WM_NOTIFY, 0, nm);
+    qw_free(w, nm);
+    x = W(w, s->page[i].hwnd);
+    if (!x || !r) return 0;
+    if (x->extra) { uint32_t mr; memcpy(&mr, x->extra, 4); return (int32_t)mr; }
+    return 0;
+}
+static void sheet_vis(qwin *w, uint32_t h, int on)
+{
+    qwnd *x = W(w, h);
+    if (!x) return;
+    x->visible = on;
+    if (on) x->style |= WS_VISIBLE; else x->style &= ~WS_VISIBLE;
+    win_send(w, h, WM_SHOWWINDOW, (uint32_t)on, 0);
+    x = W(w, h);
+    if (x) win_invalidate(w, on ? x : W(w, x->parent), 1);
+}
+static void sheet_button_style(qwin *w, qsheet *s, uint32_t id, int def)
+{
+    qwnd *b = find_ctl(w, W(w, s->h), id);
+    if (b) win_send(w, b->h, BM_SETSTYLE, def ? 1u : 0u, 0);
+}
+static void sheet_wiz_buttons(qwin *w, qsheet *s)
+{
+    qwnd *f = W(w, s->h), *b;
+    int fin = (s->wizbtn & 0xC) != 0;
+    if (!s->wizard || !f) return;
+    if ((b = find_ctl(w, f, QS_BACK)) != NULL) { b->enabled = (s->wizbtn & 1) != 0; win_invalidate(w, b, 1); }
+    if ((b = find_ctl(w, f, QS_NEXT)) != NULL) { b->enabled = (s->wizbtn & 2) != 0; sheet_vis(w, b->h, !fin); }
+    if ((b = find_ctl(w, f, QS_FINISH)) != NULL) { b->enabled = (s->wizbtn & 4) != 0; sheet_vis(w, b->h, fin); }
+    sheet_button_style(w, s, QS_NEXT, !fin);
+    sheet_button_style(w, s, QS_FINISH, fin);
+    /* The buttons usually change after the page is shown: focus must not stay on a hidden one. */
+    b = W(w, w->focus);
+    if (b && b->parent == s->h && (!b->visible || !b->enabled)) {
+        qwnd *d = find_ctl(w, f, fin ? QS_FINISH : QS_NEXT);
+        if (d && d->visible && d->enabled) set_focus(w, d->h);
+        else set_focus(w, s->h);
+    }
+}
+static int sheet_create_page(qwin *w, qsheet *s, int i)
+{
+    uint32_t psp = s->page[i].psp, flags = RD32(psp + 4), proc = RD32(psp + 24), hinst = RD32(psp + 8), cb = RD32(psp + 32);
+    qwnd *x;
+    if ((flags & 0x80u) && cb && !qw_call(w, cb, 3, 0, 2 /* PSPCB_CREATE */, psp, 0)) return 0;
+    if (!s->page[i].tpl) return 0;
+    g_dlg_child = 1;
+    s->page[i].hwnd = create_dialog(w, s->page[i].tpl, s->h, proc, psp, hinst ? hinst : s->hinst);
+    g_dlg_child = 0;
+    x = W(w, s->page[i].hwnd);
+    if (!x) { s->page[i].hwnd = 0; return 0; }
+    x->y = s->top;
+    return 1;
+}
+static int sheet_index_of_id(qwin *w, qsheet *s, uint32_t id)
+{
+    int i;
+    for (i = 0; i < s->n; i++) if (RD32(s->page[i].psp + 12) == id) return i;
+    (void)w;
+    return -1;
+}
+/* dir is where to go on when a page refuses to be shown. */
+static int sheet_select(qwin *w, qsheet *s, int i, int dir)
+{
+    int tries, old = s->cur;
+    uint32_t next;
+    wchar16 t[128];
+    for (tries = 0; tries <= s->n; tries++) {
+        int32_t r;
+        if (i < 0 || i >= s->n) return 0;
+        if (!s->page[i].hwnd && !sheet_create_page(w, s, i)) { i += dir; continue; }
+        s->cur = i;                                        /* a page asks the frame for the current one */
+        r = sheet_notify(w, s, i, PSN_SETACTIVE, 0);
+        if (r == -1) { i += dir; continue; }
+        if (r) { int k = sheet_index_of_id(w, s, (uint32_t)r); if (k < 0) { i += dir; continue; } i = k; continue; }
+        break;
+    }
+    if (tries > s->n) { s->cur = old; return 0; }
+    if (old >= 0 && old != i && old < s->n && s->page[old].hwnd) sheet_vis(w, s->page[old].hwnd, 0);
+    s->cur = i;
+    sheet_vis(w, s->page[i].hwnd, 1);
+    if (RD32(s->page[i].psp + 4) & 8u) sheet_text(w, s, RD32(s->page[i].psp + 8) ? RD32(s->page[i].psp + 8) : s->hinst, RD32(s->page[i].psp + 20), t, 128);
+    else t[0] = 0;
+    if (s->wizard && W(w, s->h)) {
+        qwnd *f = W(w, s->h);
+        const wchar16 *cap = t[0] ? t : s->caption;
+        int k;
+        for (k = 0; cap[k] && k < 255; k++) f->text[k] = cap[k];
+        f->text[k] = 0;
+        win_invalidate(w, f, 1);
+    }
+    /* Focus into the page, but not onto a push button such as Browse: Return must go on. */
+    next = dlg_next_tab(w, s->page[i].hwnd, 0, 0);
+    { qwnd *fc = W(w, next); if (fc && fc->cls && fc->cls->builtin == B_BUTTON && btype(fc) <= 1) next = 0; }
+    if (next) set_focus(w, next);
+    else { qwnd *b = find_ctl(w, W(w, s->h), s->wizard ? ((s->wizbtn & 0xC) ? QS_FINISH : QS_NEXT) : 1u); if (b) set_focus(w, b->h); else set_focus(w, s->h); }
+    return 1;
+}
+static void sheet_end(qwin *w, qsheet *s, int result)
+{
+    qwnd *f = W(w, s->h);
+    s->done = 1;
+    s->result = result;
+    if (f && !s->modeless) { f->modal_done = 1; f->modal_result = result; }
+}
+static void sheet_cancel(qwin *w, qsheet *s)
+{
+    int i;
+    if (sheet_notify(w, s, s->cur, PSN_QUERYCANCEL, 0)) return;
+    for (i = 0; i < s->n; i++) if (s->page[i].hwnd) sheet_notify(w, s, i, PSN_RESET, 0);
+    sheet_end(w, s, s->result ? s->result : s->saved);
+}
+static int sheet_apply(qwin *w, qsheet *s)
+{
+    int i;
+    if (sheet_notify(w, s, s->cur, PSN_KILLACTIVE, 0)) return 0;
+    for (i = 0; i < s->n; i++) if (s->page[i].hwnd && sheet_notify(w, s, i, PSN_APPLY, 0)) { sheet_select(w, s, i, 0); return 0; }
+    s->saved = 1;
+    return 1;
+}
+static void sheet_go(qwin *w, qsheet *s, int code, int dir)
+{
+    int32_t r = sheet_notify(w, s, s->cur, code, 0);
+    int k = s->cur + dir;
+    if (r == -1) return;
+    if (r) { k = sheet_index_of_id(w, s, (uint32_t)r); if (k < 0) return; }
+    sheet_select(w, s, k, dir);
+}
+static void sheet_command(qwin *w, qsheet *s, uint32_t id)
+{
+    if (s->done) return;
+    if (id == QS_BACK) sheet_go(w, s, PSN_WIZBACK, -1);
+    else if (id == QS_NEXT) sheet_go(w, s, PSN_WIZNEXT, 1);
+    else if (id == QS_FINISH) { if (!sheet_notify(w, s, s->cur, PSN_WIZFINISH, 0)) sheet_end(w, s, s->result ? s->result : 1); }
+    else if (id == 2) sheet_cancel(w, s);
+    else if (id == 1) { if (s->wizard) { /* Return with no button left: nothing to do */ } else if (sheet_apply(w, s)) sheet_end(w, s, s->result ? s->result : 1); }
+    else if (id == QS_APPLY) {
+        if (sheet_apply(w, s)) { qwnd *a = find_ctl(w, W(w, s->h), QS_APPLY); if (a) { a->enabled = 0; win_invalidate(w, a, 1); } }
+    } else if (id >= QS_TAB && id < QS_TAB + QS_MAX) {
+        if ((int)(id - QS_TAB) != s->cur && !sheet_notify(w, s, s->cur, PSN_KILLACTIVE, 0)) sheet_select(w, s, (int)(id - QS_TAB), 1);
+    }
+}
+static int sheet_add(qwin *w, qsheet *s, int at, uint32_t psp)
+{
+    int i;
+    if (s->n >= QS_MAX) return 0;
+    if (at < 0 || at > s->n) at = s->n;
+    for (i = s->n; i > at; i--) s->page[i] = s->page[i - 1];
+    s->page[at].psp = psp; s->page[at].hwnd = 0;
+    s->page[at].tpl = sheet_template(w, s, psp);
+    s->n++;
+    if (s->cur >= at && s->h) s->cur++;
+    return 1;
+}
+/* Returns 1 when the message was one of the frame's. */
+static int sheet_proc(qwin *w, struct qsheet *s, uint32_t *a, uint32_t *ret)
+{
+    uint32_t wp = a[2], lp = a[3];
+    int i;
+    *ret = 0;
+    switch (a[1]) {
+    case WM_COMMAND: sheet_command(w, s, wp & 0xFFFF); return 1;
+    case WM_CLOSE: sheet_command(w, s, 2); return 1;
+    case 0x0400: {                                         /* DM_GETDEFID */
+        qwnd *f = W(w, s->h), *b = f ? find_ctl(w, f, s->wizard ? ((s->wizbtn & 0xC) ? QS_FINISH : QS_NEXT) : 1u) : NULL;
+        *ret = b && b->enabled ? 0x534B0000u | (b->id & 0xFFFF) : 0;
+        return 1; }
+    case 0x0401: i = (int)wp; if (i < 0 || i >= s->n) { i = -1; { int k; for (k = 0; k < s->n; k++) if (s->page[k].psp == lp) i = k; } }  /* PSM_SETCURSEL */
+        if (i >= 0 && (s->cur < 0 || !sheet_notify(w, s, s->cur, PSN_KILLACTIVE, 0))) *ret = (uint32_t)sheet_select(w, s, i, i >= s->cur ? 1 : -1);
+        return 1;
+    case 0x0402: {                                         /* PSM_REMOVEPAGE */
+        i = (int)wp;
+        if (i < 0 || i >= s->n) return 1;
+        if (s->page[i].hwnd) win_destroy(w, W(w, s->page[i].hwnd));
+        for (; i + 1 < s->n; i++) s->page[i] = s->page[i + 1];
+        s->n--;
+        if (s->cur >= s->n) s->cur = s->n - 1;
+        return 1; }
+    case 0x0403: *ret = (uint32_t)sheet_add(w, s, -1, lp); return 1;                 /* PSM_ADDPAGE */
+    case 0x0477: *ret = (uint32_t)sheet_add(w, s, (int)wp, lp); return 1;            /* PSM_INSERTPAGE, by index */
+    case 0x0404: { qwnd *b = find_ctl(w, W(w, s->h), QS_APPLY); if (b) { b->enabled = 1; win_invalidate(w, b, 1); } return 1; }  /* PSM_CHANGED */
+    case 0x040D: return 1;                                 /* PSM_UNCHANGED */
+    case 0x0409: s->result = 2; return 1;                  /* PSM_RESTARTWINDOWS */
+    case 0x040A: s->result = 3; return 1;                  /* PSM_REBOOTSYSTEM */
+    case 0x040B: { qwnd *b = find_ctl(w, W(w, s->h), 2); if (b) { a2w(b->text, "Close", 256); win_invalidate(w, b, 1); } return 1; }  /* PSM_CANCELTOCLOSE */
+    case 0x040C:                                           /* PSM_QUERYSIBLINGS */
+        for (i = 0; i < s->n; i++) if (s->page[i].hwnd && (*ret = win_send(w, s->page[i].hwnd, 0x040C, wp, lp)) != 0) break;
+        return 1;
+    case 0x046E: *ret = (uint32_t)sheet_apply(w, s); return 1;                       /* PSM_APPLY */
+    case 0x046F: case 0x0478: {                            /* PSM_SETTITLE */
+        qwnd *f = W(w, s->h);
+        int was = s->wide, k;
+        s->wide = a[1] == 0x0478;
+        sheet_text(w, s, s->hinst, lp, s->caption, 128);
+        s->wide = was;
+        if (f) { for (k = 0; s->caption[k] && k < 255; k++) f->text[k] = s->caption[k]; f->text[k] = 0; win_invalidate(w, f, 1); }
+        return 1; }
+    case 0x0470: s->wizbtn = lp; sheet_wiz_buttons(w, s); return 1;                  /* PSM_SETWIZBUTTONS */
+    case 0x0471: {                                         /* PSM_PRESSBUTTON */
+        static const uint32_t ids[] = { QS_BACK, QS_NEXT, QS_FINISH, 1, QS_APPLY, 2, 9 };
+        if (wp < 7) sheet_command(w, s, ids[wp]);
+        return 1; }
+    case 0x0472: i = lp ? sheet_index_of_id(w, s, lp) : -1; if (i >= 0 && !sheet_notify(w, s, s->cur, PSN_KILLACTIVE, 0)) *ret = (uint32_t)sheet_select(w, s, i, 1); return 1;  /* PSM_SETCURSELID */
+    case 0x0473: case 0x0479: {                            /* PSM_SETFINISHTEXT */
+        qwnd *b = find_ctl(w, W(w, s->h), QS_FINISH);
+        int was = s->wide;
+        s->wide = a[1] == 0x0479;
+        if (b) sheet_text(w, s, s->hinst, lp, b->text, 64);
+        s->wide = was;
+        s->wizbtn |= 4;
+        sheet_wiz_buttons(w, s);
+        return 1; }
+    case 0x0474: return 1;                                 /* PSM_GETTABCONTROL: we have none */
+    case 0x0475: { uint32_t b[2]; b[0] = s->h; b[1] = lp; *ret = u_IsDialogMessageW(w, b); return 1; }  /* PSM_ISDIALOGMESSAGE */
+    case 0x0476: *ret = !s->done && s->cur >= 0 && s->cur < s->n ? s->page[s->cur].hwnd : 0; return 1;  /* PSM_GETCURRENTPAGEHWND */
+    case 0x0481: for (i = 0; i < s->n; i++) if (s->page[i].hwnd == wp) { *ret = (uint32_t)i; return 1; } *ret = 0xFFFFFFFFu; return 1;  /* PSM_HWNDTOINDEX */
+    case 0x0482: *ret = wp < (uint32_t)s->n ? s->page[wp].hwnd : 0; return 1;        /* PSM_INDEXTOHWND */
+    case 0x0483: for (i = 0; i < s->n; i++) if (s->page[i].psp == lp) { *ret = (uint32_t)i; return 1; } *ret = 0xFFFFFFFFu; return 1;  /* PSM_PAGETOINDEX */
+    case 0x0484: *ret = wp < (uint32_t)s->n ? s->page[wp].psp : 0; return 1;         /* PSM_INDEXTOPAGE */
+    case 0x0485: *ret = (uint32_t)sheet_index_of_id(w, s, lp); return 1;             /* PSM_IDTOINDEX */
+    case 0x0486: *ret = wp < (uint32_t)s->n ? RD32(s->page[wp].psp + 12) : 0; return 1;  /* PSM_INDEXTOID */
+    case 0x0487: *ret = (uint32_t)s->result; return 1;     /* PSM_GETRESULT */
+    case WM_DESTROY:
+        for (i = 0; i < s->n; i++) {
+            uint32_t psp = s->page[i].psp, cb = RD32(psp + 32);
+            if ((RD32(psp + 4) & 0x80u) && cb) qw_call(w, cb, 3, 0, 1 /* PSPCB_RELEASE */, psp, 0);
+        }
+        return 0;
+    }
+    return 0;
+}
+/* Tab runs through the page and then the frame's buttons; the rest goes to the page. */
+static int sheet_key(qwin *w, qwnd *f, uint32_t hwnd, uint32_t msg, uint32_t wp)
+{
+    qsheet *s = (qsheet *)f->sheet;
+    uint32_t page = s->cur >= 0 && s->cur < s->n ? s->page[s->cur].hwnd : 0;
+    qwnd *c = W(w, hwnd);
+    int in_page = 0;
+    uint32_t code;
+    { qwnd *q = c; while (q && q->h != page && (q->style & WS_CHILD)) q = W(w, q->parent); in_page = q && q->h == page; }
+    code = c && hwnd != f->h ? win_send(w, hwnd, WM_GETDLGCODE, wp, 0) : 0;
+    if (code & 4) return 0;
+    if (msg == WM_CHAR) return (in_page && dlg_char(w, page, wp, code)) || dlg_char(w, f->h, wp, code);
+    if (msg != WM_KEYDOWN) return 0;
+    switch (wp) {
+    case 0x09: {
+        uint32_t list[DLG_MAXCTL + 16], at = 0;
+        qwnd *pc[DLG_MAXCTL];
+        int n = 0, k, m, here = -1, back = (w->keystate[0x10] & 0x80) != 0;
+        if (code & 2) return 0;
+        m = page ? dlg_controls(w, page, pc) : 0;
+        for (k = 0; k < m; k++) if (dlg_can_focus(pc[k]) && (pc[k]->style & WS_TABSTOP)) list[n++] = pc[k]->h;
+        m = dlg_controls(w, f->h, pc);
+        for (k = 0; k < m && n < DLG_MAXCTL; k++) if (pc[k]->h != page && dlg_can_focus(pc[k]) && (pc[k]->style & WS_TABSTOP) && pc[k]->id < QS_TAB) list[n++] = pc[k]->h;
+        for (k = 0; k < n; k++) { qwnd *q = c; while (q && q->h != list[k] && (q->style & WS_CHILD)) q = W(w, q->parent); if (q && q->h == list[k]) here = k; }
+        if (!n) return 1;
+        at = (uint32_t)(here < 0 ? (back ? n - 1 : 0) : (here + (back ? n - 1 : 1)) % n);
+        set_focus(w, list[at]);
+        return 1; }
+    case 0x25: case 0x26: case 0x27: case 0x28:
+        return in_page ? dlg_key(w, page, hwnd, msg, wp) : 1;
+    case 0x0D: {
+        uint32_t def;
+        if (c && hwnd != f->h && c->cls && c->cls->builtin == B_BUTTON && btype(c) <= 1) { win_send(w, c->parent, WM_COMMAND, c->id & 0xFFFF, c->h); return 1; }
+        def = win_send(w, f->h, 0x0400, 0, 0);
+        if ((def >> 16) == 0x534B) sheet_command(w, s, def & 0xFFFF);
+        return 1; }
+    case 0x1B: sheet_command(w, s, 2); return 1;
+    }
+    return 0;
+}
+static uint32_t property_sheet(qwin *w, uint32_t *a, int wide)
+{
+    uint32_t hdr = a[0], flags = RD32(hdr + 4), parent = RD32(hdr + 8), hinst = RD32(hdr + 12), npages = RD32(hdr + 24), start = RD32(hdr + 28), pages = RD32(hdr + 32), cb = RD32(hdr + 36), h;
+    qsheet *s;
+    qclass *dc, *bc;
+    static wchar16 dn[8], bn[8];
+    int i, cw, ch, bw = 76, bh = 24, gap = 8, nb = 0, px, py, firstpage;
+    struct { const char *label; uint32_t id; } b[5];
+    qwnd tmp, *ow;
+    s = (qsheet *)calloc(1, sizeof(*s));
+    if (!s) return 0xFFFFFFFFu;
+    s->flags = flags; s->hinst = hinst; s->wide = wide; s->cur = -1; s->result = 0;
+    s->modeless = (flags & 0x400u) != 0;
+    s->wizard = (flags & (0x20u | 0x2000u | 0x1000000u)) != 0;
+    s->wizbtn = 3;
+    for (i = 0; i < (int)npages && i < QS_MAX; i++) {
+        uint32_t src = (flags & 8u) ? pages : RD32(pages + (uint32_t)i * 4u), psp;
+        /* An array of pages: each is as long as it says. */
+        if (flags & 8u) { uint32_t k; for (k = 0; k < (uint32_t)i; k++) src += RD32(src); }
+        {
+            uint32_t size = RD32(src), k;
+            psp = qw_alloc(w, size);
+            for (k = 0; k < size; k += 4) WR32(psp + k, RD32(src + k));
+        }
+        sheet_add(w, s, -1, psp);
+    }
+    if (!s->n) { free(s); return 0xFFFFFFFFu; }
+    for (i = 0; i < s->n; i++) {
+        uint32_t t = s->page[i].tpl;
+        int ex, cx, cy;
+        if (!t) continue;
+        ex = x86_rd16(C, t) == 1 && x86_rd16(C, t + 2) == 0xFFFF;
+        cx = (int16_t)x86_rd16(C, t + (ex ? 22 : 14)); cy = (int16_t)x86_rd16(C, t + (ex ? 24 : 16));
+        if (cx * BASEX / 4 > s->pw) s->pw = cx * BASEX / 4;
+        if (cy * BASEY / 8 > s->ph) s->ph = cy * BASEY / 8;
+    }
+    if (s->pw < 200) s->pw = 200;
+    if (s->ph < 100) s->ph = 100;
+    s->top = s->wizard ? 0 : 28;
+    sheet_text(w, s, hinst, RD32(hdr + 20), s->caption, 128);
+    if (s->wizard) {
+        b[nb].label = "< &Back"; b[nb++].id = QS_BACK;
+        b[nb].label = "&Next >"; b[nb++].id = QS_NEXT;
+        b[nb].label = "Finish"; b[nb++].id = QS_FINISH;
+        b[nb].label = "Cancel"; b[nb++].id = 2;
+    } else {
+        b[nb].label = "OK"; b[nb++].id = 1;
+        b[nb].label = "Cancel"; b[nb++].id = 2;
+        if (!(flags & 0x80u)) { b[nb].label = "&Apply"; b[nb++].id = QS_APPLY; }   /* PSH_NOAPPLYNOW */
+    }
+    cw = s->pw; ch = s->top + s->ph + 44;
+    memset(&tmp, 0, sizeof(tmp));
+    tmp.style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
+    nc_metrics(w, &tmp);
+    ow = W(w, parent);
+    ow = ow ? win_top(w, ow) : NULL;
+    px = ow ? ow->x + (ow->cw - cw) / 2 : 100;
+    py = ow ? ow->y + (ow->ch - ch) / 2 : 80;
+    if (px < 0) px = 0;
+    if (py < tmp.nt) py = tmp.nt;
+    a2w(dn, "#32770", 8); a2w(bn, "Button", 8);
+    dc = find_class(w, 0, dn); bc = find_class(w, 0, bn);
+    h = create_window(w, 0, dc, s->caption, WS_POPUP | WS_CAPTION | WS_SYSMENU, px - tmp.nl, py - tmp.nt, cw + tmp.nl + tmp.nr, ch + tmp.nt + tmp.nb, parent, 0, hinst, 0);
+    if (!h) { free(s); return 0xFFFFFFFFu; }
+    s->h = h;
+    W(w, h)->is_dialog = 1;
+    W(w, h)->owner = parent;
+    W(w, h)->sheet = s;
+    {   /* Finish takes Next's place. */
+        int shown = s->wizard ? nb - 1 : nb, k = 0;
+        int x0 = cw - shown * bw - (shown - 1) * gap - 10;
+        for (i = 0; i < nb; i++) {
+            wchar16 label[16];
+            uint32_t c;
+            int slot = k;
+            if (b[i].id == QS_FINISH) slot = k - 1; else k++;
+            a2w(label, b[i].label, 16);
+            c = create_window(w, 0, bc, label, WS_CHILD | WS_TABSTOP | (b[i].id == QS_FINISH ? 0u : WS_VISIBLE), x0 + slot * (bw + gap), ch - bh - 10, bw, bh, h, b[i].id, 0, 0);
+            if (c && W(w, c)) { W(w, c)->visible = b[i].id != QS_FINISH; }
+            if (c && b[i].id == QS_APPLY) W(w, c)->enabled = 0;
+        }
+    }
+    if (!s->wizard) for (i = 0; i < s->n; i++) {               /* tabs: a row of buttons */
+        wchar16 t[64];
+        char nm[16];
+        uint32_t psp = s->page[i].psp;
+        t[0] = 0;
+        if (RD32(psp + 4) & 8u) sheet_text(w, s, RD32(psp + 8) ? RD32(psp + 8) : hinst, RD32(psp + 20), t, 64);
+        if (!t[0] && s->page[i].tpl) {                         /* the page's own caption */
+            tplr r;
+            wchar16 skip[64];
+            r.p = s->page[i].tpl;
+            r.ex = x86_rd16(C, r.p) == 1 && x86_rd16(C, r.p + 2) == 0xFFFF;
+            r.p += r.ex ? 26 : 18;
+            tsz(w, &r, skip, 64);
+            tsz(w, &r, skip, 64);
+            tsz(w, &r, t, 64);
+        }
+        if (!t[0]) { snprintf(nm, sizeof(nm), "Page %d", i + 1); a2w(t, nm, 64); }
+        create_window(w, 0, bc, t, WS_CHILD | WS_VISIBLE, 4 + i * 84, 2, 80, 22, h, QS_TAB + (uint32_t)i, 0, 0);
+    }
+    sheet_wiz_buttons(w, s);
+    if (!s->wizard) sheet_button_style(w, s, 1, 1);
+    if ((flags & 0x100u) && cb) qw_call(w, cb, 3, h, 1 /* PSCB_INITIALIZED */, 0, 0);
+    firstpage = (flags & 0x40u) ? 0 : (int)start;              /* PSH_USEPSTARTPAGE names a title: start at the first */
+    if (firstpage >= s->n) firstpage = 0;
+    if (!sheet_select(w, s, firstpage, 1)) { sheet_end(w, s, 0); }
+    if (s->modeless) {
+        qwnd *x = W(w, h);
+        if (x) { x->visible = 1; x->style |= WS_VISIBLE; show_top(w, x); win_invalidate(w, x, 1); }
+        return h;
+    }
+    {
+        uint32_t r = (uint32_t)run_modal(w, h);
+        for (i = 0; i < s->n; i++) qw_free(w, s->page[i].psp);
+        free(s);
+        return r;
+    }
+}
+FN(u_PropertySheetA) { return property_sheet(w, a, 0); }
+FN(u_PropertySheetW) { return property_sheet(w, a, 1); }
+FN(u_CreatePropertySheetPage) {
+    uint32_t size = RD32(a[0]), p = qw_alloc(w, size), k;
+    for (k = 0; k < size; k += 4) WR32(p + k, RD32(a[0] + k));
+    return p;
+}
+FN(u_DestroyPropertySheetPage) { (void)w; (void)a; return 1; }
+
 const qhle qw_user32[] = {
+    { "comctl32", "PropertySheetA", 1, u_PropertySheetA }, { "comctl32", "PropertySheetW", 1, u_PropertySheetW },
+    { "comctl32", "CreatePropertySheetPageA", 1, u_CreatePropertySheetPage }, { "comctl32", "CreatePropertySheetPageW", 1, u_CreatePropertySheetPage },
+    { "comctl32", "DestroyPropertySheetPage", 1, u_DestroyPropertySheetPage },
     U("RegisterClassExW", u_RegisterClassExW, 1), U("RegisterClassW", u_RegisterClassW, 1), U("UnregisterClassW", u_UnregisterClassW, 2),
     U("GetClassInfoExW", u_GetClassInfoExW, 3),
     U("CreateWindowExW", u_CreateWindowExW, 12), U("DestroyWindow", u_DestroyWindow, 1), U("ShowWindow", u_ShowWindow, 2),
