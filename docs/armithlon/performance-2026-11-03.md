@@ -330,9 +330,13 @@ Input and sound were not judged by a person in any of them. Installers ran only 
 - Daytona's "about 60 FPS" and "correct graphics" were wrong. The track was missing. The interpreter runs REP string instructions in portions and stays on the instruction until the count is done, and a translated block went on to the next instruction regardless, losing the rest of the copy. Blocks now leave when the interpreter is somewhere else. The differential test had no REP and now has it, with large counts. With the track, Daytona runs at 40 to 50 frames per second in a race, measured with the game paused by a test key, so a race proper is still to be measured.
 - Fullscreen programs no longer get a window by default, which was a misreading of the request. They get the display as on Windows. Alt+Enter toggles any exclusive DirectDraw program at any time, and `--window` or `SetEnv QRX_WIN_MODE window` starts in a window.
 
-### Open: GTA 1 fullscreen on the desktop
+### GTA 1 fullscreen on the desktop
 
-GTA 1 stalls while loading after the menu when it runs fullscreen with QRXDesktop running: no x86 runs, 68k code keeps running. It happens with the JIT off and with the runtime of the previous commit, so neither is the cause. Without the desktop, or in a window on it, it runs at 70 frames per second. The cause is not found. `S:GTA` starts it in a window until then.
+GTA 1 stopped while loading after the menu when it ran fullscreen with QRXDesktop running. It was neither the JIT nor the runtime: `qrx-win32` waited for a signal inside `malloc`, called from `HeapAlloc`. The 16 MiB of boot memory, which was used first, had 122 KB left, with 3.9 GB free in the board RAM behind it. `QRXMoreMemory` now puts the board RAM first in exec's memory list. That fixed the stall: the game runs at 70 frames per second fullscreen, and 11.8 MiB of boot memory stay free. That AROS's low memory handling is where it waited is inferred from the stack, not seen in its source.
+
+A survey of all 68 programs afterwards shows no regression: the same six keep their frame rates (`windows-games-survey.txt`).
+
+`QRX86_PROF=1` now also prints which AROS task runs, the free memory per region, and the stack of a waiting `qrx-win32`. A task that seems to run 99% of the time is usually an idle system: AROS keeps the last task as current while it idles.
 
 ### Input
 

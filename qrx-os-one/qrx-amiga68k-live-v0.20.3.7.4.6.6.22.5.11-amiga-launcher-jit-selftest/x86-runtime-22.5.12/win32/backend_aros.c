@@ -395,6 +395,13 @@ static int translate(qwin *w, struct IntuiMessage *im, qevent *ev)
 
 static int ar_wait(qwin *w, uint32_t timeout, qevent *ev)
 {
+    {
+        static int said;
+        if (!said && w->verbose) {
+            said = 1;
+            qw_log(w, "AROS backend: code at %p, signals: port %d, timer %d", (void *)ar_init, g_port ? g_port->mp_SigBit : -1, g_topen ? g_tport->mp_SigBit : -1);
+        }
+    }
     for (;;) {
         struct IntuiMessage *im = (struct IntuiMessage *)GetMsg(g_port);
         if (im) {

@@ -1561,6 +1561,27 @@ static void xj_link(uint32_t *site, XBlock *b) {
 #endif
 #define XP_MAX 8000
 static struct { uint64_t pc[XP_MAX]; volatile unsigned n; mach_port_t thread; } xp;
+#define XP_BE32(p) ((uint32_t)(p)[0] << 24 | (uint32_t)(p)[1] << 16 | (uint32_t)(p)[2] << 8 | (p)[3])
+/* Which AROS task runs: SysBase at 4, ThisTask at 276, then the name at 10. */
+static struct { char name[24]; unsigned n; } xp_tasks[32];
+static void xp_task_sample(void) {
+    const uint8_t *ram = xj.cpu ? xj.cpu->ram_owned : NULL;
+    size_t size = xj.cpu ? xj.cpu->vm.ram.size : 0;
+    char name[24];
+    if (!ram) return;
+    uint32_t sys = XP_BE32(ram + 4), task = 0, np = 0;
+    if ((uint64_t)sys + 300u < size) task = XP_BE32(ram + sys + 276);
+    if (task && (uint64_t)task + 20u < size) np = XP_BE32(ram + task + 10);
+    if (!np || (uint64_t)np + 24u >= size) strcpy(name, "?");
+    else { memcpy(name, ram + np, 23); name[23] = 0; }
+    for (int i = 0; i < 32; i++) {
+        if (!xp_tasks[i].n) { strcpy(xp_tasks[i].name, name); xp_tasks[i].n = 1; return; }
+        if (!strcmp(xp_tasks[i].name, name)) { xp_tasks[i].n++; return; }
+    }
+}
+/* The door may be idle for long: the sampler reports as well. */
+static void xp_dump(void);
+static void xp_dump_due(void) { xp_dump(); }
 /* Signals would only arrive at system calls and blame those. This stops the thread. */
 static void *xp_sampler(void *arg) {
     (void)arg;
@@ -1568,10 +1589,13 @@ static void *xp_sampler(void *arg) {
         arm_thread_state64_t st;
         mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
         usleep(1000);
+        if (xp.n >= XP_MAX) xp_dump_due();
         if (xp.n >= XP_MAX) continue;
         if (thread_suspend(xp.thread) != KERN_SUCCESS) continue;
-        if (thread_get_state(xp.thread, ARM_THREAD_STATE64, (thread_state_t)&st, &count) == KERN_SUCCESS)
+        if (thread_get_state(xp.thread, ARM_THREAD_STATE64, (thread_state_t)&st, &count) == KERN_SUCCESS) {
             xp.pc[xp.n++] = arm_thread_state64_get_pc(st);
+            xp_task_sample();
+        }
         thread_resume(xp.thread);
     }
     return NULL;
@@ -1611,6 +1635,45 @@ static void xp_dump(void) {
     fprintf(stderr, "[QRX86-PROF] %u samples, %u%% in x86 blocks, interp %llu blocks %llu kills %llu\n", total, total ? jit * 100 / total : 0,
             (unsigned long long)xj.interp_ins, (unsigned long long)xj.blocks, (unsigned long long)xj.kills);
     for (unsigned r = 0; r < nrow && r < 28; r++) fprintf(stderr, "  %5.1f%% %s %08x\n", row[r].n * 100.0 / total, row[r].name, row[r].eip);
+    /* The tasks waiting, with what for and the top of their stacks */
+    if (xj.cpu) {
+        const uint8_t *ram = xj.cpu->ram_owned;
+        size_t size = xj.cpu->vm.ram.size;
+        uint32_t sys = XP_BE32(ram + 4), node = XP_BE32(ram + sys + 420);
+        for (int g = 0; g < 64 && node && (uint64_t)node + 64u < size; g++) {
+            uint32_t next = XP_BE32(ram + node), np = XP_BE32(ram + node + 10), sp = XP_BE32(ram + node + 54);
+            char name[24] = "?";
+            if (!next) break;
+            if (np && (uint64_t)np + 24u < size) { memcpy(name, ram + np, 23); name[23] = 0; }
+            if (strstr(name, "qrx-win32") || getenv("QRX86_PROF_ALL")) {
+                fprintf(stderr, "  wait %s sigwait=%08x recvd=%08x sp=%08x stack:", name, XP_BE32(ram + node + 22), XP_BE32(ram + node + 26), sp);
+                if ((uint64_t)sp + 8192u < size) for (int i = 0; i < 2000; i++) fprintf(stderr, " %08x", XP_BE32(ram + sp + i * 4));
+                {
+                    uint32_t segl = XP_BE32(ram + node + 128) << 2;
+                    if (segl && (uint64_t)segl + 16u < size) fprintf(stderr, " SEG %08x", XP_BE32(ram + segl + 12) << 2);
+                }
+                fprintf(stderr, "\n");
+            }
+            node = next;
+        }
+    }
+    /* Free memory per MemHeader: MemList at 322, mh_First 16, mh_Lower 20, mh_Upper 24, mh_Free 28 */
+    if (xj.cpu) {
+        const uint8_t *ram = xj.cpu->ram_owned;
+        size_t size = xj.cpu->vm.ram.size;
+        uint32_t sys = XP_BE32(ram + 4), mh = XP_BE32(ram + sys + 322);
+        fprintf(stderr, "  memory:");
+        for (int g = 0; g < 16 && mh && (uint64_t)mh + 32u < size; g++) {
+            uint32_t next = XP_BE32(ram + mh);
+            if (!next) break;
+            fprintf(stderr, " [pri %d %08x-%08x free %u]", (int)(int8_t)ram[mh + 9], XP_BE32(ram + mh + 20), XP_BE32(ram + mh + 24), XP_BE32(ram + mh + 28));
+            mh = next;
+        }
+        fprintf(stderr, "\n");
+    }
+    fprintf(stderr, "  tasks:");
+    for (int i = 0; i < 32 && xp_tasks[i].n; i++) { fprintf(stderr, " %s=%u", xp_tasks[i].name, xp_tasks[i].n); xp_tasks[i].n = 0; }
+    fprintf(stderr, "\n");
     {
         unsigned best = 0;
         for (unsigned i = 0; i < 1024; i++) if (xp_notify_page[i] > xp_notify_page[best]) best = i;
@@ -1637,7 +1700,6 @@ static int xj_run(x86cpu *c, uint32_t stop_eip) {
     {
         static int prof = -1;
         if (prof < 0) { prof = getenv("QRX86_PROF") != NULL; if (prof) xp_start(); }
-        if (prof && xp.n >= XP_MAX) xp_dump();
     }
     while (c->eip != stop_eip) {
         if ((int32_t)c->left <= 0) {
