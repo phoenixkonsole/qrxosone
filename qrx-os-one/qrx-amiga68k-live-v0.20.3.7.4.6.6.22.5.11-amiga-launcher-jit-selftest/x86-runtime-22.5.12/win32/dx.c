@@ -213,6 +213,28 @@ static void frame_marker(qwin *w)
 /* Real cards show one new frame per display refresh, and games take their pace from
  * that: a Flip or WaitForVerticalBlank here waits for the next 60 Hz tick. */
 #define VBL_US 16667u
+/* -v: the time between whole frames, which a frame counter does not show. */
+static uint32_t g_flip_n, g_flip_max, g_flip_sum, g_flip_hist[6];
+static void flip_stat(qwin *w)
+{
+    static uint64_t last, report;
+    uint64_t now = w->be->now(w);
+    if (last) {
+        uint32_t d = (uint32_t)(now - last);
+        g_flip_n++; g_flip_sum += d;
+        if (d > g_flip_max) g_flip_max = d;
+        g_flip_hist[d < 12 ? 0 : d < 20 ? 1 : d < 34 ? 2 : d < 50 ? 3 : d < 100 ? 4 : 5]++;
+    }
+    last = now;
+    if (!report) report = now;
+    if (now - report >= 5000u && g_flip_n) {
+        qw_log(w, "Flips: %u in 5 s, %u ms on average, %u at most; under 12 ms %u, 12-20 %u, 20-34 %u, 34-50 %u, 50-100 %u, more %u",
+               g_flip_n, g_flip_sum / g_flip_n, g_flip_max, g_flip_hist[0], g_flip_hist[1], g_flip_hist[2], g_flip_hist[3], g_flip_hist[4], g_flip_hist[5]);
+        g_flip_n = g_flip_sum = g_flip_max = 0;
+        memset(g_flip_hist, 0, sizeof(g_flip_hist));
+        report = now;
+    }
+}
 static void vsync_wait(qwin *w)
 {
     static uint64_t next_us;
@@ -227,7 +249,8 @@ static void present(qwin *w, dxobj *prim)
 {
     dxobj *dd = prim->dd >= 0 ? &g_o[prim->dd] : NULL;
     qwnd *t = dd && dd->hwnd ? W(w, dd->hwnd) : NULL;
-    const uint32_t *pal = prim->pal >= 0 ? g_o[prim->pal].ent : NULL;
+    /* No DirectDraw palette: the screen shows the system palette, which GDI programs set. */
+    const uint32_t *pal = prim->pal >= 0 ? g_o[prim->pal].ent : prim->bpp == 8 ? qw_sys_palette() : NULL;
     int x, y, ww, hh;
     if (!t) return;
     t = win_top(w, t);
@@ -245,6 +268,20 @@ static void present(qwin *w, dxobj *prim)
             t0 = now; f0 = w->frames;
         }
     }
+    if (dd && !dd->exclusive && prim->sw >= 1024) {
+        /* Show the part of the desktop-sized primary that lies under the window. */
+        int cx = t->x, cy = t->y, cw = t->cw, ch = t->ch;
+        const uint32_t *p8 = pal ? pal : qw_sys_palette();
+        uint32_t src;
+        if (cx < 0) cx = 0;
+        if (cy < 0) cy = 0;
+        if (cx + cw > prim->sw) cw = prim->sw - cx;
+        if (cy + ch > prim->sh) ch = prim->sh - cy;
+        if (cw <= 0 || ch <= 0) return;
+        src = prim->mem + (uint32_t)cy * (uint32_t)prim->pitch + (uint32_t)cx * (uint32_t)prim->bpp / 8u;
+        if (!w->grab_path[0] && t->be && w->be->present_frame && w->be->present_frame(w, t, src, prim->pitch, cw, ch, prim->bpp, p8)) return;
+    }
+    if (dd && !dd->exclusive && prim->sw >= 1024) return;
     if (t->cw != prim->sw || t->ch != prim->sh) {
         const qhle *mv = qw_find_hle("user32", "MoveWindow");
         uint32_t b[16];
@@ -424,7 +461,9 @@ FN(dd_CreateSurface) {                  /* (this, desc, pp, outer) */
     if (!dd || !d) return DDERR_INVALIDPARAMS;
     flags = RD32(d + 4); caps = ((flags & 1) || RD32(d + 104)) ? RD32(d + 104) : 0x40;   /* Doom95 fills caps without the flag */
     if (w->verbose) qw_log(w, "DirectDraw: CreateSurface flags=%08x caps=%08x back=%u size=%ux%u", flags, caps, RD32(d + 20), RD32(d + 12), RD32(d + 8));
-    if (!dd->mw) { dd->mw = 640; dd->mh = 480; dd->mbpp = qw_needs_256_colours(w) ? 8 : 16; }   /* no SetDisplayMode: the desktop's */
+    /* No SetDisplayMode: the desktop's mode. A windowed program draws into a primary surface
+     * as large as the desktop, at its window's screen position. */
+    if (!dd->mw) { dd->mw = dd->exclusive ? 640 : 1024; dd->mh = dd->exclusive ? 480 : 768; dd->mbpp = qw_needs_256_colours(w) ? 8 : 16; }
     bpp = (flags & 0x1000) ? (int)RD32(d + 84) : dd->mbpp;
     if (bpp != 8 && bpp != 16 && bpp != 24 && bpp != 32) bpp = dd->mbpp;
     if (caps & 0x200) {                                                    /* PRIMARYSURFACE */
@@ -732,6 +771,7 @@ FN(s_Flip) {
     dxobj *p = sf(w, a[0]), *b;
     uint32_t t;
     if (!p) return DDERR_INVALIDPARAMS;
+    if (w->verbose) flip_stat(w);
     /* DDFLIP_NOVSYNC asks not to wait */
     if (!(a[2] & 8u)) vsync_wait(w);
     if (g_d3d_active) { d3d_host_present(w); return DD_OK; }

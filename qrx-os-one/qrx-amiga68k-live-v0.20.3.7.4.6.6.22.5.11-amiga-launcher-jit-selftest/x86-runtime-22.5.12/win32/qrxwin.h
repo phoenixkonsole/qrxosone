@@ -46,6 +46,7 @@ typedef struct qobj {
     int style, width;                 /* pen style / brush style (0 solid, 1 null) */
     int font;                         /* index in qfont_table */
     qsurf bmp;                        /* bitmap pixels */
+    uint32_t *pal; int npal;          /* palette entries, 0x00RRGGBB */
     int mono;                         /* 1-bpp bitmap / brush: 0x000000 -> text colour, 0xFFFFFF -> background colour */
     int x, y, w, h;                   /* rect region / icon size */
     void *dc;                         /* GO_DC: struct qdc */
@@ -277,6 +278,13 @@ uint32_t qw_thunk(qwin *w, const char *dll, const char *name);
 void qw_api_report(struct qwin *w);
 void qw_dd_toggle_window(struct qwin *w);
 int qw_needs_256_colours(struct qwin *w);
+uint32_t qw_gdi_AnimatePalette(struct qwin *w, uint32_t *a);
+uint32_t qw_gdi_GetPaletteEntries(struct qwin *w, uint32_t *a);
+uint32_t qw_gdi_SetPaletteEntries(struct qwin *w, uint32_t *a);
+uint32_t qw_gdi_GetSystemPaletteEntries(struct qwin *w, uint32_t *a);
+uint32_t qw_gdi_CreatePalette(struct qwin *w, uint32_t *a);
+uint32_t qw_gdi_RealizePalette(struct qwin *w, uint32_t *a);
+const uint32_t *qw_sys_palette(void);
 int qw_host_bind(qwin *w, uint32_t idx);
 int qw_host_has(qwin *w, const char *name);
 uint32_t qw_alloc(qwin *w, uint32_t n);

@@ -332,7 +332,7 @@ Input and sound were not judged by a person in any of them. Installers ran only 
 
 ### GTA 1 fullscreen on the desktop
 
-GTA 1 stopped while loading after the menu when it ran fullscreen with QRXDesktop running. It was neither the JIT nor the runtime: `qrx-win32` waited for a signal inside `malloc`, called from `HeapAlloc`. The 16 MiB of boot memory, which was used first, had 122 KB left, with 3.9 GB free in the board RAM behind it. `QRXMoreMemory` now puts the board RAM first in exec's memory list. That fixed the stall: the game runs at 70 frames per second fullscreen, and 11.8 MiB of boot memory stay free. That AROS's low memory handling is where it waited is inferred from the stack, not seen in its source.
+GTA 1 stopped while loading after the menu when it ran fullscreen with QRXDesktop running. It was neither the JIT nor the runtime: `qrx-win32` waited for a signal inside `malloc`, called from `HeapAlloc`. The 16 MiB of boot memory, which was used first, had 122 KB left, with 3.9 GB free in the board RAM behind it. `QRXMoreMemory` now puts the board RAM first in exec's memory list. That fixed the stall: the game runs fullscreen, and 11.8 MiB of boot memory stay free. That AROS's low memory handling is where it waited is inferred from the stack, not seen in its source.
 
 A survey of all 68 programs afterwards shows no regression: the same six keep their frame rates (`windows-games-survey.txt`).
 
@@ -361,3 +361,32 @@ The terminal followed the pointer 30 times a second, 58 pixels behind. It is now
 Going through them one by one has only started. Sonic CD now passes its 256 colour test, loads its DLLs from subfolders and has lz32 with SZDD support, and then faults reading a sequence in DINO2D.DLL. The fixes on the way help others too: `LoadLibrary` with a path, `RealizePalette`, off-screen window positions.
 
 16-bit programs are not started on. They need an NE loader, segmented addressing in the core and the Win16 API.
+
+## Update 2026-11-05, second part: rhythmic slowdowns, Sonic CD
+
+### The display ran at 30 Hz
+
+Windows games felt fast but slowed down in a rhythm. `QRX_PRESENT_STATS=1` showed why: the window showed exactly 30 frames a second on a 60 Hz display, whatever the game did. `nextDrawable` waited 33 ms per frame. A game's own rate beats against that: GTA 1's 24 frames against 30 gives a 6 Hz rhythm, and no game was ever seen above 30.
+
+Frames now follow the display through `CVDisplayLink`, the vsync wait in the Metal layer is off, and the engine registers as latency critical so that macOS does not throttle it. Measured on the desktop and in GTA 1: 300 frames in 5 s, nearly all 14 to 18 ms apart. Single gaps of 30 to 80 ms remain, seconds apart and without a pattern. The measurements come from one Mac with the window open; whether the slowdowns are gone for the eye has to be judged by a person.
+
+Measured and found not to be the cause, during play in GTA 1 and Daytona's demo:
+
+- x86 and the guest: `QRX86_STALLS=1` logs every pause over 8 ms in x86 execution. They come in clusters while loading and are rare and short otherwise.
+- Sound: the queue never ran empty, lowest 1376 of 2400 frames.
+- Whole frames: Flips are even, GTA 1 at 42 ms and Daytona's demo at 50 ms. These intervals are in the `-v` log as `Flips:`.
+
+### Frame rate numbers
+
+`DirectDraw: N frames per second` counts every update of the primary surface. For GTA 1 that said 70 while the game shows 23 whole frames a second, so the 70 in earlier parts of this document means updates. The `Flips:` line gives whole frames.
+
+### Sonic CD
+
+It now shows its title screen in colour at the right place in its window, and runs on until a fault in `DMIX.DLL`, where an object handle is 0. On the way:
+
+- `LZInit` returned 0 instead of the handle.
+- GDI palettes are real: `CreatePalette`, `RealizePalette`, `AnimatePalette` and the system palette, which an 8-bit DirectDraw primary without a palette of its own shows.
+- A DirectDraw program without exclusive mode gets a primary as large as the desktop, and its window shows the part under it. Before, the window was resized to the primary.
+- A program fault logs the top of the x86 stack.
+
+The game folder needs the DLLs its setup would copy, from `RDX` and the top level. Nothing does that yet.

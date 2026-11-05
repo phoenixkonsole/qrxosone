@@ -1206,18 +1206,16 @@ static uint8_t *lz_expand(const uint8_t *src, uint32_t n, uint32_t *out_size)
     *out_size = o;
     return out;
 }
-FN(c_LZOpenFileA) {
-    const qhle *op = qw_find_hle("kernel32", "_lopen"), *sk = qw_find_hle("kernel32", "_llseek"),
-               *rd = qw_find_hle("kernel32", "_lread"), *cl = qw_find_hle("kernel32", "_lclose");
-    uint32_t b[16], h, size, tmp;
+/* Takes the whole of an open file into memory, unpacked. Returns an LZ handle. */
+static uint32_t lz_take(qwin *w, uint32_t h)
+{
+    const qhle *sk = qw_find_hle("kernel32", "_llseek"), *rd = qw_find_hle("kernel32", "_lread"), *cl = qw_find_hle("kernel32", "_lclose");
+    uint32_t b[16], size, tmp;
     int i;
     uint8_t *data, *x;
-    if (!op || !sk || !rd || !cl) return 0xFFFFFFFFu;
+    if (!sk || !rd || !cl) return 0xFFFFFFFFu;
     for (i = 0; i < LZ_MAX; i++) if (!g_lz[i].data) break;
     if (i == LZ_MAX) return 0xFFFFFFFFu;
-    memset(b, 0, sizeof(b)); b[0] = a[0]; b[1] = 0;
-    h = op->fn(w, b);
-    if (h == 0xFFFFFFFFu) return 0xFFFFFFFFu;
     memset(b, 0, sizeof(b)); b[0] = h; b[1] = 0; b[2] = 2;
     size = sk->fn(w, b);
     memset(b, 0, sizeof(b)); b[0] = h; b[1] = 0; b[2] = 0;
@@ -1235,6 +1233,20 @@ FN(c_LZOpenFileA) {
     if (x) { free(data); data = x; size = tmp; }
     g_lz[i].data = data; g_lz[i].size = size; g_lz[i].pos = 0;
     return LZ_BASE + (uint32_t)i;
+}
+FN(c_LZOpenFileA) {
+    const qhle *op = qw_find_hle("kernel32", "_lopen");
+    uint32_t b[16], h;
+    if (!op) return 0xFFFFFFFFu;
+    memset(b, 0, sizeof(b)); b[0] = a[0]; b[1] = 0;
+    h = op->fn(w, b);
+    if (h == 0xFFFFFFFFu) return 0xFFFFFFFFu;
+    return lz_take(w, h);
+}
+/* The handle of a file opened otherwise, or one of ours, which stays what it is. */
+FN(c_LZInit) {
+    if (a[0] - LZ_BASE < LZ_MAX) return a[0];
+    return lz_take(w, a[0]);
 }
 FN(c_LZRead) {
     uint32_t i = a[0] - LZ_BASE, n = a[2];
@@ -1343,7 +1355,7 @@ const qhle qw_compat[] = {
     U("DestroyAcceleratorTable", c_ok1, 1), U("CreateAcceleratorTableA", c_ok1, 2), U("GetClipCursor", c_ok1, 1), U("AnyPopup", c_ok0, 0), U("InsertMenuA", c_ok1, 5),
     /* gdi32 */
     G("SetStretchBltMode", c_ok1, 2), G("GetStretchBltMode", c_ok1, 1), G("GdiFlush", c_ok1, 0), G("SetMapMode", c_ok1, 2), G("GetMapMode", c_ok1, 1),
-    G("SetWindowOrgEx", c_ok1, 4), G("SetViewportOrgEx", c_ok1, 4), G("GetBkMode", c_ok1, 1), G("ResizePalette", c_ok1, 2), G("AnimatePalette", c_ok1, 4),
+    G("SetWindowOrgEx", c_ok1, 4), G("SetViewportOrgEx", c_ok1, 4), G("GetBkMode", c_ok1, 1), G("ResizePalette", c_ok1, 2), G("AnimatePalette", qw_gdi_AnimatePalette, 4),
     G("GetNearestPaletteIndex", c_ok0, 2), G("CreateRectRgnIndirect", c_ok1, 1), G("CreateHalftonePalette", c_ok1, 1), G("AddFontResourceA", c_ok1, 1),
     G("RemoveFontResourceA", c_ok1, 1), G("GetRegionData", c_ok0, 3),
     /* winmm */
@@ -1370,7 +1382,7 @@ const qhle qw_compat[] = {
     WM("waveOutSetVolume", c_ok0, 2), WM("waveOutGetVolume", c_ok0, 2),
     K("FindFirstFileA", c_FindFirstFileA, 2), K("FindNextFileA", c_FindNextFileA, 2), K("FindClose", c_FindClose, 1),
     { "comctl32", "#17", 0, c_ok0 }, { "comctl32", "InitCommonControls", 0, c_ok0 },
-    G("GetPaletteEntries", c_GetPaletteEntries, 4), G("GetDIBColorTable", c_GetDIBColorTable, 4), G("RectVisible", c_ok1, 2), G("PtVisible", c_ok1, 3),
+    G("GetPaletteEntries", qw_gdi_GetPaletteEntries, 4), G("GetDIBColorTable", c_GetDIBColorTable, 4), G("RectVisible", c_ok1, 2), G("PtVisible", c_ok1, 3),
     G("GetClipBox", c_GetClipBox, 2), G("SetWindowExtEx", c_ok1, 4), G("SetViewportExtEx", c_ok1, 4), G("OffsetViewportOrgEx", c_ok1, 4),
     G("ScaleViewportExtEx", c_ok1, 6), G("ScaleWindowExtEx", c_ok1, 6), G("GetCharWidthA", c_GetCharWidthA, 4), G("DPtoLP", c_ok1, 3), G("LPtoDP", c_ok1, 3),
     G("SetRectRgn", c_ok1, 5), G("CombineRgn", c_ok1, 4), G("CreateICA", c_ok0, 4), G("GetTextAlign", c_ok0, 1), G("GetNearestColor", c_ok0, 2),
@@ -1397,7 +1409,7 @@ const qhle qw_compat[] = {
     { "kernel32", "LoadLibraryExA", 3, c_LoadLibraryExA }, { "kernel32", "DisableThreadLibraryCalls", 1, c_ok1 },
     { "user32", "RegisterClipboardFormatA", 1, c_RegisterClipboardFormatA },
     { "lz32", "LZOpenFileA", 3, c_LZOpenFileA }, { "lz32", "LZRead", 3, c_LZRead }, { "lz32", "LZSeek", 3, c_LZSeek },
-    { "lz32", "LZClose", 1, c_LZClose }, { "lz32", "LZInit", 1, c_ok0 }, { "lz32", "LZStart", 0, c_ok1 }, { "lz32", "LZDone", 0, c_ok0 },
+    { "lz32", "LZClose", 1, c_LZClose }, { "lz32", "LZInit", 1, c_LZInit }, { "lz32", "LZStart", 0, c_ok1 }, { "lz32", "LZDone", 0, c_ok0 },
     { "user32", "SetMessageQueue", 1, c_ok1 }, { "user32", "GetKeyboardLayoutList", 2, c_GetKeyboardLayoutList },
     { "kernel32", "OpenMutexA", 3, c_OpenEventA },
     { "kernel32", "OpenEventA", 3, c_OpenEventA }, { "msacm32", "acmFormatSuggest", 5, c_acmNoDriver },

@@ -1,4 +1,5 @@
 /* Native view of the actual AROS RTG framebuffer. No host-rendered desktop. */
+#import <CoreVideo/CoreVideo.h>
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -157,7 +158,9 @@ void qrx_host_set_pointer(uint32_t index){
 - (BOOL)wantsUpdateLayer{return YES;}
 - (CALayer*)makeBackingLayer{
  CAMetalLayer *l=[CAMetalLayer layer];l.device=gpu;l.pixelFormat=MTLPixelFormatBGRA8Unorm;
- l.framebufferOnly=YES;l.displaySyncEnabled=YES;
+ /* The display link already paces the frames. A second wait for vsync here held every
+  * nextDrawable for two refreshes: 30 frames a second on a 60 Hz display. */
+ l.framebufferOnly=YES;l.displaySyncEnabled=NO;
  return l;
 }
 static uint8_t keysDown[128];
@@ -303,7 +306,58 @@ int qrx_aros_window_open(QRXVM *vm,size_t ramBytes){@autoreleasepool{
 
  [window center];[window makeKeyAndOrderFront:nil];[window makeFirstResponder:view];[NSApp finishLaunching];[NSApp activateIgnoringOtherApps:YES];running=YES;return 1;
 }}
+/* A refresh of the display wakes the event loop. Without a display link there is still a
+ * frame every 50 ms, when the event loop gives up waiting. */
+#define QRX_REFRESH_EVENT 7
+static atomic_int frameDue=1,wakePosted,refreshTicks;
+static double drawableWaitMs,copyMs,slowEventMs,lastPresentMs;
+static int slowEventType;
+static CVDisplayLinkRef displayLink;
+static id<NSObject> latencyActivity;
+static CVReturn on_refresh(CVDisplayLinkRef l,const CVTimeStamp *n,const CVTimeStamp *o,CVOptionFlags fi,CVOptionFlags *fo,void *u){
+ (void)l;(void)n;(void)o;(void)fi;(void)fo;(void)u;
+ atomic_store(&frameDue,1);
+ atomic_fetch_add(&refreshTicks,1);
+ if(!atomic_exchange(&wakePosted,1))dispatch_async(dispatch_get_main_queue(),^{
+  atomic_store(&wakePosted,0);
+  [NSApp postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0 context:nil subtype:QRX_REFRESH_EVENT data1:0 data2:0] atStart:NO];
+ });
+ return kCVReturnSuccess;
+}
+static void start_display_link(void){
+ static BOOL tried;
+ if(tried)return;
+ tried=YES;
+ /* An emulator must not be put to sleep or have its timers lumped together. */
+ latencyActivity=[[NSProcessInfo processInfo] beginActivityWithOptions:NSActivityUserInitiated|NSActivityLatencyCritical reason:@"QRX emulation"];
+ if(CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)!=kCVReturnSuccess)return;
+ CVDisplayLinkSetOutputCallback(displayLink,on_refresh,NULL);
+ CVDisplayLinkStart(displayLink);
+}
+/* QRX_PRESENT_STATS=1: the time between frames shown, every 5 s on stderr. On a steady
+ * display the bins around one refresh hold everything; others are visible judder. */
+static void present_stats(void){
+ static int on=-1;static double last,report;static unsigned n,bins[6];static double maxd;
+ if(on<0)on=getenv("QRX_PRESENT_STATS")!=NULL;
+ if(!on)return;
+ double t=CACurrentMediaTime();
+ if(last>0){
+  double d=(t-last)*1000.0;
+  n++;if(d>maxd)maxd=d;
+  if(d>25)fprintf(stderr,"[PRESENT] gap %.1f ms at %.3f s; slowest event %.1f ms (type %d), last present %.1f ms\n",d,t,slowEventMs,slowEventType,lastPresentMs);
+  slowEventMs=0;
+  bins[d<14?0:d<18?1:d<24?2:d<34?3:d<50?4:5]++;
+ }
+ last=t;
+ if(report==0)report=t;
+ if(t-report>=5.0){
+  fprintf(stderr,"[PRESENT] %u frames, longest %.1f ms; under 14: %u, 14-18: %u, 18-24: %u, 24-34: %u, 34-50: %u, more: %u; refreshes %d period %.2f ms; in nextDrawable %.1f ms a frame, copying %.1f ms\n",n,maxd,bins[0],bins[1],bins[2],bins[3],bins[4],bins[5],atomic_exchange(&refreshTicks,0),displayLink?CVDisplayLinkGetActualOutputVideoRefreshPeriod(displayLink)*1000.0:0.0,n?drawableWaitMs/n:0,n?copyMs/n:0);
+  drawableWaitMs=0;copyMs=0;
+  n=0;maxd=0;memset(bins,0,sizeof bins);report=t;
+ }
+}
 static void present_guest(void){
+ present_stats();
  /* A host-API program presents from the CPU thread; here only the size is kept up. */
  if(qrx_hg_active()){
   CAMetalLayer *hgLayer=(CAMetalLayer*)view.layer;
@@ -323,13 +377,17 @@ static void present_guest(void){
  }
  uint64_t a=atomic_load_explicit(&presentFb,memory_order_acquire),g=atomic_load_explicit(&presentGeom,memory_order_acquire);
  QRXPresent u={(uint32_t)(a>>32),(uint32_t)a,(uint32_t)(g>>32)>>16,(uint32_t)(g>>32)&0xFFFFu,(uint32_t)g};
+ double tc0=CACurrentMediaTime();
  if(!u.w||!u.h||!u.fmt||!copy_framebuffer(&u))return;
+ copyMs+=(CACurrentMediaTime()-tc0)*1000.0;
  view.guestWidth=u.w;view.guestHeight=u.h;
  CAMetalLayer *layer=(CAMetalLayer*)view.layer;
  CGFloat scale=window.backingScaleFactor;NSSize size=view.bounds.size;
  CGSize want=CGSizeMake(size.width*scale,size.height*scale);
  if(!CGSizeEqualToSize(layer.drawableSize,want)){layer.drawableSize=want;layer.contentsScale=scale;}
+ double td0=CACurrentMediaTime();
  id<CAMetalDrawable> drawable=[layer nextDrawable];
+ drawableWaitMs+=(CACurrentMediaTime()-td0)*1000.0;
  if(!drawable)return;
  MTLRenderPassDescriptor *rp=[MTLRenderPassDescriptor renderPassDescriptor];
  rp.colorAttachments[0].texture=drawable.texture;rp.colorAttachments[0].loadAction=MTLLoadActionDontCare;
@@ -476,15 +534,21 @@ int qrx_aros_window_pump(void){@autoreleasepool{
    }
   }
  }
- /* Blocks in the event queue until the next frame is due; the guest CPU has
-  * its own thread and never waits for this. */
- static NSDate *due;
- NSDate *now=[NSDate date];
- if(!due||[due compare:now]==NSOrderedAscending){present_guest();due=[now dateByAddingTimeInterval:1.0/60.0];}
+ /* The display's own clock sets the pace: waiting for a date drifts against it and, with the
+  * timer tolerance macOS applies, lands on every second refresh. Blocks in the event queue
+  * until the next refresh; the guest CPU has its own thread and never waits for this. */
+ start_display_link();
+ if(atomic_exchange(&frameDue,0)){double tp=CACurrentMediaTime();present_guest();lastPresentMs=(CACurrentMediaTime()-tp)*1000.0;}
  NSEvent *event;
- while((event=[NSApp nextEventMatchingMask:NSEventMaskAny untilDate:due inMode:NSDefaultRunLoopMode dequeue:YES])){
-  [NSApp sendEvent:event];
-  if([due compare:[NSDate date]]==NSOrderedAscending)break;
+ NSDate *limit=[NSDate dateWithTimeIntervalSinceNow:0.05];
+ while((event=[NSApp nextEventMatchingMask:NSEventMaskAny untilDate:limit inMode:NSDefaultRunLoopMode dequeue:YES])){
+  if(!(event.type==NSEventTypeApplicationDefined&&event.subtype==QRX_REFRESH_EVENT)){
+   double te=CACurrentMediaTime();
+   [NSApp sendEvent:event];
+   te=(CACurrentMediaTime()-te)*1000.0;
+   if(te>slowEventMs){slowEventMs=te;slowEventType=(int)event.type;}
+  }
+  if(atomic_load(&frameDue))break;
  }
  [NSApp updateWindows];return running;
 }}

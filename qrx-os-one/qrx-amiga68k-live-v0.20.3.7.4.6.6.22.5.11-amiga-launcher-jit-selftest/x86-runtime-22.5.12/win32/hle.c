@@ -373,6 +373,11 @@ int qw_run(qwin *w)
         char d[400];
         x86_describe_fault(c, d, sizeof(d));
         qw_log(w, "program stopped: %s", d);
+        {
+            uint32_t sp = w->cpu.r[X86_ESP];
+            qw_log(w, "stack: %08x %08x %08x %08x %08x %08x %08x %08x", x86_rd32(&w->cpu, sp), x86_rd32(&w->cpu, sp + 4), x86_rd32(&w->cpu, sp + 8), x86_rd32(&w->cpu, sp + 12),
+                   x86_rd32(&w->cpu, sp + 16), x86_rd32(&w->cpu, sp + 20), x86_rd32(&w->cpu, sp + 24), x86_rd32(&w->cpu, sp + 28));
+        }
         return 139;
     }
     return (int)w->exit_code;

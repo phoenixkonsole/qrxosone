@@ -124,10 +124,18 @@ static inline float voice_sample(const MixVoice *v,uint32_t frame,unsigned ch){
     if(bytes==1)return ((float)x86_byte(a)-128.f)/128.f;
     return (float)(int16_t)((uint16_t)x86_byte(a)|(uint16_t)x86_byte(a+1u)<<8)/32768.f;
 }
+static int stall_on=-1;
 static void mix_tick(void){
     if(!voices_live||!door_cpu||!door_cpu->vm.media)return;
     QRXMediaDevice *m=door_cpu->vm.media;
     unsigned queued=qrx_media_audio_queued(m);
+    if(stall_on>0){
+        /* How empty the sound queue gets: 0 is an audible gap. */
+        static unsigned low=MIX_TARGET_FRAMES,gaps,calls;
+        if(queued<low)low=queued;
+        if(!queued)gaps++;
+        if(++calls>=20000){fprintf(stderr,"[AUDIO] lowest queue %u of %u frames, empty %u times in %u calls\n",low,MIX_TARGET_FRAMES,gaps,calls);low=MIX_TARGET_FRAMES;gaps=calls=0;}
+    }
     if(queued>=MIX_TARGET_FRAMES)return;
     unsigned n=MIX_TARGET_FRAMES-queued;
     static float left[MIX_TARGET_FRAMES],right[MIX_TARGET_FRAMES];
@@ -338,7 +346,25 @@ static void shadow_sync(QRXFullCPU *c,uint32_t dir,uint32_t serial){
         shadow_rebuild(c,dir);
     }
 }
+/* QRX86_STALLS=1: every pause over 8 ms in x86 execution on stderr, with the guest task
+ * that ran before it. Rhythm shows in the times. */
+#include <mach/mach_time.h>
+static uint64_t stall_exit;
+static double stall_ms(uint64_t ticks){static mach_timebase_info_data_t tb;if(!tb.denom)mach_timebase_info(&tb);return (double)ticks*tb.numer/tb.denom/1e6;}
+static void stall_enter(QRXFullCPU *c){
+    uint64_t now=mach_absolute_time();
+    static uint64_t start;
+    if(!start)start=now;
+    if(stall_exit){
+        double ms=stall_ms(now-stall_exit);
+        if(ms>8.0)fprintf(stderr,"[STALL] t=%.3f guest %.1f ms\n",stall_ms(now-start)/1000.0,ms);
+    }
+    (void)c;
+}
 static void door_run(QRXFullCPU *c,uint32_t req){
+    if(stall_on<0)stall_on=getenv("QRX86_STALLS")!=NULL;
+    uint64_t stall_t0=0;
+    if(stall_on){stall_enter(c);stall_t0=mach_absolute_time();}
     if((uint64_t)req+REQ_SIZE>c->vm.ram.size)return;
     uint8_t *q=c->ram_owned+req;
     uint32_t dir=rd32(q+REQ_DIR),serial=rd32(q+REQ_SERIAL);
@@ -388,6 +414,11 @@ static void door_run(QRXFullCPU *c,uint32_t req){
     qrx_hostapi_alloc_request=0;
     wr32(q+REQ_STATUS,(uint32_t)host.fault);
     door_calls++;door_x86+=executed;
+    if(stall_on){
+        stall_exit=mach_absolute_time();
+        double ms=stall_ms(stall_exit-stall_t0);
+        if(ms>8.0)fprintf(stderr,"[STALL] x86 quantum %.1f ms, %u instructions\n",ms,executed);
+    }
 }
 static bool door_read(QRXFullCPU *c,uint32_t addr,unsigned n,uint32_t *out){
     if(addr==QRX86_DOOR_BASE&&n==4){*out=QRX86_DOOR_MAGIC;return true;}

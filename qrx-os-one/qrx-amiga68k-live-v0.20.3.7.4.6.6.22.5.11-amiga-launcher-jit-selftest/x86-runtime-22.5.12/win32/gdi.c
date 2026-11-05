@@ -645,10 +645,13 @@ FN(g_SelectObject) {
     }
     return old;
 }
+static uint32_t g_realized;                 /* the palette in the system palette */
 FN(g_DeleteObject) {
     qobj *o = O(w, a[0], 0);
     if (!o || o->stock || o->type == GO_DC) return o ? 1 : 0;
     free(o->bmp.pix);
+    free(o->pal);
+    if (a[0] == g_realized) g_realized = 0;
     memset(o, 0, sizeof(*o));
     return 1;
 }
@@ -929,10 +932,79 @@ FN(g_ExcludeClipRect) {
     return 3;                                   /* COMPLEXREGION */
 }
 /* palettes: surfaces are 32-bit true colour, palettes only need to exist */
-FN(g_CreatePalette) { UNUSED; return gdi_new(w, GO_PALETTE); }
+/* ---- GDI palettes. 8-bit programs without a DirectDraw palette show through the system
+ * palette, which the palette realized last fills, index by index. */
+static uint32_t g_sys_pal[256];
+static int g_sys_pal_init;
+const uint32_t *qw_sys_palette(void)
+{
+    if (!g_sys_pal_init) {
+        int i;
+        for (i = 0; i < 256; i++) g_sys_pal[i] = (uint32_t)i * 0x010101u;
+        g_sys_pal_init = 1;
+    }
+    return g_sys_pal;
+}
+static uint32_t pal_entry(qwin *w, uint32_t p)
+{
+    return ((uint32_t)x86_rd8(C, p) << 16) | ((uint32_t)x86_rd8(C, p + 1) << 8) | x86_rd8(C, p + 2);
+}
+uint32_t qw_gdi_CreatePalette(qwin *w, uint32_t *a) {
+    uint32_t h = gdi_new(w, GO_PALETTE), n = x86_rd16(C, a[0] + 2), i;
+    qobj *o = O(w, h, GO_PALETTE);
+    if (!o) return 0;
+    if (n > 256) n = 256;
+    o->pal = (uint32_t *)calloc(n ? n : 1, 4);
+    o->npal = (int)n;
+    if (o->pal) for (i = 0; i < n; i++) o->pal[i] = pal_entry(w, a[0] + 4 + i * 4);
+    return h;
+}
+uint32_t qw_gdi_RealizePalette(qwin *w, uint32_t *a) {
+    qdc *d = DCP(w, a[0]);
+    qobj *o = d && d->pal ? O(w, d->pal, GO_PALETTE) : NULL;
+    int i;
+    qw_sys_palette();
+    /* The count of entries it mapped. Sonic CD treats 0 as an error. */
+    if (!o || !o->pal) return 256;
+    for (i = 0; i < o->npal; i++) g_sys_pal[i] = o->pal[i];
+    g_realized = d->pal;
+    return (uint32_t)o->npal;
+}
+/* (palette, start, count, entries) */
+static uint32_t pal_change(qwin *w, uint32_t *a)
+{
+    qobj *o = O(w, a[0], GO_PALETTE);
+    uint32_t i, n = 0;
+    if (!o || !o->pal) return 0;
+    qw_sys_palette();
+    for (i = 0; i < a[2] && a[1] + i < (uint32_t)o->npal; i++, n++) {
+        o->pal[a[1] + i] = pal_entry(w, a[3] + i * 4);
+        if (g_realized == a[0]) g_sys_pal[a[1] + i] = o->pal[a[1] + i];
+    }
+    return n;
+}
+uint32_t qw_gdi_AnimatePalette(qwin *w, uint32_t *a) { return pal_change(w, a) ? 1 : 0; }
+uint32_t qw_gdi_SetPaletteEntries(qwin *w, uint32_t *a) { return pal_change(w, a); }
+static void pal_write(qwin *w, uint32_t p, uint32_t v)
+{
+    x86_wr8(C, p, (uint8_t)(v >> 16)); x86_wr8(C, p + 1, (uint8_t)(v >> 8)); x86_wr8(C, p + 2, (uint8_t)v); x86_wr8(C, p + 3, 0);
+}
+uint32_t qw_gdi_GetPaletteEntries(qwin *w, uint32_t *a) {
+    qobj *o = O(w, a[0], GO_PALETTE);
+    uint32_t i, n = 0;
+    if (!o) return 0;
+    if (!a[3]) return (uint32_t)o->npal;
+    for (i = 0; i < a[2] && a[1] + i < (uint32_t)o->npal; i++, n++) pal_write(w, a[3] + i * 4, o->pal ? o->pal[a[1] + i] : 0);
+    return n;
+}
+uint32_t qw_gdi_GetSystemPaletteEntries(qwin *w, uint32_t *a) {
+    const uint32_t *sys = qw_sys_palette();
+    uint32_t i;
+    if (!a[3]) return 256;
+    for (i = 0; i < a[2] && a[1] + i < 256; i++) pal_write(w, a[3] + i * 4, sys[a[1] + i]);
+    return i;
+}
 FN(g_SelectPalette) { qdc *d = DCP(w, a[0]); uint32_t o; if (!d) return 0; o = d->pal ? d->pal : STOCK(15); d->pal = a[1]; return o; }
-/* The count of entries it mapped. Sonic CD treats 0 as an error. */
-FN(g_RealizePalette) { UNUSED; return 256; }
 /* SaveDC/RestoreDC: drawing state incl. clip; the surface/membmp stay owned by the DC */
 FN(g_SaveDC) {
     qdc *d = DCP(w, a[0]), *c;
@@ -1116,7 +1188,7 @@ const qhle qw_gdi32[] = {
     G("SaveDC", g_SaveDC, 1), G("RestoreDC", g_RestoreDC, 2), G("CreateRectRgn", g_CreateRectRgn, 4),
     G("SelectClipRgn", g_SelectClipRgn, 2), G("IntersectClipRect", g_IntersectClipRect, 5),
     G("CreatePatternBrush", g_CreatePatternBrush, 1), G("SetBrushOrgEx", g_SetBrushOrgEx, 4), G("ExcludeClipRect", g_ExcludeClipRect, 5),
-    G("CreatePalette", g_CreatePalette, 1), G("SelectPalette", g_SelectPalette, 3), G("RealizePalette", g_RealizePalette, 1),
+    G("CreatePalette", qw_gdi_CreatePalette, 1), G("SelectPalette", g_SelectPalette, 3), G("RealizePalette", qw_gdi_RealizePalette, 1),
     U("FillRect", u_FillRect, 3), U("FrameRect", u_FrameRect, 3), U("InvertRect", u_InvertRect, 2), U("DrawFocusRect", u_DrawFocusRect, 2),
     U("DrawEdge", u_DrawEdge, 4), U("DrawFrameControl", u_DrawFrameControl, 4), U("DrawStateW", u_DrawStateW, 10),
     U("DrawTextW", u_DrawTextW, 5), U("GetSysColor", u_GetSysColor, 1), U("GetSysColorBrush", u_GetSysColorBrush, 1),
