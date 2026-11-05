@@ -399,7 +399,6 @@ What it took, and what other programs gain from it:
 
 Still open with this game:
 
-- Dialogs have no keyboard control: Return, Escape and Tab do nothing, because `IsDialogMessage` is a stub. The mouse works.
 - Static texts in the setup are cut off at their last lines, because our font is wider than Windows' system font.
 - Only the demos have been seen, through levels and a special stage. Playing by keyboard has not been tested, and sound has not been listened to.
 
@@ -435,3 +434,13 @@ How it was found, for next time: enhancing the blue box in a capture showed the 
 Sonic CD now cycles through level, title, special stage and the next level, from the setup's `Play` too; eight captures over 160 seconds all show a picture. The 68 programs report the same as before.
 
 Still open: AROS's Software Failure window has unreadable text on the QRX theme, so a crashed program looks like an empty box.
+
+## Update 2026-11-05, fifth part: keyboard in dialogs, real message boxes
+
+Dialogs now answer the keyboard, modal ones and through `IsDialogMessage` the others: Tab and Shift+Tab, arrows inside a group, Return for the focused or default button, Escape, the space bar and `&` letters. Modal dialogs now also get `WM_CHAR`, so their edit fields take typing. `GetNextDlgTabItem` and `GetNextDlgGroupItem` are real.
+
+`MessageBox` showed only OK and always returned 1, whatever the program asked. It now has all six button sets, the default button and the right return value. A program that asked "Yes or No?" used to read the answer as IDOK.
+
+Checked with a scripted test program: every button set, default button, Escape, typing, Tab, arrows, space and a modeless dialog. The 68 programs report the same as before, which says little here, since the survey presses no keys.
+
+`J2swc123.exe` (Jazz Jackrabbit 2) now gets its Yes and then ends at once, because `PropertySheetA` does nothing. Wizards of that kind need a real property sheet next.

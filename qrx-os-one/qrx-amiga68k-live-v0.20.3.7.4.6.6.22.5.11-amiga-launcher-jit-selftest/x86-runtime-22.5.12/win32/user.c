@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "qrxwin.h"
+#include <ctype.h>
 
 #define FN(name) static uint32_t name(qwin *w, uint32_t *a)
 #define C (&w->cpu)
@@ -20,6 +21,7 @@ enum { B_NONE = 0, B_BUTTON, B_STATIC, B_EDIT, B_DIALOG, B_LISTBOX, B_SCROLLBAR,
 static uint32_t def_window_proc(qwin *w, uint32_t h, uint32_t msg, uint32_t wp, uint32_t lp);
 static void win_destroy(qwin *w, qwnd *x);
 static void set_focus(qwin *w, uint32_t h);
+static qwnd *find_ctl(qwin *w, qwnd *p, uint32_t id);
 
 /* ====================================================================== handles */
 qwnd *W(qwin *w, uint32_t h)
@@ -408,6 +410,17 @@ static void radio_group_clear(qwin *w, qwnd *x)
     }
 }
 
+/* What a click does, for the keyboard and BM_CLICK as well. */
+static void button_activate(qwin *w, qwnd *x)
+{
+    int t = btype(x);
+    if (t == 3) x->state ^= 1;
+    else if (t == 6) x->state = (x->state & ~3) | (((x->state & 3) + 1) % 3);
+    else if (t == 9) { radio_group_clear(w, x); x->state |= 1; }
+    win_invalidate(w, x, 1);
+    notify_parent(w, x, 0);
+}
+
 static uint32_t button_proc(qwin *w, uint32_t *a)
 {
     qwnd *x = W(w, a[0]);
@@ -438,12 +451,7 @@ static uint32_t button_proc(qwin *w, uint32_t *a)
         x->state &= ~4;
         if (w->capture == x->h) w->capture = 0;
         win_invalidate(w, x, 1);
-        if (inside) {
-            if (t == 3) x->state ^= 1;
-            else if (t == 6) x->state = (x->state & ~3) | (((x->state & 3) + 1) % 3);
-            else if (t == 9) { radio_group_clear(w, x); x->state |= 1; }
-            notify_parent(w, x, 0);
-        }
+        if (inside) button_activate(w, x);
         (void)h;
         return 0; }
     case WM_MOUSEMOVE: return 0;
@@ -452,12 +460,12 @@ static uint32_t button_proc(qwin *w, uint32_t *a)
     case BM_GETSTATE: return (uint32_t)x->state;
     case BM_SETSTATE: if (a[2]) x->state |= 4; else x->state &= ~4; win_invalidate(w, x, 1); return 0;
     case BM_SETSTYLE: x->style = (x->style & ~0xFFFFu) | (a[2] & 0xFFFF); win_invalidate(w, x, 1); return 0;
-    case BM_CLICK: notify_parent(w, x, 0); return 0;
+    case BM_CLICK: button_activate(w, x); return 0;
     case WM_SETTEXT: def_window_proc(w, a[0], msg, a[2], a[3]); win_invalidate(w, x, 1); return 1;
     case WM_ENABLE: win_invalidate(w, x, 1); return 0;
     case WM_SETFOCUS: case WM_KILLFOCUS: if (t == 0 || t == 1) win_invalidate(w, x, 1); return 0;
     case WM_GETDLGCODE: return t == 1 ? 0x10 : t == 0 ? 0x20 : (t == 9 || t == 4) ? 0x40 : 0;
-    case WM_KEYUP: if (a[2] == ' ') { notify_parent(w, x, 0); } return 0;
+    case WM_KEYUP: if (a[2] == ' ') button_activate(w, x); return 0;
     }
     return def_window_proc(w, a[0], msg, a[2], a[3]);
 }
@@ -551,7 +559,8 @@ static uint32_t edit_proc(qwin *w, uint32_t *a)
         win_invalidate(w, x, 1);
         notify_parent(w, x, 0x300);                                             /* EN_CHANGE */
         return 0; }
-    case WM_GETDLGCODE: return 0x81;
+    case WM_GETDLGCODE:                                    /* ES_MULTILINE with ES_WANTRETURN keeps Return */
+        return (x->style & 0x1004u) == 0x1004u && a[2] == 0x0D ? 0x85 : 0x81;
     case WM_SETTEXT: def_window_proc(w, a[0], msg, a[2], a[3]); win_invalidate(w, x, 1); return 1;
     case 0x00C5: x->caret = (int)a[2]; return 0;           /* EM_LIMITTEXT */
     case 0x00B1: return 0;                                 /* EM_SETSEL */
@@ -677,8 +686,20 @@ static uint32_t dlg_proc(qwin *w, uint32_t *a)
         win_send(w, x->h, WM_COMMAND, 2, 0);    /* IDCANCEL */
         return 0;
     case WM_COMMAND:
-        if (!x->dlgproc && ((a[2] & 0xFFFF) == 1 || (a[2] & 0xFFFF) == 2)) { x->modal_done = 1; x->modal_result = (int)(a[2] & 0xFFFF); }
+        if (!x->dlgproc && (a[2] & 0xFFFF) >= 1 && (a[2] & 0xFFFF) <= 7) {       /* our message boxes */
+            uint32_t id = a[2] & 0xFFFF;
+            /* Escape and the close box: an OK box closes as OK, Yes/No ignores them. */
+            if (id == 2 && !find_ctl(w, x, 2)) { if (find_ctl(w, x, 1)) id = 1; else return 0; }
+            x->modal_done = 1; x->modal_result = (int)id;
+        }
         return 0;
+    case 0x0400: {                                         /* DM_GETDEFID */
+        int i;
+        for (i = 1; i < QW_MAXWND; i++) {
+            qwnd *c = &w->wnd[i];
+            if (c->used && !c->destroyed && c->parent == x->h && c->cls && c->cls->builtin == B_BUTTON && btype(c) == 1) return 0x534B0000u | (c->id & 0xFFFF);
+        }
+        return 0; }
     case WM_INITDIALOG: return 1;
     case WM_CTLCOLORDLG: case WM_CTLCOLORSTATIC: case WM_CTLCOLORBTN: return 0;
     }
@@ -806,6 +827,126 @@ static uint32_t dialog_template(qwin *w, uint32_t hmod, uint32_t name)
     return d;
 }
 
+/* ---------------------------------------------------------------- keyboard in dialogs */
+#define DLG_MAXCTL 128
+static int dlg_controls(qwin *w, uint32_t hdlg, qwnd **out)
+{
+    int i, n = 0;
+    for (i = 1; i < QW_MAXWND && n < DLG_MAXCTL; i++) {
+        qwnd *c = &w->wnd[i];
+        if (c->used && !c->destroyed && c->parent == hdlg && (c->style & WS_CHILD)) out[n++] = c;
+    }
+    return n;
+}
+static int dlg_can_focus(qwnd *c)
+{
+    if (!c->visible || !c->enabled) return 0;
+    if (c->cls && c->cls->builtin == B_STATIC) return 0;
+    if (c->cls && c->cls->builtin == B_BUTTON && btype(c) == 7) return 0;
+    return 1;
+}
+/* The dialog's own child that holds h, or -1. */
+static int dlg_index(qwin *w, uint32_t hdlg, uint32_t h, qwnd **list, int n)
+{
+    qwnd *c = W(w, h);
+    int i;
+    while (c && c->parent != hdlg && (c->style & WS_CHILD)) c = W(w, c->parent);
+    for (i = 0; c && i < n; i++) if (list[i] == c) return i;
+    return -1;
+}
+static uint32_t dlg_next_tab(qwin *w, uint32_t hdlg, uint32_t from, int back)
+{
+    qwnd *list[DLG_MAXCTL];
+    int n = dlg_controls(w, hdlg, list), at = dlg_index(w, hdlg, from, list, n), k;
+    if (!n) return 0;
+    if (at < 0) at = back ? 0 : n - 1;
+    for (k = 1; k <= n; k++) {
+        qwnd *c = list[(at + (back ? n - k : k)) % n];
+        if (dlg_can_focus(c) && (c->style & WS_TABSTOP)) return c->h;
+    }
+    return 0;
+}
+static uint32_t dlg_next_group(qwin *w, uint32_t hdlg, uint32_t from, int back)
+{
+    qwnd *list[DLG_MAXCTL];
+    int n = dlg_controls(w, hdlg, list), at = dlg_index(w, hdlg, from, list, n), first, last, k, size;
+    if (at < 0) return 0;
+    for (first = at; first > 0 && !(list[first]->style & WS_GROUP); first--) {}
+    for (last = at + 1; last < n && !(list[last]->style & WS_GROUP); last++) {}
+    size = last - first;
+    for (k = 1; k < size; k++) {
+        qwnd *c = list[first + (at - first + (back ? size - k : k)) % size];
+        if (dlg_can_focus(c)) return c->h;
+    }
+    return 0;
+}
+static void dlg_command(qwin *w, uint32_t hdlg, uint32_t id)
+{
+    qwnd *d = W(w, hdlg), *c = d ? find_ctl(w, d, id) : NULL;
+    win_send(w, hdlg, WM_COMMAND, id & 0xFFFF, c ? c->h : 0);
+}
+/* The & letter of a control's text; 0 when it has none. */
+static int dlg_mnemonic(const wchar16 *t)
+{
+    int i;
+    for (i = 0; t[i]; i++) if (t[i] == '&') { if (t[i + 1] != '&') return t[i + 1]; i++; }
+    return 0;
+}
+static int dlg_key(qwin *w, uint32_t hdlg, uint32_t hwnd, uint32_t msg, uint32_t wp)
+{
+    uint32_t code, next, wanted = 0;
+    qwnd *c;
+    if (msg != WM_KEYDOWN && msg != WM_CHAR) return 0;
+    code = W(w, hwnd) && hwnd != hdlg ? win_send(w, hwnd, WM_GETDLGCODE, wp, 0) : 0;
+    if (code & 4) return 0;                                /* wants everything */
+    if (msg == WM_CHAR) {
+        qwnd *list[DLG_MAXCTL];
+        int n, i;
+        if ((code & 0x80) || wp < 33 || wp > 255) return 0;
+        wanted = (uint32_t)toupper((int)wp);
+        n = dlg_controls(w, hdlg, list);
+        for (i = 0; i < n; i++) {
+            int m = dlg_mnemonic(list[i]->text), k;
+            if (!m || (uint32_t)toupper(m) != wanted) continue;
+            /* A label names the control after it. */
+            for (k = i; k < n && !dlg_can_focus(list[k]); k++) {}
+            if (k >= n) return 0;
+            set_focus(w, list[k]->h);
+            if (list[k]->cls && list[k]->cls->builtin == B_BUTTON) button_activate(w, list[k]);
+            return 1;
+        }
+        return 0;
+    }
+    switch (wp) {
+    case 0x09:                                             /* Tab */
+        if (code & 2) return 0;
+        next = dlg_next_tab(w, hdlg, hwnd, (w->keystate[0x10] & 0x80) != 0);
+        if (next) set_focus(w, next);
+        return 1;
+    case 0x25: case 0x26: case 0x27: case 0x28:            /* arrows: inside the group */
+        if (code & 1) return 0;
+        next = dlg_next_group(w, hdlg, hwnd, wp == 0x25 || wp == 0x26);
+        if (next) {
+            set_focus(w, next);
+            c = W(w, next);
+            if (c && c->cls && c->cls->builtin == B_BUTTON && btype(c) == 9) button_activate(w, c);
+        }
+        return 1;
+    case 0x0D: {                                           /* Return: the focused push button, or the default one */
+        uint32_t id = 1, def;
+        c = W(w, hwnd);
+        if (c && hwnd != hdlg && c->cls && c->cls->builtin == B_BUTTON && btype(c) <= 1) id = c->id;
+        else if (((def = win_send(w, hdlg, 0x0400, 0, 0)) >> 16) == 0x534B) id = def & 0xFFFF;
+        { qwnd *d = W(w, hdlg), *t = d ? find_ctl(w, d, id) : NULL; if (t && !t->enabled) return 1; }
+        dlg_command(w, hdlg, id);
+        return 1; }
+    case 0x1B:                                             /* Escape */
+        dlg_command(w, hdlg, 2);
+        return 1;
+    }
+    return 0;
+}
+
 static int run_modal(qwin *w, uint32_t h)
 {
     qwnd *x = W(w, h);
@@ -822,10 +963,11 @@ static int run_modal(qwin *w, uint32_t h)
     while ((x = W(w, h)) && !x->modal_done && !w->exiting) {
         if (!user_pump(w, 1, &m, 0)) { if (w->quit_posted) break; continue; }
         if (m.msg == WM_QUIT) { w->quit_posted = 1; break; }
-        qw_call(w, qw_thunk(w, "user32", "TranslateMessage"), 1, 0, 0, 0, 0);
+        if (dlg_key(w, h, m.hwnd, m.msg, m.wp)) continue;
         {
             uint32_t mm = qw_alloc(w, 28);
             WR32(mm, m.hwnd); WR32(mm + 4, m.msg); WR32(mm + 8, m.wp); WR32(mm + 12, m.lp); WR32(mm + 16, m.time);
+            qw_call(w, qw_thunk(w, "user32", "TranslateMessage"), 1, mm, 0, 0, 0);
             qw_call(w, qw_thunk(w, "user32", "DispatchMessageW"), 1, mm, 0, 0, 0);
             qw_free(w, mm);
         }
@@ -840,16 +982,27 @@ static int run_modal(qwin *w, uint32_t h)
 
 uint32_t user_message_box(qwin *w, uint32_t owner, const wchar16 *text, const wchar16 *title, uint32_t type)
 {
-    static wchar16 dn[8], bn[8], sn[8], ok[4];
+    static const struct { int n; struct { const char *label; int id; } b[3]; } kinds[6] = {
+        { 1, { { "OK", 1 } } },
+        { 2, { { "OK", 1 }, { "Cancel", 2 } } },
+        { 3, { { "&Abort", 3 }, { "&Retry", 4 }, { "&Ignore", 5 } } },
+        { 3, { { "&Yes", 6 }, { "&No", 7 }, { "Cancel", 2 } } },
+        { 2, { { "&Yes", 6 }, { "&No", 7 } } },
+        { 2, { { "&Retry", 4 }, { "Cancel", 2 } } },
+    };
+    static wchar16 dn[8], bn[8], sn[8];
     qclass *dc, *bc, *sc;
-    uint32_t h, s, b;
-    int lines = 1, i, maxw = 0, cur = 0, wd, ht;
-    (void)type;
-    a2w(dn, "#32770", 8); a2w(bn, "Button", 8); a2w(sn, "Static", 8); a2w(ok, "OK", 4);
+    uint32_t h, s, focus = 0;
+    int lines = 1, i, maxw = 0, cur = 0, wd, ht, kind = (int)(type & 0xF), def = (int)((type >> 8) & 0xF), n, bw;
+    if (kind > 5) kind = 0;
+    n = kinds[kind].n;
+    if (def >= n) def = 0;
+    bw = n * 76 + (n - 1) * 8;
+    a2w(dn, "#32770", 8); a2w(bn, "Button", 8); a2w(sn, "Static", 8);
     dc = find_class(w, 0, dn); bc = find_class(w, 0, bn); sc = find_class(w, 0, sn);
     for (i = 0; text[i]; i++) { if (text[i] == '\n') { lines++; if (cur > maxw) maxw = cur; cur = 0; } else cur += gdi_text_width(0, &text[i], 1); }
     if (cur > maxw) maxw = cur;
-    wd = maxw + 40; if (wd < 200) wd = 200;
+    wd = maxw + 40; if (wd < 200) wd = 200; if (wd < bw + 40) wd = bw + 40;
     ht = lines * gdi_font_height(0) + 70;
     {
         qwnd *ow = W(w, owner);
@@ -860,9 +1013,15 @@ uint32_t user_message_box(qwin *w, uint32_t owner, const wchar16 *text, const wc
     W(w, h)->is_dialog = 1;
     W(w, h)->owner = owner;
     s = create_window(w, 0, sc, text, WS_CHILD | WS_VISIBLE, 20, 14, wd - 40, lines * gdi_font_height(0) + 4, h, 0xFFFF, 0, 0);
-    b = create_window(w, 0, bc, ok, WS_CHILD | WS_VISIBLE | WS_TABSTOP | 1, wd / 2 - 38, ht - 36, 76, 24, h, 1, 0, 0);
     (void)s;
-    set_focus(w, b);
+    for (i = 0; i < n; i++) {
+        wchar16 label[16];
+        uint32_t b;
+        a2w(label, kinds[kind].b[i].label, 16);
+        b = create_window(w, 0, bc, label, WS_CHILD | WS_VISIBLE | WS_TABSTOP | (i == def ? 1u : 0u) | (i == 0 ? WS_GROUP : 0u), (wd - bw) / 2 + i * 84, ht - 36, 76, 24, h, (uint32_t)kinds[kind].b[i].id, 0, 0);
+        if (i == def) focus = b;
+    }
+    set_focus(w, focus);
     return (uint32_t)run_modal(w, h);
 }
 
@@ -1684,7 +1843,20 @@ FN(u_DispatchMessageW) {
     }
     return win_send(w, h, msg, wp, lp);
 }
-FN(u_IsDialogMessageW) { UNUSED; return 0; }
+/* As on Windows it handles every message for the dialog, the ordinary ones by dispatching them. */
+FN(u_IsDialogMessageW) {
+    qwnd *d = W(w, a[0]), *c;
+    uint32_t hwnd;
+    if (!d || !d->is_dialog || !a[1]) return 0;
+    hwnd = RD32(a[1]);
+    c = W(w, hwnd);
+    while (c && c != d && (c->style & WS_CHILD)) c = W(w, c->parent);
+    if (c != d) return 0;
+    if (dlg_key(w, a[0], hwnd, RD32(a[1] + 4), RD32(a[1] + 8))) return 1;
+    u_TranslateMessage(w, a + 1);
+    u_DispatchMessageW(w, a + 1);
+    return 1;
+}
 FN(u_BeginPaint) {
     qwnd *x = W(w, a[0]);
     uint32_t hdc;
@@ -1960,8 +2132,7 @@ FN(u_MessageBoxW) {
     wchar16 t[1024], c[256];
     qw_rd_wstr(w, a[1], t, 1024);
     if (a[2]) qw_rd_wstr(w, a[2], c, 256); else a2w(c, "Error", 256);
-    user_message_box(w, a[0], t, c, a[3]);
-    return 1;
+    return user_message_box(w, a[0], t, c, a[3]);
 }
 FN(u_MessageBeep) { UNUSED; return 1; }
 FN(u_wsprintfW) { return (uint32_t)qw_format(w, a[0], -1, 1, a[1], 1, C->r[X86_ESP] + 12); }
@@ -2107,7 +2278,8 @@ FN(u_DialogBoxParamW) {
 }
 FN(u_DialogBoxIndirectParamW) { uint32_t h = create_dialog(w, a[1], a[2], a[3], a[4], a[0]); return h ? (uint32_t)run_modal(w, h) : 0xFFFFFFFFu; }
 FN(u_EndDialog) { qwnd *x = W(w, a[0]); if (!x) return 0; x->modal_done = 1; x->modal_result = (int)a[1]; if (!w->modal_depth) win_destroy(w, x); return 1; }
-FN(u_GetNextDlgTabItem) { UNUSED; return a[1]; }
+FN(u_GetNextDlgTabItem) { return dlg_next_tab(w, a[0], a[1], a[2] != 0); }
+FN(u_GetNextDlgGroupItem) { return dlg_next_group(w, a[0], a[1], a[2] != 0); }
 FN(u_MapDialogRect) {
     WR32(a[1], RD32(a[1]) * BASEX / 4); WR32(a[1] + 8, RD32(a[1] + 8) * BASEX / 4);
     WR32(a[1] + 4, RD32(a[1] + 4) * BASEY / 8); WR32(a[1] + 12, RD32(a[1] + 12) * BASEY / 8);
@@ -2267,7 +2439,7 @@ const qhle qw_user32[] = {
     U("TrackMouseEvent", u_TrackMouseEvent, 1),
     U("CreateDialogParamW", u_CreateDialogParamW, 5), U("CreateDialogIndirectParamW", u_CreateDialogIndirectParamW, 5),
     U("DialogBoxParamW", u_DialogBoxParamW, 5), U("DialogBoxIndirectParamW", u_DialogBoxIndirectParamW, 5), U("EndDialog", u_EndDialog, 2),
-    U("GetNextDlgTabItem", u_GetNextDlgTabItem, 3), U("MapDialogRect", u_MapDialogRect, 2), U("GetDialogBaseUnits", u_GetDialogBaseUnits, 0),
+    U("GetNextDlgTabItem", u_GetNextDlgTabItem, 3), U("GetNextDlgGroupItem", u_GetNextDlgGroupItem, 3), U("MapDialogRect", u_MapDialogRect, 2), U("GetDialogBaseUnits", u_GetDialogBaseUnits, 0),
     U("LoadMenuW", u_LoadMenuW, 2), U("CreateMenu", u_CreateMenu, 0), U("CreatePopupMenu", u_CreateMenu, 0), U("DestroyMenu", u_DestroyMenu, 1),
     U("GetMenu", u_GetMenu, 1), U("SetMenu", u_SetMenu, 2), U("GetSubMenu", u_GetSubMenu, 2), U("GetMenuItemCount", u_GetMenuItemCount, 1),
     U("GetMenuItemID", u_GetMenuItemID, 2), U("CheckMenuItem", u_CheckMenuItem, 3), U("EnableMenuItem", u_EnableMenuItem, 3),
