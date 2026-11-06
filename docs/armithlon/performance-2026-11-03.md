@@ -495,3 +495,26 @@ Limits:
 
 - `WSAAsyncSelect` accepts the call and delivers no events, so network play in such programs does not work yet.
 - Sound in the game has not been listened to.
+
+## Update 2026-11-06, third part: Microsoft's C runtime, exceptions, MFC
+
+Programs that bring their own `MSVCRT.DLL` now run on it, and MFC programs show their dialogs. Max Payne reaches its start dialog, finds the host GPU and starts its Direct3D 8 driver. SimCity 3000 loads and runs into a null pointer in one of its DLLs. Neither is playable yet.
+
+- A program with `MSVCRT.DLL` beside it uses that file. The built-in table covers only part of the runtime, and heap and exceptions cannot be split between the two.
+- `RaiseException` and `RtlUnwind` are real for exceptions raised by software. Handlers run as guest code and return through a thunk, because a C++ catch never returns. As on Windows, a frame of the system's is on the chain while a handler runs: the C++ runtime takes the head of the chain, unwinds and links that head in again, and without the frame a frame ended up pointing at itself. Page faults still stop the program.
+- `VirtualAlloc` ignored the address it was given, so each commit in reserved memory took new memory. SimCity 3000 spent 7.7 of every 10 seconds there.
+- HostFS refused every access above 64 MB. Max Payne's archive is 98 MB. The limit is now 2 GB, the range of the guest's signed positions.
+- Direct3D 8: `GetAdapterIdentifier` and `GetDeviceCaps` wrote the larger Direct3D 9 structures, which zeroed a return address in Max Payne's driver. The caps were all zero and now hold plausible values. `GetDepthStencilSurface`, `GetRenderTarget` and `GetBackBuffer` return objects without contents. `QRX_D3D_LOG=1` names the methods a game wants and the host lacks.
+- The import table cut names at 95 characters, so long C++ names did not resolve. `LoadLibrary` also looks in the current directory, 64 modules can be loaded instead of 16, `WH_CBT` delivers `HCBT_CREATEWND`, and `CreateDialogIndirectParamA` and `DialogBoxIndirectParamA` are real instead of returning 0.
+- Also new: a silent `IDirectSound3DBuffer` (the sound plays unpositioned), `LoadCursorFromFile`, `WriteProfileStringA`, `winmm` ordinal 2, `SHGetDesktopFolder` and `SHGetSpecialFolderLocation` as failing stubs, and resource names of the form `#1024`.
+
+Survey of 66 programs, 40 seconds each: 14 stop, against 18 before this work, and no program that ran before now stops. The survey sees crashes and window sizes, not whether a game plays. `MSIFDEMO` now shows its settings dialog first, which the old stub skipped, and goes on to Direct3D after OK.
+
+Limits:
+
+- Max Payne ends with a message from its graphics engine after Play. It now asks for `GetSurfaceLevel`, the start of the texture path.
+- SimCity 3000 faults at `78711d9b`, and `SetFilePointer` takes about 0.5 ms a call.
+- `clawdins` and `gmdemins` unpack and then start a 16-bit InstallShield `SETUP.EXE`, which is not supported. The same message, `no PE header`, stops the setups of Worms 2, FF7, Fighter Tactics, Jam X and two more programs; whether each of those is 16-bit or DOS has not been checked.
+- Static text in some MFC dialogs stays empty and a check box label is cut off in Monster Truck Madness 2.
+- Under the JIT a jump to address 0 hangs where the interpreter reports the fault. Use `QRX86_NOJIT` when a program stops without a message.
+- Diablo's shareware program stops at the message `exp1:C:\Diablo\Spawn`, not examined.

@@ -135,9 +135,10 @@ DF(d3d_one){NOARGS;return 1;}
 DF(d3d_ok){NOARGS;return D3D_OK;}
 DF(d3d_not_available){NOARGS;return D3DERR_NOTAVAILABLE;}
 DF(GetAdapterIdentifier){
-    /* drivers, description strings, then ids: enough to be all zero but a name */
-    uint32_t out=is8?a[3]:a[3];
-    for(uint32_t i=0;i<1100;i+=4)x86_wr32(c,out+i,0);
+    /* drivers, description strings, then ids: enough to be all zero but a name.
+       D3D8 has no DeviceName[32]: writing the D3D9 size there overran Max Payne's stack. */
+    uint32_t out=a[3],size=is8?1068u:1100u;
+    for(uint32_t i=0;i<size;i+=4)x86_wr32(c,out+i,0);
     static const char n[]="QRX ARMithlon host GPU";
     for(uint32_t i=0;i<sizeof(n);i++){x86_wr8(c,out+i,(uint8_t)n[i]);x86_wr8(c,out+512+i,(uint8_t)n[i]);}
     return D3D_OK;
@@ -161,11 +162,41 @@ DF(GetAdapterDisplayMode){
     return D3D_OK;
 }
 static void fill_caps(x86cpu *c,uint32_t caps){
-    for(uint32_t i=0;i<304;i+=4)x86_wr32(c,caps+i,0);
+    /* D3DCAPS8 is 212 bytes, D3DCAPS9 304; the fields written here are the same in both. */
+    uint32_t size=is8?212u:304u;
+    for(uint32_t i=0;i<size;i+=4)x86_wr32(c,caps+i,0);
     x86_wr32(c,caps,1);                       /* D3DDEVTYPE_HAL */
-    x86_wr32(c,caps+28,0x00000040u);          /* DEVCAPS: HWRASTERIZATION */
-    x86_wr32(c,caps+36+16,0x00000020u|0x00000002u);
+    x86_wr32(c,caps+20,0x80000001u);          /* PresentationIntervals: ONE, IMMEDIATE */
+    x86_wr32(c,caps+28,0x000807C0u);          /* DevCaps: TL vertices and textures in any memory, DRAWPRIM, HWRASTERIZATION */
+    x86_wr32(c,caps+36,0x00000020u|0x00000002u);
+    x86_wr32(c,caps+40,0xFFu);                /* ZCmpCaps */
+    x86_wr32(c,caps+44,0x1FFFu);              /* SrcBlendCaps */
+    x86_wr32(c,caps+48,0x1FFFu);              /* DestBlendCaps */
+    x86_wr32(c,caps+52,0xFFu);                /* AlphaCmpCaps */
+    x86_wr32(c,caps+60,0x00000005u);          /* TextureCaps: PERSPECTIVE, ALPHA */
+    x86_wr32(c,caps+64,0x03030303u);          /* TextureFilterCaps: point and linear */
+    x86_wr32(c,caps+76,0x0000001Fu);          /* TextureAddressCaps */
+    x86_wr32(c,caps+88,2048u);x86_wr32(c,caps+92,2048u);   /* MaxTextureWidth, Height */
+    x86_wr32(c,caps+100,8192u);               /* MaxTextureRepeat */
+    x86_wr32(c,caps+104,8192u);               /* MaxTextureAspectRatio */
+    x86_wr32(c,caps+108,1u);                  /* MaxAnisotropy */
+    x86_wr32(c,caps+144,0x00FFFFFFu);         /* TextureOpCaps */
+    x86_wr32(c,caps+148,2u);x86_wr32(c,caps+152,2u);       /* MaxTextureBlendStages, MaxSimultaneousTextures */
+    x86_wr32(c,caps+180,0xFFFFu);             /* MaxPrimitiveCount */
+    x86_wr32(c,caps+184,0xFFFFu);             /* MaxVertexIndex */
+    x86_wr32(c,caps+188,1u);                  /* MaxStreams */
+    x86_wr32(c,caps+192,256u);                /* MaxStreamStride */
 }
+/* The depth buffer and the back buffer exist only on the host: a name for them is enough. */
+static uint32_t surface_out(x86cpu *c,uint32_t out){
+    uint32_t o=new_object(c,is8?VT_SURF8:VT_SURF9,0);
+    if(!o)return 0;
+    x86_wr32(c,out,o);
+    return D3D_OK;
+}
+DF(GetDepthStencilSurface){return surface_out(c,a[1]);}
+DF(GetRenderTarget){return surface_out(c,is8?a[1]:a[2]);}
+DF(GetBackBuffer){return surface_out(c,is8?a[3]:a[4]);}
 DF(GetDeviceCapsD3D){fill_caps(c,a[3]);return D3D_OK;}
 DF(GetDeviceCapsDev){fill_caps(c,a[1]);return D3D_OK;}
 DF(CreateDevice){
@@ -618,6 +649,7 @@ static const Impl impls[]={
     {"D3D9","CheckDepthStencilMatch",d3d_ok},{"D3D8","CheckDepthStencilMatch",d3d_ok},{"D3D9","CheckDeviceMultiSampleType",d3d_not_available},{"D3D8","CheckDeviceMultiSampleType",d3d_not_available},
     {"D3D9","GetDeviceCaps",GetDeviceCapsD3D},{"D3D8","GetDeviceCaps",GetDeviceCapsD3D},{"Dev9","GetDeviceCaps",GetDeviceCapsDev},{"Dev8","GetDeviceCaps",GetDeviceCapsDev},
     {"D3D9","CreateDevice",CreateDevice},{"D3D8","CreateDevice",CreateDevice},
+    {"","GetDepthStencilSurface",GetDepthStencilSurface},{"","GetRenderTarget",GetRenderTarget},{"","GetBackBuffer",GetBackBuffer},{"Dev8","ResourceManagerDiscardBytes",d3d_ok},
     {"","BeginScene",BeginEnd},{"","EndScene",BeginEnd},{"","Present",Present},{"","Clear",Clear},{"","SetViewport",SetViewport},{"","SetTransform",SetTransform},
     {"","SetRenderState",SetRenderState},{"","SetTextureStageState",SetTextureStageState},{"","SetSamplerState",SetSamplerState},{"","SetTexture",SetTexture},
     {"","SetFVF",SetFVF},{"","GetFVF",GetFVF},{"Dev8","SetVertexShader",SetVertexShader8},{"Dev9","SetVertexShader",d3d_ok},{"","TestCooperativeLevel",TestCooperativeLevel},

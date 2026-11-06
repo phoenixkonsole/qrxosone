@@ -131,6 +131,10 @@ static int door_hle_hook(x86cpu *h,uint32_t index){
     uint32_t ret=x86_rd32(h,sp);
     for(unsigned i=0;i<16;i++)a[i]=x86_rd32(h,sp+4u+i*4u);
     uint32_t result=f->fn(h,a);
+    /* QRX_D3D_LOG=1: the Direct3D methods a game wants and the host lacks. */
+    {extern uint32_t qrx_d3d_unimpl(x86cpu*,const uint32_t*);static int log_on=-1;
+     if(log_on<0)log_on=getenv("QRX_D3D_LOG")!=NULL;
+     if(log_on&&f->fn==qrx_d3d_unimpl)fprintf(stderr,"[D3D] %s is not implemented\n",f->name?f->name:"?");}
     /* Needs guest memory: leave eip on the thunk, the door runs this again. */
     if(qrx_hostapi_alloc_request){h->stop=1;return 1;}
     h->r[X86_EAX]=result;

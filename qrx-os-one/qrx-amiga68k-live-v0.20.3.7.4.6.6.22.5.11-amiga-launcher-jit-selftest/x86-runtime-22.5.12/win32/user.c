@@ -170,6 +170,8 @@ static void show_top(qwin *w, qwnd *x)
     w->active = x->h;
 }
 
+#define QW_MAXCBT 4
+static uint32_t g_cbthook[QW_MAXCBT];    /* WH_CBT */
 static uint32_t create_window(qwin *w, uint32_t exstyle, qclass *cls, const wchar16 *title, uint32_t style,
                               int32_t x, int32_t y, int32_t cx, int32_t cy, uint32_t parent, uint32_t menu,
                               uint32_t hinst, uint32_t param)
@@ -224,6 +226,17 @@ static uint32_t create_window(qwin *w, uint32_t exstyle, qclass *cls, const wcha
         WR32(cs, param); WR32(cs + 4, hinst); WR32(cs + 8, menu); WR32(cs + 12, parent);
         WR32(cs + 16, (uint32_t)cy); WR32(cs + 20, (uint32_t)cx); WR32(cs + 24, (uint32_t)y); WR32(cs + 28, (uint32_t)x);
         WR32(cs + 32, style); WR32(cs + 36, tp); WR32(cs + 40, cp); WR32(cs + 44, exstyle);
+    }
+    /* HCBT_CREATEWND, before the window's first message: MFC attaches its object here. */
+    {
+        int k;
+        for (k = 0; k < QW_MAXCBT; k++) if (g_cbthook[k]) {
+            uint32_t g = qw_alloc(w, 8);
+            WR32(g, cs); WR32(g + 4, 0);
+            qw_call(w, g_cbthook[k], 3, 3, h, g, 0);
+            qw_free(w, g);
+            if (!W(w, h)) return 0;
+        }
     }
     r = win_send(w, h, WM_NCCREATE, 0, cs);
     if (!W(w, h)) return 0;
@@ -1480,6 +1493,10 @@ static int kb_hook(qwin *w, int vk, int up, int was_down)
 FN(u_SetWindowsHookEx) {
     int i;
     (void)w;
+    if (a[0] == 5 /* WH_CBT */) {
+        for (i = 0; i < QW_MAXCBT; i++) if (!g_cbthook[i]) { g_cbthook[i] = a[1]; return 0x4A00u + (uint32_t)i; }
+        return 0;
+    }
     if (a[0] != 2 /* WH_KEYBOARD */) { qw_log(w, "SetWindowsHookEx: hook type %d is not delivered", (int)a[0]); return 0x4900u + a[0]; }
     for (i = 0; i < QW_MAXHOOKS; i++) {
         if (!g_kbhook[i]) { g_kbhook[i] = a[1]; return 0x4800u + (uint32_t)i; }
@@ -1490,6 +1507,7 @@ FN(u_UnhookWindowsHookEx) {
     uint32_t i = a[0] - 0x4800u;
     (void)w;
     if (i < QW_MAXHOOKS) g_kbhook[i] = 0;
+    if (a[0] - 0x4A00u < QW_MAXCBT) g_cbthook[a[0] - 0x4A00u] = 0;
     return 1;
 }
 
@@ -2195,6 +2213,7 @@ FN(u_LoadStringW) {
 }
 FN(u_LoadIconW) { uint32_t h = gdi_new(w, GO_ICON); (void)a; return h; }
 FN(u_LoadCursorW) { uint32_t h = gdi_new(w, GO_CURSOR); (void)a; return h; }
+FN(u_LoadCursorFromFile) { (void)a; return gdi_new(w, GO_CURSOR); }   /* drawn as the normal pointer */
 FN(u_LoadBitmapW) {
     uint32_t d, s;
     if (!a[0] || !res_find_in(w, a[0], 2, a[1], &d, &s)) { qobj *o; uint32_t h = gdi_new(w, GO_BITMAP); o = O(w, h, GO_BITMAP); if (o) surf_resize(&o->bmp, 1, 1); return h; }
@@ -3005,7 +3024,7 @@ const qhle qw_user32[] = {
     U("SetCapture", u_SetCapture, 1), U("ReleaseCapture", u_ReleaseCapture, 0), U("GetCapture", u_GetCapture, 0),
     U("GetActiveWindow", u_GetActiveWindow, 0), U("GetForegroundWindow", u_GetActiveWindow, 0), U("SetActiveWindow", u_SetActiveWindow, 1),
     U("SetForegroundWindow", u_one, 1), U("BringWindowToTop", u_one, 1), U("FindWindowW", u_FindWindowW, 2),
-    U("LoadStringW", u_LoadStringW, 4), U("LoadIconW", u_LoadIconW, 2), U("LoadCursorW", u_LoadCursorW, 2), U("LoadCursorA", u_LoadCursorW, 2), U("LoadIconA", u_LoadIconW, 2), U("LoadBitmapW", u_LoadBitmapW, 2),
+    U("LoadStringW", u_LoadStringW, 4), U("LoadIconW", u_LoadIconW, 2), U("LoadCursorW", u_LoadCursorW, 2), U("LoadCursorFromFileA", u_LoadCursorFromFile, 1), U("LoadCursorFromFileW", u_LoadCursorFromFile, 1), U("LoadCursorA", u_LoadCursorW, 2), U("LoadIconA", u_LoadIconW, 2), U("LoadBitmapW", u_LoadBitmapW, 2),
     U("LoadImageW", u_LoadImageW, 6), U("DestroyIcon", u_DestroyIcon, 1), U("DestroyCursor", u_DestroyIcon, 1), U("SetCursor", u_SetCursor, 1),
     U("ShowCursor", u_ShowCursor, 1), U("GetCursorPos", u_GetCursorPos, 1), U("MessageBoxW", u_MessageBoxW, 4), U("MessageBeep", u_MessageBeep, 1),
     U("wsprintfW", u_wsprintfW, -1), U("wvsprintfW", u_wvsprintfW, 3), U("wsprintfA", u_wsprintfA, -1),
@@ -3035,7 +3054,7 @@ const qhle qw_user32[] = {
     U("GetWindowLongPtrW", u_GetWindowLongW, 2), U("SetWindowLongPtrW", u_SetWindowLongW, 3),
     U("GetClassLongW", u_GetClassLongW, 2), U("SetClassLongW", u_SetClassLongW, 3),
     U("TrackMouseEvent", u_TrackMouseEvent, 1),
-    U("CreateDialogParamW", u_CreateDialogParamW, 5), U("CreateDialogIndirectParamW", u_CreateDialogIndirectParamW, 5),
+    U("CreateDialogParamW", u_CreateDialogParamW, 5), U("CreateDialogIndirectParamW", u_CreateDialogIndirectParamW, 5), U("CreateDialogIndirectParamA", u_CreateDialogIndirectParamW, 5), U("DialogBoxIndirectParamA", u_DialogBoxIndirectParamW, 5),
     U("DialogBoxParamW", u_DialogBoxParamW, 5), U("DialogBoxIndirectParamW", u_DialogBoxIndirectParamW, 5), U("EndDialog", u_EndDialog, 2),
     U("GetNextDlgTabItem", u_GetNextDlgTabItem, 3), U("GetNextDlgGroupItem", u_GetNextDlgGroupItem, 3), U("MapDialogRect", u_MapDialogRect, 2), U("GetDialogBaseUnits", u_GetDialogBaseUnits, 0),
     U("LoadMenuW", u_LoadMenuW, 2), U("CreateMenu", u_CreateMenu, 0), U("CreatePopupMenu", u_CreateMenu, 0), U("DestroyMenu", u_DestroyMenu, 1),

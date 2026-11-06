@@ -73,6 +73,7 @@ typedef struct dxobj {
 static dxobj g_o[DX_MAX];
 static uint32_t g_vt[24];           /* guest vtables per interface */
 enum { VT_DD, VT_DD2, VT_SURF, VT_PAL, VT_CLIP, VT_DS, VT_DSB, VT_DI, VT_DID };
+#define VT_B3D 20
 
 static int obj_new(qwin *w, int type, int vt)
 {
@@ -1099,6 +1100,21 @@ FN(b_GetFormat) {
     dxobj *b = ob(w, a[0], OB_DSB);
     if (!b) return DDERR_INVALIDPARAMS;
     if (a[3]) WR32(a[3], 18);
+/* IDirectSound3DBuffer: a second vtable on the buffer. It accepts everything and the buffer
+   plays as it is, without positioning: SimCity 3000 asks for it and does not check the answer. */
+FN(b_QueryInterface) {
+    dxobj *o = ob(w, a[0], OB_DSB);
+    if (o && guid_is(w, a[1], 0x279AFA86u)) {
+        uint32_t g = qw_alloc(w, 8);
+        WR32(g, g_vt[VT_B3D]); WR32(g + 4, (uint32_t)idx_of(o));
+        o->refs++;
+        WR32(a[2], g);
+        return DD_OK;
+    }
+    WR32(a[2], 0);
+    return E_NOINTERFACE;
+}
+FN(b3d_Get) { UNUSED; WR32(a[1], 0); return DD_OK; }
     if (a[1] && a[2] >= 16) {
         x86_wr16(C, a[1], 1); x86_wr16(C, a[1] + 2, (uint16_t)b->chans);
         WR32(a[1] + 4, b->rate); WR32(a[1] + 8, b->bps); x86_wr16(C, a[1] + 12, (uint16_t)b->align); x86_wr16(C, a[1] + 14, (uint16_t)b->bits);
@@ -1629,12 +1645,20 @@ static const vslot vt_ds[] = {
     V("SetSpeakerConfig", dd_ok, 2), V("Initialize", dd_ok, 2), { NULL, NULL, 0, NULL }
 };
 static const vslot vt_dsb[] = {
-    V("QueryInterface", ds_QueryInterface, 3), V("AddRef", b_AddRef, 1), V("Release", b_Release, 1), V("GetCaps", b_GetCaps, 2),
+    V("QueryInterface", b_QueryInterface, 3), V("AddRef", b_AddRef, 1), V("Release", b_Release, 1), V("GetCaps", b_GetCaps, 2),
     V("GetCurrentPosition", b_GetCurrentPosition, 3), V("GetFormat", b_GetFormat, 4), V("GetVolume", b_GetVolume, 2),
     V("GetPan", b_GetPan, 2), V("GetFrequency", b_GetFrequency, 2), V("GetStatus", b_GetStatus, 2), V("Initialize", dd_ok, 3),
     V("Lock", b_Lock, 8), V("Play", b_Play, 4), V("SetCurrentPosition", b_SetCurrentPosition, 2), V("SetFormat", b_SetFormat, 2),
     V("SetVolume", b_SetVolume, 2), V("SetPan", b_SetPan, 2), V("SetFrequency", b_SetFrequency, 2), V("Stop", b_Stop, 1),
     V("Unlock", b_Unlock, 5), V("Restore", dd_ok, 1), { NULL, NULL, 0, NULL }
+};
+static const vslot vt_b3d[] = {
+    V("QueryInterface", ds_QueryInterface, 3), V("AddRef", b_AddRef, 1), V("Release", b_Release, 1), V("GetAllParameters", dd_ok, 2),
+    V("GetConeAngles", dd_ok, 3), V("GetConeOrientation", dd_ok, 2), V("GetConeOutsideVolume", b3d_Get, 2), V("GetMaxDistance", b3d_Get, 2),
+    V("GetMinDistance", b3d_Get, 2), V("GetMode", b3d_Get, 2), V("GetPosition", dd_ok, 2), V("GetVelocity", dd_ok, 2),
+    V("SetAllParameters", dd_ok, 3), V("SetConeAngles", dd_ok, 4), V("SetConeOrientation", dd_ok, 5), V("SetConeOutsideVolume", dd_ok, 3),
+    V("SetMaxDistance", dd_ok, 3), V("SetMinDistance", dd_ok, 3), V("SetMode", dd_ok, 3), V("SetPosition", dd_ok, 5), V("SetVelocity", dd_ok, 5),
+    { NULL, NULL, 0, NULL }
 };
 static const vslot vt_di[] = {
     V("QueryInterface", di_QueryInterface, 3), V("AddRef", di_AddRef, 1), V("Release", di_Release, 1),
@@ -1695,7 +1719,7 @@ static const vslot vt_tex2[] = { LG_COM, VG("GetHandle", lg_Tex_GetHandle, 3), V
 static const vslot vt_vb7[] = { LG_COM, VG("Lock", lg_VB_Lock, 4), VD("Unlock", 1), VD("ProcessVertices", 8), VG("GetVertexBufferDesc", lg_VB_GetDesc, 2), VD("Optimize", 3), VD("ProcessVerticesStrided", 8), { NULL, NULL, 0, NULL } };
 static const vslot vt_light[] = { LG_COM, VD("Initialize", 2), VD("SetLight", 2), VD("GetLight", 2), { NULL, NULL, 0, NULL } };
 #define VMAX 60
-#define NIFACES 20
+#define NIFACES 21
 static qhle g_slots[NIFACES][VMAX];
 static const struct { const vslot *t; const char *dll, *iface; } g_ifaces[NIFACES] = {
     { vt_dd, "ddraw", "IDirectDraw" }, { vt_dd2, "ddraw", "IDirectDraw2" }, { vt_surf, "ddraw", "IDirectDrawSurface" },
@@ -1704,7 +1728,8 @@ static const struct { const vslot *t; const char *dll, *iface; } g_ifaces[NIFACE
     { vt_d3d2, "ddraw", "IDirect3D2" }, { vt_d3d3, "ddraw", "IDirect3D3" }, { vt_d3d7, "ddraw", "IDirect3D7" },
     { vt_dev2, "ddraw", "IDirect3DDevice2" }, { vt_dev3, "ddraw", "IDirect3DDevice3" }, { vt_dev7, "ddraw", "IDirect3DDevice7" },
     { vt_vp3, "ddraw", "IDirect3DViewport3" }, { vt_mat3, "ddraw", "IDirect3DMaterial3" }, { vt_tex2, "ddraw", "IDirect3DTexture2" },
-    { vt_vb7, "ddraw", "IDirect3DVertexBuffer7" }, { vt_light, "ddraw", "IDirect3DLight" }
+    { vt_vb7, "ddraw", "IDirect3DVertexBuffer7" }, { vt_light, "ddraw", "IDirect3DLight" },
+    { vt_b3d, "dsound", "IDirectSound3DBuffer" }                     /* index VT_B3D */
 };
 static char g_names[NIFACES][VMAX][64];
 static uint32_t dx_unimpl(qwin *w, uint32_t *a) { (void)a; qw_log(w, "DirectX method not implemented"); return E_FAIL_; }
