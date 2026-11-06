@@ -1935,7 +1935,7 @@ const qhle qw_compat[] = {
     K("GetStringTypeExA", c_ok1, 5), K("LockFile", c_ok1, 5), K("UnlockFile", c_ok1, 5), K("GetProcessAffinityMask", c_ok0, 3), K("IsProcessorFeaturePresent", c_ok0, 1),
     ADV("RegQueryValueA", c_RegQueryValueA, 4), ADV("RegSetValueA", c_ok0, 5), ADV("SetFileSecurityA", c_ok1, 3), ADV("GetFileSecurityA", c_ok0, 5),
     { "shell32", "ShellExecuteA", 6, c_ShellExecuteA }, { "shell32", "DragFinish", 1, c_ok0 }, { "shell32", "DragQueryFileA", 4, c_ok0 }, { "shell32", "DragAcceptFiles", 2, c_ok0 },
-    { "shell32", "SHGetFileInfoA", 5, c_ok0 }, { "shell32", "SHChangeNotify", 4, c_ok0 }, { "shell32", "SHBrowseForFolder", 1, c_ok0 }, { "shell32", "SHGetMalloc", 1, c_efail }, { "shell32", "SHGetPathFromIDList", 2, c_ok0 },
+    { "shell32", "SHGetFileInfoA", 5, c_ok0 }, { "shell32", "SHChangeNotify", 4, c_ok0 }, { "gdi32", "GetClipRgn", 2, c_ok0 }, { "gdi32", "OffsetClipRgn", 3, c_ok1 }, { "shell32", "SHBrowseForFolder", 1, c_ok0 }, { "shell32", "SHGetMalloc", 1, c_efail }, { "shell32", "SHGetPathFromIDList", 2, c_ok0 },
     { "version", "VerLanguageNameA", 3, c_VerLanguageNameA }, { "dsetup", "DirectXSetupGetVersion", 2, c_DirectXSetupGetVersion },
     { "dsetup", "DirectXSetupA", 3, c_ok0 }, { "dsetup", "DirectXSetupW", 3, c_ok0 }, { "dsetup", "DirectXSetup", 3, c_ok0 }, { "dsetup", "DirectXDeviceDriverSetupA", 4, c_ok0 },
     { "dsetup", "DirectXRegisterApplicationA", 2, c_ok1 }, { "dsetup", "DirectXRegisterApplicationW", 2, c_ok1 }, { "dsetup", "DirectXUnRegisterApplication", 2, c_ok1 },

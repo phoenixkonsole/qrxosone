@@ -258,7 +258,7 @@ FN(x_CreateDIBSection) {                 /* (hdc, BITMAPINFO*, usage, void **bit
     int bpp = x86_rd16(C, bi + 14);
     uint32_t stride, mem, h;
     qobj *o;
-    if (bw <= 0 || bw > 4096 || bh == 0 || bh > 4096 || bh < -4096) return 0;
+    if (bw <= 0 || bw > 4096 || bh == 0 || bh > 4096 || bh < -4096) { qw_log(w, "CreateDIBSection: refused %dx%d %d bits", (int)bw, (int)bh, bpp); return 0; }
     stride = (uint32_t)(((bw * bpp + 31) / 32) * 4);
     mem = qw_alloc(w, stride * (uint32_t)(bh < 0 ? -bh : bh));
     if (!mem) return 0;

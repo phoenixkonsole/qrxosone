@@ -447,7 +447,7 @@ Checked with a scripted test program: every button set, default button, Escape, 
 
 `PropertySheetA` and `W`, `CreatePropertySheetPage` and the `PSM_` messages are real, with wizards and with plain sheets, modal and modeless. Pages are created when first shown and get the `PSN_` notifications. Tabs are a row of buttons, since there is no tab control.
 
-`J2swc123.exe` (Jazz Jackrabbit 2) installs from start to end: 58 files and 40 MB. The installed `Jazz2.exe` then faults at `eip=0049c38b`.
+`J2swc123.exe` (Jazz Jackrabbit 2) installs from start to end, about 40 MB.
 
 This work uncovered general faults that were hiding behind the stub:
 
@@ -481,3 +481,17 @@ Rogue Squadron no longer stops at its assertion and draws frames; how well it ru
 To check a hardware 3D picture, use `QRX_HG_CAPTURE=file QRX_HG_CAPTURE_FRAME=n`. `QRX_RTG_CAPTURE` shows guest video memory only, where such a program is simply black.
 
 Still open: the level looks dark in both renderers, with or without the JIT (mean brightness 11 of 255 in the software renderer). Whether that is correct has not been settled.
+
+## Update 2026-11-06, second part: Jazz Jackrabbit 2 plays
+
+The shareware version goes from its own installer through intro, menu and episode choice into the first level at 60 frames a second, and the character runs both ways under the arrow keys.
+
+- `FILD` and `FISTP` on 64 bits lost data, because the x87 here keeps doubles with 53 bits of mantissa. Pentium-era memory copies use exactly that pair, and every eighth pixel came out black, with dots elsewhere. A register still holding what `FILD` put there now writes those exact bits back. This is in the CPU core, so it covers every program with such a copy.
+- A `WH_KEYBOARD` hook did not get the extended key bit in `lParam`. The game files arrows under `vk | 0x100`, so its menu worked through messages while the level saw no arrows. Doom95, which also reads through a hook, still answers its arrow keys.
+- `SPI_GETNONCLIENTMETRICS` returned nothing and the game computed a window of negative size from the garbage. It now fills the structure, in both the ANSI and the wide form.
+- `InsertMenuItem`, `WSAAsyncSelect`, `WSAAsyncGetHostByName`, `WSACancelAsyncRequest`, `GetClipRgn` and `OffsetClipRgn` are new.
+
+Limits:
+
+- `WSAAsyncSelect` accepts the call and delivers no events, so network play in such programs does not work yet.
+- Sound in the game has not been listened to.

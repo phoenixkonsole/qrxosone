@@ -99,6 +99,11 @@ struct x86cpu {
     struct { uint32_t base, limit; int used; } tls[3];   /* set_thread_area GDT slots 6..8 */
     /* x87 */
     double st[8];
+    /* A real x87 holds a 64-bit integer exactly, and old memory copies go through FILD and
+     * FISTP. A register still holding what FILD put there writes those exact bits back. */
+    int64_t st_int[8];
+    double st_was[8];
+    uint8_t st_exact[8];
     int top;
     uint16_t fsw, fcw, ftw;
     /* memory */

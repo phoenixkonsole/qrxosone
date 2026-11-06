@@ -1460,9 +1460,16 @@ static uint32_t scan_of_vk(int vk)
 }
 
 /* True when a hook swallowed the key. */
+/* The scan code in lParam, with the extended bit that arrows and page keys carry. */
+static uint32_t key_scan_bits(int vk)
+{
+    uint32_t scan = scan_of_vk(vk) << 16;
+    if ((vk >= 0x21 && vk <= 0x28) || vk == 0x2D || vk == 0x2E) scan |= 0x01000000u;
+    return scan;
+}
 static int kb_hook(qwin *w, int vk, int up, int was_down)
 {
-    uint32_t lp = 1u | (scan_of_vk(vk) << 16) | (was_down ? 0x40000000u : 0) | (up ? 0x80000000u : 0);
+    uint32_t lp = 1u | key_scan_bits(vk) | (was_down ? 0x40000000u : 0) | (up ? 0x80000000u : 0);
     int i;
     for (i = QW_MAXHOOKS - 1; i >= 0; i--) {
         if (g_kbhook[i] && qw_call(w, g_kbhook[i], 3, 0 /* HC_ACTION */, (uint32_t)vk, lp, 0)) return 1;
@@ -1508,8 +1515,7 @@ static void key_event(qwin *w, int type, int vk, int ch)
     if ((type == QE_KEYDOWN || type == QE_KEYUP) && kb_hook(w, vk, type == QE_KEYUP, was_down)) return;
     /* Engines such as SciTech MGL read the scan code in lParam, not the virtual key. */
     {
-        uint32_t scan = scan_of_vk(vk) << 16;
-        if (vk >= 0x21 && vk <= 0x28) scan |= 0x01000000u;         /* extended: arrows, page keys */
+        uint32_t scan = key_scan_bits(vk);
         if (type == QE_KEYDOWN) win_post(w, tgt->h, WM_KEYDOWN, (uint32_t)vk, 1u | scan | (was_down ? 0x40000000u : 0));
         else if (type == QE_KEYUP) win_post(w, tgt->h, WM_KEYUP, (uint32_t)vk, 0xC0000001u | scan);
     }
@@ -2262,7 +2268,32 @@ FN(u_GetMonitorInfoW) {
     WR32(a[1] + 20, 0); WR32(a[1] + 24, 0); WR32(a[1] + 28, 1024); WR32(a[1] + 32, 740); WR32(a[1] + 36, 1);
     UNUSED; return 1;
 }
+/* LOGFONT in the ANSI or wide form: as long as the structure's size says. */
+static void spi_font(qwin *w, uint32_t p, int wide)
+{
+    static const char face[] = "Arial";
+    uint32_t i, n = wide ? 92u : 60u;
+    for (i = 0; i < n; i += 4) WR32(p + i, 0);
+    WR32(p, (uint32_t)-11);                                /* lfHeight */
+    WR32(p + 16, 400);                                     /* lfWeight */
+    for (i = 0; face[i]; i++) { if (wide) x86_wr16(C, p + 28 + i * 2, (uint8_t)face[i]); else x86_wr8(C, p + 28 + i, (uint8_t)face[i]); }
+}
 FN(u_SystemParametersInfoW) {
+    if (a[0] == 0x29 && a[2]) {                            /* SPI_GETNONCLIENTMETRICS */
+        uint32_t m = a[2], size = RD32(m);
+        int wide = size >= 500;
+        uint32_t lf = wide ? 92u : 60u;
+        if (size != 340 && !wide) return 0;
+        WR32(m + 4, 1); WR32(m + 8, 16); WR32(m + 12, 16); WR32(m + 16, 18); WR32(m + 20, 18);
+        spi_font(w, m + 24, wide);
+        WR32(m + 24 + lf, 12); WR32(m + 28 + lf, 15);
+        spi_font(w, m + 32 + lf, wide);
+        WR32(m + 32 + lf * 2, 18); WR32(m + 36 + lf * 2, 18);
+        spi_font(w, m + 40 + lf * 2, wide);
+        spi_font(w, m + 40 + lf * 3, wide);
+        spi_font(w, m + 40 + lf * 4, wide);
+        return 1;
+    }
     if (a[0] == 0x30) { WR32(a[2], 0); WR32(a[2] + 4, 0); WR32(a[2] + 8, 1024); WR32(a[2] + 12, 740); return 1; }
     if (a[2] && a[1] && a[1] < 1024) { uint32_t i; for (i = 0; i < a[1]; i += 4) WR32(a[2] + i, 0); }
     UNUSED; return 0;
@@ -2418,6 +2449,36 @@ FN(u_AppendMenuW) {
     menu_changed(w, a[0]);
     return 1;
 }
+/* (menu, item, by position, MENUITEMINFO) */
+static uint32_t insert_menu_item(qwin *w, uint32_t *a, int wide)
+{
+    qmenu *m = M(w, a[0]);
+    uint32_t info = a[3], mask, type, state;
+    qmenuitem *it;
+    int at, i;
+    if (!m || m->n >= 48 || !info) return 0;
+    mask = RD32(info + 4); type = RD32(info + 8); state = RD32(info + 12);
+    at = m->n;
+    if (a[2]) { if ((int32_t)a[1] >= 0 && (int)a[1] < m->n) at = (int)a[1]; }
+    else for (i = 0; i < m->n; i++) if (m->it[i].id == a[1]) { at = i; break; }
+    for (i = m->n; i > at; i--) m->it[i] = m->it[i - 1];
+    m->n++;
+    it = &m->it[at];
+    memset(it, 0, sizeof(*it));
+    if (mask & 0x100u) type = 0;                           /* MIIM_FTYPE and string come separately */
+    if ((mask & 0x10u) && (type & 0x800u)) it->flags |= 0x800u;   /* separator */
+    if (mask & 1u) it->flags |= state & 0x0Bu;             /* disabled, grey, checked */
+    if (mask & 2u) it->id = RD32(info + 16);
+    if ((mask & 4u) && RD32(info + 20)) { it->sub = RD32(info + 20); it->flags |= 0x10u; }
+    if (((mask & 0x40u) || ((mask & 0x10u) && !(type & 0x900u))) && RD32(info + 36) >= 0x10000u) {
+        if (wide) qw_rd_wstr(w, RD32(info + 36), it->text, 64);
+        else { char t[64]; qw_rd_str(w, RD32(info + 36), t, sizeof(t)); a2w(it->text, t, 64); }
+    }
+    menu_changed(w, a[0]);
+    return 1;
+}
+FN(u_InsertMenuItemA) { return insert_menu_item(w, a, 0); }
+FN(u_InsertMenuItemW) { return insert_menu_item(w, a, 1); }
 FN(u_ModifyMenuW) {
     qmenuitem *it = menu_find(w, a[0], a[1], (a[2] & 0x400) != 0, NULL);
     if (!it) return 0;
@@ -2981,7 +3042,7 @@ const qhle qw_user32[] = {
     U("GetMenu", u_GetMenu, 1), U("SetMenu", u_SetMenu, 2), U("GetSubMenu", u_GetSubMenu, 2), U("GetMenuItemCount", u_GetMenuItemCount, 1),
     U("GetMenuItemID", u_GetMenuItemID, 2), U("CheckMenuItem", u_CheckMenuItem, 3), U("EnableMenuItem", u_EnableMenuItem, 3),
     U("CheckMenuRadioItem", u_CheckMenuRadioItem, 5), U("GetMenuState", u_GetMenuState, 3), U("AppendMenuW", u_AppendMenuW, 4),
-    U("ModifyMenuW", u_ModifyMenuW, 5), U("DeleteMenu", u_DeleteMenu, 3), U("RemoveMenu", u_DeleteMenu, 3), U("GetMenuStringW", u_GetMenuStringW, 5),
+    U("InsertMenuItemA", u_InsertMenuItemA, 4), U("InsertMenuItemW", u_InsertMenuItemW, 4), U("ModifyMenuW", u_ModifyMenuW, 5), U("DeleteMenu", u_DeleteMenu, 3), U("RemoveMenu", u_DeleteMenu, 3), U("GetMenuStringW", u_GetMenuStringW, 5),
     U("DrawMenuBar", u_DrawMenuBar, 1), U("TrackPopupMenu", u_TrackPopupMenu, 7), U("TrackPopupMenuEx", u_TrackPopupMenu, 6),
     U("GetSystemMenu", u_GetSystemMenu, 2), U("SetWindowContextHelpId", u_one, 2), U("WinHelpW", u_one, 4),
     U("SetWindowsHookExW", u_SetWindowsHookEx, 4), U("UnhookWindowsHookEx", u_UnhookWindowsHookEx, 1), U("CallNextHookEx", u_zero, 4),
