@@ -656,7 +656,16 @@ FN(k_VirtualAlloc) {
     r = qw_alloc(w, n + 0x1000);
     return (r + 0xFFFu) & ~0xFFFu;
 }
-FN(k_VirtualFree) { UNUSED; return 1; }
+/* Decommitted pages come back zero when they are committed again, and Delphi's heap counts on it.
+   Nothing is unmapped: a later commit there is what VirtualAlloc above answers. */
+FN(k_VirtualFree) {
+    if (a[2] & 0x4000u) {               /* MEM_DECOMMIT */
+        uint32_t i, from = a[0] & ~0xFFFu, n = (a[1] + (a[0] & 0xFFFu) + 0xFFFu) & ~0xFFFu;
+        if (x86_is_mapped(C, from) && n && x86_is_mapped(C, from + n - 1u)) for (i = 0; i < n; i += 4u) WR32(from + i, 0);
+    }
+    UNUSED;
+    return 1;
+}
 FN(k_VirtualProtect) { if (a[3]) WR32(a[3], 0x04); UNUSED; return 1; }
 FN(k_VirtualQuery) {
     uint32_t p = a[0] & ~0xFFFu, i;

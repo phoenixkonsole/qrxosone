@@ -581,3 +581,33 @@ Both Lucas Learning demos start and show their menus, The Gungan Frontier at up 
 `ChildWindowFromPoint` is new as well, for `pbdemo`.
 
 Both games were run from folders laid out by hand, with the data in `Data\`, because their installers cannot run here. Sound has not been listened to.
+
+## Update 2026-11-07, third part: Virtua Fighter 2 fights, Turok draws in Glide
+
+Virtua Fighter 2's demo goes from the title through the arcade mode and the character profile into a fight, at about 60 flips a second. Turok's demo starts from its launcher and draws 3D scenes through Glide. Neither has been played by hand.
+
+- With an 8-bit DirectDraw mode set, `GetDeviceCaps` now reports a palette device. Virtua Fighter 2 asks before it makes its palette, and used a null pointer without it.
+- A DIB section's pixels live in the program's memory. `GetBitmapBits` read an unused copy and returned nothing, and `GetObject` reported 32 bits. Both now answer from the section, at its depth, with `bmBits` set.
+- Glide 2 gained `guTexAllocateMemory`, `guTexDownloadMipMap`, `guTexSource`, `guTexMemReset`, `guDrawTriangleWithClip`, `grHints`, `grTexDownloadTablePartial` and several calls without an effect. `grDrawLine` draws nothing, and `grLfbLock` refuses, so a program cannot reach the frame buffer.
+- The chip keeps 12 bits of pixel position, and Glide programs add 786432 to snap a float to its grid. Positions now wrap the same way; before, Turok's vertices landed far off screen.
+- In a W buffer the depth comes from `oow`, not `ooz`, and a texture unit's own 1/w counts only after `grHints` asked for it. `glidetest` had set W-buffer mode while it filled only `ooz`, which real hardware would not have drawn as intended. It now sets the Z buffer.
+
+Survey of 66 programs: 11 stop, down from 13, and no program that ran before now stops.
+
+Limits:
+
+- Virtua Fighter 2's sky behind the arena is black, and whether it should be has not been checked.
+- Turok has no fog, as `grFogMode` does nothing, and a later frame after key presses was all black. Why is not known.
+- Turok was run from a folder laid out by hand, with its data in `data\`, and `w95turokdemov101` still stops in the survey because of its flat layout.
+- `turok2demo` and `turok3dfx` were not looked at.
+
+## Update 2026-11-07, fourth part: static TLS, BSTR, fog
+
+- Images with a TLS directory, such as Delphi programs, now get their block. Every thread gets a copy of the template, found through `fs:[2C]`. The indices come from the top of the array that `TlsAlloc` fills from the bottom. TLS callbacks are not run; a message says so when an image has some.
+- `oleaut32` has `SysAllocString`, `SysAllocStringLen`, `SysReAllocStringLen`, `SysFreeString`, `SysStringLen`, `VariantInit`, `VariantClear` and `VariantCopy`, also under their ordinals. `VariantChangeType` refuses every conversion. `OpenProcessToken`, `LookupPrivilegeValueA` and `AdjustTokenPrivileges` fail, and `GetSystemDefaultLCID` is new.
+- `VirtualFree` with `MEM_DECOMMIT` zeroes the pages, because Windows returns decommitted pages zeroed. This did not fix anything seen so far.
+- Glide table fog is mapped to the host's linear fog over w: the table gives where the fog begins and where it is full. Turok's picture did not visibly change, so this is not confirmed to work.
+
+Limits:
+
+- `islepro`, an Inno Setup 2.0.18 installer, now gets past its TLS and stops at `00401b04` in Delphi's memory manager, where text has overwritten the link of a free block. The interpreter stops at the same place, so the JIT is not the cause. Why the block is overwritten is not known.

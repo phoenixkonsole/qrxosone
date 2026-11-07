@@ -348,6 +348,7 @@ int qw_load(qwin *w, const char *path, int argc, char **argv)
     x86_wr32(c, QW_TEB + 0x20, 0x100);
     x86_wr32(c, QW_TEB + 0x24, 0x104);
     x86_wr32(c, QW_TEB + 0x2C, QW_TEB + 0x1000);
+    { extern void qw_tls_new_thread(qwin *w, uint32_t teb); qw_tls_new_thread(w, QW_TEB); }
     x86_wr32(c, QW_TEB + 0x30, QW_PEB);
     x86_wr32(c, QW_PEB + 0x08, w->image_base);
     x86_wr32(c, QW_PEB + 0x18, 0x00150000u);

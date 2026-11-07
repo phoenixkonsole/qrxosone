@@ -264,6 +264,7 @@ static int thread_new(qwin *w, uint32_t start, uint32_t param, void (*cfn)(qwin 
     t->used = 1; t->done = 0; t->waiting = 0; t->suspended = suspended;
     t->id = 0x200u + (uint32_t)i * 4u;
     t->start = start; t->param = param; t->cfn = cfn; t->teb = teb; t->exit_code = 259;  /* STILL_ACTIVE */
+    { extern void qw_tls_new_thread(qwin *w, uint32_t teb); qw_tls_new_thread(w, teb); }
     /* Starts from a copy of the creator's FPU modes, on a clean register set. */
     save_cpu(w, t);
     memset(t->r, 0, sizeof(t->r));

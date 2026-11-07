@@ -23,7 +23,7 @@ int main(void){
     for(int y=0;y<256;y++)for(int x=0;x<256;x++)tex565[y*256+x]=((x/32)^(y/32))&1?0xFFE0:0x001F;
     GrTexInfo ti={0,0,3,0xA,tex565};
     grTexDownloadMipMap(0,0,3,&ti);grTexSource(0,0,3,&ti);
-    grDepthBufferMode(2);grDepthBufferFunction(1);grDepthMask(1);
+    grDepthBufferMode(1);grDepthBufferFunction(1);grDepthMask(1);   /* Z buffer: the depth is in ooz */
     DWORD t0=timeGetTime();
     for(int f=0;f<TEST_FRAMES;f++){
         grBufferClear(0x00200040,0,0xFFFF);

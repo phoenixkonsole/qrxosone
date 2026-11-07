@@ -673,12 +673,15 @@ FN(g_DeleteObject) {
     memset(o, 0, sizeof(*o));
     return 1;
 }
+static int dib_get_bits(qwin *w, uint32_t h, uint32_t bytes, uint32_t out, uint32_t *done);
+static int dib_describe(qwin *w, uint32_t h, uint32_t bitmap);
 /* (bitmap, bytes, buffer): rows of 32 bits per pixel, the depth GetObject reports */
 FN(g_GetBitmapBits) {
     qobj *o = O(w, a[0], GO_BITMAP);
     uint32_t n = 0, total;
     int x, y;
     if (!o || !o->bmp.pix) return 0;
+    if (dib_get_bits(w, a[0], a[1], a[2], &n)) return n;
     total = (uint32_t)o->bmp.w * (uint32_t)o->bmp.h * 4u;
     if (!a[2]) return total;
     for (y = 0; y < o->bmp.h && n + 4u <= a[1]; y++)
@@ -694,6 +697,7 @@ FN(g_GetObjectW) {
         for (i = 0; i < 24; i += 4) WR32(a[2] + i, 0);
         WR32(a[2] + 4, (uint32_t)o->bmp.w); WR32(a[2] + 8, (uint32_t)o->bmp.h); WR32(a[2] + 12, (uint32_t)o->bmp.w * 4);
         x86_wr16(C, a[2] + 16, 1); x86_wr16(C, a[2] + 18, o->mono ? 1 : 32); if (o->mono) WR32(a[2] + 12, (uint32_t)((o->bmp.w + 15) / 16 * 2));
+        dib_describe(w, a[0], a[2]);
         return 24;
     }
     return 0;
@@ -735,6 +739,30 @@ void qw_dib_register(qwin *w, uint32_t hbm, uint32_t mem, uint32_t bmi, int bw, 
     }
 }
 static qdib *dib_of(uint32_t h) { int i; for (i = 0; i < 32; i++) if (g_dib[i].h == h) return &g_dib[i]; return NULL; }
+/* A DIB section's pixels are the program's memory, at its own depth; rows come top line first. */
+static int dib_get_bits(qwin *w, uint32_t h, uint32_t bytes, uint32_t out, uint32_t *done)
+{
+    qdib *d = dib_of(h);
+    uint32_t y, i, n = 0, row;
+    if (!d) return 0;
+    row = (uint32_t)(((d->w * d->bpp + 15) / 16) * 2);
+    if (!out) { *done = row * (uint32_t)d->h_; return 1; }
+    for (y = 0; y < (uint32_t)d->h_; y++) {
+        uint32_t from = d->mem + (d->topdown ? y : (uint32_t)d->h_ - 1u - y) * d->stride;
+        for (i = 0; i < row && n < bytes; i++, n++) x86_wr8(C, out + n, x86_rd8(C, from + i));
+    }
+    *done = n;
+    return 1;
+}
+static int dib_describe(qwin *w, uint32_t h, uint32_t bitmap)
+{
+    qdib *d = dib_of(h);
+    if (!d) return 0;
+    WR32(bitmap + 12, d->stride);
+    x86_wr16(C, bitmap + 18, (uint16_t)d->bpp);
+    WR32(bitmap + 20, d->mem);
+    return 1;
+}
 uint32_t qw_dib_colortable(qwin *w, uint32_t hdc, uint32_t start, uint32_t n, uint32_t rgbq)
 {
     qdc *d = DCP(w, hdc);
@@ -978,6 +1006,8 @@ int qw_needs_256_colours(qwin *w)
     static const char *const names[] = { "SONICCD.EXE", NULL };
     const char *base = strrchr(w->exe_path, '/');
     int i;
+    extern int qw_dd_mode_bpp;
+    if (qw_dd_mode_bpp == 8) return 1;      /* Virtua Fighter 2 asks GDI before it makes a palette */
     if (!base) base = strrchr(w->exe_path, ':');
     base = base ? base + 1 : w->exe_path;
     for (i = 0; names[i]; i++) if (!strcasecmp(base, names[i])) return 1;
