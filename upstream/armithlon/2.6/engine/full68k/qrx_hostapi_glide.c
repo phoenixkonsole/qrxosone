@@ -1,3 +1,4 @@
+#include <math.h>
 /* 3dfx Glide 2.x and 3.x for x86 programs on the host GPU. Vertices come in screen
  * space; the combine units reduce to texture on/off and modulate/replace. */
 #include "qrx_hostapi.h"
@@ -9,6 +10,7 @@
 static QRXHGState st;
 static unsigned win_w=640,win_h=480;
 static bool origin_lower,glide3;
+static bool stw_tmu0,w_buffer;      /* the texture unit has its own 1/w; depth comes from 1/w */
 /* Vertex layout: Glide 2's fixed struct until grVertexLayout says otherwise. */
 static struct { int xy,z,q,a,rgb,pargb,st0,q0; } lay={0,24,32,28,12,-1,36,44};
 static bool tex_on,const_color,const_alpha;
@@ -48,9 +50,15 @@ GF(grBufferSwap){NOARGS;qrx_hg_present();return 0;}
 static inline float vf(x86cpu *c,uint32_t p,int off,float def){return off<0?def:api_float(x86_rd32(c,p+(uint32_t)off));}
 static void make(x86cpu *c,uint32_t p,QRXHGVertex *v){
     float x=vf(c,p,lay.xy,0),y=api_float(x86_rd32(c,p+(uint32_t)lay.xy+4u));
+    /* The chip keeps 12 bits of pixel position. Glide 2 programs add 786432 to snap a float to
+       its grid, as the 3Dfx guide tells them to, and rely on that. */
+    if(x>=4096.f||x<=-4096.f)x-=4096.f*floorf(x/4096.f);
+    if(y>=4096.f||y<=-4096.f)y-=4096.f*floorf(y/4096.f);
     float oow=vf(c,p,lay.q,1),z=vf(c,p,lay.z,0)/65535.f;
     if(oow<=0)oow=1;
     float w=1.f/oow;
+    /* A W buffer does not look at ooz, which programs then leave unset. Nearer is smaller. */
+    if(w_buffer)z=oow<1.f?1.f-oow:0.f;
     float nx=2.f*x/(float)win_w-1.f,ny=2.f*y/(float)win_h-1.f;
     if(!origin_lower)ny=-ny;
     v->x=nx*w;v->y=ny*w;v->z=z*w;v->w=w;
@@ -65,7 +73,8 @@ static void make(x86cpu *c,uint32_t p,QRXHGVertex *v){
     }
     if(lay.pargb<0)v->a=vf(c,p,lay.a,255)/255.f;
     if(const_alpha)v->a=constant[3];
-    float tq=vf(c,p,lay.q0,oow);
+    /* In Glide 2 the unit's own 1/w counts only after grHints said so. */
+    float tq=glide3||stw_tmu0?vf(c,p,lay.q0,oow):oow;
     if(tq<=0)tq=oow;
     v->u=vf(c,p,lay.st0,0)/tq*clip_scale_s;
     v->v=(lay.st0<0?0.f:api_float(x86_rd32(c,p+(uint32_t)lay.st0+4u)))/tq*clip_scale_t;
@@ -132,7 +141,8 @@ GF(grVertexLayout){
     }
     return 0;
 }
-GF(grDepthBufferMode){NOARGS;st.depth_test=a[0]!=0;return 0;}
+GF(grDepthBufferMode){NOARGS;st.depth_test=a[0]!=0;w_buffer=a[0]==2||a[0]==4;return 0;}
+GF(grHints){NOARGS;if(a[0]==0)stw_tmu0=(a[1]&2u)!=0;return 0;}     /* GR_HINT_STWHINT, W_DIFF_TMU0 */
 GF(grDepthBufferFunction){NOARGS;st.depth_func=(uint8_t)(a[0]&7u);return 0;}
 GF(grDepthMask){NOARGS;st.depth_write=a[0]!=0;return 0;}
 GF(grColorMask){NOARGS;st.color_write=a[0]!=0;return 0;}
@@ -248,6 +258,47 @@ GF(grTexTextureMemRequired){
     return (total+7u)&~7u;
 }
 GF(grTexMaxAddress){NOARGS;return 64u*1024u*1024u;}
+/* The Gu calls of Glide 2: the library keeps the texture description behind a number. */
+#define GU_MAX 4096u
+typedef struct { uint32_t fmt; unsigned w,h; uint32_t hg; } GuTex;
+static GuTex gu_tex[GU_MAX];
+static uint32_t gu_count;
+GF(guTexMemReset){NOARGS;gu_count=0;return 0;}
+GF(guTexAllocateMemory){
+    /* tmu, even/odd, width, height, format, mipmap, small lod, large lod, aspect, ... */
+    NOARGS;
+    if(gu_count>=GU_MAX)return 0xFFFFFFFFu;
+    GuTex *t=&gu_tex[gu_count];
+    t->fmt=a[4];
+    tex_dims((int)a[7],(int)a[8],&t->w,&t->h);
+    return gu_count++;
+}
+GF(guTexDownloadMipMap){
+    if(a[0]>=gu_count)return 0;
+    GuTex *t=&gu_tex[a[0]];
+    uint8_t *px=malloc((size_t)t->w*t->h*4u);
+    if(!px)return 0;
+    decode(c,a[1],t->w,t->h,t->fmt,px);
+    t->hg=qrx_hg_texture(t->hg,t->w,t->h,px,true,true,true);
+    free(px);
+    return 0;
+}
+GF(guTexSource){
+    NOARGS;
+    if(a[0]>=gu_count)return 0;
+    const GuTex *t=&gu_tex[a[0]];
+    cur_tex=t->hg;
+    unsigned longest=t->w>t->h?t->w:t->h;
+    clip_scale_s=(float)longest/(float)t->w/256.f;
+    clip_scale_t=(float)longest/(float)t->h/256.f;
+    return 0;
+}
+GF(grTexDownloadTablePartial){
+    /* tmu, type, data, first, last */
+    for(uint32_t i=a[3];i<=a[4]&&i<256u;i++)palette[i]=x86_rd32(c,a[2]+(i-a[3])*4u);
+    return 0;
+}
+GF(grTriStats){if(a[0])x86_wr32(c,a[0],0);if(a[1])x86_wr32(c,a[1],0);return 0;}
 GF(grTexDownloadTable){
     /* Glide 2: (tmu,type,data), Glide 3: (type,data). Palette: 256 ARGB dwords. */
     uint32_t data=glide3?a[1]:a[2];
@@ -270,6 +321,11 @@ GF(grGet){
 }
 #define API(n,na,f) {n,na,f}
 const QRXHostApi qrx_api_glide[]={
+    API("grErrorSetCallback",1,gr_noop),API("grHints",2,grHints),API("grSstIdle",0,gr_noop),API("grBufferNumPending",0,gr_noop),API("grTriStats",2,grTriStats),API("grResetTriStats",0,gr_noop),
+    API("grSstResetPerfStats",0,gr_noop),API("grSstPerfStats",1,gr_noop),API("grFogTable",1,gr_noop),API("grTexCombineFunction",2,gr_noop),API("grDrawLine",2,gr_noop),
+    API("grLfbLock",6,gr_noop),API("grLfbUnlock",2,gr_noop),                     /* FXFALSE: no access to the frame buffer */
+    API("guTexMemReset",0,guTexMemReset),API("guTexAllocateMemory",15,guTexAllocateMemory),API("guTexDownloadMipMap",3,guTexDownloadMipMap),API("guTexSource",1,guTexSource),
+    API("guDrawTriangleWithClip",3,grDrawTriangle),API("grTexDownloadTablePartial",5,grTexDownloadTablePartial),
     API("grGlideInit",0,gr_noop),API("grGlideShutdown",0,gr_noop),API("grSstSelect",1,gr_noop),API("grSstWinClose",0,gr_noop),API("grSstWinOpen",7,grSstWinOpen),
     API("grSstQueryHardware",1,grSstQueryHardware),API("grSstQueryBoards",1,grSstQueryBoards),API("grSstScreenWidth",0,grSstScreenWidth),API("grSstScreenHeight",0,grSstScreenHeight),
     API("grSstOrigin",1,grSstOrigin),API("grBufferClear",3,grBufferClear),API("grBufferSwap",1,grBufferSwap),API("grRenderBuffer",1,gr_noop),API("grFinish",0,gr_noop),API("grFlush",0,gr_noop),

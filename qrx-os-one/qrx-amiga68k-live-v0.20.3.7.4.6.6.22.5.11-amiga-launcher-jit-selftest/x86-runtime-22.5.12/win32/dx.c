@@ -70,6 +70,7 @@ typedef struct dxobj {
     uint8_t prevbtn[3];
 } dxobj;
 #define DX_MAX 1024
+int qw_dd_mode_bpp;                 /* the mode the program last set: GDI answers for it too */
 static dxobj g_o[DX_MAX];
 static uint32_t g_vt[24];           /* guest vtables per interface */
 enum { VT_DD, VT_DD2, VT_SURF, VT_PAL, VT_CLIP, VT_DS, VT_DSB, VT_DI, VT_DID };
@@ -621,6 +622,7 @@ static uint32_t set_mode(qwin *w, uint32_t self, uint32_t mw, uint32_t mh, uint3
 void qw_dd_toggle_window(qwin *w)
 {
     int i;
+    qw_dd_mode_bpp = (int)bpp;
     for (i = 0; i < DX_MAX; i++) {
         dxobj *dd = &g_o[i];
         qwnd *t;
@@ -1109,14 +1111,6 @@ FN(b_QueryInterface) {
     return E_NOINTERFACE;
 }
 FN(b3d_Get) { UNUSED; WR32(a[1], 0); return DD_OK; }
-    if (a[1] && a[2] >= 16) {
-        x86_wr16(C, a[1], 1); x86_wr16(C, a[1] + 2, (uint16_t)b->chans);
-        WR32(a[1] + 4, b->rate); WR32(a[1] + 8, b->bps); x86_wr16(C, a[1] + 12, (uint16_t)b->align); x86_wr16(C, a[1] + 14, (uint16_t)b->bits);
-    }
-    return DD_OK;
-}
-FN(b_GetVolume) { dxobj *b = ob(w, a[0], OB_DSB); WR32(a[1], b ? (uint32_t)b->vol : 0); return DD_OK; }
-FN(b_GetPan) { dxobj *b = ob(w, a[0], OB_DSB); WR32(a[1], b ? (uint32_t)b->pan : 0); return DD_OK; }
 FN(b_AddRef) { return addref(ob(w, a[0], OB_DSB)); }
 FN(b_Release) { dxobj *o = ob(w, a[0], OB_DSB); if (!o) return 0; if (--o->refs > 0) return (uint32_t)o->refs; ds_host(w, o, DS_FREE, 0); obj_free(w, o); return 0; }
 FN(b_GetCaps) { dxobj *b = ob(w, a[0], OB_DSB); if (!b) return DDERR_INVALIDPARAMS; WR32(a[1] + 4, b->primbuf ? 1u : 0x20u); WR32(a[1] + 8, b->size); WR32(a[1] + 12, 0); WR32(a[1] + 16, 0); return DD_OK; }
@@ -1133,6 +1127,14 @@ FN(b_Lock) {                             /* (this, off, bytes, p1, n1, p2, n2, f
     if (!b || !b->size) return DDERR_INVALIDPARAMS;
     if (a[7] & 1) off = (play_pos(w, b) + b->align * 64) % b->size;    /* FROMWRITECURSOR */
     if (a[7] & 2) { off = 0; n = b->size; }                            /* ENTIREBUFFER */
+    if (a[1] && a[2] >= 16) {
+        x86_wr16(C, a[1], 1); x86_wr16(C, a[1] + 2, (uint16_t)b->chans);
+        WR32(a[1] + 4, b->rate); WR32(a[1] + 8, b->bps); x86_wr16(C, a[1] + 12, (uint16_t)b->align); x86_wr16(C, a[1] + 14, (uint16_t)b->bits);
+    }
+    return DD_OK;
+}
+FN(b_GetVolume) { dxobj *b = ob(w, a[0], OB_DSB); WR32(a[1], b ? (uint32_t)b->vol : 0); return DD_OK; }
+FN(b_GetPan) { dxobj *b = ob(w, a[0], OB_DSB); WR32(a[1], b ? (uint32_t)b->pan : 0); return DD_OK; }
     off %= b->size;
     if (n > b->size) n = b->size;
     if (off + n <= b->size) {
@@ -1654,14 +1656,6 @@ static const vslot vt_b3d[] = {
     V("SetMaxDistance", dd_ok, 3), V("SetMinDistance", dd_ok, 3), V("SetMode", dd_ok, 3), V("SetPosition", dd_ok, 5), V("SetVelocity", dd_ok, 5),
     { NULL, NULL, 0, NULL }
 };
-static const vslot vt_di[] = {
-    V("QueryInterface", di_QueryInterface, 3), V("AddRef", di_AddRef, 1), V("Release", di_Release, 1),
-    V("CreateDevice", di_CreateDevice, 4), V("EnumDevices", di_EnumDevices, 5), V("GetDeviceStatus", di_GetDeviceStatus, 2),
-    V("RunControlPanel", dd_ok, 3), V("Initialize", dd_ok, 3), { NULL, NULL, 0, NULL }
-};
-static const vslot vt_did[] = {             /* IDirectInputDevice2A (prefix: IDirectInputDeviceA) */
-    V("QueryInterface", dv_QueryInterface, 3), V("AddRef", dv_AddRef, 1), V("Release", dv_Release, 1),
-    V("GetCapabilities", dv_GetCapabilities, 2), V("EnumObjects", dv_ok, 4), V("GetProperty", dv_ok, 3), V("SetProperty", dv_ok, 3),
 static const vslot vt_dsb[] = {
     V("QueryInterface", b_QueryInterface, 3), V("AddRef", b_AddRef, 1), V("Release", b_Release, 1), V("GetCaps", b_GetCaps, 2),
     V("GetCurrentPosition", b_GetCurrentPosition, 3), V("GetFormat", b_GetFormat, 4), V("GetVolume", b_GetVolume, 2),
@@ -1678,6 +1672,14 @@ static const vslot vt_dsb[] = {
     V("SendDeviceData", dv_ok, 5), { NULL, NULL, 0, NULL }
 };
 
+static const vslot vt_di[] = {
+    V("QueryInterface", di_QueryInterface, 3), V("AddRef", di_AddRef, 1), V("Release", di_Release, 1),
+    V("CreateDevice", di_CreateDevice, 4), V("EnumDevices", di_EnumDevices, 5), V("GetDeviceStatus", di_GetDeviceStatus, 2),
+    V("RunControlPanel", dd_ok, 3), V("Initialize", dd_ok, 3), { NULL, NULL, 0, NULL }
+};
+static const vslot vt_did[] = {             /* IDirectInputDevice2A (prefix: IDirectInputDeviceA) */
+    V("QueryInterface", dv_QueryInterface, 3), V("AddRef", dv_AddRef, 1), V("Release", dv_Release, 1),
+    V("GetCapabilities", dv_GetCapabilities, 2), V("EnumObjects", dv_ok, 4), V("GetProperty", dv_ok, 3), V("SetProperty", dv_ok, 3),
 /* HLE table entries for the vtable slots ("ddraw", "IDirectDraw::CreateSurface" ...) */
 
 #define VD(n, c) VG(n, lg_ok, c)
