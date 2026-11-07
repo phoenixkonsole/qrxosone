@@ -531,3 +531,15 @@ Max Payne's demo now draws its loading screen through Direct3D 8 on the host, wi
 What the stop looks like: after the last frame the game loads a few more textures, then runs a loop at about 780 passes a second that calls `PeekMessage`, the DirectInput devices, `QueryPerformanceCounter` and `GetFileAttributes("C:\\data")`, and calls Direct3D no more. The interpreter behaves the same, so the JIT is not the cause.
 
 Ruled out: key presses, and making `SetForegroundWindow` and `SetActiveWindow` real, which changed nothing and was taken out again. All calls in the loop return success. The `-developer` switch creates `verbose_<computer>.txt`, but it stayed empty in these runs. The cause is not known.
+
+## Update 2026-11-07, second part: The Gungan Frontier and Pit Droids reach their menus
+
+Both Lucas Learning demos start and show their menus, The Gungan Frontier at up to 61 frames a second. Input reaches them in a test with timed keys and clicks; neither has been played further than that.
+
+- The version API returned nothing, and both games read the answer without checking it. Everything in `C:\WINDOWS\SYSTEM` and our system DLLs now report version 4.08.00.400. Other files still report no version.
+- `FindFirstFile` also finds `DDHELP.EXE`, `DDRAW16.DLL`, `DSOUND.VXD`, `D3DIM.DLL` and `D3DRM.DLL` in the system folder, which these games look for.
+- `IDirectSound::GetCaps` reported wrong flags and no sample rates. It now reports mono and stereo, 8 and 16 bit, and rates from 100 to 100000 Hz.
+
+`ChildWindowFromPoint` is new as well, for `pbdemo`.
+
+Both games were run from folders laid out by hand, with the data in `Data\`, because their installers cannot run here. Sound has not been listened to.
