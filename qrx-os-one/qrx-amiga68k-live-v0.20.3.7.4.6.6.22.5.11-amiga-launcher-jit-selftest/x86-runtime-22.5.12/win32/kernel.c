@@ -653,6 +653,13 @@ FN(k_VirtualAlloc) {
     /* Reserve first, commit page by page later: a commit inside memory the program already got
        is that memory. The heap of Microsoft's C runtime works this way. */
     if (a[0] && x86_is_mapped(C, a[0]) && (!n || x86_is_mapped(C, a[0] + n - 1u))) return a[0] & ~0xFFFu;
+    /* An address that is free is the program's to have, as under Windows: Sonic & Knuckles asks
+       for fixed ones and then uses them without looking at the answer. A reservation starts on
+       a 64 KB boundary. */
+    if (a[0] && a[0] < QW_HEAP_BASE && !x86_is_mapped(C, a[0])) {
+        uint32_t from = (a[2] & 0x2000u) ? a[0] & ~0xFFFFu : a[0] & ~0xFFFu, len = (a[0] + n - from + 0xFFFu) & ~0xFFFu;
+        if (x86_map(C, from, len, 1)) return from;
+    }
     r = qw_alloc(w, n + 0x1000);
     return (r + 0xFFFu) & ~0xFFFu;
 }

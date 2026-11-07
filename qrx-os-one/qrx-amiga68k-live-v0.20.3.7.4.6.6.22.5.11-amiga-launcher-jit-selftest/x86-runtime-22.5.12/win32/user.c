@@ -2075,6 +2075,11 @@ FN(u_AdjustWindowRectEx) {
     return 1;
 }
 FN(u_AdjustWindowRect) { uint32_t b[4]; b[0] = a[0]; b[1] = a[1]; b[2] = a[2]; b[3] = 0; return u_AdjustWindowRectEx(w, b); }
+void qw_client_origin(qwin *w, uint32_t h, int *x, int *y)
+{
+    qwnd *t = W(w, h);
+    if (t) client_screen(w, t, x, y);
+}
 FN(u_ClientToScreen) { qwnd *x = W(w, a[0]); int sx, sy; if (!x) return 0; client_screen(w, x, &sx, &sy); WR32(a[1], RD32(a[1]) + (uint32_t)sx); WR32(a[1] + 4, RD32(a[1] + 4) + (uint32_t)sy); return 1; }
 FN(u_ScreenToClient) { qwnd *x = W(w, a[0]); int sx, sy; if (!x) return 0; client_screen(w, x, &sx, &sy); WR32(a[1], RD32(a[1]) - (uint32_t)sx); WR32(a[1] + 4, RD32(a[1] + 4) - (uint32_t)sy); return 1; }
 FN(u_MapWindowPoints) {

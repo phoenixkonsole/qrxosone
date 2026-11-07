@@ -1003,7 +1003,7 @@ FN(g_Polygon) {
  * user change it; here the desktop is whatever the program wants to hear. */
 int qw_needs_256_colours(qwin *w)
 {
-    static const char *const names[] = { "SONICCD.EXE", NULL };
+    static const char *const names[] = { "SONICCD.EXE", "SONIC3K.EXE", NULL };
     const char *base = strrchr(w->exe_path, '/');
     int i;
     extern int qw_dd_mode_bpp;

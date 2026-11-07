@@ -573,3 +573,11 @@ Limits:
 Limits:
 
 - `islepro`, an Inno Setup 2.0.18 installer, now gets past its TLS and stops at `00401b04` in Delphi's memory manager, where text has overwritten the link of a free block. The interpreter stops at the same place, so the JIT is not the cause. Why the block is overwritten is not known.
+
+## Update 2026-11-07, fifth part: Sonic & Knuckles shows its intro
+
+The Sonic & Knuckles demo shows its intro with correct colours at about 38 frames a second. Stretching its 8-bit picture takes about 4.6 of every 10 seconds. It has not been played, and key presses in a test did not visibly end the intro.
+
+- `VirtualAlloc` gives a program a free address it asks for, below the heap. A reservation starts on a 64 KB boundary, as on Windows. The game asks for fixed addresses and uses them without looking at the answer.
+- The game draws in a palette and expects a 256 colour desktop, so it joins Sonic CD on the list of programs that are told so.
+- `SetClipper` is no longer ignored. A primary surface with a clipper is drawn on in screen coordinates, and ours shows only the window, so the window's position is taken off the destination.

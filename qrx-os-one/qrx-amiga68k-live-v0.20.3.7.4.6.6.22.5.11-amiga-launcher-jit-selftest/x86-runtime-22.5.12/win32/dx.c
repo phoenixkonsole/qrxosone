@@ -39,6 +39,7 @@ typedef struct dxobj {
     /* DirectDraw */
     uint32_t hwnd;
     int mw, mh, mbpp, exclusive;
+    uint32_t clipper;                /* a surface's clipper, as the guest knows it */
     int drawn[4];                       /* surface: where the last Blt on it went */
     /* surface */
     int sw, sh, bpp, pitch, primary, back, offscreen;
@@ -755,9 +756,21 @@ FN(s_Blt) {                              /* (this, destrect, src, srcrect, flags
     uint32_t fl = a[4], fx = a[5];
     int dr[4], sr[4];
     if (!d) return DDERR_INVALIDPARAMS;
-    if (!rect_of(w, a[1], dr, d->sw, d->sh)) return DD_OK;
+    /* A primary with a clipper is drawn on in screen coordinates. Ours shows only the window. */
+    {
+        dxobj *cl = d->primary && d->clipper && d->sw < 1024 ? ob(w, d->clipper, OB_CLIP) : NULL;
+        if (cl && cl->hwnd && a[1]) {
+            extern void qw_client_origin(qwin *w, uint32_t h, int *x, int *y);
+            int ox = 0, oy = 0;
+            qw_client_origin(w, cl->hwnd, &ox, &oy);
+            dr[0] = (int32_t)RD32(a[1]) - ox; dr[1] = (int32_t)RD32(a[1] + 4) - oy;
+            dr[2] = (int32_t)RD32(a[1] + 8) - ox; dr[3] = (int32_t)RD32(a[1] + 12) - oy;
+            if (dr[2] <= dr[0] || dr[3] <= dr[1]) return DD_OK;
+        } else if (!rect_of(w, a[1], dr, d->sw, d->sh)) return DD_OK;
+    }
     if (fl & 0x400) {                                                  /* COLORFILL */
         fill(w, d, dr, fx ? RD32(fx + 80) : 0);
+FN(s_SetClipper) { dxobj *d = sf(w, a[0]); if (d) d->clipper = a[1]; return DD_OK; }
         after_draw(w, d);
         return DD_OK;
     }
@@ -1119,14 +1132,6 @@ FN(b_GetFormat) {
     dxobj *b = ob(w, a[0], OB_DSB);
     if (!b) return DDERR_INVALIDPARAMS;
     if (a[3]) WR32(a[3], 18);
-FN(b_GetFrequency) { dxobj *b = ob(w, a[0], OB_DSB); WR32(a[1], b ? b->freq : 22050); return DD_OK; }
-FN(b_GetStatus) { dxobj *b = ob(w, a[0], OB_DSB); uint32_t st = 0; if (b) { play_pos(w, b); if (b->playing) st = 1 | (b->looping ? 4u : 0u); } WR32(a[1], st); return DD_OK; }
-FN(b_Lock) {                             /* (this, off, bytes, p1, n1, p2, n2, flags) */
-    dxobj *b = ob(w, a[0], OB_DSB);
-    uint32_t off = a[1], n = a[2];
-    if (!b || !b->size) return DDERR_INVALIDPARAMS;
-    if (a[7] & 1) off = (play_pos(w, b) + b->align * 64) % b->size;    /* FROMWRITECURSOR */
-    if (a[7] & 2) { off = 0; n = b->size; }                            /* ENTIREBUFFER */
     if (a[1] && a[2] >= 16) {
         x86_wr16(C, a[1], 1); x86_wr16(C, a[1] + 2, (uint16_t)b->chans);
         WR32(a[1] + 4, b->rate); WR32(a[1] + 8, b->bps); x86_wr16(C, a[1] + 12, (uint16_t)b->align); x86_wr16(C, a[1] + 14, (uint16_t)b->bits);
@@ -1143,6 +1148,14 @@ FN(b_GetPan) { dxobj *b = ob(w, a[0], OB_DSB); WR32(a[1], b ? (uint32_t)b->pan :
         if (a[6]) WR32(a[6], 0);
     } else {
         WR32(a[3], b->mem + off); WR32(a[4], b->size - off);
+FN(b_GetFrequency) { dxobj *b = ob(w, a[0], OB_DSB); WR32(a[1], b ? b->freq : 22050); return DD_OK; }
+FN(b_GetStatus) { dxobj *b = ob(w, a[0], OB_DSB); uint32_t st = 0; if (b) { play_pos(w, b); if (b->playing) st = 1 | (b->looping ? 4u : 0u); } WR32(a[1], st); return DD_OK; }
+FN(b_Lock) {                             /* (this, off, bytes, p1, n1, p2, n2, flags) */
+    dxobj *b = ob(w, a[0], OB_DSB);
+    uint32_t off = a[1], n = a[2];
+    if (!b || !b->size) return DDERR_INVALIDPARAMS;
+    if (a[7] & 1) off = (play_pos(w, b) + b->align * 64) % b->size;    /* FROMWRITECURSOR */
+    if (a[7] & 2) { off = 0; n = b->size; }                            /* ENTIREBUFFER */
         if (a[5]) WR32(a[5], b->mem);
         if (a[6]) WR32(a[6], n - (b->size - off));
     }
@@ -1624,7 +1637,7 @@ static const vslot vt_surf[] = {           /* IDirectDrawSurface + Surface2 + Su
     V("GetClipper", NULL, 2), V("GetColorKey", s_GetColorKey, 3), V("GetDC", s_GetDC, 2), V("GetFlipStatus", dd_ok, 2),
     V("GetOverlayPosition", NULL, 3), V("GetPalette", s_GetPalette, 2), V("GetPixelFormat", s_GetPixelFormat, 2),
     V("GetSurfaceDesc", s_GetSurfaceDesc, 2), V("Initialize", dd_ok, 3), V("IsLost", s_IsLost, 1), V("Lock", s_Lock, 5),
-    V("ReleaseDC", s_ReleaseDC, 2), V("Restore", dd_ok, 1), V("SetClipper", dd_ok, 2), V("SetColorKey", s_SetColorKey, 3),
+    V("ReleaseDC", s_ReleaseDC, 2), V("Restore", dd_ok, 1), V("SetClipper", s_SetClipper, 2), V("SetColorKey", s_SetColorKey, 3),
     V("SetOverlayPosition", dd_ok, 3), V("SetPalette", s_SetPalette, 2), V("Unlock", s_Unlock, 2), V("UpdateOverlay", dd_ok, 6),
     V("UpdateOverlayDisplay", dd_ok, 2), V("UpdateOverlayZOrder", dd_ok, 3),
     V("GetDDInterface", s_GetDDInterface, 2), V("PageLock", dd_ok, 2), V("PageUnlock", dd_ok, 2), V("SetSurfaceDesc", s_SetSurfaceDesc, 3),
@@ -1664,14 +1677,6 @@ static const vslot vt_dsb[] = {
     V("SetVolume", b_SetVolume, 2), V("SetPan", b_SetPan, 2), V("SetFrequency", b_SetFrequency, 2), V("Stop", b_Stop, 1),
     V("Unlock", b_Unlock, 5), V("Restore", dd_ok, 1), { NULL, NULL, 0, NULL }
 };
-    V("Acquire", dv_ok, 1), V("Unacquire", dv_ok, 1), V("GetDeviceState", dv_GetDeviceState, 3), V("GetDeviceData", dv_GetDeviceData, 5),
-    V("SetDataFormat", dv_ok, 2), V("SetEventNotification", dv_SetEventNotification, 2), V("SetCooperativeLevel", dv_ok, 3),
-    V("GetObjectInfo", NULL, 4), V("GetDeviceInfo", NULL, 2), V("RunControlPanel", dv_ok, 3), V("Initialize", dv_ok, 4),
-    V("CreateEffect", NULL, 5), V("EnumEffects", dv_ok, 4), V("GetEffectInfo", NULL, 3), V("GetForceFeedbackState", NULL, 2),
-    V("SendForceFeedbackCommand", dv_ok, 2), V("EnumCreatedEffectObjects", dv_ok, 4), V("Escape", NULL, 2), V("Poll", dv_ok, 1),
-    V("SendDeviceData", dv_ok, 5), { NULL, NULL, 0, NULL }
-};
-
 static const vslot vt_di[] = {
     V("QueryInterface", di_QueryInterface, 3), V("AddRef", di_AddRef, 1), V("Release", di_Release, 1),
     V("CreateDevice", di_CreateDevice, 4), V("EnumDevices", di_EnumDevices, 5), V("GetDeviceStatus", di_GetDeviceStatus, 2),
@@ -1688,6 +1693,14 @@ static const vslot vt_d3d2[] = { LG_COM, VG("EnumDevices", lg_EnumDevices23, 3),
     VG("CreateViewport", lg_CreateViewport, 3), VG("FindDevice", lg_FindDevice, 3), VG("CreateDevice", lg_CreateDevice2, 4), { NULL, NULL, 0, NULL } };
 static const vslot vt_d3d3[] = { LG_COM, VG("EnumDevices", lg_EnumDevices23, 3), VG("CreateLight", lg_CreateLight, 3), VG("CreateMaterial", lg_CreateMaterial, 3),
     VG("CreateViewport", lg_CreateViewport, 3), VG("FindDevice", lg_FindDevice, 3), VG("CreateDevice", lg_CreateDevice3, 5), VG("CreateVertexBuffer", lg_CreateVertexBuffer, 5),
+    V("Acquire", dv_ok, 1), V("Unacquire", dv_ok, 1), V("GetDeviceState", dv_GetDeviceState, 3), V("GetDeviceData", dv_GetDeviceData, 5),
+    V("SetDataFormat", dv_ok, 2), V("SetEventNotification", dv_SetEventNotification, 2), V("SetCooperativeLevel", dv_ok, 3),
+    V("GetObjectInfo", NULL, 4), V("GetDeviceInfo", NULL, 2), V("RunControlPanel", dv_ok, 3), V("Initialize", dv_ok, 4),
+    V("CreateEffect", NULL, 5), V("EnumEffects", dv_ok, 4), V("GetEffectInfo", NULL, 3), V("GetForceFeedbackState", NULL, 2),
+    V("SendForceFeedbackCommand", dv_ok, 2), V("EnumCreatedEffectObjects", dv_ok, 4), V("Escape", NULL, 2), V("Poll", dv_ok, 1),
+    V("SendDeviceData", dv_ok, 5), { NULL, NULL, 0, NULL }
+};
+
     VG("EnumZBufferFormats", lg_EnumZBufferFormats, 4), VD("EvictManagedTextures", 1), { NULL, NULL, 0, NULL } };
 static const vslot vt_d3d7[] = { LG_COM, VG("EnumDevices", lg_EnumDevices7, 3), VG("CreateDevice", lg_CreateDevice7, 4), VG("CreateVertexBuffer", lg_CreateVertexBuffer, 4),
     VG("EnumZBufferFormats", lg_EnumZBufferFormats, 4), VD("EvictManagedTextures", 1), { NULL, NULL, 0, NULL } };
