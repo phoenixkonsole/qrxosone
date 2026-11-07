@@ -518,3 +518,16 @@ Limits:
 - Static text in some MFC dialogs stays empty and a check box label is cut off in Monster Truck Madness 2.
 - Under the JIT a jump to address 0 hangs where the interpreter reports the fault. Use `QRX86_NOJIT` when a program stops without a message.
 - Diablo's shareware program stops at the message `exp1:C:\Diablo\Spawn`, not examined.
+
+## Update 2026-11-07: Max Payne reaches its loading screen
+
+Max Payne's demo now draws its loading screen through Direct3D 8 on the host, with correct textures and a moving bar. After 12 frames it stops presenting, so it is still not playable.
+
+- New in the Direct3D 8 and 9 wrappers: surfaces for texture levels and free memory (`GetSurfaceLevel`, `GetDesc`, `LockRect`, `UnlockRect`, `GetLevelDesc`, `GetLevelCount`), and `CreateImageSurface`, `CopyRects` and `UpdateTexture`.
+- Also new: `ValidateDevice`, `GetAvailableTextureMem`, `ResourceManagerDiscardBytes`, and `SetPixelShader` on Direct3D 8, which accepts the call and does nothing.
+- `CheckDeviceFormat` no longer accepts everything: it answers yes only for formats `CreateTexture` can handle and for depth formats. DXT is therefore refused, and a game has to choose another format. `CheckDeviceMultiSampleType` accepts "no multisampling", which it refused before.
+- `QRX_D3D_LOG=1` now also names Direct3D calls that return a failure.
+
+What the stop looks like: after the last frame the game loads a few more textures, then runs a loop at about 780 passes a second that calls `PeekMessage`, the DirectInput devices, `QueryPerformanceCounter` and `GetFileAttributes("C:\\data")`, and calls Direct3D no more. The interpreter behaves the same, so the JIT is not the cause.
+
+Ruled out: key presses, and making `SetForegroundWindow` and `SetActiveWindow` real, which changed nothing and was taken out again. All calls in the loop return success. The `-developer` switch creates `verbose_<computer>.txt`, but it stayed empty in these runs. The cause is not known.
