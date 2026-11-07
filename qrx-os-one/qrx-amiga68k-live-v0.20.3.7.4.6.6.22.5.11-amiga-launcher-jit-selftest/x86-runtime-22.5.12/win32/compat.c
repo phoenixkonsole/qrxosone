@@ -1645,12 +1645,56 @@ void qw_midi_tick(qwin *w)
 }
 
 /* ================================================================ system DLLs as files */
+/* Our system DLLs have a version too: games refuse to start below the DirectX they need, and
+ * The Gungan Frontier reads the answer without checking it. As in a real block, the fixed part
+ * follows a header of 0x28 bytes. Other files report none: reading theirs is not done. */
+#define VER_BLOCK 0x100u
+#define VER_FIXED 0x28u
+static int version_is_system(qwin *w, uint32_t path)
+{
+    char p[300];
+    const char *b;
+    rd_str(w, path, p, sizeof(p));
+    b = strrchr(p, '\\');
+    /* DDHELP.EXE and such are asked for too: all of the system folder has our version. */
+    if (!strncasecmp(p, "C:\\WINDOWS\\SYSTEM", 17)) return 1;
+    return qw_is_hle_dll(b ? b + 1 : p);
+}
+FN(c_GetFileVersionInfoSizeA) {
+    if (a[1]) WR32(a[1], 0);
+    return version_is_system(w, a[0]) ? VER_BLOCK : 0;
+}
+FN(c_GetFileVersionInfoA) {
+    uint32_t i;
+    if (!version_is_system(w, a[0]) || a[2] < VER_BLOCK) return 0;
+    for (i = 0; i < VER_BLOCK; i += 4) WR32(a[3] + i, 0);
+    WR32(a[3], VER_BLOCK | (0x34u << 16));
+    WR32(a[3] + VER_FIXED, 0xFEEF04BDu);
+    WR32(a[3] + VER_FIXED + 4, 0x00010000u);
+    /* 4.08.00.400, DirectX 8 */
+    WR32(a[3] + VER_FIXED + 8, 0x00040008u); WR32(a[3] + VER_FIXED + 12, 0x00000190u);
+    WR32(a[3] + VER_FIXED + 16, 0x00040008u); WR32(a[3] + VER_FIXED + 20, 0x00000190u);
+    return 1;
+}
+FN(c_VerQueryValueA) {
+    char q[64];
+    rd_str(w, a[1], q, sizeof(q));
+    if (a[2]) WR32(a[2], 0);
+    if (a[3]) WR32(a[3], 0);
+    if (strcmp(q, "\\") || RD32(a[0] + VER_FIXED) != 0xFEEF04BDu) return 0;
+    if (a[2]) WR32(a[2], a[0] + VER_FIXED);
+    if (a[3]) WR32(a[3], 0x34u);
+    return 1;
+}
 /* Some engines look for ddraw.dll in the system directory before loading it. */
 #define FIND_FAKE 0x7E700001u
 static int is_system_dll_path(const char *p)
 {
     const char *b = strrchr(p, '\\');
+    static const char *const helpers[] = { "ddhelp.exe", "ddraw16.dll", "dsound.vxd", "d3dim.dll", "d3drm.dll", NULL };   /* the rest of DirectX */
+    int i;
     if (strncasecmp(p, "C:\\WINDOWS\\SYSTEM", 17) || !b) return 0;
+    for (i = 0; helpers[i]; i++) if (!strcasecmp(b + 1, helpers[i])) return 1;
     return qw_is_hle_dll(b + 1);
 }
 FN(c_FindFirstFileA) {
@@ -1944,7 +1988,7 @@ const qhle qw_compat[] = {
     { "comctl32", "ImageList_Create", 5, c_ok1 }, { "comctl32", "ImageList_Add", 3, c_ok0 }, { "comctl32", "ImageList_Destroy", 1, c_ok1 },
     { "imm32", "ImmGetContext", 1, c_ok0 }, { "imm32", "ImmReleaseContext", 2, c_ok1 }, { "imm32", "ImmSetOpenStatus", 2, c_ok1 }, { "imm32", "ImmGetOpenStatus", 1, c_ok0 },
     { "imm32", "ImmAssociateContext", 2, c_ok0 }, { "imm32", "ImmNotifyIME", 4, c_ok1 }, { "imm32", "ImmGetDefaultIMEWnd", 1, c_ok0 },
-    { "version", "GetFileVersionInfoSizeA", 2, c_FileVersionNone }, { "version", "GetFileVersionInfoA", 4, c_FileVersionNone }, { "version", "VerQueryValueA", 4, c_FileVersionNone },
+    { "version", "GetFileVersionInfoSizeA", 2, c_GetFileVersionInfoSizeA }, { "version", "GetFileVersionInfoA", 4, c_GetFileVersionInfoA }, { "version", "VerQueryValueA", 4, c_VerQueryValueA },
     { "msacm32", "acmMetrics", 3, c_acmMetrics }, { "msacm32", "acmStreamOpen", 8, c_acmNoDriver }, { "msacm32", "acmStreamClose", 2, c_ok0 }, { "msacm32", "acmStreamSize", 4, c_acmNoDriver },
     { "msacm32", "acmStreamPrepareHeader", 3, c_acmNoDriver }, { "msacm32", "acmStreamUnprepareHeader", 3, c_ok0 }, { "msacm32", "acmStreamConvert", 3, c_acmNoDriver },
     { "kernel32", "LoadLibraryExA", 3, c_LoadLibraryExA }, { "kernel32", "DisableThreadLibraryCalls", 1, c_ok1 },

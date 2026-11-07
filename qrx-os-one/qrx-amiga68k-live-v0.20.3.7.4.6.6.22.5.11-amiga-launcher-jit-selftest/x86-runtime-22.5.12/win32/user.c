@@ -1867,6 +1867,17 @@ FN(u_CreateWindowExW) {
     if (a[2] >= 0x10000u) qw_rd_wstr(w, a[2], t, 256); else t[0] = 0;
     return create_window(w, a[0], c, t, a[3], (int32_t)a[4], (int32_t)a[5], (int32_t)a[6], (int32_t)a[7], a[8], a[9], a[10], a[11]);
 }
+/* (hwnd, POINT by value in client coordinates): a direct child there, else the window itself. */
+FN(u_ChildWindowFromPoint) {
+    qwnd *p = W(w, a[0]), *c;
+    int x = (int32_t)a[1], y = (int32_t)a[2], i;
+    if (!p || x < 0 || y < 0 || x >= p->cw || y >= p->ch) return 0;
+    for (i = QW_MAXWND - 1; i > 0; i--) {
+        c = &w->wnd[i];
+        if (c->used && !c->destroyed && c->parent == p->h && (c->style & WS_CHILD) && x >= c->x && y >= c->y && x < c->x + c->cw && y < c->y + c->ch) return c->h;
+    }
+    return p->h;
+}
 FN(u_DestroyWindow) { qwnd *x = W(w, a[0]); if (!x) return 0; win_destroy(w, x); return 1; }
 FN(u_ShowWindow) {
     qwnd *x = W(w, a[0]);
@@ -3020,7 +3031,7 @@ const qhle qw_user32[] = {
     U("SetDlgItemTextW", u_SetDlgItemTextW, 3), U("GetDlgItemTextW", u_GetDlgItemTextW, 4), U("SetDlgItemInt", u_SetDlgItemInt, 4),
     U("GetDlgItemInt", u_GetDlgItemInt, 4), U("CheckDlgButton", u_CheckDlgButton, 3), U("IsDlgButtonChecked", u_IsDlgButtonChecked, 2),
     U("CheckRadioButton", u_CheckRadioButton, 4), U("SendDlgItemMessageW", u_SendDlgItemMessageW, 5), U("GetClassNameW", u_GetClassNameW, 3),
-    U("EnumChildWindows", u_EnumChildWindows, 3), U("SetFocus", u_SetFocus, 1), U("GetFocus", u_GetFocus, 0),
+    U("EnumChildWindows", u_EnumChildWindows, 3), U("SetFocus", u_SetFocus, 1), U("ChildWindowFromPoint", u_ChildWindowFromPoint, 3), U("GetFocus", u_GetFocus, 0),
     U("SetCapture", u_SetCapture, 1), U("ReleaseCapture", u_ReleaseCapture, 0), U("GetCapture", u_GetCapture, 0),
     U("GetActiveWindow", u_GetActiveWindow, 0), U("GetForegroundWindow", u_GetActiveWindow, 0), U("SetActiveWindow", u_SetActiveWindow, 1),
     U("SetForegroundWindow", u_one, 1), U("BringWindowToTop", u_one, 1), U("FindWindowW", u_FindWindowW, 2),

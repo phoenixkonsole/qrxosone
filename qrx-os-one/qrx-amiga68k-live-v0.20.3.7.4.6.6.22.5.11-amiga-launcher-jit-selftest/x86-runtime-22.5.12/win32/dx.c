@@ -1079,7 +1079,9 @@ FN(ds_CreateSoundBuffer) {               /* (this, desc, pp, outer) */
     if (w->verbose) qw_log(w, "DirectSound: buffer %u bytes %u Hz%s", b->size, b->rate, b->primbuf ? " primary" : "");
     return DD_OK;
 }
-FN(ds_GetCaps) { uint32_t sz = RD32(a[1]), k; UNUSED; for (k = 4; k < sz && k < 200; k += 4) WR32(a[1] + k, 0); WR32(a[1] + 4, 0x1F00); return DD_OK; }
+FN(ds_GetCaps) { uint32_t sz = RD32(a[1]), k; UNUSED; for (k = 4; k < sz && k < 200; k += 4) WR32(a[1] + k, 0); WR32(a[1] + 4, 0x0F1Fu);   /* mono, stereo, 8 and 16 bit on both buffer kinds, any rate */
+    WR32(a[1] + 8, 100u); WR32(a[1] + 12, 100000u); WR32(a[1] + 16, 1u);   /* secondary rates, one primary buffer */
+    return DD_OK; }
 FN(ds_DuplicateSoundBuffer) {
     dxobj *s = ob(w, a[1], OB_DSB);
     int i;
@@ -1092,14 +1094,6 @@ FN(ds_DuplicateSoundBuffer) {
     return DD_OK;
 }
 FN(ds_GetSpeakerConfig) { UNUSED; WR32(a[1], 4); return DD_OK; }
-FN(b_AddRef) { return addref(ob(w, a[0], OB_DSB)); }
-FN(b_Release) { dxobj *o = ob(w, a[0], OB_DSB); if (!o) return 0; if (--o->refs > 0) return (uint32_t)o->refs; ds_host(w, o, DS_FREE, 0); obj_free(w, o); return 0; }
-FN(b_GetCaps) { dxobj *b = ob(w, a[0], OB_DSB); if (!b) return DDERR_INVALIDPARAMS; WR32(a[1] + 4, b->primbuf ? 1u : 0x20u); WR32(a[1] + 8, b->size); WR32(a[1] + 12, 0); WR32(a[1] + 16, 0); return DD_OK; }
-FN(b_GetCurrentPosition) { dxobj *b = ob(w, a[0], OB_DSB); uint32_t p; if (!b) return DDERR_INVALIDPARAMS; p = play_pos(w, b); if (a[1]) WR32(a[1], p); if (a[2]) WR32(a[2], b->size ? (p + b->align * 64) % b->size : 0); return DD_OK; }
-FN(b_GetFormat) {
-    dxobj *b = ob(w, a[0], OB_DSB);
-    if (!b) return DDERR_INVALIDPARAMS;
-    if (a[3]) WR32(a[3], 18);
 /* IDirectSound3DBuffer: a second vtable on the buffer. It accepts everything and the buffer
    plays as it is, without positioning: SimCity 3000 asks for it and does not check the answer. */
 FN(b_QueryInterface) {
@@ -1123,6 +1117,14 @@ FN(b3d_Get) { UNUSED; WR32(a[1], 0); return DD_OK; }
 }
 FN(b_GetVolume) { dxobj *b = ob(w, a[0], OB_DSB); WR32(a[1], b ? (uint32_t)b->vol : 0); return DD_OK; }
 FN(b_GetPan) { dxobj *b = ob(w, a[0], OB_DSB); WR32(a[1], b ? (uint32_t)b->pan : 0); return DD_OK; }
+FN(b_AddRef) { return addref(ob(w, a[0], OB_DSB)); }
+FN(b_Release) { dxobj *o = ob(w, a[0], OB_DSB); if (!o) return 0; if (--o->refs > 0) return (uint32_t)o->refs; ds_host(w, o, DS_FREE, 0); obj_free(w, o); return 0; }
+FN(b_GetCaps) { dxobj *b = ob(w, a[0], OB_DSB); if (!b) return DDERR_INVALIDPARAMS; WR32(a[1] + 4, b->primbuf ? 1u : 0x20u); WR32(a[1] + 8, b->size); WR32(a[1] + 12, 0); WR32(a[1] + 16, 0); return DD_OK; }
+FN(b_GetCurrentPosition) { dxobj *b = ob(w, a[0], OB_DSB); uint32_t p; if (!b) return DDERR_INVALIDPARAMS; p = play_pos(w, b); if (a[1]) WR32(a[1], p); if (a[2]) WR32(a[2], b->size ? (p + b->align * 64) % b->size : 0); return DD_OK; }
+FN(b_GetFormat) {
+    dxobj *b = ob(w, a[0], OB_DSB);
+    if (!b) return DDERR_INVALIDPARAMS;
+    if (a[3]) WR32(a[3], 18);
 FN(b_GetFrequency) { dxobj *b = ob(w, a[0], OB_DSB); WR32(a[1], b ? b->freq : 22050); return DD_OK; }
 FN(b_GetStatus) { dxobj *b = ob(w, a[0], OB_DSB); uint32_t st = 0; if (b) { play_pos(w, b); if (b->playing) st = 1 | (b->looping ? 4u : 0u); } WR32(a[1], st); return DD_OK; }
 FN(b_Lock) {                             /* (this, off, bytes, p1, n1, p2, n2, flags) */
@@ -1644,14 +1646,6 @@ static const vslot vt_ds[] = {
     V("SetCooperativeLevel", dd_ok, 3), V("Compact", dd_ok, 1), V("GetSpeakerConfig", ds_GetSpeakerConfig, 2),
     V("SetSpeakerConfig", dd_ok, 2), V("Initialize", dd_ok, 2), { NULL, NULL, 0, NULL }
 };
-static const vslot vt_dsb[] = {
-    V("QueryInterface", b_QueryInterface, 3), V("AddRef", b_AddRef, 1), V("Release", b_Release, 1), V("GetCaps", b_GetCaps, 2),
-    V("GetCurrentPosition", b_GetCurrentPosition, 3), V("GetFormat", b_GetFormat, 4), V("GetVolume", b_GetVolume, 2),
-    V("GetPan", b_GetPan, 2), V("GetFrequency", b_GetFrequency, 2), V("GetStatus", b_GetStatus, 2), V("Initialize", dd_ok, 3),
-    V("Lock", b_Lock, 8), V("Play", b_Play, 4), V("SetCurrentPosition", b_SetCurrentPosition, 2), V("SetFormat", b_SetFormat, 2),
-    V("SetVolume", b_SetVolume, 2), V("SetPan", b_SetPan, 2), V("SetFrequency", b_SetFrequency, 2), V("Stop", b_Stop, 1),
-    V("Unlock", b_Unlock, 5), V("Restore", dd_ok, 1), { NULL, NULL, 0, NULL }
-};
 static const vslot vt_b3d[] = {
     V("QueryInterface", ds_QueryInterface, 3), V("AddRef", b_AddRef, 1), V("Release", b_Release, 1), V("GetAllParameters", dd_ok, 2),
     V("GetConeAngles", dd_ok, 3), V("GetConeOrientation", dd_ok, 2), V("GetConeOutsideVolume", b3d_Get, 2), V("GetMaxDistance", b3d_Get, 2),
@@ -1668,6 +1662,14 @@ static const vslot vt_di[] = {
 static const vslot vt_did[] = {             /* IDirectInputDevice2A (prefix: IDirectInputDeviceA) */
     V("QueryInterface", dv_QueryInterface, 3), V("AddRef", dv_AddRef, 1), V("Release", dv_Release, 1),
     V("GetCapabilities", dv_GetCapabilities, 2), V("EnumObjects", dv_ok, 4), V("GetProperty", dv_ok, 3), V("SetProperty", dv_ok, 3),
+static const vslot vt_dsb[] = {
+    V("QueryInterface", b_QueryInterface, 3), V("AddRef", b_AddRef, 1), V("Release", b_Release, 1), V("GetCaps", b_GetCaps, 2),
+    V("GetCurrentPosition", b_GetCurrentPosition, 3), V("GetFormat", b_GetFormat, 4), V("GetVolume", b_GetVolume, 2),
+    V("GetPan", b_GetPan, 2), V("GetFrequency", b_GetFrequency, 2), V("GetStatus", b_GetStatus, 2), V("Initialize", dd_ok, 3),
+    V("Lock", b_Lock, 8), V("Play", b_Play, 4), V("SetCurrentPosition", b_SetCurrentPosition, 2), V("SetFormat", b_SetFormat, 2),
+    V("SetVolume", b_SetVolume, 2), V("SetPan", b_SetPan, 2), V("SetFrequency", b_SetFrequency, 2), V("Stop", b_Stop, 1),
+    V("Unlock", b_Unlock, 5), V("Restore", dd_ok, 1), { NULL, NULL, 0, NULL }
+};
     V("Acquire", dv_ok, 1), V("Unacquire", dv_ok, 1), V("GetDeviceState", dv_GetDeviceState, 3), V("GetDeviceData", dv_GetDeviceData, 5),
     V("SetDataFormat", dv_ok, 2), V("SetEventNotification", dv_SetEventNotification, 2), V("SetCooperativeLevel", dv_ok, 3),
     V("GetObjectInfo", NULL, 4), V("GetDeviceInfo", NULL, 2), V("RunControlPanel", dv_ok, 3), V("Initialize", dv_ok, 4),

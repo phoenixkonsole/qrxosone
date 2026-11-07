@@ -569,3 +569,15 @@ Found while porting Blender ([docs/BLENDER_AROS68K.md](../BLENDER_AROS68K.md)), 
 `FSSQRT` and `FDSQRT` ran as `FINT`, and `FMOVEM` of several FPU control registers with `(An)` wrote them all to one
 address, so AROS lost FPCR and the condition codes on every task switch. Repeated renders are now identical to the
 pixel. `QRX_FULL_DUMP_RAM` now takes ranges of up to 1 GiB.
+
+## Update 2026-11-07, second part: The Gungan Frontier and Pit Droids reach their menus
+
+Both Lucas Learning demos start and show their menus, The Gungan Frontier at up to 61 frames a second. Input reaches them in a test with timed keys and clicks; neither has been played further than that.
+
+- The version API returned nothing, and both games read the answer without checking it. Everything in `C:\WINDOWS\SYSTEM` and our system DLLs now report version 4.08.00.400. Other files still report no version.
+- `FindFirstFile` also finds `DDHELP.EXE`, `DDRAW16.DLL`, `DSOUND.VXD`, `D3DIM.DLL` and `D3DRM.DLL` in the system folder, which these games look for.
+- `IDirectSound::GetCaps` reported wrong flags and no sample rates. It now reports mono and stereo, 8 and 16 bit, and rates from 100 to 100000 Hz.
+
+`ChildWindowFromPoint` is new as well, for `pbdemo`.
+
+Both games were run from folders laid out by hand, with the data in `Data\`, because their installers cannot run here. Sound has not been listened to.
