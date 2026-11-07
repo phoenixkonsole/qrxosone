@@ -531,3 +531,34 @@ Max Payne's demo now draws its loading screen through Direct3D 8 on the host, wi
 What the stop looks like: after the last frame the game loads a few more textures, then runs a loop at about 780 passes a second that calls `PeekMessage`, the DirectInput devices, `QueryPerformanceCounter` and `GetFileAttributes("C:\\data")`, and calls Direct3D no more. The interpreter behaves the same, so the JIT is not the cause.
 
 Ruled out: key presses, and making `SetForegroundWindow` and `SetActiveWindow` real, which changed nothing and was taken out again. All calls in the loop return success. The `-developer` switch creates `verbose_<computer>.txt`, but it stayed empty in these runs. The cause is not known.
+
+## Update 2026-11-07: the JIT translates FPU instructions
+
+The 68k JIT now runs the common 68040 FPU instructions natively, so floating point work no longer drops to about 50 MIPS. Measured with Blender 2.79b as a guest (`-t 1`, no core 1), engines alternating, with other work on the Mac at a load of 7 to 9:
+
+| Scene | Before | After | Factor |
+|---|---|---|---|
+| Raytracing 200x200, render step | 47.3 / 48.1 / 50.5 s | 3.3 / 3.5 / 3.9 s | about 14 |
+| Procedural textures 640x640 | 39.7 / 40.2 / 41.6 s | 4.0 / 4.0 / 6.0 s | about 10 |
+| Default cube 960x540 | 28.3 / 28.7 / 29.8 s | 1.8 / 1.8 / 1.9 s | about 16 |
+| All three, boot included, host clock | 124 / 125 / 131 s | 18 / 18 / 20 s | about 7 |
+
+During a raytrace at 640x640 the engine went from 55 to 577 MIPS over the same 40 seconds. That job now finishes its render step in 34 s, matches the Mac reference to the pixel, and was at tile 20 of 324 with the old engine after the same time. No guest had finished this scene before. Interpreted instructions fell from 27% to 0.16% of the total. The native Mac build takes about 0.3 s on the 200x200 raytrace, so a guest is now roughly 11 times slower than native on this work, not 100 to 170 times.
+
+How it works:
+
+- Between blocks the guest registers stay 80-bit values in `REG_FP`. Inside a block, the ones in use live in `d8`-`d15` as IEEE single or double, and the translator knows which. C helpers preserve those registers, so a slow memory access does not disturb them.
+- Translated: `FMOVE`, `FABS`, `FNEG`, `FTST`, `FCMP`, the `FS` and `FD` forms of those plus `FADD`, `FSUB`, `FMUL`, `FDIV` and `FSQRT`, `FBcc`, `FScc`, `FMOVEM` of data registers, `FMOVE.X`, and `FMOVE` between a data register and `FPCR` or `FPSR`. Sources may be registers, memory or immediates in `.S`, `.D`, `.L`, `.W` and `.B`.
+- Native code only handles normal numbers and zero, with round-to-nearest (`FMOVE` to an integer also handles round-to-zero, because C casts ask for it). An operand or result that is a denormal, infinity or NaN, an operand with bits the format cannot hold, or another rounding mode leaves through a bail exit. The exit writes changed registers back, and Musashi runs that one instruction with nothing changed.
+- `FADD`, `FSUB`, `FMUL`, `FDIV` and `FSQRT` without `FS` or `FD` need a 64-bit mantissa, which the host FPU does not have. They stay with Musashi and softfloat, so plain extended-precision programs do not get this speedup.
+- `FPSR` condition codes share the flag liveness pass: they are only computed when something can read them.
+
+**Musashi's results changed on purpose.** The pinned code rounded `FSxxx` and `FDxxx` twice, first to 64 bits and then to the target, and took the condition codes from before the second rounding. A 68040 and AArch64 round once, so JIT and interpreter would have disagreed. `tools/patch-musashi-fsave-an.py` now rounds once and takes the codes from the rounded result. Blender's images are identical to those of the old engine: a 640x640 scene still has the same 1 of 409,600 pixels off by 1/255 against the Mac reference, the others have none.
+
+`jit_diff_tests` now compares FPU registers, `FPSR`, `FPCR` and the just-reset state. It covers the new instructions with special values, full 53-bit mantissas, all rounding modes and hand-overs to Musashi, and it fails if the common forms stop running natively. All 15 faults built in on purpose were caught, as was bringing back the old double rounding. Core 1 gets the same code through `gen-core1-rename.py`; it rendered tiles with identical pictures at a factor of about 1.7 on the raytrace.
+
+Musashi faults this work found and did not fix, because they need their own decision:
+
+- `FMOVE.W` and `FMOVE.B` to a data register replace all 32 bits; a 68040 keeps the upper ones. The JIT leaves those two forms to Musashi, so behaviour is unchanged.
+- `floatx80_sqrt` never returns on an unnormal number (exponent set, integer bit clear). Only a program storing such a value by hand can reach it.
+- `FINT` and `FINTRZ` go through a 32-bit integer, so large values saturate and -0.5 gives +0.
