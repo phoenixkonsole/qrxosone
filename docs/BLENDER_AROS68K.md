@@ -23,7 +23,7 @@ ungetrackt in `.build/blender-2.79b/src`, die Änderungen stehen als Patch in
 
 | Teil | Stufe 1 (`blender -b`) | Später |
 |---|---|---|
-| Python 3 | aus (`WITH_PYTHON=OFF`) | Pflicht für die Oberfläche, da sie aus Python-Skripten besteht. Python 3.5/3.6 muss erst nach AROS. |
+| Python 3 | aus (`WITH_PYTHON=OFF`) | Pflicht für die Oberfläche, da sie aus Python-Skripten besteht. Blender 2.79 ist auf Python 3.5 ausgelegt. In den AROS Archives gibt es ein experimentelles Python 3.3.7, aber nur für i386 und ohne ladbare Module: als Vorlage für die AROS-Anpassungen nützlich, als Programm hier nicht. Für 68k muss CPython neu gebaut werden. |
 | Blender Internal | an, Raytracer mit kleinen STL-Ersatzheadern | bleibt |
 | Cycles | aus | braucht OpenImageIO, Boost und einen C++-Standard; 64-Bit-Rechnungen auf 68k sehr langsam. Erst über Host-Tür sinnvoll. |
 | FFmpeg, OpenAL, SDL, Jack | aus | nach Bedarf |
@@ -122,7 +122,24 @@ Patches selbst stecken**.
 Das eine Pixel ist derselbe Wert mit und ohne Kern 1. Die Ursache ist nicht untersucht, vermutlich eine
 Rundung zwischen 68k-FPU und arm64. Wiederholte Läufe im Gast liefern identische Bilder.
 
-### Zeiten
+### Zeiten mit FPU-JIT
+
+Gemessen am 7. November auf der Engine mit nativen FPU-Befehlen im JIT (Render-Schritt, Last um 5 bis 10, ein Lauf
+pro Szene außer beim Raytracing). Die Bilder sind unverändert, die Vergleichszeilen oben gelten auch hier.
+
+| Szene | nur Kern 0 | mit Kern 1 | Faktor | Kacheln auf Kern 1 |
+|---|---|---|---|---|
+| Raytracing 200x200 | 4,88 / 4,79 / 4,87 s | 3,03 / 3,03 / 3,01 s | 1,6 | 15 von 36 |
+| Prozedural 640x640 | 8,15 s | 7,71 s | 1,06 | 62 von 324 |
+| Standardwürfel 960x540 | 1,08 s | 1,68 s | 0,64, also langsamer | 11 von 135 |
+
+Bei kurzen Kacheln kostet Kern 1 mehr, als er bringt, denn der Hauptthread reicht Kacheln nur alle paar Millisekunden
+weiter und holt sie ebenso ab. Der Würfel ist mit einem Lauf schwach belegt, die Richtung passt aber dazu. Hier gibt
+es Spielraum: mehrere Kacheln im Voraus an Kern 1 geben oder Kern 1 selbst aus einer Warteschlange ziehen lassen.
+
+Dieselbe Raytracing-Szene mit 640x640 wurde in dieser Messreihe nicht bis zum Ende gerendert.
+
+### Zeiten ohne FPU-JIT
 
 Gemessen im selben Lauf auf dem M1, Last um 5 durch andere Arbeit auf dem Mac, also mit Streuung. Es ist die
 Zeit des Render-Schritts, ohne Laden und Speichern. Reihenfolge abwechselnd.
@@ -177,8 +194,8 @@ Was die Zeit begrenzt:
 ### Gefundene Fehler außerhalb von Blender
 
 Beide stecken im Musashi-Kern und treffen jedes 68k-Programm mit FPU. Sie sind in
-`upstream/armithlon/2.6/tools/patch-musashi-fsave-an.py` behoben. **Die Engine im lokalen Bundle hat die
-Korrektur noch nicht**, dieser Build nutzt `.build/blender-2.79b/engine-snapshot`.
+`upstream/armithlon/2.6/tools/patch-musashi-fsave-an.py` behoben. Das lokale Bundle hat seit dem 7. November eine
+Engine mit diesen Korrekturen und dem FPU-JIT. Die alte liegt daneben als `armithlon-engine.vor-fpu-jit-2026-11-07`.
 
 - `FSSQRT` und `FDSQRT` liefen als `FINT`: `sqrt(2.0)` ergab 2.0.
 - `FMOVEM` mehrerer FPU-Steuerregister mit `(An)` schrieb alle auf dieselbe Adresse. AROS sichert so bei jedem
