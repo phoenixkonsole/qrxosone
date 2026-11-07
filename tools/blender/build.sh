@@ -39,6 +39,20 @@ DEVELOPER_DIR=/Library/Developer/CommandLineTools cmake --build "$W/engine-build
 cp "$W/engine-build/qrx68100_full_run" "$W/engine-snapshot"
 # Two rounds: the bridges look at what the libraries define, and need them built once.
 "$HERE/build_port.py" msun
+# libstdc++ of the compiler's own version, without exceptions.
+GCC=$W/dl/gcc-16.2.0.tar.xz
+[ -e "$GCC" ] || curl -sSfL -o "$GCC" https://ftp.gnu.org/gnu/gcc/gcc-16.2.0/gcc-16.2.0.tar.xz
+[ "$(shasum -a 256 "$GCC" | cut -d' ' -f1)" = e6738e29597f733270731aa90600f37ffdc045079dfc27ec7e8192cc81085c3e ] || { echo "wrong checksum: $GCC"; exit 1; }
+if [ ! -e "$W/gcc/build/src/.libs/libstdc++.a" ]; then
+  mkdir -p "$W/gcc/build"
+  tar xJf "$GCC" -C "$W/gcc" gcc-16.2.0/libstdc++-v3 gcc-16.2.0/libgcc gcc-16.2.0/config gcc-16.2.0/config.sub gcc-16.2.0/config.guess \
+    gcc-16.2.0/install-sh gcc-16.2.0/ltmain.sh gcc-16.2.0/missing gcc-16.2.0/mkinstalldirs gcc-16.2.0/include gcc-16.2.0/libtool.m4 \
+    gcc-16.2.0/gcc/BASE-VER gcc-16.2.0/gcc/DATESTAMP gcc-16.2.0/gcc/DEV-PHASE gcc-16.2.0/move-if-change gcc-16.2.0/config-ml.in gcc-16.2.0/libiberty
+  "$HERE/build_libstdcxx.sh"
+  # Stops at the C++ module files of libstdc++, which this build does not use.
+  QRX_CXX_BARE=1 make -C "$W/gcc/build" -k -j8 || true
+  [ -e "$W/gcc/build/src/.libs/libstdc++.a" ] || { echo "libstdc++ did not build"; exit 1; }
+fi
 "$HERE/configure.sh" >/dev/null
 ninja -C "$W/build" -j 8 blender || true
 "$HERE/build_port.py"

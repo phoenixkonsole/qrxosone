@@ -204,6 +204,28 @@ Engine mit diesen Korrekturen und dem FPU-JIT. Die alte liegt daneben als `armit
 
 Außerdem kann `elf2hunk` große Programme mit PC-relativen Sprüngen nicht abbilden (`elf2hunk-pc32.diff`).
 
+### C++-Standardbibliothek (7. November)
+
+`tools/blender/build_libstdcxx.sh` baut `libstdc++` aus GCC 16.2, derselben Version wie der Compiler, ohne Exceptions, RTTI und
+Threads. Im Gast laufen damit Container, `string`, `sstream`, `iostream`, `function`, `shared_ptr` und globale Konstruktoren.
+Ein `throw` beendet das Programm mit Fehlercode 20. Damit sind in Blender die Ersatzteile für den Abhängigkeitsgraph, Eigen und den
+Cache-Limiter wieder durch die echten ersetzt, auch der Haar-Löser ist wieder drin. Standard bleibt der Legacy-Graph.
+
+| Szene | nur Kern 0 | mit Kern 1 | Bild gegen Mac |
+|---|---|---|---|
+| Raytracing 200x200 | 4,46 / 4,47 s | 2,88 / 2,76 s | 0 Pixel |
+| Prozedural 640x640 | 4,36 s | 4,02 s | 1 Pixel um 1/255 |
+| Standardwürfel 960x540 | 0,80 s | 1,19 s | 0 Pixel |
+| Standardwürfel mit `--enable-new-depsgraph` | | 1,07 s | 0 Pixel |
+
+Grenzen:
+
+- Mit Threads ist `libstdc++` nicht gebaut: `shared_ptr` zählt nicht atomar, `std::thread` und `std::mutex` fehlen. Für Blender und
+  Python muss das noch geprüft werden, der neue Graph rechnet mit Threads nur auf Kern 0.
+- Nur der Würfel lief über den neuen Graphen. Eigen-Löser, Cloth und Haar-Löser sind gebaut, aber nicht aufgerufen worden.
+- Der Native Build hing nach dem Umbau in einer Read-Write-Sperre, weil Blender `R = *re` eine Sperre mit Zustand kopiert. Die Kopie
+  wird jetzt zurückgesetzt. Das Problem zeigte sich nur auf dem Mac.
+
 ### Offene Entscheidungen
 
 1. **Oberfläche und OpenGL:** Für die GUI braucht es eine Host-GL-Tür für 68k-Programme in der Engine, oder man

@@ -1,6 +1,0 @@
-#include <math.h>
-#undef isfinite
-#undef isnan
-#undef isinf
-namespace std { template<class T> inline bool isfinite(T x) { return __builtin_isfinite(x); } template<class T> inline bool isnan(T x) { return __builtin_isnan(x); } using ::fabs; using ::sqrt; using ::floor; using ::ceil; using ::pow; using ::log; using ::exp; using ::sin; using ::cos; }
-using std::isfinite; using std::isnan;

@@ -1,2 +1,0 @@
-#include <string.h>
-namespace std { using ::memcpy; using ::memset; using ::memmove; using ::strlen; using ::strcmp; }

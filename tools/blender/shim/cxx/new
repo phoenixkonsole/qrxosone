@@ -1,6 +1,0 @@
-#ifndef QRX_NEW
-#define QRX_NEW
-#include <stddef.h>
-inline void *operator new(size_t, void *p) noexcept { return p; }
-inline void *operator new[](size_t, void *p) noexcept { return p; }
-#endif

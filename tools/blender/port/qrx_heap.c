@@ -64,8 +64,8 @@ static void heap_init(void)
 {
 	/* Takes most of the largest free block: nothing else needs that much while Blender runs. */
 	ULONG largest = AvailMem(MEMF_ANY | MEMF_LARGEST);
-	const char *env = getenv("QRX_HEAP_MB");
-	ULONG want = env ? (ULONG)atol(env) * 1024u * 1024u : largest / 4u * 3u;
+	/* Only Exec here: this can run before the C library is open (libgcc's __register_frame). */
+	ULONG want = largest / 4u * 3u;
 	if (want > largest - largest / 16u) want = largest - largest / 16u;
 	/* AllocMem did not come back with a block of 3 GiB, so stay below 2 GiB until that is understood. */
 	if (want > 0x7FF00000u) want = 0x7FF00000u;

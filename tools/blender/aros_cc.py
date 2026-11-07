@@ -2,7 +2,7 @@
 """Compiler driver for Blender on QRX OS One: m68k-elf-gcc/g++ against the AROS SDK.
 
 tools/qrx86/aros-gcc.py only knows what the small QRX tools need. This one adds C++ (with no
-standard library, see tools/blender/shim), separate objects and static libraries, and the extra
+standard library of our own build, see build_libstdcxx.sh), separate objects and static libraries, and the extra
 pointer bridges of tools/blender/bridges. The ABI rule stays: GCC reads a returned pointer from
 a0, the SDK libraries return it in d0, so every SDK function returning a pointer needs a bridge.
 """
@@ -16,13 +16,18 @@ BASE = CFG['sdk']
 CPU = ['-m68040', '-fno-pic', '-fomit-frame-pointer', '-mlong-jump-table-offsets']
 DEFS = ['-D__AROS__', '-DAMIGA', '-D_AMIGA', '-D__BIG_ENDIAN__=1', '-U__linux__', '-U__linux', '-Ulinux',
         '-U__gnu_linux__', '-U_TIME_BITS', '-U_FILE_OFFSET_BITS', '-D__unix__', '-Dunix']
+STDCXX = ROOT / '.build/blender-2.79b/gcc/build'
 DROP_LIBS = {'-lm', '-lpthreads', '-ldl', '-lutil', '-lrt', '-lc', '-lstdc++', '-lgcc_s'}
 
 
 def includes(cxx):
     out = ['-nostdinc']
     if cxx:
-        out += ['-nostdinc++', '-isystem', str(HERE / 'shim/cxx')]
+        # While libstdc++ is being configured it brings its own headers.
+        out += ['-nostdinc++']
+        if not os.environ.get('QRX_CXX_BARE'):
+            out += ['-isystem', str(STDCXX / 'include/m68k-elf'), '-isystem', str(STDCXX / 'include'),
+                    '-isystem', str(STDCXX.parent / 'gcc-16.2.0/libstdc++-v3/libsupc++')]
     out += ['-isystem', str(HERE / 'shim/include')]
     for inc in ('/include/aros/posixc', '/include/aros/stdc', '/include'):
         out += ['-isystem', BASE + inc]
@@ -74,9 +79,18 @@ def main():
     cmd = [CFG['collect'], '-o', output, '-L' + BASE + '/lib', '-L' + CFG['gcc_lib'] + '/m68040',
            BASE + '/lib/startup.o', *extra, *wraps,
            '--start-group', *[i for i in inputs if i not in ('--start-group', '--end-group')],
+           *([str(STDCXX / 'src/.libs/libstdc++.a')] if cxx else []),
            str(port / 'libqrx_msun.a'), str(port / 'libqrx_bridges.a'), '-lcrtprog', '-lcrt', '-lstdlib', *libs, '-lpthread', '-lm', '-lexec',
            '-lstdc.static', '-lgcc', '--end-group']
-    return subprocess.call(cmd)
+    rc = subprocess.call(cmd)
+    if rc or not cxx:
+        return rc
+    merged = output + '.merged'
+    rc = subprocess.call([CFG['ld'], '-r', '--force-group-allocation', '-T', str(HERE / 'merge-sections.ld'),
+                          output, '-o', merged])
+    if rc == 0:
+        os.replace(merged, output)
+    return rc
 
 
 if __name__ == '__main__':

@@ -167,3 +167,60 @@ void qrx_print_base(void)
 {
 	qrx_printf("main addr %p", (void *)main);
 }
+
+/* What libstdc++ wants from a C library and the SDK does not have. */
+#include <sys/uio.h>
+void *__dso_handle = NULL;
+static struct { void (*fn)(void *); void *arg; } exit_list[128];
+static int exit_count;
+static void run_exit_list(void)
+{
+	while (exit_count > 0) {
+		exit_count--;
+		exit_list[exit_count].fn(exit_list[exit_count].arg);
+	}
+}
+int __cxa_atexit(void (*fn)(void *), void *arg, void *dso)
+{
+	(void)dso;
+	if (exit_count == 128) return -1;
+	if (exit_count == 0) atexit(run_exit_list);
+	exit_list[exit_count].fn = fn;
+	exit_list[exit_count++].arg = arg;
+	return 0;
+}
+ssize_t writev(int fd, const struct iovec *iov, int count)
+{
+	ssize_t total = 0;
+	for (int i = 0; i < count; i++) {
+		ssize_t n = write(fd, iov[i].iov_base, iov[i].iov_len);
+		if (n < 0) return total ? total : n;
+		total += n;
+		if ((size_t)n < iov[i].iov_len) break;
+	}
+	return total;
+}
+/* libstdc++ refers to the transactional memory runtime weakly, and collect-aros refuses any undefined
+ * symbol. Nothing here uses transactions. */
+void _ITM_RU1(void) { qrx_missing("_ITM_RU1"); }
+void _ITM_RU4(void) { qrx_missing("_ITM_RU4"); }
+void _ITM_addUserCommitAction(void) { qrx_missing("_ITM_addUserCommitAction"); }
+void _ITM_memcpyRnWt(void) { qrx_missing("_ITM_memcpyRnWt"); }
+void _ITM_memcpyRtWn(void) { qrx_missing("_ITM_memcpyRtWn"); }
+void _ZGTtdlPv(void) { qrx_missing("transaction delete"); }
+void _ZGTtnam(void) { qrx_missing("transaction new"); }
+void _ZGTtnaX(void) { qrx_missing("transaction new"); }
+
+/* AROS's startup registers the unwind tables, and libgcc's version allocates memory. Inside the startup
+ * code AvailMem did not come back. Programs here have no exceptions: a throw finds no table and terminates.
+ * This replaces all of libgcc's unwind-dw2-fde, so that member is never linked. */
+void __register_frame(void *begin) { (void)begin; }
+void *__deregister_frame(void *begin) { (void)begin; return NULL; }
+void __register_frame_info(void *begin, void *ob) { (void)begin; (void)ob; }
+void __register_frame_info_bases(void *begin, void *ob, void *t, void *d) { (void)begin; (void)ob; (void)t; (void)d; }
+void __register_frame_table(void *begin) { (void)begin; }
+void __register_frame_info_table(void *begin, void *ob) { (void)begin; (void)ob; }
+void __register_frame_info_table_bases(void *begin, void *ob, void *t, void *d) { (void)begin; (void)ob; (void)t; (void)d; }
+void *__deregister_frame_info(void *begin) { (void)begin; return NULL; }
+void *__deregister_frame_info_bases(void *begin) { (void)begin; return NULL; }
+void *_Unwind_Find_FDE(void *pc, void *bases) { (void)pc; (void)bases; return NULL; }

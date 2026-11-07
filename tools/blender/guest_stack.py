@@ -1,18 +1,28 @@
 #!/usr/bin/env python3
 """Debugging aid: walks exec's task lists in a RAM dump (QRX_FULL_DUMP_RAM) and resolves the words
 on a task's stack against a linked ELF, to see where a guest program waits.
-usage: guest_stack.py <ram dump> <elf> <guest address of main> [task name part]"""
+usage: guest_stack.py <ram dump> <elf> <guest address of main, or - to search> [task name part]"""
 import bisect, struct, subprocess, sys
 ram = open(sys.argv[1], 'rb').read()
-elf, main_addr = sys.argv[2], int(sys.argv[3], 16)
+elf, main_arg = sys.argv[2], sys.argv[3]
 want = sys.argv[4] if len(sys.argv) > 4 else 'blender'
 syms = []
 for l in subprocess.run(['/opt/homebrew/bin/m68k-elf-nm', '-n', elf], capture_output=True, text=True).stdout.splitlines():
     p = l.split()
     if len(p) == 3 and p[1] in 'tTwW':
         syms.append((int(p[0], 16), p[2]))
-main_off = next(a for a, n in syms if n == 'main')
-base = main_addr - main_off
+if main_arg == '-':
+    # No address known: find the program in RAM by pieces of its .text, which starts at file offset 0x34.
+    from collections import Counter
+    data = open(elf, 'rb').read()
+    votes = Counter()
+    for off in range(0x1000, min(syms[-1][0], 0x80000), 0x1000):
+        i = ram.find(data[0x34 + off:0x34 + off + 8])
+        if i > 0:
+            votes[i - off] += 1
+    base = votes.most_common(1)[0][0]
+else:
+    base = int(main_arg, 16) - next(a for a, n in syms if n == 'main')
 addrs = [a for a, _ in syms]
 def r32(a):
     return struct.unpack('>I', ram[a:a + 4])[0] if a + 4 <= len(ram) else 0
