@@ -23,6 +23,7 @@ ARMithlon 1.1 cumulative source and native host integration:
 
 ARMithlon on Apple Silicon (68k JIT, Metal RTG, HostFS, AHI, QRX86 host door):
 [measurements, changes and open work](docs/armithlon/performance-2026-11-03.md).
+FPU in the 68k JIT and two FPU faults fixed: [docs/armithlon/fpu-jit-2026-11-07.md](docs/armithlon/fpu-jit-2026-11-07.md).
 
 Linux i386 GUI work: [embedded X11 subset and AROS windows](docs/QRX_X11.md).
 
