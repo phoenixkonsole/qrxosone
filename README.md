@@ -25,3 +25,6 @@ ARMithlon on Apple Silicon (68k JIT, Metal RTG, HostFS, AHI, QRX86 host door):
 [measurements, changes and open work](docs/armithlon/performance-2026-11-03.md).
 
 Linux i386 GUI work: [embedded X11 subset and AROS windows](docs/QRX_X11.md).
+
+Blender 2.79b as a 68k AROS program, headless stage with the second 68100 core:
+[plan, state and measurements](docs/BLENDER_AROS68K.md), [build](tools/blender/README.md).

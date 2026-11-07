@@ -1,0 +1,36 @@
+/* Minimal std::vector for the Blender Internal ray tracer: no libstdc++ in this SDK. */
+#ifndef QRX_VECTOR
+#define QRX_VECTOR
+#include <stdlib.h>
+#include <stddef.h>
+#include <new>
+namespace std {
+template<class T> class vector {
+	T *d; size_t n, cap;
+	void grow(size_t c) {
+		T *nd = (T *)malloc(c * sizeof(T));
+		for (size_t i = 0; i < n; i++) { new (nd + i) T(d[i]); d[i].~T(); }
+		free(d); d = nd; cap = c;
+	}
+public:
+	typedef T *iterator;
+	vector() : d(0), n(0), cap(0) {}
+	explicit vector(size_t c, const T &v = T()) : d(0), n(0), cap(0) { resize(c, v); }
+	~vector() { clear(); free(d); }
+	vector(const vector &o) : d(0), n(0), cap(0) { reserve(o.n); for (size_t i = 0; i < o.n; i++) push_back(o.d[i]); }
+	vector &operator=(const vector &o) { if (this != &o) { clear(); reserve(o.n); for (size_t i = 0; i < o.n; i++) push_back(o.d[i]); } return *this; }
+	void reserve(size_t c) { if (c > cap) grow(c); }
+	void resize(size_t c, const T &v = T()) { while (n > c) pop_back(); reserve(c); while (n < c) push_back(v); }
+	void push_back(const T &v) { if (n == cap) grow(cap ? cap * 2 : 8); new (d + n++) T(v); }
+	void pop_back() { d[--n].~T(); }
+	void clear() { while (n) pop_back(); }
+	size_t size() const { return n; }
+	bool empty() const { return n == 0; }
+	T &operator[](size_t i) { return d[i]; }
+	const T &operator[](size_t i) const { return d[i]; }
+	T &back() { return d[n - 1]; }
+	T *begin() { return d; }
+	T *end() { return d + n; }
+};
+}
+#endif

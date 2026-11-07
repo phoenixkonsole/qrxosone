@@ -1,0 +1,1463 @@
+diff --git a/build_files/cmake/macros.cmake b/build_files/cmake/macros.cmake
+index 6303119..b9ccaaf 100644
+--- a/build_files/cmake/macros.cmake
++++ b/build_files/cmake/macros.cmake
+@@ -1344,7 +1344,7 @@ function(data_to_c
+ 	add_custom_command(
+ 		OUTPUT ${file_to}
+ 		COMMAND ${CMAKE_COMMAND} -E make_directory ${_file_to_path}
+-		COMMAND "$<TARGET_FILE:datatoc>" ${file_from} ${file_to}
++		COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:datatoc>" ${file_from} ${file_to}
+ 		DEPENDS ${file_from} datatoc)
+ 
+ 	set_source_files_properties(${file_to} PROPERTIES GENERATED TRUE)
+@@ -1369,7 +1369,7 @@ function(data_to_c_simple
+ 	add_custom_command(
+ 		OUTPUT  ${_file_to}
+ 		COMMAND ${CMAKE_COMMAND} -E make_directory ${_file_to_path}
+-		COMMAND "$<TARGET_FILE:datatoc>" ${_file_from} ${_file_to}
++		COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:datatoc>" ${_file_from} ${_file_to}
+ 		DEPENDS ${_file_from} datatoc)
+ 
+ 	set_source_files_properties(${_file_to} PROPERTIES GENERATED TRUE)
+@@ -1402,8 +1402,8 @@ function(data_to_c_simple_icons
+ 		OUTPUT  ${_file_from} ${_file_to}
+ 		COMMAND ${CMAKE_COMMAND} -E make_directory ${_file_to_path}
+ 		#COMMAND python3 ${CMAKE_SOURCE_DIR}/source/blender/datatoc/datatoc_icon.py ${_path_from_abs} ${_file_from}
+-		COMMAND "$<TARGET_FILE:datatoc_icon>" ${_path_from_abs} ${_file_from}
+-		COMMAND "$<TARGET_FILE:datatoc>" ${_file_from} ${_file_to}
++		COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:datatoc_icon>" ${_path_from_abs} ${_file_from}
++		COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:datatoc>" ${_file_from} ${_file_to}
+ 		DEPENDS
+ 			${_icon_files}
+ 			datatoc_icon
+@@ -1472,7 +1472,7 @@ function(msgfmt_simple
+ 	add_custom_command(
+ 		OUTPUT  ${_file_to}
+ 		COMMAND ${CMAKE_COMMAND} -E make_directory ${_file_to_path}
+-		COMMAND "$<TARGET_FILE:msgfmt>" ${_file_from} ${_file_to}
++		COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:msgfmt>" ${_file_from} ${_file_to}
+ 		DEPENDS msgfmt ${_file_from})
+ 
+ 	set_source_files_properties(${_file_to} PROPERTIES GENERATED TRUE)
+diff --git a/extern/glew/CMakeLists.txt b/extern/glew/CMakeLists.txt
+index f264b39..5ca947e 100644
+--- a/extern/glew/CMakeLists.txt
++++ b/extern/glew/CMakeLists.txt
+@@ -38,7 +38,7 @@ if(UNIX)
+ endif()
+ 
+ set(SRC
+-	src/glew.c
++	src/qrx_glew_stub.c
+ 
+ 	include/GL/glew.h
+ 	include/GL/glxew.h
+diff --git a/extern/glew/src/qrx_glew_stub.c b/extern/glew/src/qrx_glew_stub.c
+new file mode 100644
+index 0000000..f72b44e
+--- /dev/null
++++ b/extern/glew/src/qrx_glew_stub.c
+@@ -0,0 +1 @@
++/* QRX OS One: filled by tools/blender/gen_missing.py */
+diff --git a/intern/CMakeLists.txt b/intern/CMakeLists.txt
+index bfe2302..2d2c916 100644
+--- a/intern/CMakeLists.txt
++++ b/intern/CMakeLists.txt
+@@ -24,15 +24,12 @@
+ # ***** END GPL LICENSE BLOCK *****
+ 
+ # add_subdirectory(atomic)  # header only
+-add_subdirectory(string)
+-add_subdirectory(ghost)
++add_subdirectory(qrx)
+ add_subdirectory(guardedalloc)
+ add_subdirectory(libmv)
+-add_subdirectory(memutil)
+ add_subdirectory(opencolorio)
+ add_subdirectory(mikktspace)
+ add_subdirectory(glew-mx)
+-add_subdirectory(eigen)
+ 
+ if(WITH_GAMEENGINE_DECKLINK)
+ 	add_subdirectory(decklink)
+diff --git a/intern/qrx/CMakeLists.txt b/intern/qrx/CMakeLists.txt
+new file mode 100644
+index 0000000..257822c
+--- /dev/null
++++ b/intern/qrx/CMakeLists.txt
+@@ -0,0 +1,6 @@
++# QRX OS One: libraries that replace C++ parts without a C++ standard library in the SDK.
++# See docs/BLENDER_AROS68K.md in the QRX OS One repository.
++set(INC ../guardedalloc ../ghost ../memutil ../eigen)
++blender_add_lib(bf_intern_ghost "qrx_ghost_stub.c;qrx_ghost_paths.c" "${INC}" "")
++blender_add_lib(bf_intern_memutil "qrx_memutil.c" "${INC}" "")
++blender_add_lib(bf_intern_eigen "qrx_eigen_stub.c" "${INC}" "")
+diff --git a/intern/qrx/qrx_eigen_stub.c b/intern/qrx/qrx_eigen_stub.c
+new file mode 100644
+index 0000000..9644f16
+--- /dev/null
++++ b/intern/qrx/qrx_eigen_stub.c
+@@ -0,0 +1,12 @@
++/* intern/eigen needs a C++ standard library. These end the program with a message rather than
++ * give wrong answers. Solvers are used by a few mesh tools, not by Blender Internal rendering. */
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdbool.h>
++#include "intern/eigenvalues.h"
++#include "intern/svd.h"
++static void missing(const char *n) { fprintf(stderr, "Blender on QRX OS One: %s is not part of this build\n", n); exit(20); }
++bool EIG_self_adjoint_eigen_solve(const int size, const float *matrix, float *r_eigen_values, float *r_eigen_vectors)
++{ (void)size; (void)matrix; (void)r_eigen_values; (void)r_eigen_vectors; missing(__func__); return false; }
++void EIG_svd_square_matrix(const int size, const float *matrix, float *r_U, float *r_S, float *r_V)
++{ (void)size; (void)matrix; (void)r_U; (void)r_S; (void)r_V; missing(__func__); }
+diff --git a/intern/qrx/qrx_ghost_paths.c b/intern/qrx/qrx_ghost_paths.c
+new file mode 100644
+index 0000000..e3a6f43
+--- /dev/null
++++ b/intern/qrx/qrx_ghost_paths.c
+@@ -0,0 +1,21 @@
++/* The few GHOST calls `blender -b` makes on QRX OS One: where Blender keeps its files.
++ * The rest of GHOST (windows, events) waits for the GUI stage, see docs/BLENDER_AROS68K.md. */
++#include "GHOST_Path-api.h"
++
++GHOST_TSuccess GHOST_CreateSystemPaths(void) { return GHOST_kSuccess; }
++GHOST_TSuccess GHOST_DisposeSystemPaths(void) { return GHOST_kSuccess; }
++const GHOST_TUns8 *GHOST_getSystemDir(int version, const char *versionstr)
++{
++	(void)version; (void)versionstr;
++	return (const GHOST_TUns8 *)"PROGDIR:";
++}
++const GHOST_TUns8 *GHOST_getUserDir(int version, const char *versionstr)
++{
++	(void)version; (void)versionstr;
++	return (const GHOST_TUns8 *)"PROGDIR:user";
++}
++const GHOST_TUns8 *GHOST_getBinaryDir(void)
++{
++	return (const GHOST_TUns8 *)"PROGDIR:";
++}
++void GHOST_addToSystemRecentFiles(const char *filename) { (void)filename; }
+diff --git a/intern/qrx/qrx_ghost_stub.c b/intern/qrx/qrx_ghost_stub.c
+new file mode 100644
+index 0000000..61b3c2a
+--- /dev/null
++++ b/intern/qrx/qrx_ghost_stub.c
+@@ -0,0 +1,332 @@
++/* Generated by tools/blender/gen_missing.py. */
++extern void qrx_missing(const char *name);
++long DEG_add_bone_relation(void) { return 0; }
++long DEG_add_collision_relations(void) { return 0; }
++long DEG_add_forcefield_relations(void) { return 0; }
++long DEG_add_object_cache_relation(void) { return 0; }
++long DEG_add_object_relation(void) { return 0; }
++long DEG_add_special_eval_flag(void) { return 0; }
++long DEG_debug_graphviz(void) { return 0; }
++long DEG_debug_scene_relations_validate(void) { return 0; }
++long DEG_editors_set_update_cb(void) { return 0; }
++long DEG_editors_update_pre(void) { return 0; }
++long DEG_evaluate_on_framechange(void) { return 0; }
++long DEG_evaluate_on_refresh(void) { return 0; }
++long DEG_free_node_types(void) { return 0; }
++long DEG_get_eval_flags_for_id(void) { return 0; }
++long DEG_get_graph_from_handle(void) { return 0; }
++long DEG_graph_on_visible_update(void) { return 0; }
++long DEG_id_tag_update_ex(void) { return 0; }
++long DEG_ids_check_recalc(void) { return 0; }
++long DEG_ids_flush_tagged(void) { return 0; }
++long DEG_on_visible_update(void) { return 0; }
++long DEG_register_node_types(void) { return 0; }
++long DEG_relations_tag_update(void) { return 0; }
++long DEG_scene_flush_update(void) { return 0; }
++long DEG_scene_relations_rebuild(void) { return 0; }
++long DEG_scene_relations_update(void) { return 0; }
++long DEG_stats_simple(void) { return 0; }
++long EIG_linear_least_squares_solver_new(void) { qrx_missing("EIG_linear_least_squares_solver_new"); return 0; }
++long EIG_linear_solver_delete(void) { qrx_missing("EIG_linear_solver_delete"); return 0; }
++long EIG_linear_solver_matrix_add(void) { qrx_missing("EIG_linear_solver_matrix_add"); return 0; }
++long EIG_linear_solver_new(void) { qrx_missing("EIG_linear_solver_new"); return 0; }
++long EIG_linear_solver_right_hand_side_add(void) { qrx_missing("EIG_linear_solver_right_hand_side_add"); return 0; }
++long EIG_linear_solver_solve(void) { qrx_missing("EIG_linear_solver_solve"); return 0; }
++long EIG_linear_solver_variable_get(void) { qrx_missing("EIG_linear_solver_variable_get"); return 0; }
++long EIG_linear_solver_variable_lock(void) { qrx_missing("EIG_linear_solver_variable_lock"); return 0; }
++long EIG_linear_solver_variable_set(void) { qrx_missing("EIG_linear_solver_variable_set"); return 0; }
++long EIG_linear_solver_variable_unlock(void) { qrx_missing("EIG_linear_solver_variable_unlock"); return 0; }
++long GHOST_ActivateWindowDrawingContext(void) { qrx_missing("GHOST_ActivateWindowDrawingContext"); return 0; }
++long GHOST_AddEventConsumer(void) { qrx_missing("GHOST_AddEventConsumer"); return 0; }
++long GHOST_ClientToScreen(void) { qrx_missing("GHOST_ClientToScreen"); return 0; }
++long GHOST_CreateEventConsumer(void) { qrx_missing("GHOST_CreateEventConsumer"); return 0; }
++long GHOST_CreateSystem(void) { qrx_missing("GHOST_CreateSystem"); return 0; }
++long GHOST_CreateWindow(void) { qrx_missing("GHOST_CreateWindow"); return 0; }
++long GHOST_DispatchEvents(void) { qrx_missing("GHOST_DispatchEvents"); return 0; }
++long GHOST_DisposeRectangle(void) { qrx_missing("GHOST_DisposeRectangle"); return 0; }
++long GHOST_DisposeSystem(void) { qrx_missing("GHOST_DisposeSystem"); return 0; }
++long GHOST_DisposeWindow(void) { qrx_missing("GHOST_DisposeWindow"); return 0; }
++long GHOST_EndProgressBar(void) { qrx_missing("GHOST_EndProgressBar"); return 0; }
++long GHOST_GetAllDisplayDimensions(void) { qrx_missing("GHOST_GetAllDisplayDimensions"); return 0; }
++long GHOST_GetClientBounds(void) { qrx_missing("GHOST_GetClientBounds"); return 0; }
++long GHOST_GetCursorPosition(void) { qrx_missing("GHOST_GetCursorPosition"); return 0; }
++long GHOST_GetDPIHint(void) { qrx_missing("GHOST_GetDPIHint"); return 0; }
++long GHOST_GetEventData(void) { qrx_missing("GHOST_GetEventData"); return 0; }
++long GHOST_GetEventTime(void) { qrx_missing("GHOST_GetEventTime"); return 0; }
++long GHOST_GetEventType(void) { qrx_missing("GHOST_GetEventType"); return 0; }
++long GHOST_GetEventWindow(void) { qrx_missing("GHOST_GetEventWindow"); return 0; }
++long GHOST_GetHeightRectangle(void) { qrx_missing("GHOST_GetHeightRectangle"); return 0; }
++long GHOST_GetMainDisplayDimensions(void) { qrx_missing("GHOST_GetMainDisplayDimensions"); return 0; }
++long GHOST_GetModifierKeyState(void) { qrx_missing("GHOST_GetModifierKeyState"); return 0; }
++long GHOST_GetNativePixelSize(void) { qrx_missing("GHOST_GetNativePixelSize"); return 0; }
++long GHOST_GetRectangle(void) { qrx_missing("GHOST_GetRectangle"); return 0; }
++long GHOST_GetSwapInterval(void) { qrx_missing("GHOST_GetSwapInterval"); return 0; }
++long GHOST_GetTabletData(void) { qrx_missing("GHOST_GetTabletData"); return 0; }
++long GHOST_GetWidthRectangle(void) { qrx_missing("GHOST_GetWidthRectangle"); return 0; }
++long GHOST_GetWindowState(void) { qrx_missing("GHOST_GetWindowState"); return 0; }
++long GHOST_GetWindowUserData(void) { qrx_missing("GHOST_GetWindowUserData"); return 0; }
++long GHOST_ProcessEvents(void) { qrx_missing("GHOST_ProcessEvents"); return 0; }
++long GHOST_ScreenToClient(void) { qrx_missing("GHOST_ScreenToClient"); return 0; }
++long GHOST_SetClientSize(void) { qrx_missing("GHOST_SetClientSize"); return 0; }
++long GHOST_SetCursorGrab(void) { qrx_missing("GHOST_SetCursorGrab"); return 0; }
++long GHOST_SetCursorPosition(void) { qrx_missing("GHOST_SetCursorPosition"); return 0; }
++long GHOST_SetCursorShape(void) { qrx_missing("GHOST_SetCursorShape"); return 0; }
++long GHOST_SetCursorVisibility(void) { qrx_missing("GHOST_SetCursorVisibility"); return 0; }
++long GHOST_SetCustomCursorShape(void) { qrx_missing("GHOST_SetCustomCursorShape"); return 0; }
++long GHOST_SetCustomCursorShapeEx(void) { qrx_missing("GHOST_SetCustomCursorShapeEx"); return 0; }
++long GHOST_SetProgressBar(void) { qrx_missing("GHOST_SetProgressBar"); return 0; }
++long GHOST_SetSwapInterval(void) { qrx_missing("GHOST_SetSwapInterval"); return 0; }
++long GHOST_SetTitle(void) { qrx_missing("GHOST_SetTitle"); return 0; }
++long GHOST_SetWindowModifiedState(void) { qrx_missing("GHOST_SetWindowModifiedState"); return 0; }
++long GHOST_SetWindowOrder(void) { qrx_missing("GHOST_SetWindowOrder"); return 0; }
++long GHOST_SetWindowState(void) { qrx_missing("GHOST_SetWindowState"); return 0; }
++long GHOST_SetWindowUserData(void) { qrx_missing("GHOST_SetWindowUserData"); return 0; }
++long GHOST_SwapWindowBuffers(void) { qrx_missing("GHOST_SwapWindowBuffers"); return 0; }
++long GHOST_UseNativePixels(void) { qrx_missing("GHOST_UseNativePixels"); return 0; }
++long GHOST_ValidWindow(void) { qrx_missing("GHOST_ValidWindow"); return 0; }
++long GHOST_confirmQuit(void) { qrx_missing("GHOST_confirmQuit"); return 0; }
++long GHOST_getClipboard(void) { qrx_missing("GHOST_getClipboard"); return 0; }
++long GHOST_putClipboard(void) { qrx_missing("GHOST_putClipboard"); return 0; }
++long GHOST_toggleConsole(void) { qrx_missing("GHOST_toggleConsole"); return 0; }
++unsigned char __GLEW_AMD_debug_output = 0;
++unsigned char __GLEW_ARB_compatibility = 0;
++unsigned char __GLEW_ARB_debug_output = 0;
++unsigned char __GLEW_ARB_draw_elements_base_vertex = 0;
++unsigned char __GLEW_ARB_draw_instanced = 0;
++unsigned char __GLEW_ARB_framebuffer_object = 0;
++unsigned char __GLEW_ARB_texture_float = 0;
++unsigned char __GLEW_ARB_texture_multisample = 0;
++unsigned char __GLEW_ARB_texture_query_lod = 0;
++unsigned char __GLEW_ARB_texture_rectangle = 0;
++unsigned char __GLEW_ARB_texture_swizzle = 0;
++unsigned char __GLEW_ATI_meminfo = 0;
++unsigned char __GLEW_EXT_framebuffer_blit = 0;
++unsigned char __GLEW_EXT_framebuffer_multisample = 0;
++unsigned char __GLEW_EXT_framebuffer_multisample_blit_scaled = 0;
++unsigned char __GLEW_EXT_framebuffer_object = 0;
++unsigned char __GLEW_EXT_geometry_shader4 = 0;
++unsigned char __GLEW_EXT_gpu_shader4 = 0;
++unsigned char __GLEW_EXT_texture_filter_anisotropic = 0;
++unsigned char __GLEW_EXT_texture_rectangle = 0;
++unsigned char __GLEW_GREMEDY_string_marker = 0;
++unsigned char __GLEW_KHR_debug = 0;
++unsigned char __GLEW_NVX_gpu_memory_info = 0;
++unsigned char __GLEW_NV_texture_rectangle = 0;
++unsigned char __GLEW_VERSION_3_0 = 0;
++unsigned char __GLEW_VERSION_3_1 = 0;
++unsigned char __GLEW_VERSION_3_2 = 0;
++unsigned char __GLEW_VERSION_4_0 = 0;
++unsigned char __GLEW_VERSION_4_3 = 0;
++void *__glewActiveTexture = 0;
++void *__glewAttachShader = 0;
++void *__glewBeginQuery = 0;
++void *__glewBindBuffer = 0;
++void *__glewBindFramebufferEXT = 0;
++void *__glewBlendFuncSeparate = 0;
++void *__glewBlitFramebufferEXT = 0;
++void *__glewBufferData = 0;
++void *__glewBufferSubData = 0;
++void *__glewCheckFramebufferStatusEXT = 0;
++void *__glewClientActiveTexture = 0;
++void *__glewCompileShader = 0;
++void *__glewCreateProgram = 0;
++void *__glewCreateShader = 0;
++void *__glewDebugMessageCallback = 0;
++void *__glewDebugMessageCallbackAMD = 0;
++void *__glewDebugMessageCallbackARB = 0;
++void *__glewDebugMessageControl = 0;
++void *__glewDebugMessageControlARB = 0;
++void *__glewDebugMessageEnableAMD = 0;
++void *__glewDebugMessageInsert = 0;
++void *__glewDebugMessageInsertAMD = 0;
++void *__glewDebugMessageInsertARB = 0;
++void *__glewDeleteBuffers = 0;
++void *__glewDeleteFramebuffersEXT = 0;
++void *__glewDeleteProgram = 0;
++void *__glewDeleteQueries = 0;
++void *__glewDeleteShader = 0;
++void *__glewDisableVertexAttribArray = 0;
++void *__glewDrawArraysInstancedARB = 0;
++void *__glewDrawBuffers = 0;
++void *__glewDrawRangeElements = 0;
++void *__glewEnableVertexAttribArray = 0;
++void *__glewEndQuery = 0;
++void *__glewFramebufferTexture2DEXT = 0;
++void *__glewGenBuffers = 0;
++void *__glewGenFramebuffersEXT = 0;
++void *__glewGenQueries = 0;
++void *__glewGenerateMipmap = 0;
++void *__glewGenerateMipmapEXT = 0;
++void *__glewGetAttribLocation = 0;
++void *__glewGetProgramInfoLog = 0;
++void *__glewGetProgramiv = 0;
++void *__glewGetQueryObjectuiv = 0;
++void *__glewGetShaderInfoLog = 0;
++void *__glewGetShaderiv = 0;
++void *__glewGetUniformLocation = 0;
++void *__glewLinkProgram = 0;
++void *__glewMapBuffer = 0;
++void *__glewMultiDrawElementsBaseVertex = 0;
++void *__glewProgramParameteriEXT = 0;
++void *__glewShaderSource = 0;
++void *__glewStringMarkerGREMEDY = 0;
++void *__glewTexImage2DMultisample = 0;
++void *__glewTexImage3D = 0;
++void *__glewUniform1f = 0;
++void *__glewUniform1fv = 0;
++void *__glewUniform1i = 0;
++void *__glewUniform1iv = 0;
++void *__glewUniform2fv = 0;
++void *__glewUniform2iv = 0;
++void *__glewUniform3fv = 0;
++void *__glewUniform3iv = 0;
++void *__glewUniform4fv = 0;
++void *__glewUniform4iv = 0;
++void *__glewUniformMatrix3fv = 0;
++void *__glewUniformMatrix4fv = 0;
++void *__glewUnmapBuffer = 0;
++void *__glewUseProgram = 0;
++void *__glewVertexAttrib2fv = 0;
++void *__glewVertexAttrib3fv = 0;
++void *__glewVertexAttrib4fv = 0;
++void *__glewVertexAttribPointer = 0;
++long glAlphaFunc(void) { qrx_missing("glAlphaFunc"); return 0; }
++long glBegin(void) { qrx_missing("glBegin"); return 0; }
++long glBindTexture(void) { qrx_missing("glBindTexture"); return 0; }
++long glBitmap(void) { qrx_missing("glBitmap"); return 0; }
++long glBlendFunc(void) { qrx_missing("glBlendFunc"); return 0; }
++long glCallList(void) { qrx_missing("glCallList"); return 0; }
++long glClear(void) { qrx_missing("glClear"); return 0; }
++long glClearColor(void) { qrx_missing("glClearColor"); return 0; }
++long glClearDepth(void) { qrx_missing("glClearDepth"); return 0; }
++long glClipPlane(void) { qrx_missing("glClipPlane"); return 0; }
++long glColor3f(void) { qrx_missing("glColor3f"); return 0; }
++long glColor3fv(void) { qrx_missing("glColor3fv"); return 0; }
++long glColor3ub(void) { qrx_missing("glColor3ub"); return 0; }
++long glColor3ubv(void) { qrx_missing("glColor3ubv"); return 0; }
++long glColor4f(void) { qrx_missing("glColor4f"); return 0; }
++long glColor4fv(void) { qrx_missing("glColor4fv"); return 0; }
++long glColor4ub(void) { qrx_missing("glColor4ub"); return 0; }
++long glColor4ubv(void) { qrx_missing("glColor4ubv"); return 0; }
++long glColorMask(void) { qrx_missing("glColorMask"); return 0; }
++long glColorMaterial(void) { qrx_missing("glColorMaterial"); return 0; }
++long glColorPointer(void) { qrx_missing("glColorPointer"); return 0; }
++long glCopyTexSubImage2D(void) { qrx_missing("glCopyTexSubImage2D"); return 0; }
++long glCullFace(void) { qrx_missing("glCullFace"); return 0; }
++long glDeleteLists(void) { qrx_missing("glDeleteLists"); return 0; }
++long glDeleteTextures(void) { qrx_missing("glDeleteTextures"); return 0; }
++long glDepthFunc(void) { qrx_missing("glDepthFunc"); return 0; }
++long glDepthMask(void) { qrx_missing("glDepthMask"); return 0; }
++long glDepthRange(void) { qrx_missing("glDepthRange"); return 0; }
++long glDisable(void) { qrx_missing("glDisable"); return 0; }
++long glDisableClientState(void) { qrx_missing("glDisableClientState"); return 0; }
++long glDrawArrays(void) { qrx_missing("glDrawArrays"); return 0; }
++long glDrawBuffer(void) { qrx_missing("glDrawBuffer"); return 0; }
++long glDrawElements(void) { qrx_missing("glDrawElements"); return 0; }
++long glDrawPixels(void) { qrx_missing("glDrawPixels"); return 0; }
++long glEnable(void) { qrx_missing("glEnable"); return 0; }
++long glEnableClientState(void) { qrx_missing("glEnableClientState"); return 0; }
++long glEnd(void) { qrx_missing("glEnd"); return 0; }
++long glEndList(void) { qrx_missing("glEndList"); return 0; }
++long glFinish(void) { qrx_missing("glFinish"); return 0; }
++long glFlush(void) { qrx_missing("glFlush"); return 0; }
++long glFrontFace(void) { qrx_missing("glFrontFace"); return 0; }
++long glFrustum(void) { qrx_missing("glFrustum"); return 0; }
++long glGenLists(void) { qrx_missing("glGenLists"); return 0; }
++long glGenTextures(void) { qrx_missing("glGenTextures"); return 0; }
++long glGetBooleanv(void) { qrx_missing("glGetBooleanv"); return 0; }
++long glGetDoublev(void) { qrx_missing("glGetDoublev"); return 0; }
++long glGetError(void) { qrx_missing("glGetError"); return 0; }
++long glGetFloatv(void) { qrx_missing("glGetFloatv"); return 0; }
++long glGetIntegerv(void) { qrx_missing("glGetIntegerv"); return 0; }
++long glGetString(void) { qrx_missing("glGetString"); return 0; }
++long glGetTexImage(void) { qrx_missing("glGetTexImage"); return 0; }
++long glGetTexLevelParameteriv(void) { qrx_missing("glGetTexLevelParameteriv"); return 0; }
++long glInitNames(void) { qrx_missing("glInitNames"); return 0; }
++long glIsEnabled(void) { qrx_missing("glIsEnabled"); return 0; }
++long glIsTexture(void) { qrx_missing("glIsTexture"); return 0; }
++long glLightModeli(void) { qrx_missing("glLightModeli"); return 0; }
++long glLightf(void) { qrx_missing("glLightf"); return 0; }
++long glLightfv(void) { qrx_missing("glLightfv"); return 0; }
++long glLineStipple(void) { qrx_missing("glLineStipple"); return 0; }
++long glLineWidth(void) { qrx_missing("glLineWidth"); return 0; }
++long glLoadIdentity(void) { qrx_missing("glLoadIdentity"); return 0; }
++long glLoadMatrixf(void) { qrx_missing("glLoadMatrixf"); return 0; }
++long glLoadName(void) { qrx_missing("glLoadName"); return 0; }
++long glLogicOp(void) { qrx_missing("glLogicOp"); return 0; }
++long glMaterialfv(void) { qrx_missing("glMaterialfv"); return 0; }
++long glMateriali(void) { qrx_missing("glMateriali"); return 0; }
++long glMatrixMode(void) { qrx_missing("glMatrixMode"); return 0; }
++long glMultMatrixf(void) { qrx_missing("glMultMatrixf"); return 0; }
++long glNewList(void) { qrx_missing("glNewList"); return 0; }
++long glNormal3fv(void) { qrx_missing("glNormal3fv"); return 0; }
++long glNormal3sv(void) { qrx_missing("glNormal3sv"); return 0; }
++long glNormalPointer(void) { qrx_missing("glNormalPointer"); return 0; }
++long glOrtho(void) { qrx_missing("glOrtho"); return 0; }
++long glPixelStorei(void) { qrx_missing("glPixelStorei"); return 0; }
++long glPixelTransferf(void) { qrx_missing("glPixelTransferf"); return 0; }
++long glPixelTransferi(void) { qrx_missing("glPixelTransferi"); return 0; }
++long glPixelZoom(void) { qrx_missing("glPixelZoom"); return 0; }
++long glPointSize(void) { qrx_missing("glPointSize"); return 0; }
++long glPolygonMode(void) { qrx_missing("glPolygonMode"); return 0; }
++long glPolygonOffset(void) { qrx_missing("glPolygonOffset"); return 0; }
++long glPolygonStipple(void) { qrx_missing("glPolygonStipple"); return 0; }
++long glPopAttrib(void) { qrx_missing("glPopAttrib"); return 0; }
++long glPopClientAttrib(void) { qrx_missing("glPopClientAttrib"); return 0; }
++long glPopMatrix(void) { qrx_missing("glPopMatrix"); return 0; }
++long glPopName(void) { qrx_missing("glPopName"); return 0; }
++long glPushAttrib(void) { qrx_missing("glPushAttrib"); return 0; }
++long glPushClientAttrib(void) { qrx_missing("glPushClientAttrib"); return 0; }
++long glPushMatrix(void) { qrx_missing("glPushMatrix"); return 0; }
++long glPushName(void) { qrx_missing("glPushName"); return 0; }
++long glRasterPos2f(void) { qrx_missing("glRasterPos2f"); return 0; }
++long glRasterPos3f(void) { qrx_missing("glRasterPos3f"); return 0; }
++long glReadBuffer(void) { qrx_missing("glReadBuffer"); return 0; }
++long glReadPixels(void) { qrx_missing("glReadPixels"); return 0; }
++long glRectf(void) { qrx_missing("glRectf"); return 0; }
++long glRecti(void) { qrx_missing("glRecti"); return 0; }
++long glRenderMode(void) { qrx_missing("glRenderMode"); return 0; }
++long glRotatef(void) { qrx_missing("glRotatef"); return 0; }
++long glScalef(void) { qrx_missing("glScalef"); return 0; }
++long glScissor(void) { qrx_missing("glScissor"); return 0; }
++long glSelectBuffer(void) { qrx_missing("glSelectBuffer"); return 0; }
++long glShadeModel(void) { qrx_missing("glShadeModel"); return 0; }
++long glTexCoord2d(void) { qrx_missing("glTexCoord2d"); return 0; }
++long glTexCoord2f(void) { qrx_missing("glTexCoord2f"); return 0; }
++long glTexCoord2fv(void) { qrx_missing("glTexCoord2fv"); return 0; }
++long glTexCoord3fv(void) { qrx_missing("glTexCoord3fv"); return 0; }
++long glTexCoordPointer(void) { qrx_missing("glTexCoordPointer"); return 0; }
++long glTexEnvf(void) { qrx_missing("glTexEnvf"); return 0; }
++long glTexEnvfv(void) { qrx_missing("glTexEnvfv"); return 0; }
++long glTexEnvi(void) { qrx_missing("glTexEnvi"); return 0; }
++long glTexGeni(void) { qrx_missing("glTexGeni"); return 0; }
++long glTexImage1D(void) { qrx_missing("glTexImage1D"); return 0; }
++long glTexImage2D(void) { qrx_missing("glTexImage2D"); return 0; }
++long glTexParameterf(void) { qrx_missing("glTexParameterf"); return 0; }
++long glTexParameteri(void) { qrx_missing("glTexParameteri"); return 0; }
++long glTexParameteriv(void) { qrx_missing("glTexParameteriv"); return 0; }
++long glTexSubImage1D(void) { qrx_missing("glTexSubImage1D"); return 0; }
++long glTexSubImage2D(void) { qrx_missing("glTexSubImage2D"); return 0; }
++long glTranslatef(void) { qrx_missing("glTranslatef"); return 0; }
++long glVertex2f(void) { qrx_missing("glVertex2f"); return 0; }
++long glVertex2fv(void) { qrx_missing("glVertex2fv"); return 0; }
++long glVertex2i(void) { qrx_missing("glVertex2i"); return 0; }
++long glVertex2iv(void) { qrx_missing("glVertex2iv"); return 0; }
++long glVertex2s(void) { qrx_missing("glVertex2s"); return 0; }
++long glVertex2sv(void) { qrx_missing("glVertex2sv"); return 0; }
++long glVertex3f(void) { qrx_missing("glVertex3f"); return 0; }
++long glVertex3fv(void) { qrx_missing("glVertex3fv"); return 0; }
++long glVertexPointer(void) { qrx_missing("glVertexPointer"); return 0; }
++long glViewport(void) { qrx_missing("glViewport"); return 0; }
++long glewGetErrorString(void) { qrx_missing("glewGetErrorString"); return 0; }
++long glewInit(void) { qrx_missing("glewInit"); return 0; }
++long gluCylinder(void) { qrx_missing("gluCylinder"); return 0; }
++long gluDeleteQuadric(void) { qrx_missing("gluDeleteQuadric"); return 0; }
++long gluDisk(void) { qrx_missing("gluDisk"); return 0; }
++long gluNewQuadric(void) { qrx_missing("gluNewQuadric"); return 0; }
++long gluProject(void) { qrx_missing("gluProject"); return 0; }
++long gluQuadricDrawStyle(void) { qrx_missing("gluQuadricDrawStyle"); return 0; }
++long gluQuadricNormals(void) { qrx_missing("gluQuadricNormals"); return 0; }
++long gluQuadricOrientation(void) { qrx_missing("gluQuadricOrientation"); return 0; }
++long gluSphere(void) { qrx_missing("gluSphere"); return 0; }
++long gluUnProject(void) { qrx_missing("gluUnProject"); return 0; }
+diff --git a/intern/qrx/qrx_memutil.c b/intern/qrx/qrx_memutil.c
+new file mode 100644
+index 0000000..7aff2ed
+--- /dev/null
++++ b/intern/qrx/qrx_memutil.c
+@@ -0,0 +1,40 @@
++/* Cache limiter that never evicts, in place of intern/memutil's C++ one (no std::list here).
++ * Only the sequencer and movie clip caches use it, which the first QRX OS One stage leaves out. */
++#include <stdlib.h>
++#include <stdbool.h>
++#include "MEM_guardedalloc.h"
++#include "MEM_CacheLimiterC-Api.h"
++
++struct MEM_CacheLimiter_s { MEM_CacheLimiter_Destruct_Func destruct; };
++struct MEM_CacheLimiterHandle_s { void *data; int refs; struct MEM_CacheLimiter_s *owner; };
++static size_t limit_bytes = 32u * 1024u * 1024u;
++static bool limit_disabled = false;
++
++void MEM_CacheLimiter_set_maximum(size_t m) { limit_bytes = m; }
++size_t MEM_CacheLimiter_get_maximum(void) { return limit_bytes; }
++void MEM_CacheLimiter_set_disabled(bool disabled) { limit_disabled = disabled; }
++bool MEM_CacheLimiter_is_disabled(void) { return limit_disabled; }
++MEM_CacheLimiterC *new_MEM_CacheLimiter(MEM_CacheLimiter_Destruct_Func d, MEM_CacheLimiter_DataSize_Func s)
++{
++	struct MEM_CacheLimiter_s *c = malloc(sizeof(*c));
++	(void)s;
++	c->destruct = d;
++	return c;
++}
++void delete_MEM_CacheLimiter(MEM_CacheLimiterC *This) { free(This); }
++MEM_CacheLimiterHandleC *MEM_CacheLimiter_insert(MEM_CacheLimiterC *This, void *data)
++{
++	struct MEM_CacheLimiterHandle_s *h = malloc(sizeof(*h));
++	h->data = data; h->refs = 0; h->owner = This;
++	return h;
++}
++void MEM_CacheLimiter_enforce_limits(MEM_CacheLimiterC *This) { (void)This; }
++void MEM_CacheLimiter_unmanage(MEM_CacheLimiterHandleC *h) { free(h); }
++void MEM_CacheLimiter_touch(MEM_CacheLimiterHandleC *h) { (void)h; }
++void MEM_CacheLimiter_ref(MEM_CacheLimiterHandleC *h) { h->refs++; }
++void MEM_CacheLimiter_unref(MEM_CacheLimiterHandleC *h) { h->refs--; }
++int MEM_CacheLimiter_get_refcount(MEM_CacheLimiterHandleC *h) { return h->refs; }
++void *MEM_CacheLimiter_get(MEM_CacheLimiterHandleC *h) { return h->data; }
++void MEM_CacheLimiter_ItemPriority_Func_set(MEM_CacheLimiterC *This, MEM_CacheLimiter_ItemPriority_Func f) { (void)This; (void)f; }
++void MEM_CacheLimiter_ItemDestroyable_Func_set(MEM_CacheLimiterC *This, MEM_CacheLimiter_ItemDestroyable_Func f) { (void)This; (void)f; }
++size_t MEM_CacheLimiter_get_memory_in_use(MEM_CacheLimiterC *This) { (void)This; return 0; }
+diff --git a/source/blender/blenkernel/intern/DerivedMesh.c b/source/blender/blenkernel/intern/DerivedMesh.c
+index 9b60066..57f6698 100644
+--- a/source/blender/blenkernel/intern/DerivedMesh.c
++++ b/source/blender/blenkernel/intern/DerivedMesh.c
+@@ -94,7 +94,7 @@ static DerivedMesh *navmesh_dm_createNavMeshForVisualization(DerivedMesh *dm);
+ #endif
+ 
+ 
+-static ThreadRWMutex loops_cache_lock = PTHREAD_RWLOCK_INITIALIZER;
++static ThreadRWMutex loops_cache_lock = BLI_RWLOCK_INITIALIZER;
+ 
+ 
+ static void add_shapekey_layers(DerivedMesh *dm, Mesh *me, Object *ob);
+diff --git a/source/blender/blenkernel/intern/appdir.c b/source/blender/blenkernel/intern/appdir.c
+index 8b05804..9511212 100644
+--- a/source/blender/blenkernel/intern/appdir.c
++++ b/source/blender/blenkernel/intern/appdir.c
+@@ -786,7 +786,11 @@ static void where_is_temp(char *fullname, char *basename, const size_t maxlen, c
+ #endif
+ 	
+ 	if (fullname[0] == '\0') {
++#ifdef __AROS__
++		BLI_strncpy(fullname, "RAM:T/", maxlen);
++#else
+ 		BLI_strncpy(fullname, "/tmp/", maxlen);
++#endif
+ 	}
+ 	else {
+ 		/* add a trailing slash if needed */
+diff --git a/source/blender/blenkernel/intern/font.c b/source/blender/blenkernel/intern/font.c
+index bad73bc..e654c98 100644
+--- a/source/blender/blenkernel/intern/font.c
++++ b/source/blender/blenkernel/intern/font.c
+@@ -35,7 +35,12 @@
+ #include <math.h>
+ #include <stdlib.h>
+ #include <wchar.h>
++#ifdef __AROS__
++#include <ctype.h>
++#define towupper(c) ((c) < 128 ? toupper(c) : (c))
++#else
+ #include <wctype.h>
++#endif
+ 
+ #include "MEM_guardedalloc.h"
+ 
+diff --git a/source/blender/blenkernel/intern/scene.c b/source/blender/blenkernel/intern/scene.c
+index 6fd53bb..627898e 100644
+--- a/source/blender/blenkernel/intern/scene.c
++++ b/source/blender/blenkernel/intern/scene.c
+@@ -2307,7 +2307,13 @@ int BKE_render_num_threads(const RenderData *rd)
+ 		threads = rd->threads;
+ 	else
+ 		threads = BLI_system_thread_count();
+-	
++
++#ifdef __AROS__
++	/* QRX OS One: tile rendering is what runs on the second 68100 core. */
++	if (!(rd->mode & R_FIXED_THREADS) && qrx_core1_available())
++		threads++;
++#endif
++
+ 	return max_ii(threads, 1);
+ }
+ 
+diff --git a/source/blender/blenlib/BLI_threads.h b/source/blender/blenlib/BLI_threads.h
+index 60da6b3..3a23963 100644
+--- a/source/blender/blenlib/BLI_threads.h
++++ b/source/blender/blenlib/BLI_threads.h
+@@ -37,6 +37,10 @@ extern "C" {
+ 
+ #include <pthread.h>
+ 
++#ifdef __AROS__
++#  include "qrx_core1.h"
++#endif
++
+ #ifdef __APPLE__
+ #include <libkern/OSAtomic.h>
+ #endif
+@@ -96,8 +100,14 @@ void    BLI_unlock_thread(int type);
+ 
+ /* Mutex Lock */
+ 
++#ifdef __AROS__
++/* QRX OS One: core 1 can take these as well, so they cannot be Exec semaphores. */
++typedef struct ThreadMutex { qrx_lock_t locked; } ThreadMutex;
++#  define BLI_MUTEX_INITIALIZER   {0}
++#else
+ typedef pthread_mutex_t ThreadMutex;
+-#define BLI_MUTEX_INITIALIZER   PTHREAD_MUTEX_INITIALIZER
++#  define BLI_MUTEX_INITIALIZER   PTHREAD_MUTEX_INITIALIZER
++#endif
+ 
+ void BLI_mutex_init(ThreadMutex *mutex);
+ void BLI_mutex_end(ThreadMutex *mutex);
+@@ -111,7 +121,9 @@ void BLI_mutex_unlock(ThreadMutex *mutex);
+ 
+ /* Spin Lock */
+ 
+-#if defined(__APPLE__)
++#if defined(__AROS__)
++typedef qrx_lock_t SpinLock;
++#elif defined(__APPLE__)
+ typedef OSSpinLock SpinLock;
+ #elif defined(_MSC_VER)
+ typedef volatile int SpinLock;
+@@ -129,9 +141,13 @@ void BLI_spin_end(SpinLock *spin);
+ #define THREAD_LOCK_READ    1
+ #define THREAD_LOCK_WRITE   2
+ 
+-#define BLI_RWLOCK_INITIALIZER PTHREAD_RWLOCK_INITIALIZER
+-
++#ifdef __AROS__
++typedef struct ThreadRWMutex { qrx_lock_t guard; int readers; char writer; } ThreadRWMutex;
++#  define BLI_RWLOCK_INITIALIZER {0, 0, 0}
++#else
++#  define BLI_RWLOCK_INITIALIZER PTHREAD_RWLOCK_INITIALIZER
+ typedef pthread_rwlock_t ThreadRWMutex;
++#endif
+ 
+ void BLI_rw_mutex_init(ThreadRWMutex *mutex);
+ void BLI_rw_mutex_end(ThreadRWMutex *mutex);
+diff --git a/source/blender/blenlib/intern/path_util.c b/source/blender/blenlib/intern/path_util.c
+index 4b3a74d..1fa4c77 100644
+--- a/source/blender/blenlib/intern/path_util.c
++++ b/source/blender/blenlib/intern/path_util.c
+@@ -1040,6 +1040,10 @@ bool BLI_path_cwd(char *path, const size_t maxlen)
+ #else
+ 	if (filelen >= 2 && path[0] == '/')
+ 		wasrelative = false;
++#  ifdef __AROS__
++	if (strchr(path, ':'))  /* a volume or assign name */
++		wasrelative = false;
++#  endif
+ #endif
+ 	
+ 	if (wasrelative) {
+@@ -1568,7 +1572,11 @@ void BLI_join_dirfile(char *__restrict dst, const size_t maxlen, const char *__r
+ 	}
+ 
+ 	/* inline BLI_add_slash */
++#ifdef __AROS__
++	if ((dirlen > 0) && !ELEM(dst[dirlen - 1], SEP, ALTSEP, ':')) {
++#else
+ 	if ((dirlen > 0) && !ELEM(dst[dirlen - 1], SEP, ALTSEP)) {
++#endif
+ 		dst[dirlen++] = SEP;
+ 		dst[dirlen] = '\0';
+ 	}
+@@ -1907,6 +1915,10 @@ const char *BLI_last_slash(const char *string)
+ int BLI_add_slash(char *string)
+ {
+ 	int len = strlen(string);
++#ifdef __AROS__
++	if (len && string[len - 1] == ':')  /* "RAM:/x" would mean a parent directory */
++		return len;
++#endif
+ 	if (len == 0 || string[len - 1] != SEP) {
+ 		string[len] = SEP;
+ 		string[len + 1] = '\0';
+diff --git a/source/blender/blenlib/intern/storage.c b/source/blender/blenlib/intern/storage.c
+index b819c51..86a1acb 100644
+--- a/source/blender/blenlib/intern/storage.c
++++ b/source/blender/blenlib/intern/storage.c
+@@ -131,12 +131,16 @@ double BLI_dir_free_space(const char *dir)
+ 	return (double) (freec * bytesps * sectorspc);
+ #else
+ 
+-#ifdef USE_STATFS_STATVFS
++#ifdef __AROS__
++	(void)dir;
++	return -1;  /* unknown; only the file browser shows it */
++#elif defined(USE_STATFS_STATVFS)
+ 	struct statvfs disk;
+ #else
+ 	struct statfs disk;
+ #endif
+ 
++#ifndef __AROS__
+ 	char name[FILE_MAXDIR], *slash;
+ 	int len = strlen(dir);
+ 
+@@ -160,9 +164,12 @@ double BLI_dir_free_space(const char *dir)
+ #else
+ 	if (statfs(name, &disk)) return -1;
+ #endif
++#endif /* !__AROS__ */
+ 
++#ifndef __AROS__
+ 	return ( ((double) disk.f_bsize) * ((double) disk.f_bfree));
+ #endif
++#endif
+ }
+ 
+ 
+diff --git a/source/blender/blenlib/intern/task.c b/source/blender/blenlib/intern/task.c
+index a064c69..9e71ff9 100644
+--- a/source/blender/blenlib/intern/task.c
++++ b/source/blender/blenlib/intern/task.c
+@@ -37,6 +37,9 @@
+ 
+ #include "atomic_ops.h"
+ 
++/* AROS's pthread.h brings in exec's struct Task. */
++#define Task BLI_Task
++
+ /* Define this to enable some detailed statistic print. */
+ #undef DEBUG_STATS
+ 
+diff --git a/source/blender/blenlib/intern/threads.c b/source/blender/blenlib/intern/threads.c
+index fbb64f3..694a6e2 100644
+--- a/source/blender/blenlib/intern/threads.c
++++ b/source/blender/blenlib/intern/threads.c
+@@ -114,17 +114,17 @@ static TaskScheduler *task_scheduler = NULL;
+  *
+  ************************************************ */
+ static SpinLock _malloc_lock;
+-static pthread_mutex_t _image_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _image_draw_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _viewer_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _custom1_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _rcache_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _opengl_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _nodes_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _movieclip_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _colormanage_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _fftw_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _view3d_lock = PTHREAD_MUTEX_INITIALIZER;
++static ThreadMutex _image_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _image_draw_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _viewer_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _custom1_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _rcache_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _opengl_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _nodes_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _movieclip_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _colormanage_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _fftw_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _view3d_lock = BLI_MUTEX_INITIALIZER;
+ static pthread_t mainid;
+ static unsigned int thread_levels = 0;  /* threads can be invoked inside threads */
+ static int num_threads_override = 0;
+@@ -255,6 +255,9 @@ static void *tslot_thread_start(void *tslot_p)
+ 
+ int BLI_thread_is_main(void)
+ {
++#ifdef __AROS__
++	if (qrx_on_core1()) return 0;
++#endif
+ 	return pthread_equal(pthread_self(), mainid);
+ }
+ 
+@@ -365,7 +368,7 @@ int BLI_system_thread_count(void)
+ 		len = sizeof(t);
+ 		sysctl(mib, 2, &t, &len, NULL, 0);
+ #   else
+-		t = (int)sysconf(_SC_NPROCESSORS_ONLN);
++		t = 1;  /* QRX OS One: AROS has one scheduler CPU; core 1 is added below where present */
+ #   endif
+ #endif
+ 	}
+@@ -420,16 +423,23 @@ static ThreadMutex *global_mutex_from_type(const int type)
+ 
+ void BLI_lock_thread(int type)
+ {
+-	pthread_mutex_lock(global_mutex_from_type(type));
++	BLI_mutex_lock(global_mutex_from_type(type));
+ }
+ 
+ void BLI_unlock_thread(int type)
+ {
+-	pthread_mutex_unlock(global_mutex_from_type(type));
++	BLI_mutex_unlock(global_mutex_from_type(type));
+ }
+ 
+ /* Mutex Locks */
+ 
++#ifdef __AROS__
++void BLI_mutex_init(ThreadMutex *mutex) { mutex->locked = 0; }
++void BLI_mutex_lock(ThreadMutex *mutex) { qrx_lock(&mutex->locked); }
++void BLI_mutex_unlock(ThreadMutex *mutex) { qrx_unlock(&mutex->locked); }
++bool BLI_mutex_trylock(ThreadMutex *mutex) { return qrx_trylock(&mutex->locked); }
++void BLI_mutex_end(ThreadMutex *mutex) { (void)mutex; }
++#else
+ void BLI_mutex_init(ThreadMutex *mutex)
+ {
+ 	pthread_mutex_init(mutex, NULL);
+@@ -454,6 +464,7 @@ void BLI_mutex_end(ThreadMutex *mutex)
+ {
+ 	pthread_mutex_destroy(mutex);
+ }
++#endif /* __AROS__ */
+ 
+ ThreadMutex *BLI_mutex_alloc(void)
+ {
+@@ -472,17 +483,27 @@ void BLI_mutex_free(ThreadMutex *mutex)
+ 
+ void BLI_spin_init(SpinLock *spin)
+ {
++#ifdef __AROS__
++	*spin = 0;
++	return;
++#endif
+ #if defined(__APPLE__)
+ 	*spin = OS_SPINLOCK_INIT;
+ #elif defined(_MSC_VER)
+ 	*spin = 0;
+ #else
++#ifndef __AROS__
+ 	pthread_spin_init(spin, 0);
+ #endif
++#endif
+ }
+ 
+ void BLI_spin_lock(SpinLock *spin)
+ {
++#ifdef __AROS__
++	qrx_lock(spin);
++	return;
++#endif
+ #if defined(__APPLE__)
+ 	OSSpinLockLock(spin);
+ #elif defined(_MSC_VER)
+@@ -492,33 +513,75 @@ void BLI_spin_lock(SpinLock *spin)
+ 		}
+ 	}
+ #else
++#ifndef __AROS__
+ 	pthread_spin_lock(spin);
+ #endif
++#endif
+ }
+ 
+ void BLI_spin_unlock(SpinLock *spin)
+ {
++#ifdef __AROS__
++	qrx_unlock(spin);
++	return;
++#endif
+ #if defined(__APPLE__)
+ 	OSSpinLockUnlock(spin);
+ #elif defined(_MSC_VER)
+ 	_ReadWriteBarrier();
+ 	*spin = 0;
+ #else
++#ifndef __AROS__
+ 	pthread_spin_unlock(spin);
+ #endif
++#endif
+ }
+ 
+ void BLI_spin_end(SpinLock *spin)
+ {
++#ifdef __AROS__
++	(void)spin;
++	return;
++#endif
+ #if defined(__APPLE__)
+ #elif defined(_MSC_VER)
+ #else
++#ifndef __AROS__
+ 	pthread_spin_destroy(spin);
+ #endif
++#endif
+ }
+ 
+ /* Read/Write Mutex Lock */
+ 
++#ifdef __AROS__
++void BLI_rw_mutex_init(ThreadRWMutex *mutex)
++{
++	mutex->guard = 0; mutex->readers = 0; mutex->writer = 0;
++}
++void BLI_rw_mutex_lock(ThreadRWMutex *mutex, int mode)
++{
++	for (;;) {
++		qrx_lock(&mutex->guard);
++		if (!mutex->writer && (mode == THREAD_LOCK_READ || mutex->readers == 0)) {
++			if (mode == THREAD_LOCK_READ) mutex->readers++;
++			else mutex->writer = 1;
++			qrx_unlock(&mutex->guard);
++			return;
++		}
++		qrx_unlock(&mutex->guard);
++		qrx_yield();
++	}
++}
++void BLI_rw_mutex_unlock(ThreadRWMutex *mutex)
++{
++	qrx_lock(&mutex->guard);
++	if (mutex->writer) mutex->writer = 0;
++	else mutex->readers--;
++	qrx_unlock(&mutex->guard);
++}
++void BLI_rw_mutex_end(ThreadRWMutex *mutex) { (void)mutex; }
++#else
+ void BLI_rw_mutex_init(ThreadRWMutex *mutex)
+ {
+ 	pthread_rwlock_init(mutex, NULL);
+@@ -541,6 +604,7 @@ void BLI_rw_mutex_end(ThreadRWMutex *mutex)
+ {
+ 	pthread_rwlock_destroy(mutex);
+ }
++#endif /* __AROS__ */
+ 
+ ThreadRWMutex *BLI_rw_mutex_alloc(void)
+ {
+@@ -610,6 +674,39 @@ void BLI_condition_init(ThreadCondition *cond)
+ 	pthread_cond_init(cond, NULL);
+ }
+ 
++#ifdef __AROS__
++/* AROS's condition variables need a pthread mutex, these locks are not one, so a gate stands between
++ * them. Who waits holds the gate before dropping the lock, who notifies takes the gate first, so no
++ * notification is lost. Conditions are for core 0: core 1 has no scheduler to wait in. */
++static pthread_mutex_t condition_gate = PTHREAD_MUTEX_INITIALIZER;
++void BLI_condition_wait(ThreadCondition *cond, ThreadMutex *mutex)
++{
++	pthread_mutex_lock(&condition_gate);
++	BLI_mutex_unlock(mutex);
++	pthread_cond_wait(cond, &condition_gate);
++	pthread_mutex_unlock(&condition_gate);
++	BLI_mutex_lock(mutex);
++}
++
++void BLI_condition_wait_global_mutex(ThreadCondition *cond, const int type)
++{
++	BLI_condition_wait(cond, global_mutex_from_type(type));
++}
++
++void BLI_condition_notify_one(ThreadCondition *cond)
++{
++	pthread_mutex_lock(&condition_gate);
++	pthread_cond_signal(cond);
++	pthread_mutex_unlock(&condition_gate);
++}
++
++void BLI_condition_notify_all(ThreadCondition *cond)
++{
++	pthread_mutex_lock(&condition_gate);
++	pthread_cond_broadcast(cond);
++	pthread_mutex_unlock(&condition_gate);
++}
++#else
+ void BLI_condition_wait(ThreadCondition *cond, ThreadMutex *mutex)
+ {
+ 	pthread_cond_wait(cond, mutex);
+@@ -629,6 +726,7 @@ void BLI_condition_notify_all(ThreadCondition *cond)
+ {
+ 	pthread_cond_broadcast(cond);
+ }
++#endif
+ 
+ void BLI_condition_end(ThreadCondition *cond)
+ {
+diff --git a/source/blender/blenlib/intern/time.c b/source/blender/blenlib/intern/time.c
+index 3cf3221..e374763 100644
+--- a/source/blender/blenlib/intern/time.c
++++ b/source/blender/blenlib/intern/time.c
+@@ -93,6 +93,15 @@ double PIL_check_seconds_timer(void)
+ {
+ 	struct timeval tv;
+ 	struct timezone tz;
++#ifdef __AROS__
++	/* QRX OS One: core 1 has no timer and sees the time core 0 read last. */
++	extern int qrx_on_core1(void);
++	static volatile double last_seconds;
++	if (qrx_on_core1()) return last_seconds;
++	gettimeofday(&tv, &tz);
++	last_seconds = (double) tv.tv_sec + tv.tv_usec / 1000000.0;
++	return last_seconds;
++#endif
+ 
+ 	gettimeofday(&tv, &tz);
+ 
+diff --git a/source/blender/depsgraph/CMakeLists.txt b/source/blender/depsgraph/CMakeLists.txt
+index 33a7628..1974356 100644
+--- a/source/blender/depsgraph/CMakeLists.txt
++++ b/source/blender/depsgraph/CMakeLists.txt
+@@ -39,56 +39,14 @@ set(INC
+ set(INC_SYS
+ )
+ 
++# QRX OS One: the C++ graph needs a standard library that the SDK lacks; the legacy graph does the work.
+ set(SRC
+-	intern/builder/deg_builder.cc
+-	intern/builder/deg_builder_cycle.cc
+-	intern/builder/deg_builder_nodes.cc
+-	intern/builder/deg_builder_nodes_rig.cc
+-	intern/builder/deg_builder_nodes_scene.cc
+-	intern/builder/deg_builder_pchanmap.cc
+-	intern/builder/deg_builder_relations.cc
+-	intern/builder/deg_builder_relations_keys.cc
+-	intern/builder/deg_builder_relations_rig.cc
+-	intern/builder/deg_builder_relations_scene.cc
+-	intern/builder/deg_builder_transitive.cc
+-	intern/debug/deg_debug_graphviz.cc
+-	intern/eval/deg_eval.cc
+-	intern/eval/deg_eval_debug.cc
+-	intern/eval/deg_eval_flush.cc
+-	intern/nodes/deg_node.cc
+-	intern/nodes/deg_node_component.cc
+-	intern/nodes/deg_node_operation.cc
+-	intern/depsgraph.cc
+-	intern/depsgraph_build.cc
+-	intern/depsgraph_debug.cc
+-	intern/depsgraph_eval.cc
+-	intern/depsgraph_query.cc
+-	intern/depsgraph_tag.cc
+-	intern/depsgraph_type_defines.cc
++	intern/qrx_depsgraph_stub.c
+ 
+ 	DEG_depsgraph.h
+ 	DEG_depsgraph_build.h
+ 	DEG_depsgraph_debug.h
+ 	DEG_depsgraph_query.h
+-
+-	intern/builder/deg_builder.h
+-	intern/builder/deg_builder_cycle.h
+-	intern/builder/deg_builder_nodes.h
+-	intern/builder/deg_builder_pchanmap.h
+-	intern/builder/deg_builder_relations.h
+-	intern/builder/deg_builder_transitive.h
+-	intern/eval/deg_eval.h
+-	intern/eval/deg_eval_debug.h
+-	intern/eval/deg_eval_flush.h
+-	intern/nodes/deg_node.h
+-	intern/nodes/deg_node_component.h
+-	intern/nodes/deg_node_operation.h
+-	intern/depsgraph.h
+-	intern/depsgraph_intern.h
+-	intern/depsgraph_types.h
+-
+-	util/deg_util_foreach.h
+-	util/deg_util_function.h
+ )
+ 
+ if(WITH_CXX11)
+diff --git a/source/blender/depsgraph/intern/qrx_depsgraph_stub.c b/source/blender/depsgraph/intern/qrx_depsgraph_stub.c
+new file mode 100644
+index 0000000..ced314b
+--- /dev/null
++++ b/source/blender/depsgraph/intern/qrx_depsgraph_stub.c
+@@ -0,0 +1,24 @@
++/* QRX OS One: the C++ dependency graph needs a C++ standard library, which the AROS SDK lacks.
++ * Blender 2.79 still has its legacy graph (blenkernel/intern/depsgraph.c), which does the work.
++ * The new graph's entry points only stay for the callers that check for it at run time. */
++#include <stdbool.h>
++#include "MEM_guardedalloc.h"
++#include "BLI_utildefines.h"
++#include "DNA_scene_types.h"
++#include "DEG_depsgraph.h"
++#include "BKE_main.h"
++#include "BKE_depsgraph.h"
++
++bool DEG_depsgraph_use_legacy(void) { return true; }
++void DEG_depsgraph_switch_to_legacy(void) {}
++void DEG_depsgraph_switch_to_new(void) {}
++EvaluationContext *DEG_evaluation_context_new(int mode)
++{
++	EvaluationContext *ctx = MEM_callocN(sizeof(EvaluationContext), "EvaluationContext");
++	ctx->mode = mode;
++	return ctx;
++}
++void DEG_evaluation_context_init(EvaluationContext *ctx, int mode) { ctx->mode = mode; }
++void DEG_evaluation_context_free(EvaluationContext *ctx) { MEM_freeN(ctx); }
++void DEG_graph_free(Depsgraph *graph) { (void)graph; }
++Depsgraph *DEG_graph_new(void) { return NULL; }
+diff --git a/source/blender/editors/util/numinput.c b/source/blender/editors/util/numinput.c
+index 0f32409..df067ee 100644
+--- a/source/blender/editors/util/numinput.c
++++ b/source/blender/editors/util/numinput.c
+@@ -514,7 +514,7 @@ bool handleNumInput(bContext *C, NumInput *n, const wmEvent *event)
+ 			n->val[idx] = -n->val[idx];
+ 		}
+ 		if (n->val_flag[idx] & NUM_INVERSE) {
+-			val = n->val[idx];
++			double val = n->val[idx];
+ 			/* If we invert on radians when user is in degrees, you get unexpected results... See T53463. */
+ 			if (!n->unit_use_radians && n->unit_type[idx] == B_UNIT_ROTATION) {
+ 				val = RAD2DEG(val);
+diff --git a/source/blender/imbuf/intern/colormanagement.c b/source/blender/imbuf/intern/colormanagement.c
+index f510ded..ac665d9 100644
+--- a/source/blender/imbuf/intern/colormanagement.c
++++ b/source/blender/imbuf/intern/colormanagement.c
+@@ -102,7 +102,7 @@ float imbuf_luma_coefficients[3] = { 0.2126f, 0.7152f, 0.0722f };
+  * LOCK_COLORMANAGE can not be used since this mutex could be needed to
+  * be locked before pre-cached processor are creating
+  */
+-static pthread_mutex_t processor_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex processor_lock = BLI_MUTEX_INITIALIZER;
+ 
+ typedef struct ColormanageProcessor {
+ 	OCIO_ConstProcessorRcPtr *processor;
+diff --git a/source/blender/imbuf/intern/moviecache.c b/source/blender/imbuf/intern/moviecache.c
+index 4b49076..3944f2b 100644
+--- a/source/blender/imbuf/intern/moviecache.c
++++ b/source/blender/imbuf/intern/moviecache.c
+@@ -59,7 +59,7 @@
+ #endif
+ 
+ static MEM_CacheLimiterC *limitor = NULL;
+-static pthread_mutex_t limitor_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex limitor_lock = BLI_MUTEX_INITIALIZER;
+ 
+ typedef struct MovieCache {
+ 	char name[64];
+diff --git a/source/blender/makesdna/intern/CMakeLists.txt b/source/blender/makesdna/intern/CMakeLists.txt
+index 8c758c3..22560e3 100644
+--- a/source/blender/makesdna/intern/CMakeLists.txt
++++ b/source/blender/makesdna/intern/CMakeLists.txt
+@@ -62,7 +62,7 @@ add_custom_command(
+ 		${CMAKE_CURRENT_BINARY_DIR}/dna.c
+ 		${CMAKE_CURRENT_BINARY_DIR}/dna_type_offsets.h
+ 	COMMAND
+-		"$<TARGET_FILE:makesdna>"
++		${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:makesdna>"
+ 		${CMAKE_CURRENT_BINARY_DIR}/dna.c
+ 		${CMAKE_CURRENT_BINARY_DIR}/dna_type_offsets.h
+ 		${CMAKE_SOURCE_DIR}/source/blender/makesdna/
+diff --git a/source/blender/makesdna/intern/makesdna.c b/source/blender/makesdna/intern/makesdna.c
+index 17e30de..2391708 100644
+--- a/source/blender/makesdna/intern/makesdna.c
++++ b/source/blender/makesdna/intern/makesdna.c
+@@ -1231,7 +1231,7 @@ int main(int argc, char **argv)
+ 				baseDirectory = BASE_HEADER;
+ 			}
+ 
+-			fprintf(file_dna, "const unsigned char DNAstr[] = {\n");
++			fprintf(file_dna, "__attribute__((aligned(8))) const unsigned char DNAstr[] = {\n");
+ 			if (make_structDNA(baseDirectory, file_dna, file_dna_offsets)) {
+ 				/* error */
+ 				fclose(file_dna);
+diff --git a/source/blender/makesrna/intern/CMakeLists.txt b/source/blender/makesrna/intern/CMakeLists.txt
+index 9d0ba55..799aa81 100644
+--- a/source/blender/makesrna/intern/CMakeLists.txt
++++ b/source/blender/makesrna/intern/CMakeLists.txt
+@@ -373,7 +373,7 @@ target_link_libraries(makesrna bf_dna_blenlib)
+ # note (linux only): with crashes try add this after COMMAND: valgrind --leak-check=full --track-origins=yes
+ add_custom_command(
+ 	OUTPUT ${GENSRC}
+-	COMMAND "$<TARGET_FILE:makesrna>" ${CMAKE_CURRENT_BINARY_DIR}/
++	COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:makesrna>" ${CMAKE_CURRENT_BINARY_DIR}/
+ 	DEPENDS makesrna
+ )
+ 
+diff --git a/source/blender/makesrna/intern/makesrna.c b/source/blender/makesrna/intern/makesrna.c
+index df0df68..e2d308b 100644
+--- a/source/blender/makesrna/intern/makesrna.c
++++ b/source/blender/makesrna/intern/makesrna.c
+@@ -3994,7 +3994,6 @@ static int rna_preprocess(const char *outfile)
+ 
+ 	/* define rna */
+ 	brna = RNA_create();
+-
+ 	for (i = 0; PROCESS_ITEMS[i].filename; i++) {
+ 		if (PROCESS_ITEMS[i].define) {
+ 			PROCESS_ITEMS[i].define(brna);
+diff --git a/source/blender/makesrna/intern/rna_userdef.c b/source/blender/makesrna/intern/rna_userdef.c
+index 350cb02..7113836 100644
+--- a/source/blender/makesrna/intern/rna_userdef.c
++++ b/source/blender/makesrna/intern/rna_userdef.c
+@@ -3808,6 +3808,7 @@ static void rna_def_userdef_edit(BlenderRNA *brna)
+ 	/* currently only used for insert offset (aka auto-offset), maybe also be useful for later stuff though */
+ 	prop = RNA_def_property(srna, "node_margin", PROP_INT, PROP_NONE);
+ 	RNA_def_property_int_sdna(prop, NULL, "node_margin");
++	RNA_def_property_range(prop, 0, 127);  /* QRX OS One: char is unsigned in this build */
+ 	RNA_def_property_ui_text(prop, "Auto-offset Margin", "Minimum distance between nodes for Auto-offsetting nodes");
+ 	RNA_def_property_update(prop, 0, "rna_userdef_update");
+ }
+diff --git a/source/blender/physics/intern/hair_volume.cpp b/source/blender/physics/intern/hair_volume.cpp
+index 5cc1231..06c8cfd 100644
+--- a/source/blender/physics/intern/hair_volume.cpp
++++ b/source/blender/physics/intern/hair_volume.cpp
+@@ -41,7 +41,9 @@ extern "C" {
+ }
+ 
+ #include "implicit.h"
++#ifndef __AROS__ /* QRX OS One: Eigen needs a C++ standard library */
+ #include "eigen_utils.h"
++#endif
+ 
+ /* ================ Volumetric Hair Interaction ================
+  * adapted from
+@@ -594,6 +596,12 @@ BLI_INLINE float hair_volume_density_divergence(float density, float target_dens
+ 		return 0.0f;
+ }
+ 
++#ifdef __AROS__
++bool BPH_hair_volume_solve_divergence(HairGrid * /*grid*/, float /*dt*/, float /*target_density*/, float /*target_strength*/)
++{
++	return false;
++}
++#else
+ bool BPH_hair_volume_solve_divergence(HairGrid *grid, float /*dt*/, float target_density, float target_strength)
+ {
+ 	const float flowfac = grid->cellsize;
+@@ -886,6 +894,8 @@ bool BPH_hair_volume_solve_divergence(HairGrid *grid, float /*dt*/, float target
+ 	}
+ }
+ 
++#endif /* __AROS__ */
++
+ #if 0 /* XXX weighting is incorrect, disabled for now */
+ /* Velocity filter kernel
+  * See https://en.wikipedia.org/wiki/Filter_%28large_eddy_simulation%29
+diff --git a/source/blender/render/intern/raytrace/vbvh.h b/source/blender/render/intern/raytrace/vbvh.h
+index abccab5..4b33731 100644
+--- a/source/blender/render/intern/raytrace/vbvh.h
++++ b/source/blender/render/intern/raytrace/vbvh.h
+@@ -113,7 +113,7 @@ struct BuildBinaryVBVH {
+ 	void test_break()
+ 	{
+ 		if (RE_rayobjectcontrol_test_break(control))
+-			throw "Stop";
++			/* QRX OS One: no C++ exceptions */ abort(); // "Stop";
+ 	}
+ 
+ 	BuildBinaryVBVH(MemArena *a, RayObjectControl *c)
+@@ -140,14 +140,7 @@ struct BuildBinaryVBVH {
+ 	
+ 	Node *transform(RTBuilder *builder)
+ 	{
+-		try
+-		{
+-			return _transform(builder);
+-			
+-		} catch (...)
+-		{
+-		}
+-		return NULL;
++		return _transform(builder);  /* QRX OS One: no C++ exceptions, out of memory ends the program */
+ 	}
+ 	
+ 	Node *_transform(RTBuilder *builder)
+diff --git a/source/blender/render/intern/source/pipeline.c b/source/blender/render/intern/source/pipeline.c
+index 9ed1520..bc78c19 100644
+--- a/source/blender/render/intern/source/pipeline.c
++++ b/source/blender/render/intern/source/pipeline.c
+@@ -39,6 +39,8 @@
+ #include "DNA_anim_types.h"
+ #include "DNA_group_types.h"
+ #include "DNA_image_types.h"
++#include "DNA_material_types.h"
++#include "DNA_lamp_types.h"
+ #include "DNA_node_types.h"
+ #include "DNA_object_types.h"
+ #include "DNA_particle_types.h"
+@@ -713,6 +715,7 @@ void RE_InitState(Render *re, Render *source, RenderData *rd,
+ 
+ 	/* copy render data and render layers for thread safety */
+ 	render_copy_renderdata(&re->r, rd);
++	if (getenv("QRX_RENDER_RAY")) re->r.mode |= R_RAYTRACE | R_SHADOW;  /* QRX OS One test scene */
+ 
+ 	if (source) {
+ 		/* reuse border flags from source renderer */
+@@ -1344,6 +1347,42 @@ static void main_render_result_new(Render *re)
+ 	}
+ }
+ 
++#ifdef __AROS__
++/* QRX OS One: the second 68100 core renders tiles too. It has no scheduler, so it cannot wait on the
++ * queues the other render threads use. Tiles reach it through these two slots, from the loop in
++ * threaded_tile_processor(). */
++typedef struct Core1Tiles {
++	RenderThread *thread;
++	RenderPart *volatile todo;
++	RenderPart *volatile done;
++	volatile int quit;
++	int tiles;
++	int fail_after;  /* QRX_CORE1_FAULT_TEST: stop on a fault after this many tiles, to test the recovery */
++} Core1Tiles;
++
++static void core1_tile_job(void *arg)
++{
++	Core1Tiles *c = arg;
++
++	for (;;) {
++		RenderPart *pa = c->todo;
++		if (pa) {
++			pa->thread = c->thread->number;
++			do_part_thread(pa);
++			c->tiles++;
++			if (c->fail_after && c->tiles == c->fail_after) {
++				__asm__ volatile("illegal");  /* parks core 1 with a fault */
++			}
++			c->todo = NULL;
++			c->done = pa;
++		}
++		else if (c->quit) {
++			return;
++		}
++	}
++}
++#endif
++
+ static void threaded_tile_processor(Render *re)
+ {
+ 	RenderThread thread[BLENDER_MAX_THREADS];
+@@ -1353,6 +1392,10 @@ static void threaded_tile_processor(Render *re)
+ 	rctf viewplane = re->viewplane;
+ 	double lastdraw, elapsed, redrawtime = 1.0f;
+ 	int totpart = 0, minx = 0, slice = 0, a, wait;
++#ifdef __AROS__
++	Core1Tiles core1 = {NULL};
++	int core1_on = 0;
++#endif
+ 	
+ 	if (re->result == NULL)
+ 		return;
+@@ -1378,6 +1421,9 @@ static void threaded_tile_processor(Render *re)
+ 		BLI_thread_queue_nowait(workqueue);
+ 		
+ 		/* start all threads */
++#ifdef __AROS__
++		printf("Render threads: %d, core 1 %s\n", re->r.threads, qrx_core1_available() ? "present" : "absent");
++#endif
+ 		BLI_init_threads(&threads, do_render_thread, re->r.threads);
+ 		
+ 		for (a = 0; a < re->r.threads; a++) {
+@@ -1394,6 +1440,22 @@ static void threaded_tile_processor(Render *re)
+ 				thread[a].duh = NULL;
+ 			}
+ 
++#ifdef __AROS__
++			/* The last thread goes to core 1 when there is more than one. Display updates
++			 * stay on core 0: the loop below does them when it takes a finished tile. */
++			if (a > 0 && a == re->r.threads - 1 && !core1_on) {
++				core1.thread = &thread[a];
++				core1.todo = NULL;
++				core1.done = NULL;
++				core1.quit = 0;
++				core1.tiles = 0;
++				core1.fail_after = getenv("QRX_CORE1_FAULT_TEST") ? 3 : 0;
++				if (qrx_core1_start(core1_tile_job, &core1)) {
++					core1_on = 1;
++					continue;
++				}
++			}
++#endif
+ 			BLI_insert_thread(&threads, &thread[a]);
+ 		}
+ 		
+@@ -1403,6 +1465,34 @@ static void threaded_tile_processor(Render *re)
+ 		while (1) {
+ 			elapsed = PIL_check_seconds_timer() - lastdraw;
+ 			wait = (redrawtime - elapsed)*1000;
++
++#ifdef __AROS__
++			if (core1_on) {
++				unsigned fault_pc, fault_addr;
++				if (core1.done) {
++					if (core1.thread->display_update)
++						core1.thread->display_update(core1.thread->duh, core1.done->result, NULL);
++					BLI_thread_queue_push(donequeue, core1.done);
++					core1.done = NULL;
++				}
++				if (qrx_core1_faulted(&fault_pc, &fault_addr)) {
++					printf("Core 1 stopped at %08x (address or vector %08x), core 0 takes over its tile\n",
++					       fault_pc, fault_addr);
++					core1_on = 0;
++					if (core1.todo) {
++						BLI_thread_queue_push(workqueue, core1.todo);
++						core1.todo = NULL;
++						BLI_insert_thread(&threads, core1.thread);
++					}
++				}
++				else if (!core1.todo && !core1.quit) {
++					RenderPart *next = BLI_thread_queue_pop_timeout(workqueue, 0);
++					if (next) core1.todo = next;
++					else core1.quit = 1;
++				}
++				wait = min_ii(wait, 5);
++			}
++#endif
+ 			
+ 			/* handle finished part */
+ 			if ((pa=BLI_thread_queue_pop_timeout(donequeue, wait))) {
+@@ -1438,6 +1528,14 @@ static void threaded_tile_processor(Render *re)
+ 			}
+ 		}
+ 		
++#ifdef __AROS__
++		if (core1_on) {
++			core1.quit = 1;
++			while (qrx_core1_busy()) qrx_yield();
++			core1_on = 0;
++			printf("Core 1: %d of the tiles, %u instructions in this job\n", core1.tiles, qrx_core1_instructions());
++		}
++#endif
+ 		BLI_end_threads(&threads);
+ 		
+ 		if ((g_break=re->test_break(re->tbh)))
+@@ -3146,6 +3244,31 @@ const char *RE_GetActiveRenderView(Render *re)
+ static int render_initialize_from_main(Render *re, RenderData *rd, Main *bmain, Scene *scene, SceneRenderLayer *srl,
+                                        Object *camera_override, unsigned int lay_override, int anim, int anim_init)
+ {
++	/* Test scenes for the QRX OS One port: a build without Python has no other way to change a scene.
++	 * QRX_RENDER=WIDTHxHEIGHTxTILE sets the size in pixels and the tile size. With QRX_RENDER_RAY set,
++	 * lamps cast ray shadows and materials become mirrors, so the C++ ray tracer takes part too. */
++	{
++		const char *test = getenv("QRX_RENDER");
++		int w, h, t;
++		if (test && sscanf(test, "%dx%dx%d", &w, &h, &t) == 3) {
++			rd->xsch = w; rd->ysch = h; rd->size = 100; rd->tilex = t; rd->tiley = t;
++		}
++		if (getenv("QRX_RENDER_RAY")) {
++			Material *ma;
++			Lamp *la;
++			rd->mode |= R_RAYTRACE | R_SHADOW;
++			for (ma = bmain->mat.first; ma; ma = ma->id.next) {
++				ma->mode |= MA_RAYMIRROR | MA_SHADBUF;
++				ma->ray_mirror = 0.4f;
++				ma->ray_depth = 2;
++			}
++			for (la = bmain->lamp.first; la; la = la->id.next) {
++				la->mode |= LA_SHAD_RAY;
++			}
++			{int nm=0,nl=0; for (ma = bmain->mat.first; ma; ma = ma->id.next) nm++; for (la = bmain->lamp.first; la; la = la->id.next) nl++; printf("QRXRAY mats %d lamps %d\n",nm,nl);}
++		}
++	}
++
+ 	int winx, winy;
+ 	rcti disprect;
+ 	
+diff --git a/source/blender/render/intern/source/pointdensity.c b/source/blender/render/intern/source/pointdensity.c
+index fb047aa..ef06405 100644
+--- a/source/blender/render/intern/source/pointdensity.c
++++ b/source/blender/render/intern/source/pointdensity.c
+@@ -70,7 +70,7 @@
+ extern struct Render R;
+ /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+ 
+-static ThreadMutex sample_mutex = PTHREAD_MUTEX_INITIALIZER;
++static ThreadMutex sample_mutex = BLI_MUTEX_INITIALIZER;
+ 
+ static int point_data_used(PointDensity *pd)
+ {

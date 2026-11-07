@@ -125,6 +125,42 @@ ops = sub_once(ops, '\tuint dst = m68ki_read_8(ea);\n\tuint allow_writeback;\n',
                '\tuint dst;\n\tuint allow_writeback;\n\tint atomic_done = qrx_atomic_tas(ea, &dst);\n\tif(!atomic_done) dst = m68ki_read_8(ea);\n')
 ops = sub_once(ops, '\tif (allow_writeback==1) m68ki_write_8(ea, dst | 0x80);\n',
                '\tif (allow_writeback==1 && !atomic_done) m68ki_write_8(ea, dst | 0x80);\n')
+# 68040 FSSQRT (0x41) and FDSQRT (0x45): stripping the precision bits leaves 0x01, which is FINT, so
+# sqrt(2.0) gave 2.0. FINT has no single or double precision forms, so 0x01 with a precision is sqrt.
+sqrt_marker = ('\tif ((opmode & 0x44) == 0x44)\n')
+assert fpu.count(sqrt_marker) == 1, 'Refuse patch: FPU rounding anchor changed (pin drift?)'
+fpu = fpu.replace(sqrt_marker, sqrt_marker)
+sqrt_after = '\tswitch (opmode)\n\t{\n\t\tcase 0x00:\t\t// FMOVE'
+assert fpu.count(sqrt_after) == 1, 'Refuse patch: FPU opmode switch anchor changed (pin drift?)'
+fpu = fpu.replace(sqrt_after, '\tif (round && opmode == 0x01) opmode = 0x04; /* ARMITHLON_FxSQRT */\n' + sqrt_after)
+# FMOVEM of several FPU control registers with (An) wrote them all to one address, and read them all
+# from it. AROS saves its context with exactly that on every task switch, so FPCR and the condition
+# codes were lost: a task switch between FCMP and FBcc took the wrong branch.
+ctl_anchor = '\tint reg = (w2 >> 10) & 0x7;\n\n\tif (dir)\t// From system control reg to <ea>\n'
+assert fpu.count(ctl_anchor) == 1, 'Refuse patch: fmove_fpcr anchor changed (pin drift?)'
+fpu = fpu.replace(ctl_anchor, '''\tint reg = (w2 >> 10) & 0x7;
+
+\tif (((ea >> 3) & 7) == 2 && (reg & (reg - 1)))\t/* ARMITHLON_FMOVEM_CTL: (An), more than one register */
+\t{
+\t\tuint32 addr = REG_A[ea & 7];
+\t\tif (dir)
+\t\t{
+\t\t\tif (reg & 4) { m68ki_write_32(addr, REG_FPCR); addr += 4; }
+\t\t\tif (reg & 2) { m68ki_write_32(addr, REG_FPSR); addr += 4; }
+\t\t\tif (reg & 1) m68ki_write_32(addr, REG_FPIAR);
+\t\t}
+\t\telse
+\t\t{
+\t\t\tif (reg & 4) { REG_FPCR = m68ki_read_32(addr); addr += 4; float_rounding_mode = (REG_FPCR >> 4) & 0x3; }
+\t\t\tif (reg & 2) { REG_FPSR = m68ki_read_32(addr); addr += 4; }
+\t\t\tif (reg & 1) REG_FPIAR = m68ki_read_32(addr);
+\t\t}
+\t\tUSE_CYCLES(10);
+\t\treturn;
+\t}
+
+\tif (dir)\t// From system control reg to <ea>
+''')
 dst.mkdir(parents=True, exist_ok=True)
 (dst / 'm68k_in.c').write_text(ops, encoding='latin-1')
 (dst / 'm68kcpu.c').write_text(cpu)

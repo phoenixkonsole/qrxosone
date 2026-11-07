@@ -1,0 +1,169 @@
+/* POSIX pieces Blender wants and the AROS SDK does not have. Linked into every 68k program of
+ * the build by aros_cc.py. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <fnmatch.h>
+#include <proto/dos.h>
+#include <proto/exec.h>
+#include <dos/dosextens.h>
+#include <dos/var.h>
+
+/* No virtual memory: a mapping is a private copy, with its length in front. */
+void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)
+{
+	char *mem = malloc(len + 16);
+	(void)addr; (void)prot;
+	if (!mem) { errno = ENOMEM; return MAP_FAILED; }
+	mem += 16;
+	if (flags & MAP_ANON) {
+		memset(mem, 0, len);
+	}
+	else {
+		off_t was = lseek(fd, 0, SEEK_CUR);
+		size_t got = 0;
+		lseek(fd, off, SEEK_SET);
+		while (got < len) {
+			int n = read(fd, mem + got, len - got);
+			if (n <= 0) break;
+			got += n;
+		}
+		lseek(fd, was, SEEK_SET);
+		if (got < len) memset(mem + got, 0, len - got);
+	}
+	return mem;
+}
+int munmap(void *addr, size_t len)
+{
+	(void)len;
+	free((char *)addr - 16);
+	return 0;
+}
+
+static int match(const char *p, const char *s, int fold)
+{
+	for (;; p++, s++) {
+		char c = *p;
+		if (c == '*') {
+			while (*p == '*') p++;
+			if (!*p) return 1;
+			for (; *s; s++) if (match(p, s, fold)) return 1;
+			return 0;
+		}
+		if (!c) return !*s;
+		if (!*s) return 0;
+		if (c == '?') continue;
+		if (c == '[') {
+			const char *q = p + 1;
+			int neg = (*q == '!' || *q == '^'), hit = 0;
+			if (neg) q++;
+			for (; *q && *q != ']'; q++) {
+				int a = fold ? tolower((unsigned char)*q) : *q, b = a;
+				int t = fold ? tolower((unsigned char)*s) : *s;
+				if (q[1] == '-' && q[2] && q[2] != ']') { b = fold ? tolower((unsigned char)q[2]) : q[2]; q += 2; }
+				if (t >= a && t <= b) hit = 1;
+			}
+			if (!*q || hit == neg) return 0;
+			p = q;
+			continue;
+		}
+		if (fold ? tolower((unsigned char)c) != tolower((unsigned char)*s) : c != *s) return 0;
+	}
+}
+int fnmatch(const char *pattern, const char *s, int flags)
+{
+	return match(pattern, s, flags & FNM_CASEFOLD) ? 0 : FNM_NOMATCH;
+}
+
+char *mkdtemp(char *tmpl)
+{
+	size_t len = strlen(tmpl);
+	static unsigned counter = 1;
+	if (len < 6) { errno = EINVAL; return NULL; }
+	for (int tries = 0; tries < 1000; tries++, counter++) {
+		unsigned v = counter * 2654435761u;
+		for (int i = 1; i <= 6; i++, v >>= 4) tmpl[len - i] = "abcdefghijklmnop"[v & 15];
+		if (mkdir(tmpl, 0700) == 0) return tmpl;
+		if (errno != EEXIST) break;
+	}
+	return NULL;
+}
+
+int setenv(const char *name, const char *value, int overwrite)
+{
+	if (!overwrite && getenv(name)) return 0;
+	return SetVar(name, value, -1, GVF_LOCAL_ONLY) ? 0 : -1;
+}
+int unsetenv(const char *name)
+{
+	DeleteVar(name, GVF_LOCAL_ONLY);
+	return 0;
+}
+
+/* Without a screen the shell has no console for stderr, so a batch job can ask for it in stdout. */
+static void __attribute__((constructor)) qrx_stderr_to_stdout(void)
+{
+	/* No "insert volume" requesters: with no screen they wait forever, and Blender probes paths. */
+	((struct Process *)FindTask(NULL))->pr_WindowPtr = (APTR)-1;
+	if (getenv("QRX_STDERR_TO_STDOUT")) {
+		extern void qrx_print_base(void);
+		dup2(1, 2);
+		qrx_print_base();
+	}
+}
+
+#include <proto/exec.h>
+/* One line to the engine's log, usable anywhere on core 0: for debugging a guest with no screen. */
+void qrx_log(const char *s)
+{
+	while (*s) RawPutChar(*s++);
+	RawPutChar('\n');
+}
+
+#include <stdarg.h>
+/* printf to the engine's log, for debugging a guest with no screen. */
+int qrx_printf(const char *fmt, ...)
+{
+	char buf[512];
+	va_list ap;
+	va_start(ap, fmt);
+	int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	qrx_log(buf);
+	return n;
+}
+void abort(void)
+{
+	qrx_log("abort() called");
+	exit(20);
+}
+
+/* The C++ the build keeps uses only these from a C++ runtime. */
+void *_Znwm(unsigned long n) { return malloc(n); }
+void *_Znam(unsigned long n) { return malloc(n); }
+void _ZdlPv(void *p) { free(p); }
+void _ZdaPv(void *p) { free(p); }
+void _ZdlPvm(void *p, unsigned long n) { (void)n; free(p); }
+void _ZdaPvm(void *p, unsigned long n) { (void)n; free(p); }
+void __cxa_pure_virtual(void) { qrx_log("pure virtual call"); exit(20); }
+
+/* What the first stage leaves out ends the program with its name, see gen_missing.py. */
+void qrx_missing(const char *name)
+{
+	fprintf(stderr, "Blender on QRX OS One: %s is not part of this build\n", name);
+	qrx_printf("missing function called: %s", name);
+	exit(20);
+}
+
+/* For guest_stack.py: where the program was loaded. */
+extern int main(int, char **);
+void qrx_print_base(void)
+{
+	qrx_printf("main addr %p", (void *)main);
+}

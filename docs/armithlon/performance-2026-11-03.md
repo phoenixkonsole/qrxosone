@@ -481,3 +481,10 @@ Rogue Squadron no longer stops at its assertion and draws frames; how well it ru
 To check a hardware 3D picture, use `QRX_HG_CAPTURE=file QRX_HG_CAPTURE_FRAME=n`. `QRX_RTG_CAPTURE` shows guest video memory only, where such a program is simply black.
 
 Still open: the level looks dark in both renderers, with or without the JIT (mean brightness 11 of 255 in the software renderer). Whether that is correct has not been settled.
+
+## Update 2026-11-07: two FPU faults in the Musashi core
+
+Found while porting Blender ([docs/BLENDER_AROS68K.md](../BLENDER_AROS68K.md)), fixed in `tools/patch-musashi-fsave-an.py`:
+`FSSQRT` and `FDSQRT` ran as `FINT`, and `FMOVEM` of several FPU control registers with `(An)` wrote them all to one
+address, so AROS lost FPCR and the condition codes on every task switch. Repeated renders are now identical to the
+pixel. `QRX_FULL_DUMP_RAM` now takes ranges of up to 1 GiB.

@@ -1,0 +1,16 @@
+#ifndef QRX_QUEUE
+#define QRX_QUEUE
+#include <vector>
+namespace std {
+template<class T> class queue {
+	vector<T> v; size_t head;
+public:
+	queue() : head(0) {}
+	bool empty() const { return head == v.size(); }
+	size_t size() const { return v.size() - head; }
+	void push(const T &x) { v.push_back(x); }
+	T &front() { return v[head]; }
+	void pop() { if (++head == v.size()) { v.clear(); head = 0; } }
+};
+}
+#endif
