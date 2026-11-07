@@ -258,7 +258,7 @@ FN(x_CreateDIBSection) {                 /* (hdc, BITMAPINFO*, usage, void **bit
     int bpp = x86_rd16(C, bi + 14);
     uint32_t stride, mem, h;
     qobj *o;
-    if (bw <= 0 || bw > 4096 || bh == 0 || bh > 4096 || bh < -4096) return 0;
+    if (bw <= 0 || bw > 4096 || bh == 0 || bh > 4096 || bh < -4096) { qw_log(w, "CreateDIBSection: refused %dx%d %d bits", (int)bw, (int)bh, bpp); return 0; }
     stride = (uint32_t)(((bw * bpp + 31) / 32) * 4);
     mem = qw_alloc(w, stride * (uint32_t)(bh < 0 ? -bh : bh));
     if (!mem) return 0;
@@ -408,10 +408,9 @@ const qhle qw_extra[] = {
     K("GetStringTypeW", x_GetStringTypeW, 4), K("LCMapStringA", x_LCMapStringA, 6), K("LCMapStringW", x_LCMapStringW, 6),
     K("CompareStringA", x_CompareStringA, 6), K("CompareStringW", x_ok0, 6), K("IsBadCodePtr", x_ok0, 1), K("IsBadWritePtr", x_ok0, 2),
     K("DebugBreak", x_ok0, 0), K("lstrcatA", x_lstrcatA, 2), K("FileTimeToSystemTime", x_FileTimeToSystemTime, 2),
-    K("RtlUnwind", x_ok0, 4), K("CreateThread", x_CreateThread, 6), K("ExitThread", x_ExitThread, 1),
+    K("CreateThread", x_CreateThread, 6), K("ExitThread", x_ExitThread, 1),
     ADV("GetUserNameA", x_GetUserNameA, 2), ADV("RegDeleteKeyA", x_ok0, 2), ADV("RegEnumKeyExA", x_RegNotFound, 8),
     U("WinHelpA", x_ok1, 4), U("PostThreadMessageA", x_ok1, 4), U("GetWindowPlacement", x_ok0, 2), U("SetWindowPlacement", x_ok1, 2),
-    U("CreateDialogIndirectParamA", x_ok0, 5),
     { "comdlg32", "GetOpenFileNameA", 1, x_ok0 }, { "comdlg32", "GetSaveFileNameA", 1, x_ok0 }, { "comdlg32", "CommDlgExtendedError", 0, x_ok0 },
     K("GetEnvironmentStrings", x_GetEnvironmentStrings, 0), K("SetStdHandle", x_ok1, 2), K("GetConsoleMode", x_ok0, 2),
     K("SetConsoleMode", x_ok1, 2), K("WriteConsoleA", x_WriteConsoleA, 5), K("ReadConsoleInputA", x_ok0, 4),

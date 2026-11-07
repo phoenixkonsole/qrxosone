@@ -43,7 +43,7 @@
 #define QRX_HOSTFS_RDONLY 4u
 #define QRX_HOSTFS_ACCESS 5u
 #define QRX_HOSTFS_MAX_TRANSFER 4096u
-#define QRX_HOSTFS_MAX_FILE (64u*1024u*1024u)
+#define QRX_HOSTFS_MAX_FILE 0x7FFFFFFFu /* positions in the guest are signed 32 bits */
 #define QRX_HOSTFS_MAX_NAME 96u
 struct QRXHostFS {
     int dirfd;

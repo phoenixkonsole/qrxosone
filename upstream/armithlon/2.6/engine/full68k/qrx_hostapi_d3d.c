@@ -107,8 +107,9 @@ static uint32_t fvf;
 static bool is8;
 #define OBJ_MAX 16384u
 typedef struct {
-    int kind;                 /* 1 vertex buffer, 2 index buffer, 3 texture */
+    int kind;                 /* 1 vertex buffer, 2 index buffer, 3 texture, 4 surface */
     uint32_t mem,size,format,w,h,pitch;
+    uint32_t parent,level;    /* a surface: its texture (0 for a free one) and mip level */
     uint32_t hg; bool linear,wrap_s,wrap_t;
 } D3DObj;
 static D3DObj objs[OBJ_MAX];
@@ -135,9 +136,10 @@ DF(d3d_one){NOARGS;return 1;}
 DF(d3d_ok){NOARGS;return D3D_OK;}
 DF(d3d_not_available){NOARGS;return D3DERR_NOTAVAILABLE;}
 DF(GetAdapterIdentifier){
-    /* drivers, description strings, then ids: enough to be all zero but a name */
-    uint32_t out=is8?a[3]:a[3];
-    for(uint32_t i=0;i<1100;i+=4)x86_wr32(c,out+i,0);
+    /* drivers, description strings, then ids: enough to be all zero but a name.
+       D3D8 has no DeviceName[32]: writing the D3D9 size there overran Max Payne's stack. */
+    uint32_t out=a[3],size=is8?1068u:1100u;
+    for(uint32_t i=0;i<size;i+=4)x86_wr32(c,out+i,0);
     static const char n[]="QRX ARMithlon host GPU";
     for(uint32_t i=0;i<sizeof(n);i++){x86_wr8(c,out+i,(uint8_t)n[i]);x86_wr8(c,out+512+i,(uint8_t)n[i]);}
     return D3D_OK;
@@ -161,11 +163,41 @@ DF(GetAdapterDisplayMode){
     return D3D_OK;
 }
 static void fill_caps(x86cpu *c,uint32_t caps){
-    for(uint32_t i=0;i<304;i+=4)x86_wr32(c,caps+i,0);
+    /* D3DCAPS8 is 212 bytes, D3DCAPS9 304; the fields written here are the same in both. */
+    uint32_t size=is8?212u:304u;
+    for(uint32_t i=0;i<size;i+=4)x86_wr32(c,caps+i,0);
     x86_wr32(c,caps,1);                       /* D3DDEVTYPE_HAL */
-    x86_wr32(c,caps+28,0x00000040u);          /* DEVCAPS: HWRASTERIZATION */
-    x86_wr32(c,caps+36+16,0x00000020u|0x00000002u);
+    x86_wr32(c,caps+20,0x80000001u);          /* PresentationIntervals: ONE, IMMEDIATE */
+    x86_wr32(c,caps+28,0x000807C0u);          /* DevCaps: TL vertices and textures in any memory, DRAWPRIM, HWRASTERIZATION */
+    x86_wr32(c,caps+36,0x00000020u|0x00000002u);
+    x86_wr32(c,caps+40,0xFFu);                /* ZCmpCaps */
+    x86_wr32(c,caps+44,0x1FFFu);              /* SrcBlendCaps */
+    x86_wr32(c,caps+48,0x1FFFu);              /* DestBlendCaps */
+    x86_wr32(c,caps+52,0xFFu);                /* AlphaCmpCaps */
+    x86_wr32(c,caps+60,0x00000005u);          /* TextureCaps: PERSPECTIVE, ALPHA */
+    x86_wr32(c,caps+64,0x03030303u);          /* TextureFilterCaps: point and linear */
+    x86_wr32(c,caps+76,0x0000001Fu);          /* TextureAddressCaps */
+    x86_wr32(c,caps+88,2048u);x86_wr32(c,caps+92,2048u);   /* MaxTextureWidth, Height */
+    x86_wr32(c,caps+100,8192u);               /* MaxTextureRepeat */
+    x86_wr32(c,caps+104,8192u);               /* MaxTextureAspectRatio */
+    x86_wr32(c,caps+108,1u);                  /* MaxAnisotropy */
+    x86_wr32(c,caps+144,0x00FFFFFFu);         /* TextureOpCaps */
+    x86_wr32(c,caps+148,2u);x86_wr32(c,caps+152,2u);       /* MaxTextureBlendStages, MaxSimultaneousTextures */
+    x86_wr32(c,caps+180,0xFFFFu);             /* MaxPrimitiveCount */
+    x86_wr32(c,caps+184,0xFFFFu);             /* MaxVertexIndex */
+    x86_wr32(c,caps+188,1u);                  /* MaxStreams */
+    x86_wr32(c,caps+192,256u);                /* MaxStreamStride */
 }
+/* The depth buffer and the back buffer exist only on the host: a name for them is enough. */
+static uint32_t surface_out(x86cpu *c,uint32_t out){
+    uint32_t o=new_object(c,is8?VT_SURF8:VT_SURF9,0);
+    if(!o)return 0;
+    x86_wr32(c,out,o);
+    return D3D_OK;
+}
+DF(GetDepthStencilSurface){return surface_out(c,a[1]);}
+DF(GetRenderTarget){return surface_out(c,is8?a[1]:a[2]);}
+DF(GetBackBuffer){return surface_out(c,is8?a[3]:a[4]);}
 DF(GetDeviceCapsD3D){fill_caps(c,a[3]);return D3D_OK;}
 DF(GetDeviceCapsDev){fill_caps(c,a[1]);return D3D_OK;}
 DF(CreateDevice){
@@ -420,7 +452,7 @@ DF(Buffer_Lock9){
 static unsigned fmt_bytes(uint32_t f){
     switch(f){case 21:case 22:return 4;case 23:case 25:case 26:return 2;case 50:return 1;default:return 0;}
 }
-static uint32_t create_texture(x86cpu *c,uint32_t w,uint32_t h,uint32_t fmt,unsigned vt,uint32_t out){
+static uint32_t create_texture(x86cpu *c,uint32_t w,uint32_t h,uint32_t levels,uint32_t fmt,unsigned vt,uint32_t out){
     unsigned bytes=fmt_bytes(fmt);
     if(!bytes||!w||!h)return D3DERR_INVALIDCALL;
     uint32_t mem=alloc_block(w*h*bytes);
@@ -429,26 +461,42 @@ static uint32_t create_texture(x86cpu *c,uint32_t w,uint32_t h,uint32_t fmt,unsi
     uint32_t o=new_object(c,vt,handle);
     if(!o)return 0;
     next_obj++;
-    objs[handle]=(D3DObj){.kind=3,.mem=mem,.size=w*h*bytes,.format=fmt,.w=w,.h=h,.pitch=w*bytes,.linear=true,.wrap_s=true,.wrap_t=true};
+    objs[handle]=(D3DObj){.kind=3,.mem=mem,.size=w*h*bytes,.format=fmt,.w=w,.h=h,.pitch=w*bytes,.level=levels,.linear=true,.wrap_s=true,.wrap_t=true};
     objs[handle].hg=qrx_hg_texture(0,w,h,NULL,true,true,true);
     pending_mem=0;
     x86_wr32(c,out,o);
     return D3D_OK;
 }
 /* this,w,h,levels,usage,format,pool,out[,shared] */
-DF(CreateTexture){return create_texture(c,a[1],a[2],a[5],is8?VT_TEX8:VT_TEX9,a[7]);}
+DF(CreateTexture){return create_texture(c,a[1],a[2],a[3],a[5],is8?VT_TEX8:VT_TEX9,a[7]);}
+DF(GetLevelCount){
+    const D3DObj *o=&objs[HANDLE(a[0])];
+    uint32_t n=1,big=o->w>o->h?o->w:o->h;
+    if(o->level)return o->level;
+    while(big>1u){big>>=1;n++;}          /* 0 asked for the whole chain */
+    return n;
+}
+/* What a rectangle { left, top, right, bottom } starts at. */
+static uint32_t rect_bits(x86cpu *c,const D3DObj *o,uint32_t rect){
+    if(!rect)return o->mem;
+    return o->mem+x86_rd32(c,rect+4u)*o->pitch+x86_rd32(c,rect)*fmt_bytes(o->format);
+}
 DF(Texture_LockRect){
     /* this, level, out{pitch,bits}, rect, flags. Only level 0 reaches the GPU: lower
      * levels share its memory, which holds enough room for them. */
     D3DObj *o=&objs[HANDLE(a[0])];
-    x86_wr32(c,a[2],o->pitch);x86_wr32(c,a[2]+4,o->mem);
+    x86_wr32(c,a[2],o->pitch);x86_wr32(c,a[2]+4,rect_bits(c,o,a[3]));
     return D3D_OK;
 }
+static void texture_upload(x86cpu *c,D3DObj *o);
 DF(Texture_UnlockRect){
     if(a[1]!=0)return D3D_OK;
-    D3DObj *o=&objs[HANDLE(a[0])];
+    texture_upload(c,&objs[HANDLE(a[0])]);
+    return D3D_OK;
+}
+static void texture_upload(x86cpu *c,D3DObj *o){
     uint8_t *px=malloc((size_t)o->w*o->h*4u);
-    if(!px)return D3D_OK;
+    if(!px)return;
     for(uint32_t i=0;i<o->w*o->h;i++){
         uint8_t *d=px+(size_t)i*4u;
         uint32_t r=255,g=255,b=255,al=255;
@@ -464,7 +512,100 @@ DF(Texture_UnlockRect){
     }
     qrx_hg_texture(o->hg,o->w,o->h,px,o->linear,o->wrap_s,o->wrap_t);
     free(px);
+}
+/* ---- surfaces: a texture's level, or free memory to copy from. Level 0 is the texture's own
+ * memory; a lower level gets its own, since a surface can stay locked beside the others. */
+#define SURF_VT (is8?VT_SURF8:VT_SURF9)
+static uint32_t new_surface(x86cpu *c,uint32_t parent,uint32_t level,uint32_t w,uint32_t h,uint32_t fmt,uint32_t out){
+    unsigned bytes=fmt_bytes(fmt);
+    if(!bytes||!w||!h||next_obj>=OBJ_MAX)return D3DERR_INVALIDCALL;
+    uint32_t mem=parent&&!level?objs[parent].mem:alloc_block(w*h*bytes);
+    if(!mem)return 0;
+    uint32_t handle=next_obj;
+    uint32_t o=new_object(c,SURF_VT,handle);
+    if(!o)return 0;
+    next_obj++;
+    objs[handle]=(D3DObj){.kind=4,.mem=mem,.size=w*h*bytes,.format=fmt,.w=w,.h=h,.pitch=w*bytes,.parent=parent,.level=level};
+    pending_mem=0;
+    x86_wr32(c,out,o);
     return D3D_OK;
+}
+static uint32_t level_size(uint32_t v,uint32_t level){v=level<31u?v>>level:0u;return v?v:1u;}
+DF(GetSurfaceLevel){
+    uint32_t t=HANDLE(a[0]);
+    return new_surface(c,t,a[1],level_size(objs[t].w,a[1]),level_size(objs[t].h,a[1]),objs[t].format,a[2]);
+}
+DF(CreateImageSurface){return new_surface(c,0,0,a[1],a[2],a[3],a[4]);}
+/* D3DSURFACE_DESC: D3D8 has a Size where D3D9 has the multisample quality further on. */
+static void write_desc(x86cpu *c,uint32_t out,const D3DObj *o,uint32_t w,uint32_t h,uint32_t fmt){
+    uint32_t bytes=w*h*fmt_bytes(fmt);
+    (void)o;
+    x86_wr32(c,out,fmt);x86_wr32(c,out+4,3);x86_wr32(c,out+8,0);x86_wr32(c,out+12,1);
+    if(is8){x86_wr32(c,out+16,bytes);x86_wr32(c,out+20,0);x86_wr32(c,out+24,w);x86_wr32(c,out+28,h);}
+    else{x86_wr32(c,out+16,0);x86_wr32(c,out+20,0);x86_wr32(c,out+24,w);x86_wr32(c,out+28,h);}
+}
+DF(Surface_GetDesc){
+    uint32_t h=HANDLE(a[0]);
+    if(!h)write_desc(c,a[1],NULL,bb_w,bb_h,D3DFMT_X8R8G8B8);      /* the host's own buffers */
+    else write_desc(c,a[1],&objs[h],objs[h].w,objs[h].h,objs[h].format);
+    return D3D_OK;
+}
+DF(Texture_GetLevelDesc){
+    D3DObj *o=&objs[HANDLE(a[0])];
+    write_desc(c,a[2],o,level_size(o->w,a[1]),level_size(o->h,a[1]),o->format);
+    return D3D_OK;
+}
+DF(Surface_LockRect){
+    uint32_t h=HANDLE(a[0]);
+    if(!h)return D3DERR_INVALIDCALL;
+    x86_wr32(c,a[1],objs[h].pitch);x86_wr32(c,a[1]+4,rect_bits(c,&objs[h],a[2]));
+    return D3D_OK;
+}
+static void surface_changed(x86cpu *c,const D3DObj *o){
+    if(o->parent&&!o->level)texture_upload(c,&objs[o->parent]);
+}
+DF(Surface_UnlockRect){
+    uint32_t h=HANDLE(a[0]);
+    if(h)surface_changed(c,&objs[h]);
+    return D3D_OK;
+}
+/* (this, source, rects, count, destination, points): between surfaces of one format. */
+static void copy_rect(x86cpu *c,const D3DObj *s,const D3DObj *d,uint32_t sx,uint32_t sy,uint32_t w,uint32_t h,uint32_t dx,uint32_t dy){
+    unsigned bytes=fmt_bytes(s->format);
+    if(sx>=s->w||sy>=s->h||dx>=d->w||dy>=d->h)return;
+    if(w>s->w-sx)w=s->w-sx;
+    if(h>s->h-sy)h=s->h-sy;
+    if(w>d->w-dx)w=d->w-dx;
+    if(h>d->h-dy)h=d->h-dy;
+    for(uint32_t y=0;y<h;y++){
+        uint32_t from=s->mem+(sy+y)*s->pitch+sx*bytes,to=d->mem+(dy+y)*d->pitch+dx*bytes;
+        for(uint32_t i=0;i<w*bytes;i++)x86_wr8(c,to+i,x86_rd8(c,from+i));
+    }
+}
+DF(CopyRects){
+    uint32_t sh=HANDLE(a[1]),dh=HANDLE(a[4]);
+    if(!sh||!dh||fmt_bytes(objs[sh].format)!=fmt_bytes(objs[dh].format))return D3DERR_INVALIDCALL;
+    if(!a[2]||!a[3])copy_rect(c,&objs[sh],&objs[dh],0,0,objs[sh].w,objs[sh].h,0,0);
+    else for(uint32_t i=0;i<a[3];i++){
+        uint32_t r=a[2]+i*16u,l=x86_rd32(c,r),t=x86_rd32(c,r+4u),dx=a[5]?x86_rd32(c,a[5]+i*8u):l,dy=a[5]?x86_rd32(c,a[5]+i*8u+4u):t;
+        copy_rect(c,&objs[sh],&objs[dh],l,t,x86_rd32(c,r+8u)-l,x86_rd32(c,r+12u)-t,dx,dy);
+    }
+    surface_changed(c,&objs[dh]);
+    return D3D_OK;
+}
+DF(UpdateTexture){
+    D3DObj *s=&objs[HANDLE(a[1])],*d=&objs[HANDLE(a[2])];
+    copy_rect(c,s,d,0,0,s->w,s->h,0,0);
+    texture_upload(c,d);
+    return D3D_OK;
+}
+DF(GetAvailableTextureMem){NOARGS;return 256u*1024u*1024u;}
+DF(CheckDeviceMultiSampleType){NOARGS;return a[5]==0?D3D_OK:D3DERR_NOTAVAILABLE;}   /* only "none" */
+DF(ValidateDevice){if(a[1])x86_wr32(c,a[1],1);return D3D_OK;}
+/* What CreateTexture can do, and depth formats: a game then picks one of these. */
+DF(CheckDeviceFormat){
+    NOARGS;
+    switch(a[6]){case 21:case 22:case 23:case 25:case 26:case 50:case 71:case 75:case 77:case 80:return D3D_OK;default:return D3DERR_NOTAVAILABLE;}
 }
 /* ---- which method runs what. An empty interface name matches them all. */
 
@@ -610,14 +751,19 @@ DF(L_DrawIndexedVB7){
     return D3D_OK;
 }
 static const Impl impls[]={
+    {"Surf8","GetDesc",Surface_GetDesc},{"Surf9","GetDesc",Surface_GetDesc},{"Surf8","LockRect",Surface_LockRect},{"Surf9","LockRect",Surface_LockRect},
+    {"Surf8","UnlockRect",Surface_UnlockRect},{"Surf9","UnlockRect",Surface_UnlockRect},
+    {"","GetSurfaceLevel",GetSurfaceLevel},{"","ValidateDevice",ValidateDevice},{"Dev8","SetPixelShader",d3d_ok},{"","GetLevelDesc",Texture_GetLevelDesc},{"","GetLevelCount",GetLevelCount},{"Dev8","CreateImageSurface",CreateImageSurface},{"Dev8","CopyRects",CopyRects},
+    {"","UpdateTexture",UpdateTexture},{"","GetAvailableTextureMem",GetAvailableTextureMem},
     {"","QueryInterface",com_QI},{"","AddRef",com_AddRef},{"","Release",com_Release},
     {"D3D9","GetAdapterCount",d3d_one},{"D3D8","GetAdapterCount",d3d_one},{"D3D9","GetAdapterIdentifier",GetAdapterIdentifier},{"D3D8","GetAdapterIdentifier",GetAdapterIdentifier},
     {"D3D9","GetAdapterModeCount",GetAdapterModeCount},{"D3D8","GetAdapterModeCount",GetAdapterModeCount},{"D3D9","EnumAdapterModes",EnumAdapterModes9},{"D3D8","EnumAdapterModes",EnumAdapterModes8},
     {"D3D9","GetAdapterDisplayMode",GetAdapterDisplayMode},{"D3D8","GetAdapterDisplayMode",GetAdapterDisplayMode},
-    {"D3D9","CheckDeviceType",d3d_ok},{"D3D8","CheckDeviceType",d3d_ok},{"D3D9","CheckDeviceFormat",d3d_ok},{"D3D8","CheckDeviceFormat",d3d_ok},
-    {"D3D9","CheckDepthStencilMatch",d3d_ok},{"D3D8","CheckDepthStencilMatch",d3d_ok},{"D3D9","CheckDeviceMultiSampleType",d3d_not_available},{"D3D8","CheckDeviceMultiSampleType",d3d_not_available},
+    {"D3D9","CheckDeviceType",d3d_ok},{"D3D8","CheckDeviceType",d3d_ok},{"D3D9","CheckDeviceFormat",CheckDeviceFormat},{"D3D8","CheckDeviceFormat",CheckDeviceFormat},
+    {"D3D9","CheckDepthStencilMatch",d3d_ok},{"D3D8","CheckDepthStencilMatch",d3d_ok},{"D3D9","CheckDeviceMultiSampleType",CheckDeviceMultiSampleType},{"D3D8","CheckDeviceMultiSampleType",CheckDeviceMultiSampleType},
     {"D3D9","GetDeviceCaps",GetDeviceCapsD3D},{"D3D8","GetDeviceCaps",GetDeviceCapsD3D},{"Dev9","GetDeviceCaps",GetDeviceCapsDev},{"Dev8","GetDeviceCaps",GetDeviceCapsDev},
     {"D3D9","CreateDevice",CreateDevice},{"D3D8","CreateDevice",CreateDevice},
+    {"","GetDepthStencilSurface",GetDepthStencilSurface},{"","GetRenderTarget",GetRenderTarget},{"","GetBackBuffer",GetBackBuffer},{"Dev8","ResourceManagerDiscardBytes",d3d_ok},
     {"","BeginScene",BeginEnd},{"","EndScene",BeginEnd},{"","Present",Present},{"","Clear",Clear},{"","SetViewport",SetViewport},{"","SetTransform",SetTransform},
     {"","SetRenderState",SetRenderState},{"","SetTextureStageState",SetTextureStageState},{"","SetSamplerState",SetSamplerState},{"","SetTexture",SetTexture},
     {"","SetFVF",SetFVF},{"","GetFVF",GetFVF},{"Dev8","SetVertexShader",SetVertexShader8},{"Dev9","SetVertexShader",d3d_ok},{"","TestCooperativeLevel",TestCooperativeLevel},

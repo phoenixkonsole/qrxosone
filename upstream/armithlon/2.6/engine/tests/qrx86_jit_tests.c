@@ -18,6 +18,7 @@ void qrx_hostapi_alloc_result(uint32_t a, uint32_t b) { (void)a; (void)b; }
 uint32_t qrx_hostapi_alloc_request;
 const QRXHostApi *qrx_d3d_thunks[QW_THUNKS];
 void qrx_d3d_new_process(void) {}
+uint32_t qrx_d3d_unimpl(x86cpu *c, const uint32_t *a) { (void)c; (void)a; return 0; }
 void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram) { (void)op; (void)a; (void)ram; }
 void qrx_host_midi_short(uint32_t m) { (void)m; }
 void qrx_host_midi_sysex(const uint8_t *d, uint32_t n) { (void)d; (void)n; }

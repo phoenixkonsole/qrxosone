@@ -191,7 +191,7 @@ typedef struct qhle {
 } qhle;
 
 /* a loaded PE image: the program (mod[0]) or a program-supplied DLL */
-#define QW_MAXMOD 16
+#define QW_MAXMOD 64
 #define QW_DLL_BASE  0x40000000u      /* relocated DLLs go here */
 #define QW_DLL_LIMIT 0x7C000000u
 typedef struct qmod {

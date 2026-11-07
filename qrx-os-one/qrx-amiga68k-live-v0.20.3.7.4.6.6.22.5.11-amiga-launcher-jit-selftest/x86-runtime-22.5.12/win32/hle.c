@@ -169,6 +169,10 @@ const qhle *qw_find_hle(const char *dll, const char *name)
 
 uint32_t qw_data_import(qwin *w, const char *dll, const char *name);
 
+/* The function has set the registers and eip itself: no return to the caller. */
+static int g_api_jumped;
+void qw_api_jump(void) { g_api_jumped = 1; }
+
 uint32_t qw_thunk(qwin *w, const char *dll, const char *name)
 {
     const qhle *e = qw_find_hle(dll, name);
@@ -265,7 +269,8 @@ static int hle_hook(x86cpu *c, uint32_t idx)
 #endif
     if (w->trace) qw_log(w, "<- %s = %08x", e->name, r);
     if (c->fault) return 1;
-    if (w->exiting) { c->stop = 1; return 1; }
+    if (w->exiting) { c->stop = 1; g_api_jumped = 0; return 1; }
+    if (g_api_jumped) { g_api_jumped = 0; return 1; }
     c->r[X86_ESP] = sp + 4 + (e->nargs > 0 ? 4u * (uint32_t)e->nargs : 0u);
     c->r[X86_EAX] = r;
     c->eip = ret;

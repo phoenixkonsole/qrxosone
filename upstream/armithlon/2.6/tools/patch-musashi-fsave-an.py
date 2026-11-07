@@ -161,6 +161,37 @@ fpu = fpu.replace(ctl_anchor, '''\tint reg = (w2 >> 10) & 0x7;
 
 \tif (dir)\t// From system control reg to <ea>
 ''')
+# FSxxx and FDxxx: round once to the target precision and take the condition codes from that
+# result, as a 68040 does. The pinned code rounds the 64-bit result again, through a host double and
+# a C cast, and sets the codes before. The JIT runs these on the host FPU, which rounds once, and
+# both engines have to give the same bits.
+fsd_prec = '\tswitch (opmode)\n\t{\n\t\tcase 0x00:\t\t// FMOVE'
+assert fpu.count(fsd_prec) == 1, 'Refuse patch: FPU opmode switch anchor changed (pin drift?)'
+fpu = fpu.replace(fsd_prec, '\tif (round) floatx80_rounding_precision = round == 1 ? 32 : 64; /* ARMITHLON_FSD_ROUND */\n' + fsd_prec)
+fsd_tail = ('''\tif (round == 1)
+\t{
+\t\t// round to single
+\t\tREG_FP[dst] = double_to_fx80((float)fx80_to_double(REG_FP[dst]));
+\t} else if (round == 2)
+\t{
+\t\t// round to double
+\t\tREG_FP[dst] = double_to_fx80(fx80_to_double(REG_FP[dst]));
+\t}
+''')
+assert fpu.count(fsd_tail) == 1, 'Refuse patch: FPU rounding tail changed (pin drift?)'
+fpu = fpu.replace(fsd_tail, '''\tfloatx80_rounding_precision = 80;
+\tif (round == 1)
+\t{
+\t\t// round to single
+\t\tREG_FP[dst] = float32_to_floatx80(floatx80_to_float32(REG_FP[dst]));
+\t\tSET_CONDITION_CODES(REG_FP[dst]);
+\t} else if (round == 2)
+\t{
+\t\t// round to double
+\t\tREG_FP[dst] = float64_to_floatx80(floatx80_to_float64(REG_FP[dst]));
+\t\tSET_CONDITION_CODES(REG_FP[dst]);
+\t}
+''')
 dst.mkdir(parents=True, exist_ok=True)
 (dst / 'm68k_in.c').write_text(ops, encoding='latin-1')
 (dst / 'm68kcpu.c').write_text(cpu)

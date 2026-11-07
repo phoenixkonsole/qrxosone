@@ -293,6 +293,8 @@ const qhle qw_net[] = {
     N("sendto", 20, n_sendto, 6), N("setsockopt", 21, n_setsockopt, 5), N("shutdown", 22, n_shutdown, 2), N("socket", 23, n_socket, 3),
     N("gethostbyaddr", 51, n_null, 3), N("gethostbyname", 52, n_gethostbyname, 1), N("getprotobyname", 53, n_null, 1),
     N("getservbyname", 55, n_null, 2), N("gethostname", 57, n_gethostname, 2),
+    /* Asynchronous notification is accepted but delivers no events yet: programs start, network play would wait. */
+    N("WSAAsyncSelect", 101, n_ok0, 4), N("WSAAsyncGetHostByName", 103, n_null, 5), N("WSACancelAsyncRequest", 108, n_ok0, 1),
     N("WSAGetLastError", 111, n_WSAGetLastError, 0), N("WSASetLastError", 112, n_WSASetLastError, 1), N("WSACancelBlockingCall", 113, n_ok0, 0),
     N("WSAIsBlocking", 114, n_ok0, 0), N("WSAStartup", 115, n_WSAStartup, 2), N("WSACleanup", 116, n_ok0, 0), N("__WSAFDIsSet", 151, n_WSAFDIsSet, 2),
     { NULL, NULL, 0, NULL }

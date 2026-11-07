@@ -277,6 +277,8 @@ if(QRX_ENABLE_MUSASHI)
   target_link_libraries(qrx68100_cpu_bench PRIVATE qrx68100_full)
   add_executable(qrx68100_jit_diff_tests tests/jit_diff_tests.c)
   target_link_libraries(qrx68100_jit_diff_tests PRIVATE qrx68100_full)
+  # Reads Musashi's CPU struct for the FPU state, so it shares that library's options.
+  target_compile_definitions(qrx68100_jit_diff_tests PRIVATE M68K_INSTRUCTION_HOOK=1 M68K_EMULATE_INT_ACK=1 M68K_EMULATE_ADDRESS_ERROR=1)
   target_compile_options(qrx68100_jit_diff_tests PRIVATE -UNDEBUG -Wall -Wextra)
   add_test(NAME jit_a64_differential_against_musashi COMMAND qrx68100_jit_diff_tests)
   add_executable(qrx86_jit_tests tests/qrx86_jit_tests.c ${QRX86_QMATH_SOURCES})

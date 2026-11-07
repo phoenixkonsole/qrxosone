@@ -170,6 +170,8 @@ static void show_top(qwin *w, qwnd *x)
     w->active = x->h;
 }
 
+#define QW_MAXCBT 4
+static uint32_t g_cbthook[QW_MAXCBT];    /* WH_CBT */
 static uint32_t create_window(qwin *w, uint32_t exstyle, qclass *cls, const wchar16 *title, uint32_t style,
                               int32_t x, int32_t y, int32_t cx, int32_t cy, uint32_t parent, uint32_t menu,
                               uint32_t hinst, uint32_t param)
@@ -224,6 +226,17 @@ static uint32_t create_window(qwin *w, uint32_t exstyle, qclass *cls, const wcha
         WR32(cs, param); WR32(cs + 4, hinst); WR32(cs + 8, menu); WR32(cs + 12, parent);
         WR32(cs + 16, (uint32_t)cy); WR32(cs + 20, (uint32_t)cx); WR32(cs + 24, (uint32_t)y); WR32(cs + 28, (uint32_t)x);
         WR32(cs + 32, style); WR32(cs + 36, tp); WR32(cs + 40, cp); WR32(cs + 44, exstyle);
+    }
+    /* HCBT_CREATEWND, before the window's first message: MFC attaches its object here. */
+    {
+        int k;
+        for (k = 0; k < QW_MAXCBT; k++) if (g_cbthook[k]) {
+            uint32_t g = qw_alloc(w, 8);
+            WR32(g, cs); WR32(g + 4, 0);
+            qw_call(w, g_cbthook[k], 3, 3, h, g, 0);
+            qw_free(w, g);
+            if (!W(w, h)) return 0;
+        }
     }
     r = win_send(w, h, WM_NCCREATE, 0, cs);
     if (!W(w, h)) return 0;
@@ -1460,9 +1473,16 @@ static uint32_t scan_of_vk(int vk)
 }
 
 /* True when a hook swallowed the key. */
+/* The scan code in lParam, with the extended bit that arrows and page keys carry. */
+static uint32_t key_scan_bits(int vk)
+{
+    uint32_t scan = scan_of_vk(vk) << 16;
+    if ((vk >= 0x21 && vk <= 0x28) || vk == 0x2D || vk == 0x2E) scan |= 0x01000000u;
+    return scan;
+}
 static int kb_hook(qwin *w, int vk, int up, int was_down)
 {
-    uint32_t lp = 1u | (scan_of_vk(vk) << 16) | (was_down ? 0x40000000u : 0) | (up ? 0x80000000u : 0);
+    uint32_t lp = 1u | key_scan_bits(vk) | (was_down ? 0x40000000u : 0) | (up ? 0x80000000u : 0);
     int i;
     for (i = QW_MAXHOOKS - 1; i >= 0; i--) {
         if (g_kbhook[i] && qw_call(w, g_kbhook[i], 3, 0 /* HC_ACTION */, (uint32_t)vk, lp, 0)) return 1;
@@ -1473,6 +1493,10 @@ static int kb_hook(qwin *w, int vk, int up, int was_down)
 FN(u_SetWindowsHookEx) {
     int i;
     (void)w;
+    if (a[0] == 5 /* WH_CBT */) {
+        for (i = 0; i < QW_MAXCBT; i++) if (!g_cbthook[i]) { g_cbthook[i] = a[1]; return 0x4A00u + (uint32_t)i; }
+        return 0;
+    }
     if (a[0] != 2 /* WH_KEYBOARD */) { qw_log(w, "SetWindowsHookEx: hook type %d is not delivered", (int)a[0]); return 0x4900u + a[0]; }
     for (i = 0; i < QW_MAXHOOKS; i++) {
         if (!g_kbhook[i]) { g_kbhook[i] = a[1]; return 0x4800u + (uint32_t)i; }
@@ -1483,6 +1507,7 @@ FN(u_UnhookWindowsHookEx) {
     uint32_t i = a[0] - 0x4800u;
     (void)w;
     if (i < QW_MAXHOOKS) g_kbhook[i] = 0;
+    if (a[0] - 0x4A00u < QW_MAXCBT) g_cbthook[a[0] - 0x4A00u] = 0;
     return 1;
 }
 
@@ -1508,8 +1533,7 @@ static void key_event(qwin *w, int type, int vk, int ch)
     if ((type == QE_KEYDOWN || type == QE_KEYUP) && kb_hook(w, vk, type == QE_KEYUP, was_down)) return;
     /* Engines such as SciTech MGL read the scan code in lParam, not the virtual key. */
     {
-        uint32_t scan = scan_of_vk(vk) << 16;
-        if (vk >= 0x21 && vk <= 0x28) scan |= 0x01000000u;         /* extended: arrows, page keys */
+        uint32_t scan = key_scan_bits(vk);
         if (type == QE_KEYDOWN) win_post(w, tgt->h, WM_KEYDOWN, (uint32_t)vk, 1u | scan | (was_down ? 0x40000000u : 0));
         else if (type == QE_KEYUP) win_post(w, tgt->h, WM_KEYUP, (uint32_t)vk, 0xC0000001u | scan);
     }
@@ -2189,6 +2213,7 @@ FN(u_LoadStringW) {
 }
 FN(u_LoadIconW) { uint32_t h = gdi_new(w, GO_ICON); (void)a; return h; }
 FN(u_LoadCursorW) { uint32_t h = gdi_new(w, GO_CURSOR); (void)a; return h; }
+FN(u_LoadCursorFromFile) { (void)a; return gdi_new(w, GO_CURSOR); }   /* drawn as the normal pointer */
 FN(u_LoadBitmapW) {
     uint32_t d, s;
     if (!a[0] || !res_find_in(w, a[0], 2, a[1], &d, &s)) { qobj *o; uint32_t h = gdi_new(w, GO_BITMAP); o = O(w, h, GO_BITMAP); if (o) surf_resize(&o->bmp, 1, 1); return h; }
@@ -2262,7 +2287,32 @@ FN(u_GetMonitorInfoW) {
     WR32(a[1] + 20, 0); WR32(a[1] + 24, 0); WR32(a[1] + 28, 1024); WR32(a[1] + 32, 740); WR32(a[1] + 36, 1);
     UNUSED; return 1;
 }
+/* LOGFONT in the ANSI or wide form: as long as the structure's size says. */
+static void spi_font(qwin *w, uint32_t p, int wide)
+{
+    static const char face[] = "Arial";
+    uint32_t i, n = wide ? 92u : 60u;
+    for (i = 0; i < n; i += 4) WR32(p + i, 0);
+    WR32(p, (uint32_t)-11);                                /* lfHeight */
+    WR32(p + 16, 400);                                     /* lfWeight */
+    for (i = 0; face[i]; i++) { if (wide) x86_wr16(C, p + 28 + i * 2, (uint8_t)face[i]); else x86_wr8(C, p + 28 + i, (uint8_t)face[i]); }
+}
 FN(u_SystemParametersInfoW) {
+    if (a[0] == 0x29 && a[2]) {                            /* SPI_GETNONCLIENTMETRICS */
+        uint32_t m = a[2], size = RD32(m);
+        int wide = size >= 500;
+        uint32_t lf = wide ? 92u : 60u;
+        if (size != 340 && !wide) return 0;
+        WR32(m + 4, 1); WR32(m + 8, 16); WR32(m + 12, 16); WR32(m + 16, 18); WR32(m + 20, 18);
+        spi_font(w, m + 24, wide);
+        WR32(m + 24 + lf, 12); WR32(m + 28 + lf, 15);
+        spi_font(w, m + 32 + lf, wide);
+        WR32(m + 32 + lf * 2, 18); WR32(m + 36 + lf * 2, 18);
+        spi_font(w, m + 40 + lf * 2, wide);
+        spi_font(w, m + 40 + lf * 3, wide);
+        spi_font(w, m + 40 + lf * 4, wide);
+        return 1;
+    }
     if (a[0] == 0x30) { WR32(a[2], 0); WR32(a[2] + 4, 0); WR32(a[2] + 8, 1024); WR32(a[2] + 12, 740); return 1; }
     if (a[2] && a[1] && a[1] < 1024) { uint32_t i; for (i = 0; i < a[1]; i += 4) WR32(a[2] + i, 0); }
     UNUSED; return 0;
@@ -2418,6 +2468,36 @@ FN(u_AppendMenuW) {
     menu_changed(w, a[0]);
     return 1;
 }
+/* (menu, item, by position, MENUITEMINFO) */
+static uint32_t insert_menu_item(qwin *w, uint32_t *a, int wide)
+{
+    qmenu *m = M(w, a[0]);
+    uint32_t info = a[3], mask, type, state;
+    qmenuitem *it;
+    int at, i;
+    if (!m || m->n >= 48 || !info) return 0;
+    mask = RD32(info + 4); type = RD32(info + 8); state = RD32(info + 12);
+    at = m->n;
+    if (a[2]) { if ((int32_t)a[1] >= 0 && (int)a[1] < m->n) at = (int)a[1]; }
+    else for (i = 0; i < m->n; i++) if (m->it[i].id == a[1]) { at = i; break; }
+    for (i = m->n; i > at; i--) m->it[i] = m->it[i - 1];
+    m->n++;
+    it = &m->it[at];
+    memset(it, 0, sizeof(*it));
+    if (mask & 0x100u) type = 0;                           /* MIIM_FTYPE and string come separately */
+    if ((mask & 0x10u) && (type & 0x800u)) it->flags |= 0x800u;   /* separator */
+    if (mask & 1u) it->flags |= state & 0x0Bu;             /* disabled, grey, checked */
+    if (mask & 2u) it->id = RD32(info + 16);
+    if ((mask & 4u) && RD32(info + 20)) { it->sub = RD32(info + 20); it->flags |= 0x10u; }
+    if (((mask & 0x40u) || ((mask & 0x10u) && !(type & 0x900u))) && RD32(info + 36) >= 0x10000u) {
+        if (wide) qw_rd_wstr(w, RD32(info + 36), it->text, 64);
+        else { char t[64]; qw_rd_str(w, RD32(info + 36), t, sizeof(t)); a2w(it->text, t, 64); }
+    }
+    menu_changed(w, a[0]);
+    return 1;
+}
+FN(u_InsertMenuItemA) { return insert_menu_item(w, a, 0); }
+FN(u_InsertMenuItemW) { return insert_menu_item(w, a, 1); }
 FN(u_ModifyMenuW) {
     qmenuitem *it = menu_find(w, a[0], a[1], (a[2] & 0x400) != 0, NULL);
     if (!it) return 0;
@@ -2944,7 +3024,7 @@ const qhle qw_user32[] = {
     U("SetCapture", u_SetCapture, 1), U("ReleaseCapture", u_ReleaseCapture, 0), U("GetCapture", u_GetCapture, 0),
     U("GetActiveWindow", u_GetActiveWindow, 0), U("GetForegroundWindow", u_GetActiveWindow, 0), U("SetActiveWindow", u_SetActiveWindow, 1),
     U("SetForegroundWindow", u_one, 1), U("BringWindowToTop", u_one, 1), U("FindWindowW", u_FindWindowW, 2),
-    U("LoadStringW", u_LoadStringW, 4), U("LoadIconW", u_LoadIconW, 2), U("LoadCursorW", u_LoadCursorW, 2), U("LoadCursorA", u_LoadCursorW, 2), U("LoadIconA", u_LoadIconW, 2), U("LoadBitmapW", u_LoadBitmapW, 2),
+    U("LoadStringW", u_LoadStringW, 4), U("LoadIconW", u_LoadIconW, 2), U("LoadCursorW", u_LoadCursorW, 2), U("LoadCursorFromFileA", u_LoadCursorFromFile, 1), U("LoadCursorFromFileW", u_LoadCursorFromFile, 1), U("LoadCursorA", u_LoadCursorW, 2), U("LoadIconA", u_LoadIconW, 2), U("LoadBitmapW", u_LoadBitmapW, 2),
     U("LoadImageW", u_LoadImageW, 6), U("DestroyIcon", u_DestroyIcon, 1), U("DestroyCursor", u_DestroyIcon, 1), U("SetCursor", u_SetCursor, 1),
     U("ShowCursor", u_ShowCursor, 1), U("GetCursorPos", u_GetCursorPos, 1), U("MessageBoxW", u_MessageBoxW, 4), U("MessageBeep", u_MessageBeep, 1),
     U("wsprintfW", u_wsprintfW, -1), U("wvsprintfW", u_wvsprintfW, 3), U("wsprintfA", u_wsprintfA, -1),
@@ -2974,14 +3054,14 @@ const qhle qw_user32[] = {
     U("GetWindowLongPtrW", u_GetWindowLongW, 2), U("SetWindowLongPtrW", u_SetWindowLongW, 3),
     U("GetClassLongW", u_GetClassLongW, 2), U("SetClassLongW", u_SetClassLongW, 3),
     U("TrackMouseEvent", u_TrackMouseEvent, 1),
-    U("CreateDialogParamW", u_CreateDialogParamW, 5), U("CreateDialogIndirectParamW", u_CreateDialogIndirectParamW, 5),
+    U("CreateDialogParamW", u_CreateDialogParamW, 5), U("CreateDialogIndirectParamW", u_CreateDialogIndirectParamW, 5), U("CreateDialogIndirectParamA", u_CreateDialogIndirectParamW, 5), U("DialogBoxIndirectParamA", u_DialogBoxIndirectParamW, 5),
     U("DialogBoxParamW", u_DialogBoxParamW, 5), U("DialogBoxIndirectParamW", u_DialogBoxIndirectParamW, 5), U("EndDialog", u_EndDialog, 2),
     U("GetNextDlgTabItem", u_GetNextDlgTabItem, 3), U("GetNextDlgGroupItem", u_GetNextDlgGroupItem, 3), U("MapDialogRect", u_MapDialogRect, 2), U("GetDialogBaseUnits", u_GetDialogBaseUnits, 0),
     U("LoadMenuW", u_LoadMenuW, 2), U("CreateMenu", u_CreateMenu, 0), U("CreatePopupMenu", u_CreateMenu, 0), U("DestroyMenu", u_DestroyMenu, 1),
     U("GetMenu", u_GetMenu, 1), U("SetMenu", u_SetMenu, 2), U("GetSubMenu", u_GetSubMenu, 2), U("GetMenuItemCount", u_GetMenuItemCount, 1),
     U("GetMenuItemID", u_GetMenuItemID, 2), U("CheckMenuItem", u_CheckMenuItem, 3), U("EnableMenuItem", u_EnableMenuItem, 3),
     U("CheckMenuRadioItem", u_CheckMenuRadioItem, 5), U("GetMenuState", u_GetMenuState, 3), U("AppendMenuW", u_AppendMenuW, 4),
-    U("ModifyMenuW", u_ModifyMenuW, 5), U("DeleteMenu", u_DeleteMenu, 3), U("RemoveMenu", u_DeleteMenu, 3), U("GetMenuStringW", u_GetMenuStringW, 5),
+    U("InsertMenuItemA", u_InsertMenuItemA, 4), U("InsertMenuItemW", u_InsertMenuItemW, 4), U("ModifyMenuW", u_ModifyMenuW, 5), U("DeleteMenu", u_DeleteMenu, 3), U("RemoveMenu", u_DeleteMenu, 3), U("GetMenuStringW", u_GetMenuStringW, 5),
     U("DrawMenuBar", u_DrawMenuBar, 1), U("TrackPopupMenu", u_TrackPopupMenu, 7), U("TrackPopupMenuEx", u_TrackPopupMenu, 6),
     U("GetSystemMenu", u_GetSystemMenu, 2), U("SetWindowContextHelpId", u_one, 2), U("WinHelpW", u_one, 4),
     U("SetWindowsHookExW", u_SetWindowsHookEx, 4), U("UnhookWindowsHookEx", u_UnhookWindowsHookEx, 1), U("CallNextHookEx", u_zero, 4),

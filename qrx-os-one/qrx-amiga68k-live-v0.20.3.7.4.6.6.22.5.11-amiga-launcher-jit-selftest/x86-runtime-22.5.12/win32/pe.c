@@ -73,6 +73,10 @@ static void apply_relocs(qwin *w, uint32_t base, uint32_t rva, uint32_t size, ui
     }
 }
 
+/* A program that brings its own MSVCRT.DLL runs on that one: the built-in table covers only a
+ * part of it, and heap and exceptions cannot be split between the two. */
+static int g_native_crt;
+
 int qw_is_hle_dll(const char *dll)
 {
     static const char *hle[] = { "lz32", "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll",
@@ -82,6 +86,7 @@ int qw_is_hle_dll(const char *dll)
     int i;
     for (k = 0; dll[k] && dll[k] != '.' && k < 63; k++) n[k] = (char)tolower((unsigned char)dll[k]);
     n[k] = 0;
+    if (g_native_crt && !strcmp(n, "msvcrt")) return 0;
     for (i = 0; hle[i]; i++) if (!strcmp(n, hle[i])) return 1;
     return 0;
 }
@@ -96,7 +101,7 @@ uint32_t pe_export(qwin *w, qmod *m, const char *name, uint32_t ordinal)
     fns = m->base + x86_rd32(c, d + 28); names = m->base + x86_rd32(c, d + 32); ords = m->base + x86_rd32(c, d + 36);
     if (name) {
         for (i = 0; i < nnames; i++) {
-            char s[96];
+            char s[512];
             qw_rd_str(w, m->base + x86_rd32(c, names + i * 4), s, sizeof(s));
             if (!strcmp(s, name)) { uint16_t o = x86_rd16(c, ords + i * 2); if (o < nfn) rva = x86_rd32(c, fns + o * 4u); break; }
         }
@@ -124,6 +129,7 @@ static int find_dll_file(qwin *w, const char *name, char *out, size_t max)
     const char *sl = strrchr(w->exe_path, '/');
     DIR *d;
     struct dirent *e;
+    int searched_cwd = 0;
     lower_base(want, name, sizeof(want));
     if (sl) { size_t L = (size_t)(sl - w->exe_path); if (L >= sizeof(dir)) return 0; memcpy(dir, w->exe_path, L); dir[L] = 0; }
     else {
@@ -161,6 +167,12 @@ static int find_dll_file(qwin *w, const char *name, char *out, size_t max)
         }
     }
     closedir(d);
+    }
+    /* Then the current directory, as Windows does: Max Payne changes into its driver folder. */
+    if (!searched_cwd) {
+        extern int qw_fs_cwd_host(qwin *w, char *out, size_t max);
+        searched_cwd = 1;
+        if (qw_fs_cwd_host(w, dir, sizeof(dir))) continue;
     }
     /* Then where tools/armithlon/install-directx.sh puts Microsoft's helper DLLs. */
     if (!strcmp(dir, "APPS:windows_system")) return 0;
@@ -311,7 +323,7 @@ static qmod *pe_map(qwin *w, const uint8_t *b, size_t n, const char *name, int i
             if (!ilt) ilt = iat;
             for (k = 0; ; k++) {
                 uint32_t e = x86_rd32(c, base + ilt + k * 4), addr = 0;
-                char fn[96];
+                char fn[512];
                 if (!e) break;
                 if (e & 0x80000000u) snprintf(fn, sizeof(fn), "#%u", e & 0xFFFF);
                 else qw_rd_str(w, base + e + 2, fn, sizeof(fn));
@@ -344,6 +356,14 @@ int pe_load(qwin *w, const uint8_t *b, size_t n)
     char name[64];
     qmod *m;
     lower_base(name, w->exe_path, sizeof(name));
+    {
+        char dll[1400];
+        const char *sl = strrchr(w->exe_path, '/');
+        size_t dl = sl ? (size_t)(sl - w->exe_path) : 0;
+        /* Only beside the program: the search also looks in the shared system folders. */
+        g_native_crt = sl && find_dll_file(w, "msvcrt.dll", dll, sizeof(dll)) && !strncmp(dll, w->exe_path, dl) && dll[dl] == '/';
+        if (g_native_crt) qw_log(w, "running on the program's own MSVCRT.DLL");
+    }
     m = pe_map(w, b, n, name, 0);
     if (!m) return 0;
     w->image_base = m->base;
@@ -358,6 +378,12 @@ static int name_match(qwin *w, uint32_t dir_base, uint32_t ent, uint32_t name)
 {
     x86cpu *c = &w->cpu;
     uint32_t id = x86_rd32(c, ent);
+    if (name >= 0x10000u && x86_rd16(c, name) == '#') {    /* "#1024" is resource number 1024 */
+        uint32_t n = 0, at = name + 2;
+        uint16_t ch;
+        while ((ch = x86_rd16(c, at)) >= '0' && ch <= '9') { n = n * 10u + (uint32_t)(ch - '0'); at += 2; }
+        name = n;
+    }
     if (name < 0x10000u) return !(id & 0x80000000u) && (id & 0xFFFF) == name;
     if (!(id & 0x80000000u)) return 0;
     {
