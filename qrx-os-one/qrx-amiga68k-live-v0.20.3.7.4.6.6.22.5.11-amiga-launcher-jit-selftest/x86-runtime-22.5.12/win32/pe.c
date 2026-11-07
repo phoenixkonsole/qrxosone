@@ -240,6 +240,40 @@ void pe_init_dlls(qwin *w)
     }
 }
 
+/* Static TLS (__declspec(thread), Delphi threadvars): every thread gets a copy of the image's
+ * template, found through fs:[2C][index]. That array is also what TlsAlloc hands out, from the
+ * bottom, so these indices come from the top. */
+#define PE_TLS_MAX 16
+static struct { uint32_t start, size, zero, index; } g_tls[PE_TLS_MAX];
+static int g_ntls;
+static void pe_tls_block(qwin *w, int i, uint32_t teb)
+{
+    x86cpu *c = &w->cpu;
+    uint32_t mem = qw_alloc(w, g_tls[i].size + g_tls[i].zero + 16u), k;
+    if (!mem) return;
+    for (k = 0; k < g_tls[i].size; k++) x86_wr8(c, mem + k, x86_rd8(c, g_tls[i].start + k));
+    for (k = 0; k < g_tls[i].zero; k++) x86_wr8(c, mem + g_tls[i].size + k, 0);
+    x86_wr32(c, teb + 0x1000u + g_tls[i].index * 4u, mem);
+}
+void qw_tls_new_thread(qwin *w, uint32_t teb)
+{
+    int i;
+    for (i = 0; i < g_ntls; i++) pe_tls_block(w, i, teb);
+}
+static void pe_tls_add(qwin *w, uint32_t dir, const char *name)
+{
+    extern uint32_t qw_thread_current_teb(void);
+    x86cpu *c = &w->cpu;
+    uint32_t start = x86_rd32(c, dir), end = x86_rd32(c, dir + 4), at = x86_rd32(c, dir + 8), cb = x86_rd32(c, dir + 12);
+    if (g_ntls >= PE_TLS_MAX || end < start) { qw_log(w, "%s: too much static TLS", name); return; }
+    g_tls[g_ntls].start = start; g_tls[g_ntls].size = end - start; g_tls[g_ntls].zero = x86_rd32(c, dir + 16);
+    g_tls[g_ntls].index = 63u - (uint32_t)g_ntls;
+    if (at) x86_wr32(c, at, g_tls[g_ntls].index);
+    if (w->started) pe_tls_block(w, g_ntls, qw_thread_current_teb());   /* before that: qw_load, once the TEB exists */
+    g_ntls++;
+    if (cb && x86_rd32(c, cb)) qw_log(w, "%s: TLS callbacks are not run", name);
+}
+
 static qmod *pe_map(qwin *w, const uint8_t *b, size_t n, const char *name, int is_dll)
 {
     x86cpu *c = &w->cpu;
@@ -300,6 +334,7 @@ static qmod *pe_map(qwin *w, const uint8_t *b, size_t n, const char *name, int i
     m->entry = le32(b + opt + 16);
     m->res_rva = le32(b + opt + 112);
     m->exp_rva = le32(b + opt + 96);
+    if (optsz >= 96u + 10u * 8u && le32(b + opt + 96 + 9 * 8)) pe_tls_add(w, base + le32(b + opt + 96 + 9 * 8), name);
     m->exp_size = le32(b + opt + 100);
     /* imports: HLE DLLs bind to host thunks, other DLLs are loaded from the program directory */
     if (imp_rva) {

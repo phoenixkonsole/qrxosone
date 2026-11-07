@@ -1644,6 +1644,47 @@ void qw_midi_tick(qwin *w)
     }
 }
 
+/* ================================================================ BSTR and VARIANT */
+/* A BSTR is UTF-16 with its length in bytes in the dword before it. */
+static uint32_t bstr_new(qwin *w, uint32_t from, uint32_t chars)
+{
+    uint32_t m = qw_alloc(w, chars * 2u + 6u), i;
+    if (!m) return 0;
+    WR32(m, chars * 2u);
+    for (i = 0; i < chars; i++) x86_wr16(C, m + 4u + i * 2u, from ? x86_rd16(C, from + i * 2u) : 0);
+    x86_wr16(C, m + 4u + chars * 2u, 0);
+    return m + 4u;
+}
+FN(ole_SysAllocStringLen) { return bstr_new(w, a[0], a[1]); }
+FN(ole_SysAllocString) {
+    uint32_t n = 0;
+    if (!a[0]) return 0;
+    while (x86_rd16(C, a[0] + n * 2u)) n++;
+    return bstr_new(w, a[0], n);
+}
+FN(ole_SysFreeString) { if (a[0]) qw_free(w, a[0] - 4u); return 0; }
+FN(ole_SysStringLen) { UNUSED; return a[0] ? RD32(a[0] - 4u) / 2u : 0; }
+FN(ole_SysReAllocStringLen) {
+    uint32_t n = bstr_new(w, a[1], a[2]), old = RD32(a[0]);
+    if (!n) return 0;
+    if (old) qw_free(w, old - 4u);
+    WR32(a[0], n);
+    return 1;
+}
+FN(ole_VariantInit) { UNUSED; WR32(a[0], 0); WR32(a[0] + 4, 0); WR32(a[0] + 8, 0); WR32(a[0] + 12, 0); return 0; }
+FN(ole_VariantClear) {
+    if ((x86_rd16(C, a[0]) & 0xFFFu) == 8u && RD32(a[0] + 8)) qw_free(w, RD32(a[0] + 8) - 4u);   /* VT_BSTR */
+    WR32(a[0], 0);
+    return 0;
+}
+FN(ole_VariantCopy) {
+    uint32_t i;
+    for (i = 0; i < 16u; i += 4u) WR32(a[0] + i, RD32(a[1] + i));
+    if ((x86_rd16(C, a[1]) & 0xFFFu) == 8u && RD32(a[1] + 8)) WR32(a[0] + 8, bstr_new(w, RD32(a[1] + 8), RD32(RD32(a[1] + 8) - 4u) / 2u));
+    return 0;
+}
+FN(ole_VariantChangeType) { UNUSED; return 0x80020005u; }   /* DISP_E_TYPEMISMATCH: no conversions here */
+
 /* ================================================================ system DLLs as files */
 /* Our system DLLs have a version too: games refuse to start below the DirectX they need, and
  * The Gungan Frontier reads the answer without checking it. As in a real block, the fixed part
@@ -1918,7 +1959,7 @@ const qhle qw_compat[] = {
     /* strings and misc */
     K("lstrcmpA", c_lstrcmpA, 2), K("lstrcmpiA", c_lstrcmpiA, 2), K("lstrcpynA", c_lstrcpynA, 3), K("MulDiv", c_MulDiv, 3),
     K("SetConsoleCtrlHandler", c_ok1, 2), K("GetComputerNameA", c_GetComputerNameA, 2), K("GetSystemDefaultLangID", c_LangId, 0),
-    K("GetUserDefaultLangID", c_LangId, 0), K("GetThreadLocale", c_LangId, 0), K("SystemTimeToFileTime", c_SystemTimeToFileTime, 2),
+    K("GetUserDefaultLangID", c_LangId, 0), K("GetSystemDefaultLCID", c_LangId, 0), K("GetThreadLocale", c_LangId, 0), K("SystemTimeToFileTime", c_SystemTimeToFileTime, 2),
     K("GetExitCodeProcess", c_GetExitCodeProcess, 2), K("WinExec", c_WinExec, 2), K("CreateProcessA", c_CreateProcessA, 10), K("GetNumberFormatA", c_GetNumberFormatA, 6), K("CreateProcessW", c_CreateProcessW, 10), K("TerminateProcess", c_TerminateProcess, 2), K("GetDateFormatA", c_FormatDT, 6), K("GetTimeFormatA", c_FormatDT, 6),
     K("IsValidLocale", c_ok1, 2), K("IsValidCodePage", c_ok1, 1), K("SetEnvironmentVariableW", c_ok1, 2), K("UTRegister", c_ok0, 7), K("UTUnRegister", c_ok0, 1),
     K("GetOverlappedResult", c_ok0, 4), K("PeekNamedPipe", c_ok0, 6), K("GetCommState", c_ok0, 2), K("SetCommState", c_ok0, 2), K("SetCommTimeouts", c_ok0, 2),
@@ -1988,6 +2029,12 @@ const qhle qw_compat[] = {
     { "comctl32", "ImageList_Create", 5, c_ok1 }, { "comctl32", "ImageList_Add", 3, c_ok0 }, { "comctl32", "ImageList_Destroy", 1, c_ok1 },
     { "imm32", "ImmGetContext", 1, c_ok0 }, { "imm32", "ImmReleaseContext", 2, c_ok1 }, { "imm32", "ImmSetOpenStatus", 2, c_ok1 }, { "imm32", "ImmGetOpenStatus", 1, c_ok0 },
     { "imm32", "ImmAssociateContext", 2, c_ok0 }, { "imm32", "ImmNotifyIME", 4, c_ok1 }, { "imm32", "ImmGetDefaultIMEWnd", 1, c_ok0 },
+    { "oleaut32", "SysAllocString", 1, ole_SysAllocString }, { "oleaut32", "#2", 1, ole_SysAllocString }, { "oleaut32", "SysAllocStringLen", 2, ole_SysAllocStringLen }, { "oleaut32", "#4", 2, ole_SysAllocStringLen },
+    { "oleaut32", "SysReAllocStringLen", 3, ole_SysReAllocStringLen }, { "oleaut32", "#5", 3, ole_SysReAllocStringLen }, { "oleaut32", "SysFreeString", 1, ole_SysFreeString }, { "oleaut32", "#6", 1, ole_SysFreeString },
+    { "oleaut32", "SysStringLen", 1, ole_SysStringLen }, { "oleaut32", "#7", 1, ole_SysStringLen }, { "oleaut32", "VariantInit", 1, ole_VariantInit }, { "oleaut32", "#8", 1, ole_VariantInit },
+    { "oleaut32", "VariantClear", 1, ole_VariantClear }, { "oleaut32", "#9", 1, ole_VariantClear }, { "oleaut32", "VariantCopy", 2, ole_VariantCopy }, { "oleaut32", "#10", 2, ole_VariantCopy },
+    { "oleaut32", "VariantCopyInd", 2, ole_VariantCopy }, { "oleaut32", "VariantChangeTypeEx", 5, ole_VariantChangeType }, { "oleaut32", "VariantChangeType", 4, ole_VariantChangeType },
+    { "advapi32", "OpenProcessToken", 3, c_ok0 }, { "advapi32", "LookupPrivilegeValueA", 3, c_ok0 }, { "advapi32", "AdjustTokenPrivileges", 6, c_ok0 },
     { "version", "GetFileVersionInfoSizeA", 2, c_GetFileVersionInfoSizeA }, { "version", "GetFileVersionInfoA", 4, c_GetFileVersionInfoA }, { "version", "VerQueryValueA", 4, c_VerQueryValueA },
     { "msacm32", "acmMetrics", 3, c_acmMetrics }, { "msacm32", "acmStreamOpen", 8, c_acmNoDriver }, { "msacm32", "acmStreamClose", 2, c_ok0 }, { "msacm32", "acmStreamSize", 4, c_acmNoDriver },
     { "msacm32", "acmStreamPrepareHeader", 3, c_acmNoDriver }, { "msacm32", "acmStreamUnprepareHeader", 3, c_ok0 }, { "msacm32", "acmStreamConvert", 3, c_acmNoDriver },

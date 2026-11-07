@@ -562,3 +562,14 @@ Limits:
 - Turok has no fog, as `grFogMode` does nothing, and a later frame after key presses was all black. Why is not known.
 - Turok was run from a folder laid out by hand, with its data in `data\`, and `w95turokdemov101` still stops in the survey because of its flat layout.
 - `turok2demo` and `turok3dfx` were not looked at.
+
+## Update 2026-11-07, fourth part: static TLS, BSTR, fog
+
+- Images with a TLS directory, such as Delphi programs, now get their block. Every thread gets a copy of the template, found through `fs:[2C]`. The indices come from the top of the array that `TlsAlloc` fills from the bottom. TLS callbacks are not run; a message says so when an image has some.
+- `oleaut32` has `SysAllocString`, `SysAllocStringLen`, `SysReAllocStringLen`, `SysFreeString`, `SysStringLen`, `VariantInit`, `VariantClear` and `VariantCopy`, also under their ordinals. `VariantChangeType` refuses every conversion. `OpenProcessToken`, `LookupPrivilegeValueA` and `AdjustTokenPrivileges` fail, and `GetSystemDefaultLCID` is new.
+- `VirtualFree` with `MEM_DECOMMIT` zeroes the pages, because Windows returns decommitted pages zeroed. This did not fix anything seen so far.
+- Glide table fog is mapped to the host's linear fog over w: the table gives where the fog begins and where it is full. Turok's picture did not visibly change, so this is not confirmed to work.
+
+Limits:
+
+- `islepro`, an Inno Setup 2.0.18 installer, now gets past its TLS and stops at `00401b04` in Delphi's memory manager, where text has overwritten the link of a free block. The interpreter stops at the same place, so the JIT is not the cause. Why the block is overwritten is not known.

@@ -142,6 +142,28 @@ GF(grVertexLayout){
     return 0;
 }
 GF(grDepthBufferMode){NOARGS;st.depth_test=a[0]!=0;w_buffer=a[0]==2||a[0]==4;return 0;}
+/* The shader fades linearly over w. A fog table says how much fog there is at 64 fixed values of
+ * w: from it come where the fog begins and where it is full. */
+GF(grFogMode){NOARGS;st.fog=(a[0]&0xFFu)==2u;return 0;}
+GF(grFogColorValue){
+    NOARGS;
+    st.fog_rgb[0]=((a[0]>>16)&255u)/255.f;st.fog_rgb[1]=((a[0]>>8)&255u)/255.f;st.fog_rgb[2]=(a[0]&255u)/255.f;
+    return 0;
+}
+static float fog_index_to_w(unsigned i){return ldexpf(1.f,3+(int)(i>>2))/(float)(8u-(i&3u));}
+GF(grFogTable){
+    float start=-1.f,end=-1.f;
+    for(unsigned i=0;i<64u;i++){
+        unsigned v=x86_rd8(c,a[0]+i);
+        if(v<8u)start=fog_index_to_w(i);
+        if(v>=248u&&end<0.f)end=fog_index_to_w(i);
+    }
+    if(end<0.f)end=fog_index_to_w(63);
+    if(start<0.f)start=fog_index_to_w(0);
+    if(start>=end)start=end*0.5f;
+    st.fog_start=start;st.fog_end=end;
+    return 0;
+}
 GF(grHints){NOARGS;if(a[0]==0)stw_tmu0=(a[1]&2u)!=0;return 0;}     /* GR_HINT_STWHINT, W_DIFF_TMU0 */
 GF(grDepthBufferFunction){NOARGS;st.depth_func=(uint8_t)(a[0]&7u);return 0;}
 GF(grDepthMask){NOARGS;st.depth_write=a[0]!=0;return 0;}
@@ -322,7 +344,7 @@ GF(grGet){
 #define API(n,na,f) {n,na,f}
 const QRXHostApi qrx_api_glide[]={
     API("grErrorSetCallback",1,gr_noop),API("grHints",2,grHints),API("grSstIdle",0,gr_noop),API("grBufferNumPending",0,gr_noop),API("grTriStats",2,grTriStats),API("grResetTriStats",0,gr_noop),
-    API("grSstResetPerfStats",0,gr_noop),API("grSstPerfStats",1,gr_noop),API("grFogTable",1,gr_noop),API("grTexCombineFunction",2,gr_noop),API("grDrawLine",2,gr_noop),
+    API("grSstResetPerfStats",0,gr_noop),API("grSstPerfStats",1,gr_noop),API("grFogTable",1,grFogTable),API("grTexCombineFunction",2,gr_noop),API("grDrawLine",2,gr_noop),
     API("grLfbLock",6,gr_noop),API("grLfbUnlock",2,gr_noop),                     /* FXFALSE: no access to the frame buffer */
     API("guTexMemReset",0,guTexMemReset),API("guTexAllocateMemory",15,guTexAllocateMemory),API("guTexDownloadMipMap",3,guTexDownloadMipMap),API("guTexSource",1,guTexSource),
     API("guDrawTriangleWithClip",3,grDrawTriangle),API("grTexDownloadTablePartial",5,grTexDownloadTablePartial),
@@ -336,7 +358,7 @@ const QRXHostApi qrx_api_glide[]={
     API("grAlphaTestReferenceValue",1,grAlphaTestReferenceValue),API("grConstantColorValue",1,grConstantColorValue),API("grColorCombine",5,grColorCombine),API("grAlphaCombine",5,grAlphaCombine),
     API("grTexCombine",7,gr_noop),API("grTexFilterMode",3,gr_noop),API("grTexClampMode",3,gr_noop),API("grTexMipMapMode",3,gr_noop),API("grTexLodBiasValue",2,gr_noop),
     API("grTexDownloadMipMap",4,grTexDownloadMipMap),API("grTexSource",4,grTexSource),API("grTexTextureMemRequired",2,grTexTextureMemRequired),API("grTexMinAddress",1,gr_noop),
-    API("grTexMaxAddress",1,grTexMaxAddress),API("grTexDownloadTable",3,grTexDownloadTable),API("grGet",3,grGet),API("grClipWindow",4,gr_noop),API("grFogMode",1,gr_noop),API("grFogColorValue",1,gr_noop),
+    API("grTexMaxAddress",1,grTexMaxAddress),API("grTexDownloadTable",3,grTexDownloadTable),API("grGet",3,grGet),API("grClipWindow",4,gr_noop),API("grFogMode",1,grFogMode),API("grFogColorValue",1,grFogColorValue),
     API("grChromakeyMode",1,gr_noop),API("grChromakeyValue",1,gr_noop),API("grDitherMode",1,gr_noop),API("grLfbConstantAlpha",1,gr_noop),API("grLfbConstantDepth",1,gr_noop),
     API("grDepthBiasLevel",1,gr_noop),API("grEnable",1,gr_noop),API("grDisable",1,gr_noop),API("grGlideGetVersion",1,gr_ok),API("grSstControl",1,gr_ok),API("grSstVRetraceOn",0,gr_ok),API("grSstIsBusy",0,gr_noop),
     {NULL,0,NULL}
