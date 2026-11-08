@@ -179,7 +179,7 @@ unshield cannot read a file that spans two cabinets; that was not seen to matter
 | Flip chains | Up to 7 back buffers | GTA, which asks for 7 |
 | `waveOut`, `timeSetEvent` | Host mixer voice over a ring; timers on a service thread | GTA music through Miles |
 | MIDI | `midiOut*` and `midiStream*` on the macOS DLS synthesizer (`macos/qrx_midi.m`) | Doom95: 500 messages, output peak 31908 of 32767 |
-| Winsock | `wsock32` and `ws2_32` on host sockets (`full68k/qrx_hostnet.c`) | `hostnet_tests`, and `nettest.exe` under AROS: 512 KB TCP echo, UDP, refused connection |
+| Winsock | `wsock32` and `ws2_32` on host sockets (`full68k/qrx_hostnet.c`) | `hostnet_tests`, and `nettest.exe` under AROS: 512 KB TCP echo, UDP, refused connection, two threads sending 2 MB each into full socket buffers |
 | Direct3D 5, 6, 7 | `IDirect3D2`, `3`, `7` and their devices on the host renderer, with textures from DirectDraw surfaces, colour key, vertex buffers | `d3d5test.exe`, `d3d7test.exe`: image checked, 300 frames in 54 and 85 ms headless |
 | Vulkan | `vulkan-1` on MoltenVK through 32-bit structure conversion (`full68k/qrx_hostapi_vk.c`) | `vktest.exe`: shaders, vertex buffer, swapchain, image checked, 300 frames in about 100 ms |
 | Registry, INI files, file mappings, `mmio`, old file calls | `win32/compat.c`. The registry persists in `QRXREG.TXT` beside the game | GTA reads its settings this way |
@@ -258,7 +258,29 @@ How it was checked, on the Mac M1 (log: `benchmarks/armithlon-m1-2026-11-03/dire
 A bug that has nothing to do with the network showed up: after GTA quits cleanly from a game, it
 saves `GTADATA/PLAYER_A.DAT`, and the next start of any level stops with a page fault at
 `eip=00414ce3`, in single player too. It reads video mode 6 from GTA's mode table and finds no
-entry there. Putting the original file back gets past it. It is not fixed yet.
+entry there. Putting the original file back gets past it. Fixed on 2026-11-06, see below.
+
+The cause was QRX86's `EnumDisplayModes`, not the file:
+
+- GTA keeps only modes of 15, 16 and 32 bits with an aspect of 4:3 or 8:5, up to 1600 wide. Our list had two of those, 640x480x16 and 800x600x16. A dump of the table in a running game showed these two entries.
+- When GTA loads `PLAYER_A.DAT`, the function at `0x414c70` compares the stored byte with the number of modes, which also includes other values that were 0 here. If the byte is smaller it picks mode 6, otherwise mode 0. It never uses the byte as a mode. This is GTA's own code, and it expects at least seven modes.
+- The shipped file holds 6, which was not smaller than 2, so the game got mode 0. Quitting then stored 0, which is smaller than 2, so the next start asked for mode 6, past the end of the table.
+
+`EnumDisplayModes` now also lists 320x200, 320x240, 400x300, 512x384 and 640x400 in 16 bits, and 400x300 and 512x384 in 8 bits, in ascending order. The largest mode stays 800x600. That gives GTA seven modes, and its mode 6 is 800x600x16.
+
+This has a visible effect: GTA's levels now always run at 800x600 instead of 640x480, with the shipped file too, and its menus stay at 640x480. The file now keeps 6 after a quit.
+
+How it was checked, on the Mac M1, with `QRX_TEST_KEYS` and `QRX_RTG_CAPTURE`, in a copy of the game:
+
+| Check | Result |
+| --- | --- |
+| Old list: level, Esc, Enter, new start | Page fault at `eip=00414ce3`, as reported |
+| New list, shipped data: level, Esc, Enter, new start | `PLAYER_A.DAT` is written during the quit; the new start shows a level at 800x600 |
+| New list, with the file an earlier quit left behind, which holds 0 | Shows a level at 800x600 |
+| Flips in the level | 42 ms on average, the same as at 640x480 |
+| The 31 other programs that import `ddraw`, old list against new, 38 s without input, three at once | 28 alike in display mode, capture size and stop message. Daytona, `s3d_demo` and the second Tomb Raider II demo differed, and were alike in a second run of 66 s |
+
+Many of those 31 do not reach a display mode in that time, so the comparison says little about them, and nothing was played. Multiplayer was not run again with the new list. The mode keys in the game, which step through the table, were not tried.
 
 Not checked: two computers, which means `QRX_DPLAY_HOST` and broadcast over a real network, and whether
 the macOS firewall asks for permission there; more than two players; a whole deathmatch to its

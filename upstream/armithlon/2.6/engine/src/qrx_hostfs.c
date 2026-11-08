@@ -6,6 +6,7 @@
 #define _DARWIN_C_SOURCE
 #endif
 #include "qrx_hostfs.h"
+#include "qrx_hostnet.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -44,10 +45,25 @@ static int regular(int dirfd,const char *name,struct stat *s){
     return 0;
 }
 static uint32_t status_errno(int e){return e==ENOENT?QRX_HOSTFS_NOENT:QRX_HOSTFS_IOERR;}
+static uint32_t net_rd32(const uint8_t *p){return ((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|((uint32_t)p[2]<<8)|p[3];}
+static void net_wr32(uint8_t *p,uint32_t v){p[0]=(uint8_t)(v>>24);p[1]=(uint8_t)(v>>16);p[2]=(uint8_t)(v>>8);p[3]=(uint8_t)v;}
+static void execute_net(QRXVM *v,QRXHostFS *fs){
+    uint32_t a[12];
+    if(fs->length<QRX_HOSTFS_NET_WORDS*4u||!bounds(v,fs->data_dma,QRX_HOSTFS_NET_WORDS*4u)){
+        fs->status=QRX_HOSTFS_INVALID;return;
+    }
+    uint8_t *p=v->ram.data+fs->data_dma;
+    for(unsigned i=0;i<12;i++)a[i]=net_rd32(p+4u*(i+1u));
+    qrx_hostnet_call(net_rd32(p),a,v->ram.data);
+    for(unsigned i=0;i<12;i++)net_wr32(p+4u*(i+1u),a[i]);
+    v->ram_write_epoch++;
+    fs->result=0;fs->status=QRX_HOSTFS_OK;
+}
 #include "qrx_hostfs_tree.inc"
 static void execute(QRXVM *v,QRXHostFS *fs,uint32_t op){
     if(op>=0x101&&op<=0x10a){execute_tree(v,fs,op-0x100);return;}
     fs->status=QRX_HOSTFS_INVALID; fs->result=0;fs->size=0;
+    if(op==QRX_HOSTFS_CMD_NET){execute_net(v,fs);return;}
     if(op<1||op>QRX_HOSTFS_CMD_TRUNCATE)return;
     if((op==QRX_HOSTFS_CMD_WRITE||op==QRX_HOSTFS_CMD_DELETE||op==QRX_HOSTFS_CMD_TRUNCATE)&&fs->readonly){
         fs->status=QRX_HOSTFS_RDONLY;return;
@@ -166,7 +182,7 @@ bool qrx_hostfs_read(QRXVM *v,uint32_t a,unsigned n,uint32_t *out){
     QRXHostFS *s=v->hostfs;
     switch(a){
     case QRX_HOSTFS_MAGIC:*out=0x51525846u;return true;
-    case QRX_HOSTFS_FEATURES:*out=0x11u+(s->readonly?0u:2u);return true;
+    case QRX_HOSTFS_FEATURES:*out=0x15u+(s->readonly?0u:2u);return true;
     case QRX_HOSTFS_NAME_DMA:*out=s->name_dma;return true;
     case QRX_HOSTFS_DATA_DMA:*out=s->data_dma;return true;
     case QRX_HOSTFS_OFFSET:*out=s->offset;return true;
@@ -194,7 +210,7 @@ bool qrx_hostfs2_read(QRXVM *v,uint32_t a,unsigned n,uint32_t *out){
     QRXHostFS *s=v->hostfs2;
     switch(a){
     case QRX_HOSTFS2_MAGIC:*out=0x51525846u;return true;
-    case QRX_HOSTFS2_FEATURES:*out=0x11u+(s->readonly?0u:2u);return true;
+    case QRX_HOSTFS2_FEATURES:*out=0x15u+(s->readonly?0u:2u);return true;
     case QRX_HOSTFS2_NAME_DMA:*out=s->name_dma;return true;
     case QRX_HOSTFS2_DATA_DMA:*out=s->data_dma;return true;
     case QRX_HOSTFS2_OFFSET:*out=s->offset;return true;

@@ -13,7 +13,7 @@
  static struct QRXDesktopEntry g_desktop_entries[DESKTOP_MAX];
  static int g_desktop_count = 0;
  static int g_desktop_selected = -1;
-@@ -1561,7 +1567,165 @@
+@@ -1561,7 +1567,233 @@
      if (has_icon && IconBase)
          DeleteDiskObject((UBYTE *)full);
      return 1;
@@ -24,14 +24,75 @@
 + * only unpack is offered for .rar. External tools (UnZip, 7z, Lha, UnRAR,
 + * Zip) must be reachable via the AmigaDOS path; missing tools report via
 + * the terminal capture instead of failing silently. */
-+enum { QRX_ARCH_NONE = 0, QRX_ARCH_ZIP, QRX_ARCH_7Z, QRX_ARCH_LHA, QRX_ARCH_RAR };
++enum { QRX_ARCH_NONE = 0, QRX_ARCH_ZIP, QRX_ARCH_7Z, QRX_ARCH_LHA, QRX_ARCH_RAR, QRX_ARCH_SIT, QRX_ARCH_IMAGE };
++enum { QRX_IMAGE_NONE = 0, QRX_IMAGE_ISO, QRX_IMAGE_HFS };
 +static int qrx_archive_kind(const char *name) {
 +    if (!name) return QRX_ARCH_NONE;
 +    if (qrx_ci_ends(name, ".zip")) return QRX_ARCH_ZIP;
 +    if (qrx_ci_ends(name, ".7z")) return QRX_ARCH_7Z;
 +    if (qrx_ci_ends(name, ".lha") || qrx_ci_ends(name, ".lzh")) return QRX_ARCH_LHA;
 +    if (qrx_ci_ends(name, ".rar")) return QRX_ARCH_RAR;
++    if (qrx_ci_ends(name, ".sit")) return QRX_ARCH_SIT;
++    if (qrx_ci_ends(name, ".iso") || qrx_ci_ends(name, ".dmg") ||
++        qrx_ci_ends(name, ".img") || qrx_ci_ends(name, ".dsk"))
++        return QRX_ARCH_IMAGE;
 +    return QRX_ARCH_NONE;
++}
++static int qrx_image_kind(const char *name) {
++    if (!name) return QRX_IMAGE_NONE;
++    if (qrx_ci_ends(name, ".iso")) return QRX_IMAGE_ISO;
++    if (qrx_ci_ends(name, ".dmg") || qrx_ci_ends(name, ".img") ||
++        qrx_ci_ends(name, ".dsk")) return QRX_IMAGE_HFS;
++    return QRX_IMAGE_NONE;
++}
++static const char *qrx_image_device(const char *name) {
++    return qrx_image_kind(name) == QRX_IMAGE_ISO ? "ICD0:" : "HFS0:";
++}
++static int qrx_image_unit(const char *name) {
++    return qrx_image_kind(name) == QRX_IMAGE_ISO ? 4 : 0;
++}
++static void qrx_image_mount(int index) {
++    struct QRXFileEntry *e;
++    char full[FILE_PATH_LEN + 128];
++    char command[FILE_PATH_LEN + 256];
++    const char *device;
++    if (index < 0 || index >= g_file_count) return;
++    e = &g_file_entries[index];
++    if (e->dir_type > 0 || qrx_image_kind(e->name) == QRX_IMAGE_NONE) return;
++    qrx_join_path(full, sizeof(full), g_files_path, e->name);
++    device = qrx_image_device(e->name);
++    snprintf(command, sizeof(command), "Mount %s >NIL:", device);
++    execute_capture(command);
++    snprintf(command, sizeof(command), "C:QRXMountImage %d \"%s\"", qrx_image_unit(e->name), full);
++    if (!execute_capture(command)) {
++        qrx_set_status("Image: native diskimage insert failed.");
++        return;
++    }
++    snprintf(command, sizeof(command), "Mount %s", device);
++    execute_capture(command);
++    {
++        BPTR volume = Lock((STRPTR)device, ACCESS_READ);
++        if (volume) {
++            UnLock(volume);
++            qrx_set_status("Image mounted. Open the new volume in QRX Drive.");
++        } else {
++            qrx_set_status("Image inserted, but no readable HFS/HFS+ volume appeared.");
++        }
++    }
++}
++static void qrx_image_eject(int index) {
++    struct QRXFileEntry *e;
++    char command[FILE_PATH_LEN + 192];
++    const char *device;
++    if (index < 0 || index >= g_file_count) return;
++    e = &g_file_entries[index];
++    if (qrx_image_kind(e->name) == QRX_IMAGE_NONE) return;
++    device = qrx_image_device(e->name);
++    snprintf(command, sizeof(command), "C:QRXMountImage %d --eject", qrx_image_unit(e->name));
++    if (execute_capture(command))
++        qrx_set_status("Image ejected.");
++    else
++        qrx_set_status("Image: eject failed or no image is mounted.");
 +}
 +static LONG qrx_run_in_dir(const char *dir, const char *cmd) {
 +    BPTR lock, old;
@@ -54,9 +115,12 @@
 +    e = &g_file_entries[index];
 +    if (e->dir_type > 0) { qrx_set_status("Archive: drawers cannot be unpacked."); return; }
 +    kind = qrx_archive_kind(e->name);
-+    if (kind == QRX_ARCH_NONE) { qrx_set_status("Archive: not a .zip/.7z/.lha/.rar file."); return; }
++    if (kind == QRX_ARCH_NONE) { qrx_set_status("Archive: not a .zip/.7z/.lha/.rar/.sit file."); return; }
++    if (kind == QRX_ARCH_IMAGE) { qrx_set_status("Image: use Mount image."); return; }
 +    qrx_join_path(full, sizeof(full), g_files_path, e->name);
-+    if (kind == QRX_ARCH_ZIP)
++    if (kind == QRX_ARCH_SIT)
++        snprintf(command, sizeof(command), "xadUnFile \"%s\" DEST \"%s\" OW QUIET", full, g_files_path);
++    else if (kind == QRX_ARCH_ZIP)
 +        snprintf(command, sizeof(command), "UnZip -o \"%s\" -d \"%s\"", full, g_files_path);
 +    else if (kind == QRX_ARCH_7Z)
 +        snprintf(command, sizeof(command), "7z x \"%s\" -o\"%s\"", full, g_files_path);
@@ -71,6 +135,7 @@
 +        qrx_set_status(kind == QRX_ARCH_ZIP ? "Archive: needs UnZip in the command path."
 +                     : kind == QRX_ARCH_7Z ? "Archive: needs 7z in the command path."
 +                     : kind == QRX_ARCH_LHA ? "Archive: needs Lha in the command path."
++                     : kind == QRX_ARCH_SIT ? "Archive: needs xadUnFile and xadmaster.library."
 +                     : "Archive: needs UnRAR in the command path.");
 +    }
 +}
@@ -85,8 +150,9 @@
 +    snprintf(target, sizeof(target), "%s.%s", e->name, ext);
 +    if (qrx_ci_ends(e->name, ".zip") || qrx_ci_ends(e->name, ".7z") ||
 +        qrx_ci_ends(e->name, ".lha") || qrx_ci_ends(e->name, ".lzh") ||
-+        qrx_ci_ends(e->name, ".rar")) {
-+        qrx_set_status("Archive: packing an archive again is refused.");
++        qrx_ci_ends(e->name, ".rar") || qrx_ci_ends(e->name, ".sit") ||
++        qrx_image_kind(e->name) != QRX_IMAGE_NONE) {
++        qrx_set_status("Archive: packing an archive or image again is refused.");
 +        return;
 +    }
 +    if (kind == QRX_ARCH_ZIP)
@@ -103,15 +169,17 @@
 +                     : kind == QRX_ARCH_LHA ? "Archive: needs Lha in the command path."
 +                     : "Archive: needs 7z in the command path.");
 +    }
-+}
+ }
 +#define QRX_ARCH_ROW_H 20
 +#define QRX_ARCH_MENU_W 150
 +static int qrx_archive_item_count(int index) {
 +    if (index < 0 || index >= g_file_count) return 0;
 +    return qrx_archive_kind(g_file_entries[index].name) != QRX_ARCH_NONE ? 2 : 4;
- }
++}
 +static const char *qrx_archive_item_label(int index, int row) {
 +    if (index < 0 || index >= g_file_count) return "";
++    if (qrx_archive_kind(g_file_entries[index].name) == QRX_ARCH_IMAGE)
++        return row == 0 ? "Mount image" : "Eject image";
 +    if (qrx_archive_kind(g_file_entries[index].name) != QRX_ARCH_NONE)
 +        return row == 0 ? "Unpack here" : "Cancel";
 +    if (row == 0) return "Pack as .zip";
@@ -167,7 +235,10 @@
 +    }
 +    i = g_archive_index;
 +    g_archive_menu = 0; g_archive_index = -1;
-+    if (qrx_archive_kind(g_file_entries[i].name) != QRX_ARCH_NONE) {
++    if (qrx_archive_kind(g_file_entries[i].name) == QRX_ARCH_IMAGE) {
++        if (row == 0) qrx_image_mount(i);
++        else qrx_image_eject(i);
++    } else if (qrx_archive_kind(g_file_entries[i].name) != QRX_ARCH_NONE) {
 +        if (row == 0) qrx_archive_unpack(i);
 +    } else {
 +        if (row == 0) qrx_archive_pack(i, QRX_ARCH_ZIP);
@@ -179,7 +250,7 @@
  
  static int qrx_rename_path(const char *old_full, const char *new_full,
                             int has_icon) {
-@@ -2146,6 +2310,8 @@
+@@ -2146,6 +2378,8 @@
                   g_file_entries[g_file_selected].name);
          text_at(rp, PEN_ACCENT, 110, 105, buf);
      }
@@ -188,7 +259,7 @@
  }
  
  static int filemanager_close_hit(WORD x, WORD y) {
-@@ -2433,11 +2599,29 @@
+@@ -2433,11 +2667,29 @@
          if (g_object_drag_candidate >= 0 || g_object_dragging) {
              qrx_finish_object_drag(x, y);
              return;

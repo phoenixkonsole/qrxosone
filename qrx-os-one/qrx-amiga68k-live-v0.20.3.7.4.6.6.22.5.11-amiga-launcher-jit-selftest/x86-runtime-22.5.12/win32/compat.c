@@ -1342,6 +1342,15 @@ FN(c_waveOutClose) {
 }
 FN(c_waveOutPrepareHeader) { WR32(a[1] + 16, RD32(a[1] + 16) | 2u); return 0; }
 FN(c_waveOutUnprepareHeader) { WR32(a[1] + 16, RD32(a[1] + 16) & ~2u); return 0; }
+static void wo_start(qwin *w, uint32_t i)
+{
+    qwo *o = &g_wo[i];
+    o->playing = 1;
+    o->clock0 = w->be->now(w) - (o->played * 1000u) / (o->rate * o->ba);
+    o->lastpos = (uint32_t)(o->played & (WO_RING - 1u));
+    qw_ds_voice(w, DSV_SET, WO_VOICE_BASE + i, o->ring, WO_RING, o->rate, o->ch, o->bits, 1, o->lastpos + 1u, NULL, NULL);
+    qw_ds_voice(w, DSV_START, WO_VOICE_BASE + i, o->ring, WO_RING, o->rate, o->ch, o->bits, 1, 0, NULL, NULL);
+}
 FN(c_waveOutWrite) {
     uint32_t i = a[0] - WO_HANDLE, hdr = a[1], data, len, wp, n;
     qwo *o;
@@ -1372,13 +1381,7 @@ FN(c_waveOutWrite) {
     o->q[o->qn] = hdr;
     o->qend[o->qn] = o->written;
     o->qn++;
-    if (!o->playing && !o->paused) {
-        o->playing = 1;
-        o->clock0 = w->be->now(w) - (o->played * 1000u) / (o->rate * o->ba);
-        o->lastpos = (uint32_t)(o->played & (WO_RING - 1u));
-        qw_ds_voice(w, DSV_SET, WO_VOICE_BASE + i, o->ring, WO_RING, o->rate, o->ch, o->bits, 1, o->lastpos + 1u, NULL, NULL);
-        qw_ds_voice(w, DSV_START, WO_VOICE_BASE + i, o->ring, WO_RING, o->rate, o->ch, o->bits, 1, 0, NULL, NULL);
-    }
+    if (!o->playing && !o->paused) wo_start(w, i);
     return 0;
 }
 FN(c_waveOutReset) {
@@ -1400,7 +1403,15 @@ FN(c_waveOutReset) {
     return 0;
 }
 FN(c_waveOutPause) { uint32_t i = a[0] - WO_HANDLE; if (i < 2) { g_wo[i].paused = 1; if (g_wo[i].playing) { qw_ds_voice(w, DSV_STOP, WO_VOICE_BASE + i, 0, 0, 0, 0, 0, 0, 0, NULL, NULL); g_wo[i].playing = 0; } } return 0; }
-FN(c_waveOutRestart) { uint32_t i = a[0] - WO_HANDLE; (void)w; if (i < 2) g_wo[i].paused = 0; return 0; }
+/* What was written during the pause starts now: Freddi Fish tests the sound card this way. */
+FN(c_waveOutRestart) {
+    uint32_t i = a[0] - WO_HANDLE;
+    if (i < 2) {
+        g_wo[i].paused = 0;
+        if (g_wo[i].open && !g_wo[i].playing && g_wo[i].qn) wo_start(w, i);
+    }
+    return 0;
+}
 /* MMTIME: wType, then the value */
 FN(c_waveOutGetPosition) {
     uint32_t i = a[0] - WO_HANDLE;
@@ -1642,6 +1653,23 @@ void qw_midi_tick(qwin *w)
         g_st.have_due = 0;
         { uint64_t d = g_st.due; if (g_st.off + 12u <= used) { g_st.due = d + (uint64_t)RD32(data + g_st.off) * 1000u; g_st.have_due = 1; } else g_st.due = d; }
     }
+}
+
+/* (hdc, family, callback, lparam): the one font there is, under the name asked for. */
+FN(c_EnumFontFamiliesA) {
+    uint32_t lf = qw_alloc(w, 60 + 32), tm = qw_alloc(w, 80), i, r;
+    char face[32];
+    if (!lf || !tm) return 0;
+    for (i = 0; i < 92u; i += 4u) WR32(lf + i, 0);
+    for (i = 0; i < 80u; i += 4u) WR32(tm + i, 0);
+    snprintf(face, sizeof(face), "Arial");
+    if (a[1]) rd_str(w, a[1], face, sizeof(face));
+    WR32(lf, 16); WR32(lf + 16, 400);        /* lfHeight, lfWeight */
+    for (i = 0; face[i]; i++) x86_wr8(C, lf + 28 + i, (uint8_t)face[i]);
+    WR32(tm, 16); WR32(tm + 4, 13); WR32(tm + 8, 3); WR32(tm + 20, 7); WR32(tm + 24, 14); WR32(tm + 28, 400);
+    r = qw_call(w, a[2], 4, lf, tm, 4 /* TRUETYPE_FONTTYPE */, a[3]);
+    qw_free(w, lf); qw_free(w, tm);
+    return r;
 }
 
 /* ================================================================ BSTR and VARIANT */
@@ -2034,7 +2062,7 @@ const qhle qw_compat[] = {
     { "oleaut32", "SysStringLen", 1, ole_SysStringLen }, { "oleaut32", "#7", 1, ole_SysStringLen }, { "oleaut32", "VariantInit", 1, ole_VariantInit }, { "oleaut32", "#8", 1, ole_VariantInit },
     { "oleaut32", "VariantClear", 1, ole_VariantClear }, { "oleaut32", "#9", 1, ole_VariantClear }, { "oleaut32", "VariantCopy", 2, ole_VariantCopy }, { "oleaut32", "#10", 2, ole_VariantCopy },
     { "oleaut32", "VariantCopyInd", 2, ole_VariantCopy }, { "oleaut32", "VariantChangeTypeEx", 5, ole_VariantChangeType }, { "oleaut32", "VariantChangeType", 4, ole_VariantChangeType },
-    { "advapi32", "OpenProcessToken", 3, c_ok0 }, { "advapi32", "LookupPrivilegeValueA", 3, c_ok0 }, { "advapi32", "AdjustTokenPrivileges", 6, c_ok0 },
+    { "gdi32", "EnumFontFamiliesA", 4, c_EnumFontFamiliesA }, { "advapi32", "OpenProcessToken", 3, c_ok0 }, { "advapi32", "LookupPrivilegeValueA", 3, c_ok0 }, { "advapi32", "AdjustTokenPrivileges", 6, c_ok0 },
     { "version", "GetFileVersionInfoSizeA", 2, c_GetFileVersionInfoSizeA }, { "version", "GetFileVersionInfoA", 4, c_GetFileVersionInfoA }, { "version", "VerQueryValueA", 4, c_VerQueryValueA },
     { "msacm32", "acmMetrics", 3, c_acmMetrics }, { "msacm32", "acmStreamOpen", 8, c_acmNoDriver }, { "msacm32", "acmStreamClose", 2, c_ok0 }, { "msacm32", "acmStreamSize", 4, c_acmNoDriver },
     { "msacm32", "acmStreamPrepareHeader", 3, c_acmNoDriver }, { "msacm32", "acmStreamUnprepareHeader", 3, c_ok0 }, { "msacm32", "acmStreamConvert", 3, c_acmNoDriver },

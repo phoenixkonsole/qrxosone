@@ -519,7 +519,15 @@ FN(dd_CreateSurface) {                  /* (this, desc, pp, outer) */
     return DD_OK;
 }
 FN(dd_EnumDisplayModes) {               /* (this, flags, desc, ctx, callback) */
-    static const int modes[][3] = { { 320, 200, 8 }, { 320, 240, 8 }, { 640, 400, 8 }, { 640, 480, 8 }, { 640, 480, 16 }, { 800, 600, 8 }, { 800, 600, 16 } };
+    /* The modes of a Windows graphics card, ascending. Programs index into what they get here:
+     * GTA 1 builds a table of its 15, 16 and 32 bit modes and starts its levels in entry 6,
+     * so it needs at least seven of them. */
+    static const int modes[][3] = {
+        { 320, 200, 8 }, { 320, 200, 16 }, { 320, 240, 8 }, { 320, 240, 16 },
+        { 400, 300, 8 }, { 400, 300, 16 }, { 512, 384, 8 }, { 512, 384, 16 },
+        { 640, 400, 8 }, { 640, 400, 16 }, { 640, 480, 8 }, { 640, 480, 16 },
+        { 800, 600, 8 }, { 800, 600, 16 }
+    };
     uint32_t d = qw_alloc(w, 108);
     dxobj tmp;
     unsigned k;
@@ -615,6 +623,7 @@ static uint32_t set_mode(qwin *w, uint32_t self, uint32_t mw, uint32_t mh, uint3
         return 0x8876024Eu;                         /* DDERR_UNSUPPORTEDMODE */
     }
     dd->mw = (int)mw; dd->mh = (int)mh; dd->mbpp = (int)bpp;
+    qw_dd_mode_bpp = (int)bpp;
     if (w->verbose) qw_log(w, "DirectDraw: display mode %ux%ux%u", mw, mh, bpp);
     fullscreen(w, dd, 1);
     return DD_OK;
@@ -623,7 +632,6 @@ static uint32_t set_mode(qwin *w, uint32_t self, uint32_t mw, uint32_t mh, uint3
 void qw_dd_toggle_window(qwin *w)
 {
     int i;
-    qw_dd_mode_bpp = (int)bpp;
     for (i = 0; i < DX_MAX; i++) {
         dxobj *dd = &g_o[i];
         qwnd *t;
@@ -751,6 +759,7 @@ static void fill(qwin *w, dxobj *d, int *r, uint32_t color)
     for (y = y0; y < y1; y++) x86_write_mem(C, d->mem + (uint32_t)(y * d->pitch + x0 * bpp), row, (uint32_t)n);
 }
 static void after_draw(qwin *w, dxobj *d) { publish(w, d); if (d->primary) present(w, d); }
+FN(s_SetClipper) { dxobj *d = sf(w, a[0]); if (d) d->clipper = a[1]; return DD_OK; }
 FN(s_Blt) {                              /* (this, destrect, src, srcrect, flags, fx) */
     dxobj *d = sf(w, a[0]), *s = a[2] ? sf(w, a[2]) : NULL;
     uint32_t fl = a[4], fx = a[5];
@@ -770,7 +779,6 @@ FN(s_Blt) {                              /* (this, destrect, src, srcrect, flags
     }
     if (fl & 0x400) {                                                  /* COLORFILL */
         fill(w, d, dr, fx ? RD32(fx + 80) : 0);
-FN(s_SetClipper) { dxobj *d = sf(w, a[0]); if (d) d->clipper = a[1]; return DD_OK; }
         after_draw(w, d);
         return DD_OK;
     }
@@ -1140,14 +1148,6 @@ FN(b_GetFormat) {
 }
 FN(b_GetVolume) { dxobj *b = ob(w, a[0], OB_DSB); WR32(a[1], b ? (uint32_t)b->vol : 0); return DD_OK; }
 FN(b_GetPan) { dxobj *b = ob(w, a[0], OB_DSB); WR32(a[1], b ? (uint32_t)b->pan : 0); return DD_OK; }
-    off %= b->size;
-    if (n > b->size) n = b->size;
-    if (off + n <= b->size) {
-        WR32(a[3], b->mem + off); WR32(a[4], n);
-        if (a[5]) WR32(a[5], 0);
-        if (a[6]) WR32(a[6], 0);
-    } else {
-        WR32(a[3], b->mem + off); WR32(a[4], b->size - off);
 FN(b_GetFrequency) { dxobj *b = ob(w, a[0], OB_DSB); WR32(a[1], b ? b->freq : 22050); return DD_OK; }
 FN(b_GetStatus) { dxobj *b = ob(w, a[0], OB_DSB); uint32_t st = 0; if (b) { play_pos(w, b); if (b->playing) st = 1 | (b->looping ? 4u : 0u); } WR32(a[1], st); return DD_OK; }
 FN(b_Lock) {                             /* (this, off, bytes, p1, n1, p2, n2, flags) */
@@ -1156,6 +1156,14 @@ FN(b_Lock) {                             /* (this, off, bytes, p1, n1, p2, n2, f
     if (!b || !b->size) return DDERR_INVALIDPARAMS;
     if (a[7] & 1) off = (play_pos(w, b) + b->align * 64) % b->size;    /* FROMWRITECURSOR */
     if (a[7] & 2) { off = 0; n = b->size; }                            /* ENTIREBUFFER */
+    off %= b->size;
+    if (n > b->size) n = b->size;
+    if (off + n <= b->size) {
+        WR32(a[3], b->mem + off); WR32(a[4], n);
+        if (a[5]) WR32(a[5], 0);
+        if (a[6]) WR32(a[6], 0);
+    } else {
+        WR32(a[3], b->mem + off); WR32(a[4], b->size - off);
         if (a[5]) WR32(a[5], b->mem);
         if (a[6]) WR32(a[6], n - (b->size - off));
     }
@@ -1685,14 +1693,6 @@ static const vslot vt_di[] = {
 static const vslot vt_did[] = {             /* IDirectInputDevice2A (prefix: IDirectInputDeviceA) */
     V("QueryInterface", dv_QueryInterface, 3), V("AddRef", dv_AddRef, 1), V("Release", dv_Release, 1),
     V("GetCapabilities", dv_GetCapabilities, 2), V("EnumObjects", dv_ok, 4), V("GetProperty", dv_ok, 3), V("SetProperty", dv_ok, 3),
-/* HLE table entries for the vtable slots ("ddraw", "IDirectDraw::CreateSurface" ...) */
-
-#define VD(n, c) VG(n, lg_ok, c)
-#define LG_COM VG("QueryInterface", lg_QI, 3), VG("AddRef", lg_AddRef, 1), VG("Release", lg_Release, 1)
-static const vslot vt_d3d2[] = { LG_COM, VG("EnumDevices", lg_EnumDevices23, 3), VG("CreateLight", lg_CreateLight, 3), VG("CreateMaterial", lg_CreateMaterial, 3),
-    VG("CreateViewport", lg_CreateViewport, 3), VG("FindDevice", lg_FindDevice, 3), VG("CreateDevice", lg_CreateDevice2, 4), { NULL, NULL, 0, NULL } };
-static const vslot vt_d3d3[] = { LG_COM, VG("EnumDevices", lg_EnumDevices23, 3), VG("CreateLight", lg_CreateLight, 3), VG("CreateMaterial", lg_CreateMaterial, 3),
-    VG("CreateViewport", lg_CreateViewport, 3), VG("FindDevice", lg_FindDevice, 3), VG("CreateDevice", lg_CreateDevice3, 5), VG("CreateVertexBuffer", lg_CreateVertexBuffer, 5),
     V("Acquire", dv_ok, 1), V("Unacquire", dv_ok, 1), V("GetDeviceState", dv_GetDeviceState, 3), V("GetDeviceData", dv_GetDeviceData, 5),
     V("SetDataFormat", dv_ok, 2), V("SetEventNotification", dv_SetEventNotification, 2), V("SetCooperativeLevel", dv_ok, 3),
     V("GetObjectInfo", NULL, 4), V("GetDeviceInfo", NULL, 2), V("RunControlPanel", dv_ok, 3), V("Initialize", dv_ok, 4),
@@ -1701,6 +1701,14 @@ static const vslot vt_d3d3[] = { LG_COM, VG("EnumDevices", lg_EnumDevices23, 3),
     V("SendDeviceData", dv_ok, 5), { NULL, NULL, 0, NULL }
 };
 
+/* HLE table entries for the vtable slots ("ddraw", "IDirectDraw::CreateSurface" ...) */
+
+#define VD(n, c) VG(n, lg_ok, c)
+#define LG_COM VG("QueryInterface", lg_QI, 3), VG("AddRef", lg_AddRef, 1), VG("Release", lg_Release, 1)
+static const vslot vt_d3d2[] = { LG_COM, VG("EnumDevices", lg_EnumDevices23, 3), VG("CreateLight", lg_CreateLight, 3), VG("CreateMaterial", lg_CreateMaterial, 3),
+    VG("CreateViewport", lg_CreateViewport, 3), VG("FindDevice", lg_FindDevice, 3), VG("CreateDevice", lg_CreateDevice2, 4), { NULL, NULL, 0, NULL } };
+static const vslot vt_d3d3[] = { LG_COM, VG("EnumDevices", lg_EnumDevices23, 3), VG("CreateLight", lg_CreateLight, 3), VG("CreateMaterial", lg_CreateMaterial, 3),
+    VG("CreateViewport", lg_CreateViewport, 3), VG("FindDevice", lg_FindDevice, 3), VG("CreateDevice", lg_CreateDevice3, 5), VG("CreateVertexBuffer", lg_CreateVertexBuffer, 5),
     VG("EnumZBufferFormats", lg_EnumZBufferFormats, 4), VD("EvictManagedTextures", 1), { NULL, NULL, 0, NULL } };
 static const vslot vt_d3d7[] = { LG_COM, VG("EnumDevices", lg_EnumDevices7, 3), VG("CreateDevice", lg_CreateDevice7, 4), VG("CreateVertexBuffer", lg_CreateVertexBuffer, 4),
     VG("EnumZBufferFormats", lg_EnumZBufferFormats, 4), VD("EvictManagedTextures", 1), { NULL, NULL, 0, NULL } };

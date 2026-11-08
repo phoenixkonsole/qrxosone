@@ -235,7 +235,8 @@ typedef struct qwin {
     struct qblk *blocks;              /* allocation map */
     struct qblk *freel;
     /* kernel */
-    uint32_t last_error, exit_code;
+    uint32_t last_error, net_error;   /* of the running thread: threads.c swaps them on a switch */
+    uint32_t exit_code;
     int exiting;
     uint32_t unhandled_filter;
     uint32_t onexit[64];
