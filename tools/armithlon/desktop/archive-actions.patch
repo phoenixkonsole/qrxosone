@@ -1,19 +1,19 @@
 --- a/qrx_desktop.c
 +++ b/qrx_desktop.c
-@@ -240,6 +240,12 @@
+@@ -239,6 +239,12 @@
+ static int g_object_dragging = 0;
  static WORD g_object_drag_start_x = 0;
  static WORD g_object_drag_start_y = 0;
- 
++
 +/* Right-click (MENUDOWN, WFLG_RMBTRAP) archive context menu state. */
 +static int g_archive_menu = 0;
 +static int g_archive_index = -1;
 +static WORD g_archive_x = 0;
 +static WORD g_archive_y = 0;
-+
+ 
  static struct QRXDesktopEntry g_desktop_entries[DESKTOP_MAX];
  static int g_desktop_count = 0;
- static int g_desktop_selected = -1;
-@@ -1561,7 +1567,233 @@
+@@ -1561,7 +1567,236 @@
      if (has_icon && IconBase)
          DeleteDiskObject((UBYTE *)full);
      return 1;
@@ -250,7 +250,7 @@
  
  static int qrx_rename_path(const char *old_full, const char *new_full,
                             int has_icon) {
-@@ -2146,6 +2378,8 @@
+@@ -2146,6 +2381,8 @@
                   g_file_entries[g_file_selected].name);
          text_at(rp, PEN_ACCENT, 110, 105, buf);
      }
@@ -259,7 +259,23 @@
  }
  
  static int filemanager_close_hit(WORD x, WORD y) {
-@@ -2433,11 +2667,29 @@
+@@ -2324,6 +2561,15 @@
+     g_delete_armed = 0;
+     qrx_set_status("");
+     redraw_filemanager();
++    /* A disk image inserts its media on double-click. The context menu uses
++       the same native mount/eject path. */
++    if (qrx_archive_kind(g_file_entries[index].name) == QRX_ARCH_IMAGE) {
++        if (is_double) {
++            qrx_image_mount(index);
++            g_last_file_click = -1;
++        }
++        return;
++    }
+     /* Drawers are navigation objects: one click opens them. Files retain double-click launch. */
+     if (g_file_entries[index].dir_type > 0) qrx_open_file_entry(index);
+     else if (is_double) qrx_open_file_entry(index);
+@@ -2433,11 +2679,29 @@
          if (g_object_drag_candidate >= 0 || g_object_dragging) {
              qrx_finish_object_drag(x, y);
              return;
