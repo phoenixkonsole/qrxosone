@@ -312,8 +312,60 @@ static void qrx_refresh_mounted_volumes(void) {
 }
 static void qrx_refresh_mounted_volumes_only(void) {
     const ULONG flags''',1)
+# ---- IPFS: public drive (assign), publishing and encrypted volume images ----
+# The IPFS: assign is created by Startup-Sequence; show assigns in the drive list,
+# but only IPFS (not LIBS:, FONTS: and the other system assigns).
+patch('const ULONG flags = LDF_READ | LDF_VOLUMES;',
+      'const ULONG flags = LDF_READ | LDF_VOLUMES | LDF_ASSIGNS;')
+patch('''        qrx_bstr_to_name(entry->dol_Name, name, sizeof(name));
+        if (qrx_volume_name_is_builtin(name) || qrx_volume_name_seen(name))''','''        qrx_bstr_to_name(entry->dol_Name, name, sizeof(name));
+        if ((entry->dol_Type == DLT_DIRECTORY || entry->dol_Type == DLT_LATE ||
+             entry->dol_Type == DLT_NONBINDING) && qrx_ci_cmp(name, "IPFS")) continue;
+        if (qrx_volume_name_is_builtin(name) || qrx_volume_name_seen(name))''')
+patch('#define QRX_MOUNTED_VOLUME_MAX 4', '#define QRX_MOUNTED_VOLUME_MAX 8')
+patch('#include "qrx_icons.c"', 'static int qrx_file_visible_count(void);\n#include "qrx_icons.c"\n#include "ipfs-drive.c"')
+patch('''struct QRXFileEntry {
+    char name[108];
+    LONG dir_type;
+    LONG size;
+    ULONG protection;
+    UBYTE has_icon;
+    UBYTE generated_icon;
+    UBYTE icon_type;
+    char default_tool[128];
+};''','''struct QRXFileEntry {
+    char name[108];
+    LONG dir_type;
+    LONG size;
+    ULONG protection;
+    UBYTE has_icon;
+    UBYTE generated_icon;
+    UBYTE icon_type;
+    char default_tool[128];
+    char ipfs_cid[96];
+    UBYTE ipfs_pinned;
+};''')
+patch('''    qrx_draw_archive_menu(rp);
+}''','''    qrx_draw_archive_menu(rp);
+    qrx_ipfs_drive_draw(rp);
+}''')
+patch('''    if (cls == IDCMP_VANILLAKEY && g_rename_active) {''','''    if (cls == IDCMP_VANILLAKEY && qrx_ipfs_text_active()) {
+        qrx_ipfs_text_key((int)code);
+        redraw_filemanager();
+        return;
+    }
+
+    if (cls == IDCMP_VANILLAKEY && g_rename_active) {''')
+# The IPFS badge lives in the title bar, before the title-drag hit test.
+patch('''    if (filemanager_close_hit(x, y)) { close_filemanager(); return; }
+    if (filemanager_resize_hit(x, y)) { begin_file_gesture(x, y, 1); return; }
+    if (filemanager_title_hit(x, y)) { begin_file_gesture(x, y, 0); return; }''','''    if (filemanager_close_hit(x, y)) { close_filemanager(); return; }
+    if (filemanager_resize_hit(x, y)) { begin_file_gesture(x, y, 1); return; }
+    if (qrx_ipfs_drive_click(x, y)) return;
+    if (filemanager_title_hit(x, y)) { begin_file_gesture(x, y, 0); return; }''')
+
 (out/'qrx_desktop.armithlon.c').write_text(s)
-for f in ('qrx_icons.c','qrx_wicon.h'):shutil.copy(extra/f,out/f)
+for f in ('qrx_icons.c','qrx_wicon.h','ipfs-drive.c'):shutil.copy(extra/f,out/f)
 if not (out/'qrx_wallpaper.h').exists():
  generator=next((root/'qrx-os-one').glob('*/amiga-runtime-22.5.11/tests/desktop/gen-test-wallpaper.py'))
  subprocess.run([sys.executable,str(generator),str(out/'qrx_wallpaper.h')],check=True)
@@ -327,4 +379,6 @@ system=root/'.build/bundle/SystemFull/QRX'
 if system.is_dir() and sys.platform=='darwin':
  subprocess.run(['swiftc','-O',str(extra/'gen-assets.swift'),'-o',str(out/'gen-assets')],check=True)
  subprocess.run([str(out/'gen-assets'),str(system)],check=True)
+ # Install both into the tree ARMithlon.app actually launches.
+ shutil.copy(out/'QRXDesktop.hunk',system/'C/QRXDesktop')
  shutil.copy(out/'QRXDesktopPrefs.hunk',system/'C/QRXDesktopPrefs')

@@ -16,6 +16,20 @@ EndIf
 Assign "T:"       "RAM:T"
 Assign "CLIPS:"   "RAM:Clipboards"
 
+; IPFS: is an assign to a normal drawer; QRX Drive shows it as a volume.
+; QRXIPFSD is the local node; QRXIPFSSync publishes changes through it.
+; Everything published there is public.
+If NOT EXISTS "SYS:Storage/IPFS"
+    MakeDir "SYS:Storage/IPFS"
+EndIf
+Assign "IPFS:" "SYS:Storage/IPFS"
+If EXISTS "C:QRXIPFSD"
+    Run >NIL: C:QRXIPFSD
+EndIf
+If EXISTS "C:QRXIPFSSync"
+    Run >NIL: C:QRXIPFSSync
+EndIf
+
 Assign "KEYMAPS:" "DEVS:Keymaps"
 Assign "LOCALE:"  "SYS:Locale"
 Assign "LIBS:"    "SYS:Classes" ADD
