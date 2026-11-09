@@ -156,6 +156,26 @@ static void expect_jit_block(const char *what, unsigned want)
         failures++;
     }
 }
+
+static void expect_jit_source(const char *what, uint32_t insn)
+{
+    uint8_t raw[4];
+    unsigned i;
+    unsigned j;
+
+    raw[0] = (uint8_t)(insn >> 24);
+    raw[1] = (uint8_t)(insn >> 16);
+    raw[2] = (uint8_t)(insn >> 8);
+    raw[3] = (uint8_t)insn;
+    for (i = 0; i < jit.nblocks; i++) {
+        for (j = 0; j + 4u <= jit.blocks[i].source_len; j += 4u) {
+            if (memcmp(&jit.blocks[i].source[j], raw, sizeof(raw)) == 0)
+                return;
+        }
+    }
+    printf("FAIL %s jit source %08lx\n", what, (unsigned long)insn);
+    failures++;
+}
 #endif
 
 static qrx_ppc_status_t run(void)
@@ -300,6 +320,60 @@ static void test_compare_branch(void)
     expect_u32("branch cr", (ppc.cpu.cr >> 28) & 0xFu, 2);
     expect_u32("branch mem0", get32(DATA_BASE), 2);
     report("compare_branch", before);
+}
+
+static void test_compare_cr(void)
+{
+    static const uint32_t code[] = {
+        0x38600005u, /* li r3,5 */
+        0x38800005u, /* li r4,5 */
+        0x7C032000u, /* cmpw r3,r4 */
+        0x2C830005u, /* cmpwi cr1,r3,5 */
+        0x7D032040u, /* cmplw cr2,r3,r4 */
+        0x29830005u, /* cmplwi cr3,r3,5 */
+        0x38A0FFFFu, /* li r5,-1 */
+        0x2E050000u, /* cmpwi cr4,r5,0 */
+        0x2A850000u, /* cmplwi cr5,r5,0 */
+        0x3CC00000u, /* lis r6,0 */
+        0x60C6FFFFu, /* ori r6,r6,0xFFFF */
+        0x2C260000u, /* cmpi L=1 r6,0 */
+        0x28A60000u, /* cmpli L=1 cr1,r6,0 */
+        0x7F032000u, /* cmpw cr6,r3,r4 */
+        0x7F832040u, /* cmplw cr7,r3,r4 */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t so[] = {
+        0x38600005u, /* li r3,5 */
+        0x38800005u, /* li r4,5 */
+        0x2C830005u, /* cmpwi cr1,r3,5 */
+        0x44000002u  /* sc */
+    };
+    unsigned before = failures;
+
+    prepare(code, sizeof(code) / sizeof(code[0]));
+    expect_status("compare_cr", run(), QRX_PPC_TRAP);
+    expect_u32("compare_cr r5", ppc.cpu.gpr[5], 0xFFFFFFFFu);
+    expect_u32("compare_cr r6", ppc.cpu.gpr[6], 0x0000FFFFu);
+    expect_u32("compare_cr cr0", (ppc.cpu.cr >> 28) & 0xFu, 8u);
+    expect_u32("compare_cr cr1", (ppc.cpu.cr >> 24) & 0xFu, 4u);
+    expect_u32("compare_cr cr2", (ppc.cpu.cr >> 20) & 0xFu, 2u);
+    expect_u32("compare_cr cr3", (ppc.cpu.cr >> 16) & 0xFu, 2u);
+    expect_u32("compare_cr cr4", (ppc.cpu.cr >> 12) & 0xFu, 8u);
+    expect_u32("compare_cr cr5", (ppc.cpu.cr >> 8) & 0xFu, 4u);
+    expect_u32("compare_cr cr6", (ppc.cpu.cr >> 4) & 0xFu, 2u);
+    expect_u32("compare_cr cr7", ppc.cpu.cr & 0xFu, 2u);
+#ifdef __AROS__
+    expect_jit_block("compare_cr", sizeof(code) / sizeof(code[0]));
+#endif
+
+    prepare(so, sizeof(so) / sizeof(so[0]));
+    ppc.cpu.xer = 0x80000000u;
+    expect_status("compare_so", run(), QRX_PPC_TRAP);
+    expect_u32("compare_so cr1", (ppc.cpu.cr >> 24) & 0xFu, 3u);
+#ifdef __AROS__
+    expect_jit_block("compare_so", sizeof(so) / sizeof(so[0]));
+#endif
+    report("compare_cr", before);
 }
 
 static void test_load_store(void)
@@ -891,6 +965,816 @@ static void test_jit_widths(void)
     expect_jit_block("jit_width_half_unaligned", unaligned_insns);
     report("jit_widths", before);
 }
+
+/* Use a logical limit below the 256-KiB backing array so a deliberately
+ * broken range check can be exercised without touching real out-of-bounds
+ * storage.  This keeps the mutation tests safe while still checking the
+ * helper's status and fault address. */
+static void test_jit_widths_limit(void)
+{
+    static const uint32_t byte_last[] = {
+        0x3C600000u, /* lis r3,0 */
+        0x60632FFFu, /* ori r3,r3,0x2FFF */
+        0x88830000u, /* lbz r4,0(r3) */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t half_last[] = {
+        0x3C600000u, /* lis r3,0 */
+        0x60632FFEu, /* ori r3,r3,0x2FFE */
+        0xA0830000u, /* lhz r4,0(r3) */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t word_last[] = {
+        0x3C600000u, /* lis r3,0 */
+        0x60632FFCu, /* ori r3,r3,0x2FFC */
+        0x80830000u, /* lwz r4,0(r3) */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t byte_oob[] = {
+        0x3C600000u, /* lis r3,0 */
+        0x60633000u, /* ori r3,r3,0x3000 */
+        0x88830000u, /* lbz r4,0(r3) */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t half_oob[] = {
+        0x3C600000u, /* lis r3,0 */
+        0x60633000u, /* ori r3,r3,0x3000 */
+        0xA0830000u, /* lhz r4,0(r3) */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t word_oob[] = {
+        0x3C600000u, /* lis r3,0 */
+        0x60633000u, /* ori r3,r3,0x3000 */
+        0x80830000u, /* lwz r4,0(r3) */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t stb_oob[] = {
+        0x3C600000u, /* lis r3,0 */
+        0x60633000u, /* ori r3,r3,0x3000 */
+        0x38800012u, /* li r4,0x12 */
+        0x98830000u, /* stb r4,0(r3) */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t sth_oob[] = {
+        0x3C600000u, /* lis r3,0 */
+        0x60633000u, /* ori r3,r3,0x3000 */
+        0x38801234u, /* li r4,0x1234 */
+        0xB0830000u, /* sth r4,0(r3) */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t half_unaligned[] = {
+        0x3C600000u, /* lis r3,0 */
+        0x60632001u, /* ori r3,r3,0x2001 */
+        0xA0830000u, /* lhz r4,0(r3) */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t sth_unaligned[] = {
+        0x3C600000u, /* lis r3,0 */
+        0x60632001u, /* ori r3,r3,0x2001 */
+        0x38801234u, /* li r4,0x1234 */
+        0xB0830000u, /* sth r4,0(r3) */
+        0x44000002u  /* sc */
+    };
+    const uint32_t limit = 0x3000u;
+    unsigned before = failures;
+
+    prepare(byte_last, sizeof(byte_last) / sizeof(byte_last[0]));
+    ppc.mem.size = limit;
+    put32(limit - 4u, 0x123456ABu);
+    expect_status("jit_width_limit_byte_last", run(), QRX_PPC_TRAP);
+    expect_u32("jit_width_limit_byte_last value", ppc.cpu.gpr[4], 0xABu);
+    expect_jit_block("jit_width_limit_byte_last",
+                     sizeof(byte_last) / sizeof(byte_last[0]));
+
+    prepare(half_last, sizeof(half_last) / sizeof(half_last[0]));
+    ppc.mem.size = limit;
+    put32(limit - 4u, 0x12345678u);
+    expect_status("jit_width_limit_half_last", run(), QRX_PPC_TRAP);
+    expect_u32("jit_width_limit_half_last value", ppc.cpu.gpr[4], 0x5678u);
+    expect_jit_block("jit_width_limit_half_last",
+                     sizeof(half_last) / sizeof(half_last[0]));
+
+    prepare(word_last, sizeof(word_last) / sizeof(word_last[0]));
+    ppc.mem.size = limit;
+    put32(limit - 4u, 0x12345678u);
+    expect_status("jit_width_limit_word_last", run(), QRX_PPC_TRAP);
+    expect_u32("jit_width_limit_word_last value", ppc.cpu.gpr[4],
+               0x12345678u);
+    expect_jit_block("jit_width_limit_word_last",
+                     sizeof(word_last) / sizeof(word_last[0]));
+
+    prepare(byte_oob, sizeof(byte_oob) / sizeof(byte_oob[0]));
+    ppc.mem.size = limit;
+    expect_status("jit_width_limit_byte_oob", run(), QRX_PPC_FAULT);
+    expect_u32("jit_width_limit_byte_oob pc", ppc.cpu.pc, CODE_BASE + 8u);
+    expect_u32("jit_width_limit_byte_oob addr", ppc.fault_addr, limit);
+    expect_u32("jit_width_limit_byte_oob insns", ppc.insns, 3);
+    expect_jit_block("jit_width_limit_byte_oob",
+                     sizeof(byte_oob) / sizeof(byte_oob[0]));
+
+    prepare(half_oob, sizeof(half_oob) / sizeof(half_oob[0]));
+    ppc.mem.size = limit;
+    expect_status("jit_width_limit_half_oob", run(), QRX_PPC_FAULT);
+    expect_u32("jit_width_limit_half_oob pc", ppc.cpu.pc, CODE_BASE + 8u);
+    expect_u32("jit_width_limit_half_oob addr", ppc.fault_addr, limit);
+    expect_u32("jit_width_limit_half_oob insns", ppc.insns, 3);
+    expect_jit_block("jit_width_limit_half_oob",
+                     sizeof(half_oob) / sizeof(half_oob[0]));
+
+    prepare(word_oob, sizeof(word_oob) / sizeof(word_oob[0]));
+    ppc.mem.size = limit;
+    expect_status("jit_width_limit_word_oob", run(), QRX_PPC_FAULT);
+    expect_u32("jit_width_limit_word_oob pc", ppc.cpu.pc, CODE_BASE + 8u);
+    expect_u32("jit_width_limit_word_oob addr", ppc.fault_addr, limit);
+    expect_u32("jit_width_limit_word_oob insns", ppc.insns, 3);
+    expect_jit_block("jit_width_limit_word_oob",
+                     sizeof(word_oob) / sizeof(word_oob[0]));
+
+    prepare(stb_oob, sizeof(stb_oob) / sizeof(stb_oob[0]));
+    ppc.mem.size = limit;
+    expect_status("jit_width_limit_stb_oob", run(), QRX_PPC_FAULT);
+    expect_u32("jit_width_limit_stb_oob pc", ppc.cpu.pc, CODE_BASE + 12u);
+    expect_u32("jit_width_limit_stb_oob addr", ppc.fault_addr, limit);
+    expect_u32("jit_width_limit_stb_oob insns", ppc.insns, 4);
+    expect_jit_block("jit_width_limit_stb_oob",
+                     sizeof(stb_oob) / sizeof(stb_oob[0]));
+
+    prepare(sth_oob, sizeof(sth_oob) / sizeof(sth_oob[0]));
+    ppc.mem.size = limit;
+    expect_status("jit_width_limit_sth_oob", run(), QRX_PPC_FAULT);
+    expect_u32("jit_width_limit_sth_oob pc", ppc.cpu.pc, CODE_BASE + 12u);
+    expect_u32("jit_width_limit_sth_oob addr", ppc.fault_addr, limit);
+    expect_u32("jit_width_limit_sth_oob insns", ppc.insns, 4);
+    expect_jit_block("jit_width_limit_sth_oob",
+                     sizeof(sth_oob) / sizeof(sth_oob[0]));
+
+    prepare(half_unaligned, sizeof(half_unaligned) /
+                            sizeof(half_unaligned[0]));
+    ppc.mem.size = limit;
+    expect_status("jit_width_limit_half_unaligned", run(), QRX_PPC_FAULT);
+    expect_u32("jit_width_limit_half_unaligned pc", ppc.cpu.pc,
+               CODE_BASE + 8u);
+    expect_u32("jit_width_limit_half_unaligned addr", ppc.fault_addr,
+               0x2001u);
+    expect_u32("jit_width_limit_half_unaligned insns", ppc.insns, 3);
+    expect_jit_block("jit_width_limit_half_unaligned",
+                     sizeof(half_unaligned) / sizeof(half_unaligned[0]));
+
+    prepare(sth_unaligned, sizeof(sth_unaligned) /
+                            sizeof(sth_unaligned[0]));
+    ppc.mem.size = limit;
+    expect_status("jit_width_limit_sth_unaligned", run(), QRX_PPC_FAULT);
+    expect_u32("jit_width_limit_sth_unaligned pc", ppc.cpu.pc,
+               CODE_BASE + 12u);
+    expect_u32("jit_width_limit_sth_unaligned addr", ppc.fault_addr,
+               0x2001u);
+    expect_u32("jit_width_limit_sth_unaligned insns", ppc.insns, 4);
+    expect_jit_block("jit_width_limit_sth_unaligned",
+                     sizeof(sth_unaligned) / sizeof(sth_unaligned[0]));
+    report("jit_widths_limit", before);
+}
+
+static void test_jit_branch(void)
+{
+    static const uint32_t taken[] = {
+        0x38600001u, /* li r3,1 */
+        0x38800001u, /* li r4,1 */
+        0x7C232000u, /* cmpw r3,r4 */
+        0x4182000Cu, /* beq +12 -> taken path */
+        0x38A00007u, /* li r5,7 (fallthrough) */
+        0x44000002u, /* sc */
+        0x38A0002Au, /* li r5,42 */
+        0x38C02000u, /* li r6,0x2000 */
+        0x90A60000u, /* stw r5,0(r6) */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t not_taken[] = {
+        0x38600001u, /* li r3,1 */
+        0x38800002u, /* li r4,2 */
+        0x7C232000u, /* cmpw r3,r4 */
+        0x4182000Cu, /* beq +12 -> taken path */
+        0x38A00007u, /* li r5,7 (fallthrough) */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t cr_field[] = {
+        0x38600005u, /* li r3,5 */
+        0x38800005u, /* li r4,5 */
+        0x2C830005u, /* cmpwi cr1,r3,5 */
+        0x4186000Cu, /* beq cr1,+12 -> taken path */
+        0x38A00007u, /* li r5,7 (fallthrough) */
+        0x44000002u, /* sc */
+        0x38A0002Au, /* li r5,42 */
+        0x38C02000u, /* li r6,0x2000 */
+        0x90A60000u, /* stw r5,0(r6) */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t link[] = {
+        0x42800009u, /* bcl 20,0,+8 */
+        0x38A00063u, /* li r5,99 (skipped) */
+        0x38A0002Au, /* li r5,42 */
+        0x7CC802A6u, /* mfspr r6,LR */
+        0x38E02000u, /* li r7,0x2000 */
+        0x90C70000u, /* stw r6,0(r7) */
+        0x44000002u  /* sc */
+    };
+    static const uint32_t ctr_loop[] = {
+        0x38600000u, /* li r3,0 */
+        0x38800003u, /* li r4,3 */
+        0x7C8903A6u, /* mtctr r4 */
+        0x38630001u, /* addi r3,r3,1 */
+        0x42003FFCu, /* bdnz loop */
+        0x38C02000u, /* li r6,0x2000 */
+        0x90660000u, /* stw r3,0(r6) */
+        0x44000002u  /* sc */
+    };
+    unsigned before = failures;
+
+    prepare(taken, sizeof(taken) / sizeof(taken[0]));
+    expect_status("jit_branch_taken", run(), QRX_PPC_TRAP);
+    expect_u32("jit_branch_taken r5", ppc.cpu.gpr[5], 42);
+    expect_u32("jit_branch_taken cr0", (ppc.cpu.cr >> 28) & 0xFu, 2u);
+    expect_u32("jit_branch_taken mem", get32(DATA_BASE), 42);
+    expect_u32("jit_branch_taken pc", ppc.cpu.pc, CODE_BASE + 40u);
+    expect_jit_source("jit_branch_taken", 0x4182000Cu);
+
+    prepare(not_taken, sizeof(not_taken) / sizeof(not_taken[0]));
+    expect_status("jit_branch_not_taken", run(), QRX_PPC_TRAP);
+    expect_u32("jit_branch_not_taken r5", ppc.cpu.gpr[5], 7);
+    expect_u32("jit_branch_not_taken mem", get32(DATA_BASE), 0u);
+    expect_u32("jit_branch_not_taken pc", ppc.cpu.pc, CODE_BASE + 24u);
+    expect_jit_source("jit_branch_not_taken", 0x4182000Cu);
+
+    prepare(cr_field, sizeof(cr_field) / sizeof(cr_field[0]));
+    expect_status("jit_branch_cr1", run(), QRX_PPC_TRAP);
+    expect_u32("jit_branch_cr1 r5", ppc.cpu.gpr[5], 42);
+    expect_u32("jit_branch_cr1 cr1", (ppc.cpu.cr >> 24) & 0xFu, 2u);
+    expect_u32("jit_branch_cr1 pc", ppc.cpu.pc, CODE_BASE + 40u);
+    expect_jit_source("jit_branch_cr1", 0x4186000Cu);
+
+    prepare(link, sizeof(link) / sizeof(link[0]));
+    expect_status("jit_branch_link", run(), QRX_PPC_TRAP);
+    expect_u32("jit_branch_link r5", ppc.cpu.gpr[5], 42);
+    expect_u32("jit_branch_link lr", ppc.cpu.lr, 0x1004u);
+    expect_u32("jit_branch_link r6", ppc.cpu.gpr[6], 0x1004u);
+    expect_u32("jit_branch_link mem", get32(DATA_BASE), 0x1004u);
+    expect_jit_source("jit_branch_link", 0x42800009u);
+
+    prepare(ctr_loop, sizeof(ctr_loop) / sizeof(ctr_loop[0]));
+    expect_status("jit_branch_ctr", run(), QRX_PPC_TRAP);
+    expect_u32("jit_branch_ctr r3", ppc.cpu.gpr[3], 3);
+    expect_u32("jit_branch_ctr ctr", ppc.cpu.ctr, 0);
+    expect_u32("jit_branch_ctr mem", get32(DATA_BASE), 3);
+    expect_jit_source("jit_branch_ctr", 0x42003FFCu);
+    report("jit_branch", before);
+}
+
+static uint32_t get32_native(uint32_t addr)
+{
+    return ((uint32_t)memory_jit[addr + 0] << 24) |
+           ((uint32_t)memory_jit[addr + 1] << 16) |
+           ((uint32_t)memory_jit[addr + 2] << 8) |
+           (uint32_t)memory_jit[addr + 3];
+}
+
+/* After the first run has translated all three blocks, a direct and a
+ * conditional branch must both tail-jump into their target: the second run
+ * has to enter only the first block natively, translate nothing and still
+ * execute all eight instructions. */
+static void test_jit_chain(void)
+{
+    static const uint32_t code[] = {
+        0x38600001u, /* 0x1000 li r3,1 */
+        0x48000008u, /* 0x1004 b +8 -> 0x100c */
+        0x38A00063u, /* 0x1008 li r5,99 (skipped) */
+        0x2C030001u, /* 0x100c cmpwi r3,1 */
+        0x41820008u, /* 0x1010 beq +8 -> 0x1018 */
+        0x38A00063u, /* 0x1014 li r5,99 (not taken) */
+        0x38A00007u, /* 0x1018 li r5,7 (taken target) */
+        0x38C02000u, /* 0x101c li r6,0x2000 */
+        0x90660000u, /* 0x1020 stw r3,0(r6) */
+        0x44000002u  /* 0x1024 sc */
+    };
+    qrx_ppc_t expected;
+    qrx_ppc_t native;
+    uint32_t hits_before;
+    unsigned before = failures;
+
+    prepare(code, sizeof(code) / sizeof(code[0]));
+    memcpy(memory_jit, memory, sizeof(memory));
+    expect_status("jit_chain_interp", qrx_ppc_run(&ppc, 10000), QRX_PPC_TRAP);
+    expected = ppc;
+    expect_u32("jit_chain_interp r5", ppc.cpu.gpr[5], 7u);
+    expect_u32("jit_chain_interp mem", get32(DATA_BASE), 1u);
+
+    prepare(code, sizeof(code) / sizeof(code[0]));
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    qrx_ppc_jit_reset(&jit);
+    expect_status("jit_chain_first", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_first blocks", jit.nblocks, 3u);
+    expect_u32("jit_chain_first misses", jit.misses, 3u);
+    expect_u32("jit_chain_first hits", jit.hits, 0u);
+    expect_u32("jit_chain_first insns", native.insns, 8u);
+    expect_u32("jit_chain_first pc", native.cpu.pc, expected.cpu.pc);
+    expect_u32("jit_chain_first r5", native.cpu.gpr[5], 7u);
+    expect_u32("jit_chain_first mem", get32_native(DATA_BASE), 1u);
+    hits_before = jit.hits;
+
+    prepare(code, sizeof(code) / sizeof(code[0]));
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    expect_status("jit_chain_linked", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_linked entries", jit.hits - hits_before, 1u);
+    expect_u32("jit_chain_linked misses", jit.misses, 3u);
+    expect_u32("jit_chain_linked insns", native.insns, 8u);
+    expect_u32("jit_chain_linked pc", native.cpu.pc, expected.cpu.pc);
+    expect_u32("jit_chain_linked gpr3", native.cpu.gpr[3],
+               expected.cpu.gpr[3]);
+    expect_u32("jit_chain_linked gpr5", native.cpu.gpr[5],
+               expected.cpu.gpr[5]);
+    expect_u32("jit_chain_linked cr", native.cpu.cr, expected.cpu.cr);
+    expect_u32("jit_chain_linked mem", get32_native(DATA_BASE), 1u);
+    report("jit_chain", before);
+}
+
+/* bclr: a subroutine returns through LR, so its target is only known at run
+ * time and has to go through the indirect target cache. */
+static void test_jit_chain_blr(void)
+{
+    static const uint32_t code[] = {
+        0x38800002u, /* 0x1000 li r4,2 */
+        0x38600000u, /* 0x1004 li r3,0 */
+        0x48000021u, /* 0x1008 bl 0x1028 */
+        0x3884FFFFu, /* 0x100c addi r4,r4,-1 */
+        0x2C040000u, /* 0x1010 cmpwi r4,0 */
+        0x4082FFF4u, /* 0x1014 bne 0x1008 */
+        0x38C02000u, /* 0x1018 li r6,0x2000 */
+        0x90660000u, /* 0x101c stw r3,0(r6) */
+        0x44000002u, /* 0x1020 sc */
+        0x00000000u, /* 0x1024 padding */
+        0x38630001u, /* 0x1028 addi r3,r3,1 */
+        0x4E800020u  /* 0x102c blr */
+    };
+    qrx_ppc_t native;
+    uint32_t hits_before;
+    uint32_t misses_before;
+    uint32_t cache_before;
+    unsigned before = failures;
+
+    /* Both native runs use memory_jit, so `memory` stays the pristine image
+     * for the interpreter reference run at the end. */
+    prepare(code, sizeof(code) / sizeof(code[0]));
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    qrx_ppc_jit_reset(&jit);
+    expect_status("jit_chain_blr_first", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_blr_blocks", jit.nblocks, 5u);
+    expect_u32("jit_chain_blr_first cache", jit.cache_hits, 1u);
+    expect_u32("jit_chain_blr_first insns", native.insns, 17u);
+    expect_u32("jit_chain_blr_first mem", get32_native(DATA_BASE), 2u);
+
+    hits_before = jit.hits;
+    misses_before = jit.misses;
+    cache_before = jit.cache_hits;
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    expect_status("jit_chain_blr_linked", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_blr_entries", jit.hits - hits_before, 1u);
+    expect_u32("jit_chain_blr_no_misses", jit.misses - misses_before, 0u);
+    expect_u32("jit_chain_blr_cache", jit.cache_hits - cache_before, 2u);
+    expect_u32("jit_chain_blr_insns", native.insns, 17u);
+
+    expect_status("jit_chain_blr_interp", qrx_ppc_run(&ppc, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_blr_interp r3", ppc.cpu.gpr[3], 2u);
+    expect_u32("jit_chain_blr_interp lr", ppc.cpu.lr, 0x100cu);
+    expect_u32("jit_chain_blr_interp mem", get32(DATA_BASE), 2u);
+    compare_jit_state(&ppc, &native);
+    report("jit_chain_blr", before);
+}
+
+/* bcctr: the target comes from CTR, which the interpreter sets from mtctr in
+ * front of the native block.  The block after it must chain into that target. */
+static void test_jit_chain_bcctr(void)
+{
+    static const uint32_t code[] = {
+        0x38801024u, /* 0x1000 li r4,0x1024 */
+        0x7C8903A6u, /* 0x1004 mtctr r4 (interpreter) */
+        0x38600005u, /* 0x1008 li r3,5 */
+        0x4E800420u, /* 0x100c bcctr 20,0 -> CTR */
+        0x38A00063u, /* 0x1010 li r5,99 (skipped) */
+        0x00000000u, /* 0x1014 padding */
+        0x00000000u, /* 0x1018 padding */
+        0x00000000u, /* 0x101c padding */
+        0x00000000u, /* 0x1020 padding */
+        0x38C02000u, /* 0x1024 li r6,0x2000 */
+        0x90660000u, /* 0x1028 stw r3,0(r6) */
+        0x44000002u  /* 0x102c sc */
+    };
+    qrx_ppc_t native;
+    uint32_t hits_before;
+    uint32_t misses_before;
+    uint32_t cache_before;
+    unsigned before = failures;
+
+    prepare(code, sizeof(code) / sizeof(code[0]));
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    qrx_ppc_jit_reset(&jit);
+    expect_status("jit_chain_bcctr_first", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_bcctr_blocks", jit.nblocks, 3u);
+    expect_u32("jit_chain_bcctr_first insns", native.insns, 7u);
+    expect_u32("jit_chain_bcctr_first mem", get32_native(DATA_BASE), 5u);
+
+    hits_before = jit.hits;
+    misses_before = jit.misses;
+    cache_before = jit.cache_hits;
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    expect_status("jit_chain_bcctr_linked", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    /* 0x1000 and 0x1008 are separate entries because mtctr stays interpreted;
+     * a missing indirect chain would add a third entry for 0x1024. */
+    expect_u32("jit_chain_bcctr_entries", jit.hits - hits_before, 2u);
+    expect_u32("jit_chain_bcctr_no_misses", jit.misses - misses_before, 0u);
+    expect_u32("jit_chain_bcctr_cache", jit.cache_hits - cache_before, 1u);
+    expect_u32("jit_chain_bcctr_insns", native.insns, 7u);
+
+    expect_status("jit_chain_bcctr_interp", qrx_ppc_run(&ppc, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_bcctr_interp r3", ppc.cpu.gpr[3], 5u);
+    expect_u32("jit_chain_bcctr_interp r5", ppc.cpu.gpr[5], 0u);
+    expect_u32("jit_chain_bcctr_interp mem", get32(DATA_BASE), 5u);
+    compare_jit_state(&ppc, &native);
+    report("jit_chain_bcctr", before);
+}
+
+/* A not-taken bclr has to continue at the fallthrough and still chain there. */
+static void test_jit_chain_indirect_not_taken(void)
+{
+    static const uint32_t code[] = {
+        0x38600001u, /* 0x1000 li r3,1 */
+        0x38800002u, /* 0x1004 li r4,2 */
+        0x7C232000u, /* 0x1008 cmpw r3,r4 (LT, EQ clear) */
+        0x4D820020u, /* 0x100c beqlr, not taken */
+        0x38A00007u, /* 0x1010 li r5,7 */
+        0x44000002u  /* 0x1014 sc */
+    };
+    qrx_ppc_t native;
+    uint32_t hits_before;
+    uint32_t misses_before;
+    unsigned before = failures;
+
+    prepare(code, sizeof(code) / sizeof(code[0]));
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    qrx_ppc_jit_reset(&jit);
+    expect_status("jit_chain_beqlr_first", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_beqlr_blocks", jit.nblocks, 2u);
+    expect_u32("jit_chain_beqlr_first insns", native.insns, 6u);
+
+    hits_before = jit.hits;
+    misses_before = jit.misses;
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    expect_status("jit_chain_beqlr_linked", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_beqlr_entries", jit.hits - hits_before, 1u);
+    expect_u32("jit_chain_beqlr_no_misses", jit.misses - misses_before, 0u);
+    expect_u32("jit_chain_beqlr_insns", native.insns, 6u);
+
+    expect_status("jit_chain_beqlr_interp", qrx_ppc_run(&ppc, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_beqlr_interp r5", ppc.cpu.gpr[5], 7u);
+    expect_u32("jit_chain_beqlr_interp pc", ppc.cpu.pc, 0x1018u);
+    compare_jit_state(&ppc, &native);
+    report("jit_chain_beqlr", before);
+}
+/* Two return sites (0x1010 after the first bl, 0x1014 after the second, i.e.
+ * sets 4 and 5): both cache entries stay resident, so the second run is fully
+ * native and every indirect return is a hit.  The same-set thrash test below
+ * covers three sites competing for one set. */
+static void test_jit_chain_cache_2way(void)
+{
+    static const uint32_t code[] = {
+        0x38600000u, /* 0x1000 li r3,0 */
+        0x38800000u, /* 0x1004 li r4,0 */
+        0x38A00004u, /* 0x1008 li r5,4 */
+        0x4800002Du, /* 0x100c bl 0x1038 */
+        0x48000069u, /* 0x1010 bl 0x1078 */
+        0x38A5FFFFu, /* 0x1014 addi r5,r5,-1 */
+        0x2C050000u, /* 0x1018 cmpwi r5,0 */
+        0x4082FFF0u, /* 0x101c bne 0x100c */
+        0x38C02000u, /* 0x1020 li r6,0x2000 */
+        0x90660000u, /* 0x1024 stw r3,0(r6) */
+        0x90860004u, /* 0x1028 stw r4,4(r6) */
+        0x44000002u, /* 0x102c sc */
+        0x00000000u, /* 0x1030 padding */
+        0x00000000u, /* 0x1034 padding */
+        0x38630001u, /* 0x1038 addi r3,r3,1 */
+        0x4E800020u, /* 0x103c blr -> 0x1010 */
+        0x00000000u, /* 0x1040 padding */
+        0x00000000u, /* 0x1044 padding */
+        0x00000000u, /* 0x1048 padding */
+        0x00000000u, /* 0x104c padding */
+        0x00000000u, /* 0x1050 padding */
+        0x00000000u, /* 0x1054 padding */
+        0x00000000u, /* 0x1058 padding */
+        0x00000000u, /* 0x105c padding */
+        0x00000000u, /* 0x1060 padding */
+        0x00000000u, /* 0x1064 padding */
+        0x00000000u, /* 0x1068 padding */
+        0x00000000u, /* 0x106c padding */
+        0x00000000u, /* 0x1070 padding */
+        0x00000000u, /* 0x1074 padding */
+        0x38840001u, /* 0x1078 addi r4,r4,1 */
+        0x4E800020u  /* 0x107c blr -> 0x1014 */
+    };
+    qrx_ppc_t native;
+    uint32_t hits_before;
+    uint32_t misses_before;
+    uint32_t cache_before;
+    uint32_t cache_miss_before;
+    unsigned i;
+    unsigned before = failures;
+
+    prepare(code, sizeof(code) / sizeof(code[0]));
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    qrx_ppc_jit_reset(&jit);
+    expect_status("jit_chain_2way_first", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_2way_blocks", jit.nblocks, 7u);
+    expect_u32("jit_chain_2way_first hits", jit.cache_hits, 6u);
+    expect_u32("jit_chain_2way_first misses", jit.cache_misses, 2u);
+    expect_u32("jit_chain_2way_first insns", native.insns, 43u);
+    expect_u32("jit_chain_2way_first mem", get32_native(DATA_BASE), 4u);
+    expect_u32("jit_chain_2way_first mem4", get32_native(DATA_BASE + 4u), 4u);
+
+    hits_before = jit.hits;
+    misses_before = jit.misses;
+    cache_before = jit.cache_hits;
+    cache_miss_before = jit.cache_misses;
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    expect_status("jit_chain_2way_linked", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_2way_entries", jit.hits - hits_before, 1u);
+    expect_u32("jit_chain_2way_no_misses", jit.misses - misses_before, 0u);
+    /* Eight indirect returns per run and all of them hits: both targets share
+     * a set and still stay resident, where a 1-way cache would miss each. */
+    expect_u32("jit_chain_2way_hits", jit.cache_hits - cache_before, 8u);
+    expect_u32("jit_chain_2way_no_cache_misses",
+               jit.cache_misses - cache_miss_before, 0u);
+    expect_u32("jit_chain_2way_insns", native.insns, 43u);
+
+    /* Interleaved lookups keep both ways usable: neither target evicts the
+     * other, which a directly mapped cache cannot do. */
+    cache_before = jit.cache_hits;
+    cache_miss_before = jit.cache_misses;
+    for (i = 0; i < 4; i++) {
+        expect_u32("jit_chain_2way_keep_a",
+                   qrx_ppc_jit_chain_target(&jit, 0x1038u) != 0, 1u);
+        expect_u32("jit_chain_2way_keep_b",
+                   qrx_ppc_jit_chain_target(&jit, 0x1078u) != 0, 1u);
+    }
+    expect_u32("jit_chain_2way_keep_hits", jit.cache_hits - cache_before, 8u);
+    expect_u32("jit_chain_2way_keep_misses",
+               jit.cache_misses - cache_miss_before, 0u);
+
+    expect_status("jit_chain_2way_interp", qrx_ppc_run(&ppc, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_2way_interp r3", ppc.cpu.gpr[3], 4u);
+    expect_u32("jit_chain_2way_interp r4", ppc.cpu.gpr[4], 4u);
+    expect_u32("jit_chain_2way_interp lr", ppc.cpu.lr, 0x1014u);
+    expect_u32("jit_chain_2way_interp pc", ppc.cpu.pc, 0x1030u);
+    compare_jit_state(&ppc, &native);
+    report("jit_chain_cache_2way", before);
+}
+/* Three return targets in one cache set (0x10B8, 0x10F8 and 0x1138 all map to
+ * set 6).  Two ways cannot keep all three, so every cycle evicts the least
+ * recently used target; the evicted target has to come back through the
+ * runner and must still produce exactly the interpreter's result. */
+/* Three return sites in one cache set: the bclr targets are the addresses
+ * after each bl, and 0x1038, 0x1078 and 0x10B8 all map to set 6.  Two ways
+ * cannot hold all three, so the alternating calls keep evicting the least
+ * recently used return site; every evicted site has to come back through the
+ * runner and must still produce exactly the interpreter's result. */
+/* Three return sites in one cache set: a bclr target is the address after its
+ * bl, and 0x1038, 0x1078 and 0x10B8 all map to set 6.  Two ways cannot hold
+ * all three, so A is called twice in a row (always a hit), while B and C keep
+ * evicting the least recently used site.  Every evicted site has to come back
+ * through the runner and must still produce the interpreter's result. */
+static void test_jit_chain_cache_thrash(void)
+{
+    static const uint32_t code[] = {
+        0x38600000u, /* 0x1000 li r3,0 */
+        0x38800000u, /* 0x1004 li r4,0 */
+        0x38A00000u, /* 0x1008 li r5,0 */
+        0x38C00004u, /* 0x100c li r6,4 */
+        0x38E00002u, /* 0x1010 li r7,2 */
+        0x48000020u, /* 0x1014 b 0x1034 */
+        0x00000000u, /* 0x1018 padding */
+        0x00000000u, /* 0x101c padding */
+        0x00000000u, /* 0x1020 padding */
+        0x00000000u, /* 0x1024 padding */
+        0x00000000u, /* 0x1028 padding */
+        0x00000000u, /* 0x102c padding */
+        0x00000000u, /* 0x1030 padding */
+        0x480000CDu, /* 0x1034 bl 0x1100 (A), ret 0x1038 */
+        0x38E7FFFFu, /* 0x1038 addi r7,r7,-1 */
+        0x2C070000u, /* 0x103c cmpwi r7,0 */
+        0x4082FFF4u, /* 0x1040 bne 0x1034 */
+        0x48000030u, /* 0x1044 b 0x1074 */
+        0x00000000u, /* 0x1048 padding */
+        0x00000000u, /* 0x104c padding */
+        0x00000000u, /* 0x1050 padding */
+        0x00000000u, /* 0x1054 padding */
+        0x00000000u, /* 0x1058 padding */
+        0x00000000u, /* 0x105c padding */
+        0x00000000u, /* 0x1060 padding */
+        0x00000000u, /* 0x1064 padding */
+        0x00000000u, /* 0x1068 padding */
+        0x00000000u, /* 0x106c padding */
+        0x00000000u, /* 0x1070 padding */
+        0x48000095u, /* 0x1074 bl 0x1108 (B), ret 0x1078 */
+        0x4800003Cu, /* 0x1078 b 0x10B4 */
+        0x00000000u, /* 0x107c padding */
+        0x00000000u, /* 0x1080 padding */
+        0x00000000u, /* 0x1084 padding */
+        0x00000000u, /* 0x1088 padding */
+        0x00000000u, /* 0x108c padding */
+        0x00000000u, /* 0x1090 padding */
+        0x00000000u, /* 0x1094 padding */
+        0x00000000u, /* 0x1098 padding */
+        0x00000000u, /* 0x109c padding */
+        0x00000000u, /* 0x10a0 padding */
+        0x00000000u, /* 0x10a4 padding */
+        0x00000000u, /* 0x10a8 padding */
+        0x00000000u, /* 0x10ac padding */
+        0x00000000u, /* 0x10b0 padding */
+        0x4800005Du, /* 0x10b4 bl 0x1110 (C), ret 0x10B8 */
+        0x38E00002u, /* 0x10b8 li r7,2 */
+        0x38C6FFFFu, /* 0x10bc addi r6,r6,-1 */
+        0x2C060000u, /* 0x10c0 cmpwi r6,0 */
+        0x4082FF70u, /* 0x10c4 bne 0x1034 */
+        0x39002000u, /* 0x10c8 li r8,0x2000 */
+        0x90680000u, /* 0x10cc stw r3,0(r8) */
+        0x90880004u, /* 0x10d0 stw r4,4(r8) */
+        0x90A80008u, /* 0x10d4 stw r5,8(r8) */
+        0x44000002u, /* 0x10d8 sc */
+        0x00000000u, /* 0x10dc padding */
+        0x00000000u, /* 0x10e0 padding */
+        0x00000000u, /* 0x10e4 padding */
+        0x00000000u, /* 0x10e8 padding */
+        0x00000000u, /* 0x10ec padding */
+        0x00000000u, /* 0x10f0 padding */
+        0x00000000u, /* 0x10f4 padding */
+        0x00000000u, /* 0x10f8 padding */
+        0x00000000u, /* 0x10fc padding */
+        0x38630001u, /* 0x1100 addi r3,r3,1 */
+        0x4E800020u, /* 0x1104 blr */
+        0x38840001u, /* 0x1108 addi r4,r4,1 */
+        0x4E800020u, /* 0x110c blr */
+        0x38A50001u, /* 0x1110 addi r5,r5,1 */
+        0x4E800020u, /* 0x1114 blr */
+    };
+    qrx_ppc_t native;
+    uint32_t hits_before;
+    uint32_t cache_before;
+    uint32_t cache_miss_before;
+    unsigned before = failures;
+
+    prepare(code, sizeof(code) / sizeof(code[0]));
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    qrx_ppc_jit_reset(&jit);
+    expect_status("jit_chain_thrash_first", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_thrash_blocks", jit.nblocks, 12u);
+    expect_u32("jit_chain_thrash_first insns", native.insns, 107u);
+    expect_u32("jit_chain_thrash_first mem", get32_native(DATA_BASE), 8u);
+    expect_u32("jit_chain_thrash_first mem4", get32_native(DATA_BASE + 4u), 4u);
+    expect_u32("jit_chain_thrash_first mem8", get32_native(DATA_BASE + 8u), 4u);
+
+    hits_before = jit.hits;
+    cache_before = jit.cache_hits;
+    cache_miss_before = jit.cache_misses;
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    expect_status("jit_chain_thrash_linked", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_thrash_insns", native.insns, 107u);
+    /* Four returns per iteration (A A B C): the repeated A always hits, while
+     * B and C compete with A for the two ways of set 6. */
+    expect_u32("jit_chain_thrash_lookups",
+               (jit.cache_hits + jit.cache_misses) -
+               (cache_before + cache_miss_before), 16u);
+    expect_u32("jit_chain_thrash_hits", jit.cache_hits - cache_before, 4u);
+    expect_u32("jit_chain_thrash_misses",
+               (jit.cache_misses - cache_miss_before) > 0, 1u);
+    /* Each eviction leaves through the runner and re-enters exactly once, so
+     * the extra native entries match the misses: an evicted entry never runs
+     * stale code. */
+    expect_u32("jit_chain_thrash_entries", jit.hits - hits_before,
+               1u + (jit.cache_misses - cache_miss_before));
+
+    expect_status("jit_chain_thrash_interp", qrx_ppc_run(&ppc, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_chain_thrash_interp r3", ppc.cpu.gpr[3], 8u);
+    expect_u32("jit_chain_thrash_interp r4", ppc.cpu.gpr[4], 4u);
+    expect_u32("jit_chain_thrash_interp r5", ppc.cpu.gpr[5], 4u);
+    expect_u32("jit_chain_thrash_interp pc", ppc.cpu.pc, 0x10DCu);
+    compare_jit_state(&ppc, &native);
+    report("jit_chain_cache_thrash", before);
+}
+/* Mid-block SMC: a store inside a block rewrites an instruction that the same
+ * block would execute next.  The store must end the block, because the block
+ * still holds the old translation of that instruction; the runner then
+ * re-checks the bytes and translates the successor anew. */
+static void test_jit_smc_midblock(void)
+{
+    static const uint32_t overlap[] = {
+        0x38600000u, /* 0x1000 li r3,0 */
+        0x3CC03863u, /* 0x1004 lis r6,0x3863 */
+        0x60C6000Au, /* 0x1008 ori r6,r6,0x000a */
+        0x38E01014u, /* 0x100c li r7,0x1014 */
+        0x90C70000u, /* 0x1010 stw r6,0(r7) patches 0x1014 */
+        0x38630001u, /* 0x1014 addi r3,r3,1 (becomes +10) */
+        0x39002000u, /* 0x1018 li r8,0x2000 */
+        0x90680000u, /* 0x101c stw r3,0(r8) */
+        0x44000002u  /* 0x1020 sc */
+    };
+    static const uint32_t disjoint[] = {
+        0x38600000u, /* 0x1000 li r3,0 */
+        0x3CC03863u, /* 0x1004 lis r6,0x3863 */
+        0x60C6000Au, /* 0x1008 ori r6,r6,0x000a */
+        0x38E02000u, /* 0x100c li r7,0x2000 */
+        0x90C70000u, /* 0x1010 stw r6,0(r7) outside the block */
+        0x39002004u, /* 0x1014 li r8,0x2004 */
+        0x90680000u, /* 0x1018 stw r3,0(r8) */
+        0x44000002u  /* 0x101c sc */
+    };
+    qrx_ppc_t native;
+    unsigned before = failures;
+
+    prepare(overlap, sizeof(overlap) / sizeof(overlap[0]));
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    qrx_ppc_jit_reset(&jit);
+    expect_status("jit_smc_overlap", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    /* Five instructions, then the patched block at 0x1014: without the store
+     * check the stale +1 would run and the block count would stay at one. */
+    expect_u32("jit_smc_overlap blocks", jit.nblocks, 2u);
+    expect_u32("jit_smc_overlap insns", native.insns, 9u);
+    expect_u32("jit_smc_overlap mem", get32_native(DATA_BASE), 10u);
+
+    expect_status("jit_smc_overlap_interp", qrx_ppc_run(&ppc, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_smc_overlap_interp r3", ppc.cpu.gpr[3], 10u);
+    expect_u32("jit_smc_overlap_interp mem", get32(DATA_BASE), 10u);
+    compare_jit_state(&ppc, &native);
+
+    /* A store outside the block must not end it: one block, one native
+     * entry. */
+    prepare(disjoint, sizeof(disjoint) / sizeof(disjoint[0]));
+    memcpy(memory_jit, memory, sizeof(memory));
+    native = ppc;
+    native.mem.data = memory_jit;
+    qrx_ppc_jit_reset(&jit);
+    expect_status("jit_smc_disjoint", qrx_ppc_run_jit(&native, &jit, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_smc_disjoint blocks", jit.nblocks, 1u);
+    expect_u32("jit_smc_disjoint insns", native.insns, 8u);
+    expect_u32("jit_smc_disjoint mem", get32_native(DATA_BASE), 0x3863000Au);
+    expect_u32("jit_smc_disjoint mem4", get32_native(DATA_BASE + 4u), 0u);
+
+    expect_status("jit_smc_disjoint_interp", qrx_ppc_run(&ppc, 10000),
+                  QRX_PPC_TRAP);
+    expect_u32("jit_smc_disjoint_interp mem", get32(DATA_BASE), 0x3863000Au);
+    compare_jit_state(&ppc, &native);
+    report("jit_smc_midblock", before);
+}
 #endif
 
 static void test_jit_faults(void)
@@ -1347,6 +2231,7 @@ int main(void)
     test_arithmetic();
     test_loop();
     test_compare_branch();
+    test_compare_cr();
     test_load_store();
     test_mul_div();
     test_rotate();
@@ -1360,6 +2245,21 @@ int main(void)
         test_jit_fault_fuzz();
     if (jit_code)
         test_jit_widths();
+    if (jit_code)
+        test_jit_widths_limit();
+    if (jit_code)
+        test_jit_branch();
+    if (jit_code)
+        test_jit_chain();
+    if (jit_code)
+        test_jit_chain_blr();
+    if (jit_code)
+        test_jit_chain_bcctr();
+    if (jit_code)
+        test_jit_chain_indirect_not_taken();
+        test_jit_chain_cache_2way();
+        test_jit_chain_cache_thrash();
+        test_jit_smc_midblock();
 #endif
     test_jit_faults();
     test_fpu_double();

@@ -251,10 +251,11 @@ keine vollständige G4-FPU.
 Stand 2026-11-09: Tier 1 ist in `tools/qrxppc/qrx_ppc_jit.c` umgesetzt.
 Der Emitter erzeugt 68k-Code für `addi`/`addis`, `ori`/`oris`/`xori`/
 `xoris`, `add`/`subf`/`and`/`or`/`xor` (RC=0/1, OE=0), `andi.`/`andis.`,
-`lwz`/`stw`, `lbz`/`lhz`/`lha`, `stb`/`sth`, direkte
-`b`/`bl`/`ba`/`bla`-Blockenden und `sc`. Die Speicherzugriffe laufen über
-geprüfte C-Helfer, damit Alignment-/Bereichsfehler, `fault_addr` und
-Instruktionszählung mit dem Interpreter übereinstimmen. Ein 24-Block-Cache
+`lwz`/`stw`, `lbz`/`lhz`/`lha`, `stb`/`sth`, `cmp`/`cmpl`/`cmpi`/`cmpli`
+(CR0…CR7, L-Form), direkte `b`/`bl`/`ba`/`bla`- und `bc`/`bcl`-Blockenden
+sowie `sc`. Die Speicherzugriffe laufen über geprüfte C-Helfer, damit
+Alignment-/Bereichsfehler, `fault_addr` und Instruktionszählung mit dem
+Interpreter übereinstimmen. Ein 24-Block-Cache
 vergleicht die exakten Quellbytes bei jedem Einstieg; Codeänderungen zwischen
 Blockläufen führen zur Neuübersetzung. `CacheClearE`/`CacheClearU` werden
 nach jedem neuen Block ausgeführt.
@@ -263,21 +264,60 @@ CR0 wird lazy geführt: Der generierte Code hält den Nibble in 68k-D2 und
 committet ihn erst an Blockgrenzen oder vor potenziell faultenden
 Speicherzugriffen nach `cpu.cr`. Mehrere CR0-Schreiber im Block erzeugen nur
 den letzten Wert; der D2-Save/Restore im Prolog/Epilog hält die C-ABI ein.
+Compare-Instruktionen schreiben das gewählte CR-Feld direkt; bedingte Branches
+committen zuerst einen pending CR0, werten BO/BI/CTR aus und setzen PC sowie
+bei LK=1 und genommenem Branch LR.
 
-Abnahme im ARMithlon-Gast: 26 Fälle, davon 19 bestehende Integer-/FPU-Fälle,
-der CR0-Test (`jit_cr0`), der deterministische Fuzz-Test (`jit_fuzz`, 64
-Fälle × 16 zufällige JIT-Instruktionen), der Fault-Fuzz (`jit_fault_fuzz`,
-96 Fälle mit zufälligen 32-Bit-Adressen, RAM-Grenz- und Wrap-Adressen sowie
-CR0-Commit vor dem Fault), der Breiten-/Grenztest (`jit_widths`), zwei
-gezielte Fault-Differentialfälle (OOB und unaligned) und der
-SMC-/Cache-Test (`jit_cache_smc`); `QRXPPC: 0 failure(s)`. Die bestehenden
-Fälle laufen zusätzlich per JIT auf einer separaten Speicherkopie und
-vergleichen den vollständigen CPU-/Speicherzustand.
+Direkte und bedingte Branches verketten Blöcke per Tail-Jump: Jeder Block hat
+einen eigenen Chain-Einstieg ohne zusätzlichen D2-Frame; unbekannte Ziele
+laufen über den Block-Epilog in den Runner zurück. Nach der Übersetzung des
+Zielblocks patcht `jit_link_block()` die Sprungziele auf dessen Chain-Einstieg.
+Der Chain-Einstieg prüft Quellbytes und Restbudget, damit SMC und `max_insns`
+innerhalb der Kette gelten; Blöcke mit Stores werden nicht als Kettenquelle
+verwendet, und eine Quellbyte-Änderung verwirft den gesamten Cache. Die
+Instruktionszählung erfolgt im generierten Code (`chain_insns`).
 
-Offen für den vollständigen P1.4-Ausbau: übrige CR-Felder und
-Compare-Instruktionen, bedingte Branches/Block-Chaining/indirekte
-Branch-Lookups, ISA-Tag und Seitengeneration, Mid-Block-SMC und
-Alias-Invalidierung, FPU-JIT und Trace-/Performance-Ausbau. Tier 1 ist ein belastbarer Anfang, keine
+`bclr`/`bcctr` haben kein statisches Ziel. Der Block endet mit einem Lookup im
+zweifach assoziativen Ziel-Cache (`QRX_PPC_JIT_CACHE_SETS` ×
+`QRX_PPC_JIT_CACHE_WAYS` = 8 Sätze × 2 Wege, Index `(pc >> 2) & 7`); ein
+Treffer springt in den Chain-Einstieg, ein Fehltreffer geht mit gesetztem PC
+zurück in den Runner. Zwei Ziele teilen sich einen Satz, ohne einander zu
+verdrängen; erst ein drittes Ziel im selben Satz ersetzt den zuletzt nicht
+benutzten Weg. Der Einstieg vergleicht `cpu.pc` mit der Blockadresse, damit ein
+veralteter Eintrag nach einer Invalidierung keinen fremden Block ausführt;
+nicht genommene indirekte Branches nutzen den statischen Fallthrough-Link.
+
+Abnahme im ARMithlon-Gast: 37 Fälle, davon 19 bestehende Integer-/FPU-Fälle,
+der CR0-Test (`jit_cr0`), der Compare-/CR-Test (`compare_cr`), der
+Branch-Test (`jit_branch` mit genommenem/nicht genommenem Pfad, CR1, Link und
+CTR-Schleife), der Chaining-Test (`jit_chain`, ein nativer Einstieg für einen
+direkten und einen bedingten Branch nach dem Übersetzen aller Blöcke), die
+drei indirekten Ketten-Tests (`jit_chain_blr`, `jit_chain_bcctr`,
+`jit_chain_beqlr`), der Zwei-Wege-Test (`jit_chain_cache_2way`, beide
+Rücksprungstellen bleiben resident, der zweite Lauf ist rein nativ) und der
+Drei-Ziel-Test (`jit_chain_cache_thrash`: drei Rücksprungadressen im selben
+Satz, Treffer und LRU-Verdrängungen im Wechsel, jede Verdrängung kehrt korrekt
+über den Runner zurück), der Mid-Block-SMC-Test (`jit_smc_midblock`: ein Store
+in die eigenen Quellbytes beendet den Block, ein Store außerhalb nicht), der
+deterministische Fuzz-Test (`jit_fuzz`, 64 Fälle × 16
+zufällige JIT-Instruktionen), der Fault-Fuzz (`jit_fault_fuzz`, 96 Fälle mit
+zufälligen 32-Bit-Adressen, RAM-Grenz- und Wrap-Adressen sowie CR0-Commit vor
+dem Fault), der Breiten-/Grenztest (`jit_widths`), der logische Limit-Test
+(`jit_widths_limit`), zwei gezielte Fault-Differentialfälle (OOB und
+unaligned) und der SMC-/Cache-Test (`jit_cache_smc`); `QRXPPC: 0 failure(s)`.
+Die bestehenden Fälle laufen zusätzlich per JIT auf einer separaten
+Speicherkopie und vergleichen den vollständigen CPU-/Speicherzustand. Der
+Gast-Mutationstest `tools/qrxppc/mutation_test.sh` baut sechs Varianten mit
+entferntem Byte-/Halfword-Range- oder Halfword-Alignment-Check; alle sechs
+werden von `jit_widths_limit` erkannt. Eine siebte Variante durchsucht im
+Ziel-Cache nur den ersten Weg (wieder direkt abgebildet); sie wird von
+`jit_chain_cache_2way` erkannt, eine achte schaltet die Mid-Block-SMC-Prüfung ab
+und wird von `jit_smc_midblock` erkannt.
+
+Block-Chaining für direkte, bedingte und indirekte Branches ist damit
+umgesetzt. Offen für den vollständigen P1.4-Ausbau: ISA-Tag und
+Seitengeneration und Alias-Invalidierung, FPU-JIT und
+Trace-/Performance-Ausbau. Tier 1 ist ein belastbarer Anfang, keine
 vollständige P1.4-Abnahme.
 
 #### P1.5 ABI und Mixed Mode
@@ -295,9 +335,10 @@ Abnahme P1:
 - Codeänderungen invalidieren den Cache nachweislich.
 - Es gibt noch keine Aussage wie „MacOS läuft“.
 
-Stand 2026-11-09: Der Tier-1-Satz besteht differentiell, inklusive Fault-
-und SMC-Test. Randomisierte JIT-Instruktionstests, bedingte Branches,
-Mid-Block-SMC und der volle P1.4-Ausbau bleiben offen.
+Stand 2026-11-09: Der Tier-1-Satz besteht differentiell, inklusive Fault-,
+SMC-, Compare-/CR-, Branch- und Chaining-Tests für direkte und indirekte
+Branches, inklusive Mid-Block-SMC. Randomisierte JIT-Instruktionstests und der
+volle P1.4-Ausbau bleiben offen.
 
 ### P2 — MacOS 9 HLE
 
@@ -432,9 +473,9 @@ zur HFS-/DMG-/SIT-Arbeit als isolierter CPU-Testkern beginnen, aber nicht als
 5. QRXPPC-Spezifikation und PPC-Testvektoren anlegen.
 6. Interpreter für PPC32-Integer und FPU.
 7. Differentialtest-Harness und Trace-Format.
-8. 68k-JIT-Tier-1 mit Code-Cache und SMC-Invalidierung (Tier 1 mit Lazy-CR0
-   umgesetzt; übrige CR-Felder, bedingte Branches, Seitengenerationen und
-   FPU-JIT offen).
+8. 68k-JIT-Tier-1 mit Code-Cache und SMC-Invalidierung (Tier 1 mit Lazy-CR0,
+   Compare-Feldern und Block-Chaining für direkte, bedingte und indirekte
+   Branches umgesetzt; Seitengenerationen und FPU-JIT offen).
 9. Mixed-Mode-ABI.
 10. MacOS-9-HLE-Minimum.
 11. Erst dann QuickTime/LightWave-Bring-up.
