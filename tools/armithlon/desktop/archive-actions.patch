@@ -119,7 +119,7 @@
 +    if (kind == QRX_ARCH_IMAGE) { qrx_set_status("Image: use Mount image."); return; }
 +    qrx_join_path(full, sizeof(full), g_files_path, e->name);
 +    if (kind == QRX_ARCH_SIT)
-+        snprintf(command, sizeof(command), "xadUnFile \"%s\" DEST \"%s\" OW QUIET", full, g_files_path);
++        snprintf(command, sizeof(command), "C:QRXUnSit \"%s\" \"%s\"", full, g_files_path);
 +    else if (kind == QRX_ARCH_ZIP)
 +        snprintf(command, sizeof(command), "UnZip -o \"%s\" -d \"%s\"", full, g_files_path);
 +    else if (kind == QRX_ARCH_7Z)
@@ -135,7 +135,7 @@
 +        qrx_set_status(kind == QRX_ARCH_ZIP ? "Archive: needs UnZip in the command path."
 +                     : kind == QRX_ARCH_7Z ? "Archive: needs 7z in the command path."
 +                     : kind == QRX_ARCH_LHA ? "Archive: needs Lha in the command path."
-+                     : kind == QRX_ARCH_SIT ? "Archive: needs xadUnFile and xadmaster.library."
++                     : kind == QRX_ARCH_SIT ? "Archive: SIT5 extraction failed; use QRXUnSit for SIT5 archives."
 +                     : "Archive: needs UnRAR in the command path.");
 +    }
 +}

@@ -103,6 +103,7 @@ AddDataTypes REFRESH QUIET
 Assign LIBS: DEVS:Drivers ADD
 DEVS:Monitors/SAGA
 SetEnv QRXSCREEN rtg
+Run >NIL: C:QRXLoadDevice
 Run <NIL: >QRX:input.log C:QRXHostInput
 C:QRXDesktop >QRX:desktop.log
 IPrefs

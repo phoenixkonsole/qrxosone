@@ -1,0 +1,16 @@
+FileSystem     = L:ODFileSystem
+Stacksize      = 16384
+Priority       = 10
+GlobVec        = -1
+DosType        = 0x43443031
+ForceLoad      = 1
+Device         = diskimage.device
+Unit           = 4
+Control        = "HFSFIRST"
+BlockSize      = 2048
+Surfaces       = 1
+BlocksPerTrack = 1
+LowCyl         = 0
+HighCyl        = 0
+Reserved       = 0
+Activate       = 0

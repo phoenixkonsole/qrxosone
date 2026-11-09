@@ -30,6 +30,11 @@ Linux i386 GUI work: [embedded X11 subset and AROS windows](docs/QRX_X11.md).
 Blender 2.79b as a 68k AROS program, headless stage with the second 68100 core:
 [plan, state and measurements](docs/BLENDER_AROS68K.md), [build](tools/blender/README.md).
 
+QRXPPC PPC32 integer/FPU reference interpreter, Tier-1 PPC→68k-JIT with
+lazy CR0, byte/halfword JIT accesses, deterministic differential fuzzing
+(valid and fault paths, full 32-bit and boundary addresses) and guest tests: [specification](docs/QRXPPC_SPEC.md),
+[build](tools/qrxppc/build.sh).
+
 IPFS client with a complete guest-side CLI (`QRXIPFSPub`: add, ls, get,
 pin/unpin, version, repo), native local 68K node (`QRXIPFSD`), native
 libp2p peer (`QRXIPFSP2P`: Noise, Yamux, Bitswap 1.2, Kademlia), public
