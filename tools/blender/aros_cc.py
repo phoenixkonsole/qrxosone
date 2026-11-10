@@ -57,6 +57,20 @@ def main():
         if not any(a.endswith(('.S', '.s')) for a in args):
             flags = ['-include', CFG['abi_header'], '-include', str(HERE / 'shim/include/qrx_extra.h')] + flags
         return subprocess.call([drv, *flags, *args])
+    # cc file.c -o prog, as configure scripts do: compile first, then link the objects.
+    srcs = [a for a in args if a.endswith(('.c', '.cc', '.cpp', '.S'))]
+    if srcs:
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix='qrx-cc-') as tmp:
+            compile_flags = [a for a in args if a.startswith(('-D', '-I', '-U', '-O', '-f', '-m', '-w', '-W', '-g', '-std', '-include'))
+                             and not a.startswith(('-Wl,',))]
+            objs = {}
+            for n, src in enumerate(srcs):
+                objs[src] = f'{tmp}/{n}.o'
+                rc = subprocess.call([sys.argv[0], *compile_flags, '-c', src, '-o', objs[src]])
+                if rc:
+                    return rc
+            return subprocess.call([sys.argv[0], *[objs.get(a, a) for a in args if a not in compile_flags]])
     # link: only what ends up in an AROS executable
     output, inputs, i = 'a.out', [], 0
     while i < len(args):

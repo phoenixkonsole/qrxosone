@@ -11,7 +11,9 @@
 #include <signal.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/random.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #define MAXSOCK 64
@@ -100,6 +102,18 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
         a[8] = 0;
         return;
     }
+    case QRX_NET_TIME: {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        a[10] = (uint32_t)tv.tv_sec;
+        a[11] = (uint32_t)tv.tv_usec;
+        a[8] = 0;
+        return;
+    }
+    case QRX_NET_RANDOM:
+        if (a[2] == 0 || a[2] > 256 || getentropy(ram + a[1], a[2])) { a[8] = UINT32_MAX; a[9] = 10022; return; }
+        a[8] = a[2];
+        return;
     case NET_HOSTNAME: {
         char *dst = (char *)ram + a[1];
         result(a, gethostname(dst, a[2]));

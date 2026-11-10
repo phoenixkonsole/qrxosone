@@ -1,0 +1,461 @@
+diff --git a/Include/osdefs.h b/Include/osdefs.h
+index bd84c1c..b978b33 100644
+--- a/Include/osdefs.h
++++ b/Include/osdefs.h
+@@ -38,8 +38,12 @@ extern "C" {
+ 
+ /* Search path entry delimiter */
+ #ifndef DELIM
++#ifdef __AROS__
++#define DELIM L';'  /* QRX OS One: a colon ends a volume name */
++#else
+ #define DELIM L':'
+ #endif
++#endif
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/Lib/_bootlocale.py b/Lib/_bootlocale.py
+index 4bccac1..86b715e 100644
+--- a/Lib/_bootlocale.py
++++ b/Lib/_bootlocale.py
+@@ -7,7 +7,10 @@ Don't import directly from third-party code; use the `locale` module instead!
+ import sys
+ import _locale
+ 
+-if sys.platform.startswith("win"):
++if sys.platform == "aros":
++    def getpreferredencoding(do_setlocale=True):
++        return 'UTF-8'  # QRX OS One, as get_locale_encoding() in pylifecycle.c
++elif sys.platform.startswith("win"):
+     def getpreferredencoding(do_setlocale=True):
+         return _locale._getdefaultlocale()[1]
+ else:
+diff --git a/Lib/_sysconfigdata.py b/Lib/_sysconfigdata.py
+new file mode 100644
+index 0000000..7a486cf
+--- /dev/null
++++ b/Lib/_sysconfigdata.py
+@@ -0,0 +1,3 @@
++# QRX OS One: Python's Makefile would generate this. Nothing here builds extension modules.
++build_time_vars = {'ABIFLAGS': 'm', 'CC': 'aros_cc', 'EXT_SUFFIX': '.so', 'LDVERSION': '3.5m', 'SO': '.so',
++                   'VERSION': '3.5', 'Py_ENABLE_SHARED': 0, 'WITH_DOC_STRINGS': 1, 'WITH_PYMALLOC': 0}
+diff --git a/Lib/posixpath.py b/Lib/posixpath.py
+index d9f3f99..9a06f39 100644
+--- a/Lib/posixpath.py
++++ b/Lib/posixpath.py
+@@ -34,7 +34,10 @@ sep = '/'
+ pathsep = ':'
+ defpath = ':/bin:/usr/bin'
+ altsep = None
+-devnull = '/dev/null'
++devnull = 'NIL:' if sys.platform == 'aros' else '/dev/null'
++
++_aros = sys.platform == 'aros'
++
+ 
+ def _get_sep(path):
+     if isinstance(path, bytes):
+@@ -61,7 +64,11 @@ def normcase(s):
+ def isabs(s):
+     """Test whether a path is absolute"""
+     sep = _get_sep(s)
+-    return s.startswith(sep)
++    if s.startswith(sep):
++        return True
++    if _aros:  # a volume or assign name: "SYS:foo"
++        return (b":" if isinstance(s, bytes) else ":") in s
++    return False
+ 
+ 
+ # Join pathnames.
+@@ -78,10 +85,11 @@ def join(a, *p):
+     try:
+         if not p:
+             path[:0] + sep  #23780: Ensure compatible data type even if p is null.
++        colon = b":" if isinstance(sep, bytes) else ":"
+         for b in p:
+-            if b.startswith(sep):
++            if b.startswith(sep) or (_aros and colon in b):
+                 path = b
+-            elif not path or path.endswith(sep):
++            elif not path or path.endswith(sep) or (_aros and path.endswith(colon)):
+                 path += b
+             else:
+                 path += sep + b
+@@ -101,6 +109,9 @@ def split(p):
+     everything after the final slash.  Either part may be empty."""
+     sep = _get_sep(p)
+     i = p.rfind(sep) + 1
++    if _aros and i == 0:  # "SYS:foo" splits after the colon
++        i = p.rfind(b":" if isinstance(p, bytes) else ":") + 1
++        return p[:i], p[i:]
+     head, tail = p[:i], p[i:]
+     if head and head != sep*len(head):
+         head = head.rstrip(sep)
+@@ -135,21 +146,14 @@ def splitdrive(p):
+ 
+ def basename(p):
+     """Returns the final component of a pathname"""
+-    sep = _get_sep(p)
+-    i = p.rfind(sep) + 1
+-    return p[i:]
++    return split(p)[1]
+ 
+ 
+ # Return the head (dirname) part of a path, same as split(path)[0].
+ 
+ def dirname(p):
+     """Returns the directory component of a pathname"""
+-    sep = _get_sep(p)
+-    i = p.rfind(sep) + 1
+-    head = p[:i]
+-    if head and head != sep*len(head):
+-        head = head.rstrip(sep)
+-    return head
++    return split(p)[0]
+ 
+ 
+ # Is a path a symbolic link?
+@@ -222,6 +226,10 @@ def ismount(path):
+ def expanduser(path):
+     """Expand ~ and ~user constructions.  If user or $HOME is unknown,
+     do nothing."""
++    if _aros and 'HOME' not in os.environ:  # no password database on QRX OS One
++        if isinstance(path, bytes):
++            return b'PROGDIR:' + path[2:] if path[:2] in (b'~', b'~/') else path
++        return 'PROGDIR:' + path[2:] if path[:2] in ('~', '~/') else path
+     if isinstance(path, bytes):
+         tilde = b'~'
+     else:
+diff --git a/Lib/subprocess.py b/Lib/subprocess.py
+index 8e44998..fd3c887 100644
+--- a/Lib/subprocess.py
++++ b/Lib/subprocess.py
+@@ -124,9 +124,16 @@ if _mswindows:
+         hStdError = None
+         wShowWindow = 0
+ else:
+-    import _posixsubprocess
+-    import select
+-    import selectors
++    # QRX OS One has no fork: the module loads, starting a process fails with OSError.
++    try:
++        import _posixsubprocess
++    except ImportError:
++        _posixsubprocess = None
++    try:
++        import select
++        import selectors
++    except ImportError:
++        select = selectors = None
+     try:
+         import threading
+     except ImportError:
+@@ -140,7 +147,9 @@ else:
+     # poll/select have the advantage of not requiring any extra file
+     # descriptor, contrarily to epoll/kqueue (also, they require a single
+     # syscall).
+-    if hasattr(selectors, 'PollSelector'):
++    if selectors is None:
++        _PopenSelector = None
++    elif hasattr(selectors, 'PollSelector'):
+         _PopenSelector = selectors.PollSelector
+     else:
+         _PopenSelector = selectors.SelectSelector
+diff --git a/Lib/tempfile.py b/Lib/tempfile.py
+index ad687b9..938fb86 100644
+--- a/Lib/tempfile.py
++++ b/Lib/tempfile.py
+@@ -172,7 +172,10 @@ def _candidate_tempdir_list():
+         if dirname: dirlist.append(dirname)
+ 
+     # Failing that, try OS-specific locations.
+-    if _os.name == 'nt':
++    if __import__('sys').platform == 'aros':
++        # QRX OS One: T: is the temporary directory; an open of /tmp waits there for good.
++        dirlist.extend([ 'T:', 'RAM:T' ])
++    elif _os.name == 'nt':
+         dirlist.extend([ r'c:\temp', r'c:\tmp', r'\temp', r'\tmp' ])
+     else:
+         dirlist.extend([ '/tmp', '/var/tmp', '/usr/tmp' ])
+diff --git a/Modules/_localemodule.c b/Modules/_localemodule.c
+index 39e0c54..d377e9c 100644
+--- a/Modules/_localemodule.c
++++ b/Modules/_localemodule.c
+@@ -119,6 +119,10 @@ PyLocale_setlocale(PyObject* self, PyObject* args)
+     } else {
+         /* get locale */
+         result = setlocale(category, NULL);
++#ifdef __AROS__
++        if (!result)
++            result = "C";  /* QRX OS One: AROS answers only for some categories */
++#endif
+         if (!result) {
+             PyErr_SetString(Error, "locale query failed");
+             return NULL;
+diff --git a/Modules/faulthandler.c b/Modules/faulthandler.c
+index 56285b6..d6e130b 100644
+--- a/Modules/faulthandler.c
++++ b/Modules/faulthandler.c
+@@ -410,6 +410,13 @@ faulthandler_enable(PyObject *self, PyObject *args, PyObject *kwargs)
+             handler->previous = signal(handler->signum,
+                                        faulthandler_fatal_error);
+             err = (handler->previous == SIG_ERR);
++#endif
++#ifdef __AROS__
++            /* QRX OS One: AROS cannot catch every one of these signals; dump on the others. */
++            if (err) {
++                err = 0;
++                continue;
++            }
+ #endif
+             if (err) {
+                 PyErr_SetFromErrno(PyExc_RuntimeError);
+@@ -769,6 +776,12 @@ faulthandler_register_py(PyObject *self,
+ 
+     if (!user->enabled) {
+         err = faulthandler_register(signum, chain, &previous);
++        #ifdef __AROS__
++        if (err) {  /* QRX OS One: a signal AROS cannot deliver is simply not watched */
++            err = 0;
++            Py_RETURN_NONE;
++        }
++#endif
+         if (err) {
+             PyErr_SetFromErrno(PyExc_OSError);
+             return NULL;
+diff --git a/Modules/getpath.c b/Modules/getpath.c
+index c438b8e..72a31d4 100644
+--- a/Modules/getpath.c
++++ b/Modules/getpath.c
+@@ -458,6 +458,25 @@ search_for_exec_prefix(wchar_t *argv0_path, wchar_t *home,
+ static void
+ calculate_path(void)
+ {
++#ifdef __AROS__
++    /* QRX OS One: the library lies beside the program. */
++    {
++        static wchar_t aros_path[1024];
++        char *env = getenv("PYTHONPATH");
++        wchar_t *wenv = env ? Py_DecodeLocale(env, NULL) : NULL;
++        aros_path[0] = 0;
++        if (wenv) {
++            wcsncpy(aros_path, wenv, 800);
++            wcscat(aros_path, L";");
++        }
++        wcscat(aros_path, L"PROGDIR:lib/python3.5");
++        module_search_path = aros_path;
++        wcscpy(prefix, L"PROGDIR:");
++        wcscpy(exec_prefix, L"PROGDIR:");
++        wcscpy(progpath, L"PROGDIR:python");
++        return;
++    }
++#endif
+     extern wchar_t *Py_GetProgramName(void);
+ 
+     static wchar_t delimiter[2] = {DELIM, '\0'};
+diff --git a/Modules/posixmodule.c b/Modules/posixmodule.c
+index 102c540..0d9a102 100644
+--- a/Modules/posixmodule.c
++++ b/Modules/posixmodule.c
+@@ -177,6 +177,14 @@ corresponding Unix manual entries for more information on calls.");
+ #endif  /* _MSC_VER */
+ #endif  /* ! __WATCOMC__ || __QNX__ */
+ 
++#ifdef __AROS__
++/* QRX OS One: no processes in the POSIX sense. */
++#undef HAVE_FORK
++#undef HAVE_FORK1
++#undef HAVE_EXECV
++#undef HAVE_POPEN
++#endif
++
+ 
+ /*[clinic input]
+ # one of the few times we lie about this name!
+@@ -3646,7 +3654,11 @@ _posix_listdir(path_t *path, PyObject *list)
+             return_str = !PyObject_CheckBuffer(path->object);
+         }
+         else {
++#ifdef __AROS__
++            name = "";  /* QRX OS One: AmigaDOS names the current directory "" */
++#else
+             name = ".";
++#endif
+             return_str = 1;
+         }
+ 
+@@ -11076,7 +11088,11 @@ os_listxattr_impl(PyObject *module, path_t *path, int follow_symlinks)
+     if (fd_and_follow_symlinks_invalid("listxattr", path->fd, follow_symlinks))
+         goto exit;
+ 
++#ifdef __AROS__
++    name = path->narrow ? path->narrow : "";  /* QRX OS One: the current directory */
++#else
+     name = path->narrow ? path->narrow : ".";
++#endif
+ 
+     for (i = 0; ; i++) {
+         char *start, *trace, *end;
+diff --git a/Modules/socketmodule.c b/Modules/socketmodule.c
+index 47abe8d..a2e6eca 100644
+--- a/Modules/socketmodule.c
++++ b/Modules/socketmodule.c
+@@ -2083,7 +2083,7 @@ getsockaddrlen(PySocketSockObject *s, socklen_t *len_ret)
+    provided.  Some architectures might need extra padding after the
+    cmsghdr, however, and CMSG_LEN() would have to take account of
+    this. */
+-#ifdef CMSG_LEN
++#if defined(CMSG_LEN) && !defined(__AROS__)  /* QRX OS One: the door has no sendmsg/recvmsg */
+ /* If length is in range, set *result to CMSG_LEN(length) and return
+    true; otherwise, return false. */
+ static int
+@@ -3198,7 +3198,7 @@ Like recv_into(buffer[, nbytes[, flags]]) but also return the sender's address i
+ 
+ /* The sendmsg() and recvmsg[_into]() methods require a working
+    CMSG_LEN().  See the comment near get_CMSG_LEN(). */
+-#ifdef CMSG_LEN
++#if defined(CMSG_LEN) && !defined(__AROS__)  /* QRX OS One: the door has no sendmsg/recvmsg */
+ struct sock_recvmsg {
+     struct msghdr *msg;
+     int flags;
+@@ -3751,7 +3751,7 @@ For IP sockets, the address is a pair (hostaddr, port).");
+ 
+ /* The sendmsg() and recvmsg[_into]() methods require a working
+    CMSG_LEN().  See the comment near get_CMSG_LEN(). */
+-#ifdef CMSG_LEN
++#if defined(CMSG_LEN) && !defined(__AROS__)  /* QRX OS One: the door has no sendmsg/recvmsg */
+ struct sock_sendmsg {
+     struct msghdr *msg;
+     int flags;
+@@ -4139,7 +4139,7 @@ static PyMethodDef sock_methods[] = {
+                       setsockopt_doc},
+     {"shutdown",          (PyCFunction)sock_shutdown, METH_O,
+                       shutdown_doc},
+-#ifdef CMSG_LEN
++#if defined(CMSG_LEN) && !defined(__AROS__)  /* QRX OS One: the door has no sendmsg/recvmsg */
+     {"recvmsg",           (PyCFunction)sock_recvmsg, METH_VARARGS,
+                       recvmsg_doc},
+     {"recvmsg_into",      (PyCFunction)sock_recvmsg_into, METH_VARARGS,
+@@ -5887,7 +5887,7 @@ Returns the interface name corresponding to the interface index if_index.");
+ #endif  /* HAVE_IF_NAMEINDEX */
+ 
+ 
+-#ifdef CMSG_LEN
++#if defined(CMSG_LEN) && !defined(__AROS__)  /* QRX OS One: the door has no sendmsg/recvmsg */
+ /* Python interface to CMSG_LEN(length). */
+ 
+ static PyObject *
+@@ -6012,7 +6012,7 @@ static PyMethodDef socket_methods[] = {
+     {"if_indextoname", socket_if_indextoname,
+      METH_O, if_indextoname_doc},
+ #endif
+-#ifdef CMSG_LEN
++#if defined(CMSG_LEN) && !defined(__AROS__)  /* QRX OS One: the door has no sendmsg/recvmsg */
+     {"CMSG_LEN",                socket_CMSG_LEN,
+      METH_VARARGS, CMSG_LEN_doc},
+ #ifdef CMSG_SPACE
+diff --git a/Modules/timemodule.c b/Modules/timemodule.c
+index 252fdcf..f19dd90 100644
+--- a/Modules/timemodule.c
++++ b/Modules/timemodule.c
+@@ -1405,7 +1405,14 @@ pysleep(_PyTime_t secs)
+             return -1;
+ 
+         Py_BEGIN_ALLOW_THREADS
++#ifdef __AROS__
++        /* QRX OS One: select needs the network stack. A DOS tick is 1/50 s. */
++        extern void Delay(unsigned long);
++        Delay((timeout.tv_sec * 1000000UL + timeout.tv_usec + 19999UL) / 20000UL);
++        err = 0;
++#else
+         err = select(0, (fd_set *)0, (fd_set *)0, (fd_set *)0, &timeout);
++#endif
+         Py_END_ALLOW_THREADS
+ 
+         if (err == 0)
+diff --git a/Python/fileutils.c b/Python/fileutils.c
+index 5072118..f327193 100644
+--- a/Python/fileutils.c
++++ b/Python/fileutils.c
+@@ -745,6 +745,10 @@ _Py_stat(PyObject *path, struct stat *statbuf)
+ static int
+ get_inheritable(int fd, int raise)
+ {
++#ifdef __AROS__
++    /* QRX OS One: no fork or exec, so nothing inherits. */
++    return 1;
++#endif
+ #ifdef MS_WINDOWS
+     HANDLE handle;
+     DWORD flags;
+@@ -796,6 +800,10 @@ _Py_get_inheritable(int fd)
+ static int
+ set_inheritable(int fd, int inheritable, int raise, int *atomic_flag_works)
+ {
++#ifdef __AROS__
++    /* QRX OS One: no fork or exec, so nothing inherits. */
++    (void)fd; (void)inheritable; (void)raise; (void)atomic_flag_works; return 0;
++#endif
+ #ifdef MS_WINDOWS
+     HANDLE handle;
+     DWORD flags;
+diff --git a/Python/pylifecycle.c b/Python/pylifecycle.c
+index 422454c..82600e9 100644
+--- a/Python/pylifecycle.c
++++ b/Python/pylifecycle.c
+@@ -212,6 +212,9 @@ error:
+ static char*
+ get_locale_encoding(void)
+ {
++#ifdef __AROS__
++    return _PyMem_RawStrdup("utf-8");  /* QRX OS One: Blender and its scripts work in UTF-8 */
++#endif
+ #ifdef MS_WINDOWS
+     char codepage[100];
+     PyOS_snprintf(codepage, sizeof(codepage), "cp%d", GetACP());
+diff --git a/Python/pytime.c b/Python/pytime.c
+index 7f65824..8ea58f5 100644
+--- a/Python/pytime.c
++++ b/Python/pytime.c
+@@ -593,6 +593,10 @@ pymonotonic(_PyTime_t *tp, _Py_clock_info_t *info, int raise)
+         info->adjustable = 0;
+     }
+ 
++#elif defined(__AROS__)
++    /* QRX OS One has no monotonic clock in its C library. */
++    return pygettimeofday(tp, info, raise);
++
+ #elif defined(__APPLE__)
+     static mach_timebase_info_data_t timebase;
+     uint64_t time;
+diff --git a/Python/random.c b/Python/random.c
+index 31f61d0..72446d0 100644
+--- a/Python/random.c
++++ b/Python/random.c
+@@ -473,6 +473,24 @@ pyurandom(void *buffer, Py_ssize_t size, int raise)
+     int res;
+ #endif
+ 
++#ifdef __AROS__
++    /* QRX OS One: random bytes from the host through the ARMithlon door (port/qrx_socket.c). Without
++     * the door only a time-seeded generator is left: enough for hash seeds, not for cryptography. */
++    {
++        extern int getentropy(void *buf, size_t n);
++        static unsigned int counter;
++        if (size >= 0 && getentropy(buffer, (size_t)size) == 0)
++            return 0;
++        _PyTime_t t;
++        if (size < 0) {
++            PyErr_Format(PyExc_ValueError, "negative argument not allowed");
++            return -1;
++        }
++        t = _PyTime_GetSystemClock();
++        lcg_urandom((unsigned int)t ^ (unsigned int)(t >> 32) ^ (++counter * 2654435761u), buffer, size);
++        return 0;
++    }
++#endif
+     if (size < 0) {
+         if (raise) {
+             PyErr_Format(PyExc_ValueError,

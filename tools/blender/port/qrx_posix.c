@@ -224,3 +224,6 @@ void __register_frame_info_table_bases(void *begin, void *ob, void *t, void *d) 
 void *__deregister_frame_info(void *begin) { (void)begin; return NULL; }
 void *__deregister_frame_info_bases(void *begin) { (void)begin; return NULL; }
 void *_Unwind_Find_FDE(void *pc, void *bases) { (void)pc; (void)bases; return NULL; }
+
+/* FLT_ROUNDS in the SDK's float.h: round to nearest is all that runs here. */
+int __flt_rounds(void) { return 1; }
