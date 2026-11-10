@@ -619,3 +619,9 @@ No installer was clicked through, and the bitmap pane of the FF7 setup stays whi
 A DIB section that was deleted kept its entry in the table of DIB sections. When `CreateDIBSection` handed out the same handle again, blits read the old, freed memory. Freddi Fish does exactly that: it creates a section, deletes it, and creates the one it draws into. The new entry now replaces the old one.
 
 Freddi still shows a black window. The section it gets is the one shown, but it never writes a pixel into it, so its own logic waits before the first picture. Reporting a 256 colour desktop did not change that. The survey is unchanged: 4 stop, as before.
+
+## Update 2026-11-10, third part: showing a window activates it
+
+Freddi Fish now draws its intro and plays its sound. Its main loop runs the game only after the window has had `WM_ACTIVATEAPP` with wParam 1 and `WM_SETFOCUS`. Windows sends both when `ShowWindow` shows a top-level window, but QRX86 sent them only from `SetFocus`. `ShowWindow` now activates the window, except for `SW_SHOWMINNOACTIVE`, `SW_SHOWNA` and `SW_SHOWNOACTIVATE`. If a control inside the window already has the focus, it keeps it.
+
+The survey of 66 programs is unchanged: the same 4 stop, and no other program changed its result or its screen size.

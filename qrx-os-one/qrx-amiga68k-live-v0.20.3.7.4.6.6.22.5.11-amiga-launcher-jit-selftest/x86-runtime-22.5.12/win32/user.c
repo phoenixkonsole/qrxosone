@@ -1882,6 +1882,7 @@ FN(u_DestroyWindow) { qwnd *x = W(w, a[0]); if (!x) return 0; win_destroy(w, x);
 FN(u_ShowWindow) {
     qwnd *x = W(w, a[0]);
     int was;
+    uint32_t old_active = w->active;
     if (!x) return 0;
     was = x->visible;
     x->visible = a[1] != 0;
@@ -1892,6 +1893,15 @@ FN(u_ShowWindow) {
         else if (x->be && w->be->destroy) { w->be->destroy(w, x); x->be = NULL; }
     }
     if (was != x->visible) win_send(w, x->h, WM_SHOWWINDOW, (uint32_t)x->visible, 0);
+    /* Showing a top-level window activates it, except SW_SHOWMINNOACTIVE, SW_SHOWNA and
+     * SW_SHOWNOACTIVATE. Freddi Fish runs its game only after WM_ACTIVATEAPP and WM_SETFOCUS. */
+    if (W(w, a[0]) && x->visible && !(x->style & WS_CHILD) && a[1] != 4 && a[1] != 7 && a[1] != 8) {
+        qwnd *f = W(w, w->focus);
+        while (f && (f->style & WS_CHILD) && W(w, f->parent)) f = W(w, f->parent);
+        w->active = old_active;
+        if (f == x) activate_top(w, x->h);             /* a control in it has the focus already */
+        else set_focus(w, x->h);
+    }
     return (uint32_t)was;
 }
 FN(u_UpdateWindow) {
