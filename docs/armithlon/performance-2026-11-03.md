@@ -613,3 +613,9 @@ There is still no Win16: the CPU core runs flat 32-bit code only. Many 16-bit pr
 - `waveOutRestart` starts what was written while paused, which Freddi's sound test relies on. `EnumFontFamiliesA` reports one font under the name asked for. The NT security calls fail with `ERROR_CALL_NOT_IMPLEMENTED`, as on Windows 95.
 
 No installer was clicked through, and the bitmap pane of the FF7 setup stays white. The survey of 66 programs ran again after its scripts and unpacked games were rebuilt: 4 stop, down from 9, and no program that ran before now stops. The six former 16-bit stops all open a window, and `clawdins` starts its engine. Still stopping: `galac15` (a DOS program), `islepro`, and `sonic_cd` and `w95turokdemov101`, which need their folders laid out by hand. `ctest` passes.
+
+## Update 2026-11-10, second part: a reused bitmap handle
+
+A DIB section that was deleted kept its entry in the table of DIB sections. When `CreateDIBSection` handed out the same handle again, blits read the old, freed memory. Freddi Fish does exactly that: it creates a section, deletes it, and creates the one it draws into. The new entry now replaces the old one.
+
+Freddi still shows a black window. The section it gets is the one shown, but it never writes a pixel into it, so its own logic waits before the first picture. Reporting a 256 colour desktop did not change that. The survey is unchanged: 4 stop, as before.

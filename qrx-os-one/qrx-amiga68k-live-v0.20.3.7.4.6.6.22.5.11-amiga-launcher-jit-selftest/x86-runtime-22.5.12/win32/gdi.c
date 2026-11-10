@@ -729,7 +729,9 @@ static qdib g_dib[32];
 void qw_dib_register(qwin *w, uint32_t hbm, uint32_t mem, uint32_t bmi, int bw, int bh, int bpp, uint32_t stride)
 {
     int i, k;
-    for (i = 0; i < 32; i++) if (!g_dib[i].h || !O(w, g_dib[i].h, GO_BITMAP)) break;
+    /* A handle comes back after DeleteObject: its old entry is stale and must not win. */
+    for (i = 0; i < 32; i++) if (g_dib[i].h == hbm) break;
+    if (i == 32) for (i = 0; i < 32; i++) if (!g_dib[i].h || !O(w, g_dib[i].h, GO_BITMAP)) break;
     if (i == 32) return;
     g_dib[i].h = hbm; g_dib[i].mem = mem; g_dib[i].stride = stride; g_dib[i].w = bw; g_dib[i].h_ = bh < 0 ? -bh : bh;
     g_dib[i].bpp = bpp; g_dib[i].topdown = bh < 0;
