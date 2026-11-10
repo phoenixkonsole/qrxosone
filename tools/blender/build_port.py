@@ -122,6 +122,7 @@ def nm_undefined(paths):
 
 def bridges():
     protos = prototypes()
+    protos.setdefault('realpath', ('p', 2))  # the SDK's stdlib.h hides it from strict modes
     builtin = {w.split('=', 1)[1] for w in __import__('json').loads(
         (ROOT / '.build/qrx-sdk/bin/toolchain.json').read_text())['wrap_flags']}
     sdk_syms = set()

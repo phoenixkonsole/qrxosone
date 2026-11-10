@@ -8,6 +8,8 @@
 #define QRX86_DOOR_BASE UINT32_C(0xFF000880)
 #define QRX86_DOOR_SIZE UINT32_C(0x80)
 #define QRX86_DOOR_MAGIC UINT32_C(0x51383644)
+/* +16 reads feature bits. Service 4 with no page directory: sockets for native 68k programs. */
+#define QRX86_DOOR_FEATURE_NATIVE_NET UINT32_C(1)
 void qrx86_door_attach(QRXFullCPU *c);
 void qrx86_door_report(void);
 #endif

@@ -283,6 +283,7 @@ static void midi_service(QRXFullCPU *c,uint8_t *q){
 static void net_service(QRXFullCPU *c,uint8_t *q){
     uint32_t a[12];
     for(unsigned i=0;i<12;i++)a[i]=rd32(q+16+i*4u);
+    if(rd32(q+12)==QRX_NET_RANDOM&&(uint64_t)a[1]+a[2]>c->vm.ram.size){wr32(q+16+8*4u,UINT32_MAX);return;}
     qrx_hostnet_call(rd32(q+12),a,c->ram_owned);
     for(unsigned i=8;i<12;i++)wr32(q+16+i*4u,a[i]);
 }
@@ -374,6 +375,8 @@ static void service_call(QRXFullCPU *c,uint32_t block){
     /* Sent by the desktop without an x86 process around: no page table to look at. */
     if(svc==6){qrx_host_set_pointer(rd32(q+12));return;}
     if(svc==7){proc_begin(rd32(q+8));return;}
+    /* TCP/IP for native 68k programs, which have no page directory to look at. */
+    if(svc==4&&!rd32(q+8)){net_service(c,q);return;}
     shadow_sync(c,rd32(q+8),rd32(q+4));
     if(svc==1)sound_service(c,q);
     else if(svc==2)api_service(c,q);
@@ -464,6 +467,7 @@ static void door_run(QRXFullCPU *c,uint32_t req){
 }
 static bool door_read(QRXFullCPU *c,uint32_t addr,unsigned n,uint32_t *out){
     if(addr==QRX86_DOOR_BASE&&n==4){*out=QRX86_DOOR_MAGIC;return true;}
+    if(addr==QRX86_DOOR_BASE+16u&&n==4){*out=QRX86_DOOR_FEATURE_NATIVE_NET;return true;}
     /* Reading the size register opens the RAM above the boot-visible 32 MiB. */
     if(addr==QRX86_DOOR_BASE+8u&&n==4){*out=(uint32_t)qrx_full_show_high_ram(c);return true;}
     return false;

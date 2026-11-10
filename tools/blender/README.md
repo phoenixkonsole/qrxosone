@@ -17,6 +17,8 @@ ungetrackte `.build/blender-2.79b`. Der Bau startet die Engine im Hintergrund, d
 | `aros_cc.py`, `aros-c++`, `toolchain.cmake`, `configure.sh` | Compiler-Treiber und CMake für das 68k-Ziel |
 | `build_port.py`, `port/`, `shim/` | Port: Halde, Kern 1, libc, ABI-Brücken, msun, fehlende POSIX-Header |
 | `build_libstdcxx.sh` | `libstdc++` aus GCC 16.2 für das AROS-SDK, ohne Exceptions, RTTI und Threads |
+| `build_python.py`, `patches/python-3.5.10-qrx.patch` | CPython 3.5.10 statisch für 68k-AROS |
+| `port/qrx_socket.c` | BSD-Sockets auf den Sockets des Macs über die ARMithlon-Tür |
 | `merge-sections.ld` | fasst die Abschnitte pro Funktion zusammen, die sonst alle zu AROS-Hunks würden |
 | `run_tool.py` | führt `datatoc` auf dem Mac, `makesdna` und `makesrna` im Gast aus |
 | `gen_missing.py` | Stubs für GHOST, GL und den neuen Graph aus der Liste undefinierter Symbole |
@@ -47,6 +49,16 @@ tools/blender/run-job.sh job.txt 300
 Nur zum Testen, weil ein Build ohne Python Szenen nicht anders ändern kann: `QRX_RENDER=BxHxTILE` setzt
 Bild- und Kachelgröße, `QRX_RENDER_RAY=1` schaltet Raytracing, Strahlschatten und Spiegel ein.
 `QRX_CORE1_FAULT_TEST=1` lässt Kern 1 nach drei Kacheln absichtlich mit einem Fehler stehen bleiben.
+
+## Python
+
+```bash
+tools/blender/build_python.sh
+```
+
+Das lädt `Python-3.5.10.tar.xz` von python.org (15,4 MB), wendet den Patch an, konfiguriert und baut nach
+`.build/blender-2.79b/py/build/python.elf`. Im Testbaum gehört das Programm nach `SYS:python` und `Lib` nach
+`SYS:lib/python3.5`. Achtung bei `-c` in AmigaDOS: `*` ist dort das Escape-Zeichen, `"print(6*7)"` gibt 67 aus.
 
 ## Fallen
 

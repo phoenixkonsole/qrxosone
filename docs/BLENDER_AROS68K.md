@@ -226,6 +226,72 @@ Grenzen:
 - Der Native Build hing nach dem Umbau in einer Read-Write-Sperre, weil Blender `R = *re` eine Sperre mit Zustand kopiert. Die Kopie
   wird jetzt zurückgesetzt. Das Problem zeigte sich nur auf dem Mac.
 
+### Python 3.5 (10. November)
+
+CPython 3.5.10, die Version, auf die Blender 2.79 ausgelegt ist, baut statisch für 68k-AROS
+(`tools/blender/build_python.py`, Änderungen in `tools/blender/patches/python-3.5.10-qrx.patch`). Ein Host-Python
+braucht es nicht, weil Grammatik und eingefrorene `importlib` im Quellpaket liegen. Das Programm hat 4,2 MB, die
+Bibliothek liegt unter `PROGDIR:lib/python3.5`.
+
+Was für AROS angepasst ist:
+
+- Pfade: `PYTHONPATH` trennt mit `;`. `os.path` kennt Volumes und Assigns (`SYS:foo` ist absolut), `os.devnull` ist
+  `NIL:`, temporäre Dateien liegen in `T:`, und `os.listdir()` liest `""`, AROS' aktuelles Verzeichnis.
+- Kodierung: Dateisystem, Ein- und Ausgabe in UTF-8. `mbstowcs` und Verwandte sind dafür neu, denn die SDK-Versionen
+  scheiterten schon an ASCII.
+- Prozesse: `fork` und `exec` gibt es nicht. `subprocess` lädt, der Start eines Prozesses scheitert mit `OSError`.
+- Zufall: vom Host über die Tür. Ohne Tür bleibt ein zeitbasierter Generator, gut genug für Hash-Werte, nicht für Kryptographie.
+- `faulthandler` überspringt Signale, die AROS nicht zustellen kann.
+
+Geprüft im Gast: ein eigener Test mit 18 Prüfungen (Mathematik, Float-Darstellung, große Zahlen, `struct`, `re`, `json`,
+`pickle`, Hashes, `zlib`, Datum, Zufall, `decimal`, `fractions`, vier Threads, `sleep`, Datei mit Umlauten). Alles
+bestanden. Die Umwandlung von Zahl-Strings stimmt in 16 Grenzfällen bitgenau mit dem Mac überein.
+
+CPythons eigene Tests, einzeln im Gast gestartet:
+
+| Modul | Ergebnis | Woran die Fehler liegen |
+|---|---|---|
+| test_grammar, test_list, test_string, test_heapq, test_collections, test_hashlib, test_zlib | bestanden | |
+| test_struct, test_dict, test_itertools | bestanden, seit `_testcapi` mitgebaut ist | |
+| test_json | 150 Tests, 5 Fehler | starten `python -m json.tool` als Unterprozess |
+| test_threading | 148 Tests, 10 Fehler | Unterprozesse und Subinterpreter |
+| test_tempfile | 82 Tests, 2 Fehlschläge, 8 Fehler | AROS löscht keine offenen Dateien, Dateirechte |
+| test_socket | 648 Tests, 376 übersprungen, 7 Fehlschläge, 97 Fehler | fehlende Socket-Optionen und -Attribute, IPv6, Unix-Sockets |
+| test_math, test_float | nicht bis zum Ende gelaufen | sehr umfangreich, `test_float` stand nach 2 Minuten |
+
+Beobachtet und nicht geklärt: Direkt nach `test_tempfile` konnte ein neuer Python-Prozess einmal keinen zweiten Thread
+starten, im übernächsten Prozess ging es wieder. Ein Programm im Boot-Skript erbt als aktuelles Verzeichnis
+`AROS Kickstart:`, auf das man nicht schreiben kann; Jobs beginnen deshalb mit `CD SYS:`.
+
+### Blender mit Python (10. November)
+
+Blender ist jetzt mit eingebettetem Python 3.5 gebaut (`WITH_PYTHON=ON`, 11 MB Code). Im Gast lädt `blender -b` Blenders
+eigene Python-Skripte in etwa 5 Sekunden, `bpy` arbeitet. Geprüft:
+
+- `bpy.app.version_string` und die Objekte der Startszene stimmen.
+- Ein Skript (`tree/scene.py`) dreht den Würfel, legt über Operatoren eine Kugel mit Spiegelmaterial und eine Ebene mit
+  Wolkentextur an, schaltet Strahlschatten ein, speichert eine `.blend` und rendert. Kern 1 übernimmt dabei 10 Kacheln.
+- Die gespeicherte Datei beginnt mit `BLENDER_V279`, ist also 32 Bit und Big Endian. Der native Mac-Build lädt sie, und
+  sein Bild ist **pixelgleich** mit dem Gast-Render. Damit ist der Weg über `.blend`-Dateien in beide Richtungen geprüft.
+
+Weitere Stubs für GL kamen durch das Python-Modul `bgl` dazu. `tools/blender/install_tree.sh` bringt Blender, Python und
+die Skripte in den Testbaum.
+
+### Netz für 68k-Programme (10. November)
+
+68k-Programme bekommen BSD-Sockets auf den Sockets des Macs, über Dienst 4 der ARMithlon-Tür. AROSTCP und eine
+Netzwerkkarte sind dafür nicht nötig. Die Schicht (`tools/blender/port/qrx_socket.c`) stammt aus der Tor-Portierung,
+löst Namen aber über den Host auf. Die Tür-Änderung für native Programme ist dieselbe wie dort. Damit hat Python echte
+`_socket`- und `select`-Module.
+
+Geprüft im Gast mit Python, alle 7 Punkte bestanden: `localhost` auflösen, Zufall vom Host, HTTP-Abruf von einem
+Server auf dem Mac, `select`, ein Echo-Server im Gast mit Client in einem zweiten Thread, `example.com` auflösen und
+per HTTP laden.
+
+Grenzen: nur IPv4, höchstens 64 Sockets, kein `sendmsg`/`recvmsg`, kein TLS, weil OpenSSL noch nicht gebaut ist. Wer
+wartet, fragt alle 2 ms nach. Die Engine im Bundle braucht diese Tür-Änderung, sie kommt mit dem nächsten Bau aus dem
+Branch.
+
 ### Offene Entscheidungen
 
 1. **Oberfläche und OpenGL:** Für die GUI braucht es eine Host-GL-Tür für 68k-Programme in der Engine, oder man
