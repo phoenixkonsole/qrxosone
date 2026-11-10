@@ -1,0 +1,393 @@
+--- a/llvm/CMakeLists.txt
++++ b/llvm/CMakeLists.txt
+@@ -543,6 +543,7 @@
+   CSKY
+   DirectX
+   M68k
++  M68k64
+   Xtensa
+ )
+ 
+--- a/llvm/include/llvm/TargetParser/Triple.h
++++ b/llvm/include/llvm/TargetParser/Triple.h
+@@ -64,6 +64,7 @@
+     loongarch32, // LoongArch (32-bit): loongarch32
+     loongarch64, // LoongArch (64-bit): loongarch64
+     m68k,        // M68k: Motorola 680x0 family
++    m68k64,      // M68k64: QRX 68100EC64, 64-bit 680x0
+     mips,        // MIPS: mips, mipsallegrex, mipsr6
+     mipsel,      // MIPSEL: mipsel, mipsallegrexe, mipsr6el
+     mips64,      // MIPS64: mips64, mips64r6, mipsn32, mipsn32r6
+--- a/llvm/lib/TargetParser/Triple.cpp
++++ b/llvm/lib/TargetParser/Triple.cpp
+@@ -47,6 +47,7 @@
+   case loongarch32:    return "loongarch32";
+   case loongarch64:    return "loongarch64";
+   case m68k:           return "m68k";
++  case m68k64:         return "m68k64";
+   case mips64:         return "mips64";
+   case mips64el:       return "mips64el";
+   case mips:           return "mips";
+@@ -196,6 +197,7 @@
+   case ppcle:       return "ppc";
+ 
+   case m68k:        return "m68k";
++  case m68k64:      return "m68k";
+ 
+   case mips:
+   case mipsel:
+@@ -463,6 +465,7 @@
+       .Case("avr", avr)
+       .StartsWith("bpf", BPFArch)
+       .Case("m68k", m68k)
++      .Case("m68k64", m68k64)
+       .Case("mips", mips)
+       .Case("mipsel", mipsel)
+       .Case("mips64", mips64)
+@@ -614,6 +617,7 @@
+           .Case("thumbeb", Triple::thumbeb)
+           .Case("avr", Triple::avr)
+           .Case("m68k", Triple::m68k)
++          .Case("m68k64", Triple::m68k64)
+           .Case("msp430", Triple::msp430)
+           .Cases({"mips", "mipseb", "mipsallegrex", "mipsisa32r6", "mipsr6"},
+                  Triple::mips)
+@@ -1001,6 +1005,7 @@
+   case Triple::loongarch32:
+   case Triple::loongarch64:
+   case Triple::m68k:
++  case Triple::m68k64:
+   case Triple::mips64:
+   case Triple::mips64el:
+   case Triple::mips:
+@@ -1764,6 +1769,7 @@
+   case llvm::Triple::bpfel:
+   case llvm::Triple::hsail64:
+   case llvm::Triple::loongarch64:
++  case llvm::Triple::m68k64:
+   case llvm::Triple::mips64:
+   case llvm::Triple::mips64el:
+   case llvm::Triple::nvptx64:
+@@ -2062,6 +2068,7 @@
+   case Triple::sparcv9:
+   case Triple::systemz:
+   case Triple::m68k:
++  case Triple::m68k64:
+ 
+   // ARM is intentionally unsupported here, changing the architecture would
+   // drop any arch suffixes.
+@@ -2359,6 +2366,7 @@
+   case Triple::hexagon:
+   case Triple::lanai:
+   case Triple::m68k:
++  case Triple::m68k64:
+   case Triple::msp430:
+   case Triple::systemz:
+   case Triple::xcore:
+--- a/llvm/lib/TargetParser/TargetDataLayout.cpp
++++ b/llvm/lib/TargetParser/TargetDataLayout.cpp
+@@ -574,6 +574,9 @@
+     return computeLoongArchDataLayout(*this);
+   case Triple::m68k:
+     return computeM68kDataLayout(*this);
++  case Triple::m68k64:
++    // QRX 68100EC64: big endian, natural alignment, 64-bit pointers.
++    return "E-m:e-p:64:64-i8:8-i16:16-i32:32-i64:64-f32:32-f64:64-n8:16:32:64-a:0:16-S64";
+   case Triple::mips:
+   case Triple::mipsel:
+   case Triple::mips64:
+--- a/llvm/lib/BinaryFormat/ELF.cpp
++++ b/llvm/lib/BinaryFormat/ELF.cpp
+@@ -230,6 +230,7 @@
+   case Triple::loongarch64:
+     return EM_LOONGARCH;
+   case Triple::m68k:
++  case Triple::m68k64:
+     return EM_68K;
+   case Triple::mips:
+   case Triple::mipsel:
+--- a/llvm/include/llvm/Object/ELFObjectFile.h
++++ b/llvm/include/llvm/Object/ELFObjectFile.h
+@@ -1366,7 +1366,7 @@
+   bool IsLittleEndian = ELFT::Endianness == llvm::endianness::little;
+   switch (EF.getHeader().e_machine) {
+   case ELF::EM_68K:
+-    return Triple::m68k;
++    return ELFT::Is64Bits ? Triple::m68k64 : Triple::m68k;
+   case ELF::EM_386:
+   case ELF::EM_IAMCU:
+     return Triple::x86;
+--- a/llvm/include/llvm/IR/RuntimeLibcalls.td
++++ b/llvm/include/llvm/IR/RuntimeLibcalls.td
+@@ -3517,7 +3517,7 @@
+ def isDefaultLibcallArch : RuntimeLibcallPredicate<[{
+   TT.isMIPS() || TT.isLoongArch() || TT.isVE() || TT.isBPF() ||
+   TT.getArch() == Triple::csky || TT.getArch() == Triple::arc ||
+-  TT.getArch() == Triple::m68k ||  TT.getArch() == Triple::xtensa ||
++  TT.getArch() == Triple::m68k || TT.getArch() == Triple::m68k64 || TT.getArch() == Triple::xtensa ||
+   (TT.isSystemZ() && !TT.isOSzOS())
+ }]>;
+ 
+--- a/clang/lib/Basic/Targets.cpp
++++ b/clang/lib/Basic/Targets.cpp
+@@ -350,6 +350,9 @@
+       return std::make_unique<MipsTargetInfo>(Triple, Opts);
+     }
+ 
++  case llvm::Triple::m68k64:
++    return std::make_unique<M68k64TargetInfo>(Triple, Opts);
++
+   case llvm::Triple::m68k:
+     switch (os) {
+     case llvm::Triple::Linux:
+--- a/clang/lib/Basic/Targets/M68k.h
++++ b/clang/lib/Basic/Targets/M68k.h
+@@ -62,6 +62,32 @@
+   }
+ };
+ 
++// QRX 68100EC64 long mode: LP64, natural alignment.
++class LLVM_LIBRARY_VISIBILITY M68k64TargetInfo : public M68kTargetInfo {
++public:
++  M68k64TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
++      : M68kTargetInfo(Triple, Opts) {
++    PointerWidth = PointerAlign = LongWidth = LongAlign = 64;
++    LongLongAlign = DoubleAlign = 64;
++    IntAlign = FloatAlign = 32;
++    SuitableAlign = 64;
++    LongDoubleWidth = LongDoubleAlign = 64;
++    LongDoubleFormat = &llvm::APFloat::IEEEdouble();
++    SizeType = UnsignedLong;
++    PtrDiffType = SignedLong;
++    IntPtrType = SignedLong;
++    Int64Type = SignedLong;
++    IntMaxType = SignedLong;
++    MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
++  }
++  void getTargetDefines(const LangOptions &Opts, MacroBuilder &Builder) const override {
++    M68kTargetInfo::getTargetDefines(Opts, Builder);
++    Builder.defineMacro("__m68k64__");
++    Builder.defineMacro("_LP64");
++    Builder.defineMacro("__LP64__");
++  }
++};
++
+ } // namespace targets
+ } // namespace clang
+ 
+--- a/clang/lib/CodeGen/CodeGenModule.cpp
++++ b/clang/lib/CodeGen/CodeGenModule.cpp
+@@ -118,6 +118,7 @@
+     return createDefaultTargetCodeGenInfo(CGM);
+ 
+   case llvm::Triple::m68k:
++  case llvm::Triple::m68k64:
+     return createM68kTargetCodeGenInfo(CGM);
+   case llvm::Triple::mips:
+   case llvm::Triple::mipsel:
+--- a/clang/lib/CodeGen/Targets/M68k.cpp
++++ b/clang/lib/CodeGen/Targets/M68k.cpp
+@@ -49,7 +49,29 @@
+   }
+ }
+ 
++namespace {
++// m68k64 varargs: every argument takes an 8-byte stack slot, small ones at its high address.
++class M68k64ABIInfo : public DefaultABIInfo {
++public:
++  using DefaultABIInfo::DefaultABIInfo;
++  RValue EmitVAArg(CodeGenFunction &CGF, Address VAListAddr, QualType Ty,
++                   AggValueSlot Slot) const override {
++    return emitVoidPtrVAArg(CGF, VAListAddr, Ty, /*IsIndirect=*/false,
++                            getContext().getTypeInfoInChars(Ty),
++                            CharUnits::fromQuantity(8),
++                            /*AllowHigherAlign=*/true, Slot);
++  }
++};
++class M68k64TargetCodeGenInfo : public TargetCodeGenInfo {
++public:
++  M68k64TargetCodeGenInfo(CodeGenTypes &CGT)
++      : TargetCodeGenInfo(std::make_unique<M68k64ABIInfo>(CGT)) {}
++};
++} // namespace
++
+ std::unique_ptr<TargetCodeGenInfo>
+ CodeGen::createM68kTargetCodeGenInfo(CodeGenModule &CGM) {
++  if (CGM.getTriple().getArch() == llvm::Triple::m68k64)
++    return std::make_unique<M68k64TargetCodeGenInfo>(CGM.getTypes());
+   return std::make_unique<M68kTargetCodeGenInfo>(CGM.getTypes());
+ }
+--- a/clang/lib/Driver/ToolChains/CommonArgs.cpp
++++ b/clang/lib/Driver/ToolChains/CommonArgs.cpp
+@@ -99,6 +99,7 @@
+   case llvm::Triple::loongarch32:
+   case llvm::Triple::loongarch64:
+   case llvm::Triple::m68k:
++  case llvm::Triple::m68k64:
+     return !clang::driver::tools::areOptimizationsEnabled(Args);
+   default:
+     break;
+@@ -749,6 +750,7 @@
+     return "";
+ 
+   case llvm::Triple::m68k:
++  case llvm::Triple::m68k64:
+     return m68k::getM68kTargetCPU(Args);
+ 
+   case llvm::Triple::mips:
+@@ -901,6 +903,7 @@
+     NVPTX::getNVPTXTargetFeatures(D, Triple, Args, Features);
+     break;
+   case llvm::Triple::m68k:
++  case llvm::Triple::m68k64:
+     m68k::getM68kTargetFeatures(D, Triple, Args, Features);
+     break;
+   case llvm::Triple::msp430:
+--- a/lld/ELF/Arch/M68k64.cpp
++++ b/lld/ELF/Arch/M68k64.cpp
+@@ -0,0 +1,83 @@
++//===- M68k64.cpp - QRX 68100EC64 ----------------------------------------===//
++//
++// Static linking for the m68k64 target: ELF64, big endian, EM_68K. There is no GOT, PLT or TLS
++// support yet. R_68K64_64 is ours: the 68000 family has no 64-bit relocation.
++//
++//===----------------------------------------------------------------------===//
++
++#include "Symbols.h"
++#include "Target.h"
++#include "llvm/BinaryFormat/ELF.h"
++#include "llvm/Support/Endian.h"
++
++using namespace llvm;
++using namespace llvm::support::endian;
++using namespace llvm::ELF;
++using namespace lld;
++using namespace lld::elf;
++
++namespace {
++constexpr uint32_t R_68K64_64 = 240;
++
++class M68k64 final : public TargetInfo {
++public:
++  M68k64(Ctx &ctx) : TargetInfo(ctx) {
++    symbolicRel = RelType(R_68K64_64);
++    defaultImageBase = 0x10000;
++    defaultMaxPageSize = 0x1000;
++    defaultCommonPageSize = 0x1000;
++  }
++  RelExpr getRelExpr(RelType type, const Symbol &s,
++                     const uint8_t *loc) const override;
++  void relocate(uint8_t *loc, const Relocation &rel,
++                uint64_t val) const override;
++};
++} // namespace
++
++RelExpr M68k64::getRelExpr(RelType type, const Symbol &s,
++                           const uint8_t *loc) const {
++  switch (uint32_t(type)) {
++  case R_68K64_64:
++  case R_68K_32:
++  case R_68K_16:
++  case R_68K_8:
++    return R_ABS;
++  case R_68K_PC32:
++  case R_68K_PC16:
++  case R_68K_PC8:
++    return R_PC;
++  case R_68K_NONE:
++    return R_NONE;
++  default:
++    Err(ctx) << getErrorLoc(ctx, loc) << "unknown relocation (" << type.v
++             << ") against symbol " << &s;
++    return R_NONE;
++  }
++}
++
++void M68k64::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
++  switch (uint32_t(rel.type)) {
++  case R_68K64_64:
++    write64be(loc, val);
++    break;
++  case R_68K_32:
++  case R_68K_PC32:
++    checkInt(ctx, loc, val, 32, rel);
++    write32be(loc, val);
++    break;
++  case R_68K_16:
++  case R_68K_PC16:
++    checkInt(ctx, loc, val, 16, rel);
++    write16be(loc, val);
++    break;
++  case R_68K_8:
++  case R_68K_PC8:
++    checkInt(ctx, loc, val, 8, rel);
++    *loc = val;
++    break;
++  default:
++    llvm_unreachable("unknown relocation");
++  }
++}
++
++void elf::setM68k64TargetInfo(Ctx &ctx) { ctx.target.reset(new M68k64(ctx)); }
+--- a/lld/ELF/CMakeLists.txt
++++ b/lld/ELF/CMakeLists.txt
+@@ -33,6 +33,7 @@
+   Arch/PPC64.cpp
+   Arch/RISCV.cpp
+   Arch/SPARCV9.cpp
++  Arch/M68k64.cpp
+   Arch/SystemZ.cpp
+   Arch/X86.cpp
+   Arch/X86_64.cpp
+--- a/lld/ELF/Target.h
++++ b/lld/ELF/Target.h
+@@ -207,6 +207,7 @@
+ void setPPCTargetInfo(Ctx &);
+ void setRISCVTargetInfo(Ctx &);
+ void setSPARCV9TargetInfo(Ctx &);
++void setM68k64TargetInfo(Ctx &);
+ void setSystemZTargetInfo(Ctx &);
+ void setX86TargetInfo(Ctx &);
+ void setX86_64TargetInfo(Ctx &);
+--- a/lld/ELF/Target.cpp
++++ b/lld/ELF/Target.cpp
+@@ -88,6 +88,8 @@
+     return setRISCVTargetInfo(ctx);
+   case EM_SPARCV9:
+     return setSPARCV9TargetInfo(ctx);
++  case EM_68K:
++    return setM68k64TargetInfo(ctx);
+   case EM_S390:
+     return setSystemZTargetInfo(ctx);
+   case EM_X86_64:
+--- a/lld/ELF/Driver.cpp
++++ b/lld/ELF/Driver.cpp
+@@ -176,6 +176,7 @@
+           .Case("elf_i386", {ELF32LEKind, EM_386})
+           .Case("elf_iamcu", {ELF32LEKind, EM_IAMCU})
+           .Case("elf64_sparc", {ELF64BEKind, EM_SPARCV9})
++          .Case("elf64m68k", {ELF64BEKind, EM_68K})
+           .Case("msp430elf", {ELF32LEKind, EM_MSP430})
+           .Case("elf64_amdgpu", {ELF64LEKind, EM_AMDGPU})
+           .Case("elf64loongarch", {ELF64LEKind, EM_LOONGARCH})
+--- a/lld/ELF/InputFiles.cpp
++++ b/lld/ELF/InputFiles.cpp
+@@ -1785,6 +1785,8 @@
+     return EM_RISCV;
+   case Triple::sparcv9:
+     return EM_SPARCV9;
++  case Triple::m68k64:
++    return EM_68K;
+   case Triple::systemz:
+     return EM_S390;
+   case Triple::x86:
+--- a/lld/ELF/ScriptParser.cpp
++++ b/lld/ELF/ScriptParser.cpp
+@@ -461,6 +461,7 @@
+       .Case("elf32-littleriscv", {ELF32LEKind, EM_RISCV})
+       .Case("elf64-littleriscv", {ELF64LEKind, EM_RISCV})
+       .Case("elf64-sparc", {ELF64BEKind, EM_SPARCV9})
++      .Case("elf64-m68k", {ELF64BEKind, EM_68K})
+       .Case("elf32-msp430", {ELF32LEKind, EM_MSP430})
+       .Case("elf32-loongarch", {ELF32LEKind, EM_LOONGARCH})
+       .Case("elf64-loongarch", {ELF64LEKind, EM_LOONGARCH})
