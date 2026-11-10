@@ -247,6 +247,22 @@ Geprüft im Gast: ein eigener Test mit 18 Prüfungen (Mathematik, Float-Darstell
 `pickle`, Hashes, `zlib`, Datum, Zufall, `decimal`, `fractions`, vier Threads, `sleep`, Datei mit Umlauten). Alles
 bestanden. Die Umwandlung von Zahl-Strings stimmt in 16 Grenzfällen bitgenau mit dem Mac überein.
 
+CPythons eigene Tests, einzeln im Gast gestartet:
+
+| Modul | Ergebnis | Woran die Fehler liegen |
+|---|---|---|
+| test_grammar, test_list, test_string, test_heapq, test_collections, test_hashlib, test_zlib | bestanden | |
+| test_struct, test_dict, test_itertools | bestanden, seit `_testcapi` mitgebaut ist | |
+| test_json | 150 Tests, 5 Fehler | starten `python -m json.tool` als Unterprozess |
+| test_threading | 148 Tests, 10 Fehler | Unterprozesse und Subinterpreter |
+| test_tempfile | 82 Tests, 2 Fehlschläge, 8 Fehler | AROS löscht keine offenen Dateien, Dateirechte |
+| test_socket | 648 Tests, 376 übersprungen, 7 Fehlschläge, 97 Fehler | fehlende Socket-Optionen und -Attribute, IPv6, Unix-Sockets |
+| test_math, test_float | nicht bis zum Ende gelaufen | sehr umfangreich, `test_float` stand nach 2 Minuten |
+
+Beobachtet und nicht geklärt: Direkt nach `test_tempfile` konnte ein neuer Python-Prozess einmal keinen zweiten Thread
+starten, im übernächsten Prozess ging es wieder. Ein Programm im Boot-Skript erbt als aktuelles Verzeichnis
+`AROS Kickstart:`, auf das man nicht schreiben kann; Jobs beginnen deshalb mit `CD SYS:`.
+
 ### Netz für 68k-Programme (10. November)
 
 68k-Programme bekommen BSD-Sockets auf den Sockets des Macs, über Dienst 4 der ARMithlon-Tür. AROSTCP und eine

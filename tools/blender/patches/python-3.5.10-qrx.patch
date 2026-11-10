@@ -129,7 +129,7 @@ index d9f3f99..9a06f39 100644
          tilde = b'~'
      else:
 diff --git a/Lib/subprocess.py b/Lib/subprocess.py
-index 8e44998..fd3c887 100644
+index 8e44998..559d5ca 100644
 --- a/Lib/subprocess.py
 +++ b/Lib/subprocess.py
 @@ -124,9 +124,16 @@ if _mswindows:
@@ -163,8 +163,18 @@ index 8e44998..fd3c887 100644
          _PopenSelector = selectors.PollSelector
      else:
          _PopenSelector = selectors.SelectSelector
+@@ -568,6 +577,9 @@ class Popen(object):
+                  restore_signals=True, start_new_session=False,
+                  pass_fds=()):
+         """Create new Popen instance."""
++        if not _mswindows and _posixsubprocess is None:
++            # QRX OS One: no fork, so no child process. Fail before any pipe is made.
++            raise OSError(errno.ENOSYS, 'starting processes is not supported on this system')
+         _cleanup()
+         # Held while anything is calling waitpid before returncode has been
+         # updated to prevent clobbering returncode if wait() or poll() are
 diff --git a/Lib/tempfile.py b/Lib/tempfile.py
-index ad687b9..938fb86 100644
+index ad687b9..d348ae5 100644
 --- a/Lib/tempfile.py
 +++ b/Lib/tempfile.py
 @@ -172,7 +172,10 @@ def _candidate_tempdir_list():
@@ -179,6 +189,15 @@ index ad687b9..938fb86 100644
          dirlist.extend([ r'c:\temp', r'c:\tmp', r'\temp', r'\tmp' ])
      else:
          dirlist.extend([ '/tmp', '/var/tmp', '/usr/tmp' ])
+@@ -557,7 +560,7 @@ def NamedTemporaryFile(mode='w+b', buffering=-1, encoding=None,
+         _os.close(fd)
+         raise
+ 
+-if _os.name != 'posix' or _os.sys.platform == 'cygwin':
++if _os.name != 'posix' or _os.sys.platform in ('cygwin', 'aros'):  # AROS cannot delete an open file
+     # On non-POSIX and Cygwin systems, assume that we cannot unlink a file
+     # while it is open.
+     TemporaryFile = NamedTemporaryFile
 diff --git a/Modules/_localemodule.c b/Modules/_localemodule.c
 index 39e0c54..d377e9c 100644
 --- a/Modules/_localemodule.c
