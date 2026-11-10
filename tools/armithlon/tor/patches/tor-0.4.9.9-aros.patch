@@ -1,0 +1,91 @@
+--- a/src/lib/fs/path.c
++++ b/src/lib/fs/path.c
+@@ -145,6 +145,11 @@
+ int
+ path_is_relative(const char *filename)
+ {
++#ifdef __AROS__
++  /* VOLUME:file and ASSIGN:file are absolute. */
++  if (strchr(filename, ':'))
++    return 0;
++#endif
+   if (filename && filename[0] == '/')
+     return 0;
+ #ifdef _WIN32
+@@ -294,7 +299,7 @@
+ 
+   tor_assert(fname);
+ 
+-  if (fname[0] == '/') {
++  if (!path_is_relative(fname)) {
+     absfname = tor_strdup(fname);
+   } else {
+     path = alloc_getcwd();
+--- a/src/lib/fs/dir.c
++++ b/src/lib/fs/dir.c
+@@ -75,7 +75,8 @@
+ 
+   tor_assert(dirname);
+ 
+-#ifndef _WIN32
++  /* AROS has one user, no permissions to check, and open() takes no directory. */
++#if !defined(_WIN32) && !defined(__AROS__)
+   int fd;
+   const struct passwd *pw = NULL;
+   uid_t running_uid;
+@@ -279,7 +280,11 @@
+     }
+     if (check & CPD_CREATE) {
+       log_info(LD_GENERAL, "Creating directory %s", dirname);
+-      r = mkdir(dirname);
++    #ifdef __AROS__
++  r = mkdir(dirname, 0700);
++#else
++  r = mkdir(dirname);
++#endif
+       if (r) {
+         log_warn(LD_FS, "Error creating directory %s: %s", dirname,
+                  strerror(errno));
+--- a/src/lib/crypt_ops/crypto_curve25519.c
++++ b/src/lib/crypt_ops/crypto_curve25519.c
+@@ -38,6 +38,9 @@
+    ============================== */
+ 
+ #ifdef USE_CURVE25519_DONNA
++#ifdef __AROS__
++int qrx_core1_x25519(uint8_t *out, const uint8_t *secret, const uint8_t *point);
++#endif
+ int curve25519_donna(uint8_t *mypublic,
+                      const uint8_t *secret, const uint8_t *basepoint);
+ #endif
+@@ -71,6 +74,12 @@
+   /* Clear the high bit, in case our backend foolishly looks at it. */
+   bp[31] &= 0x7f;
+ #ifdef USE_CURVE25519_DONNA
++#ifdef __AROS__
++  /* Second 68100 core if it was switched on and is free, otherwise here. */
++  if (qrx_core1_x25519(output, secret, bp) == 0)
++    r = 0;
++  else
++#endif
+   r = curve25519_donna(output, secret, bp);
+ #elif defined(USE_CURVE25519_NACL)
+   r = crypto_scalarmult_curve25519(output, secret, bp);
+--- a/src/test/testing_common.c
++++ b/src/test/testing_common.c
+@@ -102,12 +102,14 @@
+     exit(1);
+   }
+ #else /* !defined(_WIN32) */
+-  tor_snprintf(temp_dir, sizeof(temp_dir), "/tmp/tor_test_%d_%s",
++  tor_snprintf(temp_dir, sizeof(temp_dir), "RAM:tor_test_%d_%s",
+                (int) getpid(), rnd32);
+   r = mkdir(temp_dir, 0700);
+   if (!r) {
+     /* undo sticky bit so tests don't get confused. */
++#ifndef __AROS__
+     r = chown(temp_dir, getuid(), getgid());
++#endif
+   }
+ #endif /* defined(_WIN32) || ... */
+   if (r) {
