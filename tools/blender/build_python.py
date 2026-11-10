@@ -31,6 +31,7 @@ MODULES = {
     '_sha256': ['sha256module.c'], '_sha512': ['sha512module.c'], '_csv': ['_csv.c'], 'zlib': ['zlibmodule.c'],
     # sockets go to the host through the ARMithlon door, see port/qrx_socket.c
     '_socket': ['socketmodule.c'], 'select': ['selectmodule.c'],
+    '_json': ['_json.c'], '_testcapi': ['_testcapimodule.c'],
 }
 CORE_MODULES = ['main.c', 'gcmodule.c', 'getbuildinfo.c', 'getpath.c', 'xxsubtype.c']
 
@@ -112,6 +113,8 @@ def main():
     for i, j in enumerate(jobs):
         if j[0].name == 'sysmodule.c':
             jobs[i] = (j[0], j[1], ('-DABIFLAGS="m"',))
+        if j[0].name == '_testcapimodule.c':
+            jobs[i] = (j[0], j[1], ('-UPy_BUILD_CORE',))  # it tests the API as extensions see it
         if j[0].name == 'getplatform.c':
             jobs[i] = (j[0], j[1], ('-DPLATFORM="aros"',))
     with cf.ThreadPoolExecutor(8) as ex:
