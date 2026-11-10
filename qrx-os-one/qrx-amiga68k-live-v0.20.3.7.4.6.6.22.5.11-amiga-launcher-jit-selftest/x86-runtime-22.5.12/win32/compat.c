@@ -50,6 +50,9 @@ static uint32_t call_api(qwin *w, const char *dll, const char *name, uint32_t *a
 }
 FN(c_ok0) { UNUSED; return 0; }
 FN(c_ok1) { UNUSED; return 1; }
+/* The NT security calls, as Windows 95 has them: they fail with ERROR_CALL_NOT_IMPLEMENTED, and
+   setup programs take that as "no NT, no rights to check". */
+FN(c_nosec) { (void)a; w->last_error = 120; return 0; }
 FN(c_arg0) { (void)w; return a[0]; }
 FN(c_fail_mm) { UNUSED; return 2u; /* MMSYSERR_BADDEVICEID */ }
 
@@ -272,6 +275,17 @@ static int try_exe(qwin *w, const char *dir, const char *name, char *host, size_
         else snprintf(win, wmax, "%s%s", name, round ? "" : ".exe");
         qw_fs_map(w, win, host, hmax);
         k = exe_kind(host);
+        if (k == 2) {                            /* a 16-bit starter for a 32-bit program? */
+            extern int qw_ne_redirect(qwin *w, const char *path, char *out, size_t max);
+            char alt[1200];
+            if (qw_ne_redirect(w, host, alt, sizeof(alt))) {
+                const char *ab = strrchr(alt, '/') ? strrchr(alt, '/') + 1 : alt;
+                char *wb = strrchr(win, '\\');
+                snprintf(host, hmax, "%s", alt);
+                if (wb && (size_t)(wb + 1 - win) + strlen(ab) < wmax) strcpy(wb + 1, ab);
+                k = 1;
+            }
+        }
         if (k) return k;
     }
     return 0;
@@ -2062,7 +2076,10 @@ const qhle qw_compat[] = {
     { "oleaut32", "SysStringLen", 1, ole_SysStringLen }, { "oleaut32", "#7", 1, ole_SysStringLen }, { "oleaut32", "VariantInit", 1, ole_VariantInit }, { "oleaut32", "#8", 1, ole_VariantInit },
     { "oleaut32", "VariantClear", 1, ole_VariantClear }, { "oleaut32", "#9", 1, ole_VariantClear }, { "oleaut32", "VariantCopy", 2, ole_VariantCopy }, { "oleaut32", "#10", 2, ole_VariantCopy },
     { "oleaut32", "VariantCopyInd", 2, ole_VariantCopy }, { "oleaut32", "VariantChangeTypeEx", 5, ole_VariantChangeType }, { "oleaut32", "VariantChangeType", 4, ole_VariantChangeType },
-    { "gdi32", "EnumFontFamiliesA", 4, c_EnumFontFamiliesA }, { "advapi32", "OpenProcessToken", 3, c_ok0 }, { "advapi32", "LookupPrivilegeValueA", 3, c_ok0 }, { "advapi32", "AdjustTokenPrivileges", 6, c_ok0 },
+    { "gdi32", "EnumFontFamiliesA", 4, c_EnumFontFamiliesA }, { "advapi32", "InitializeSecurityDescriptor", 2, c_ok1 }, { "advapi32", "SetSecurityDescriptorDacl", 4, c_ok1 }, { "advapi32", "OpenProcessToken", 3, c_nosec }, { "advapi32", "LookupPrivilegeValueA", 3, c_nosec }, { "advapi32", "AdjustTokenPrivileges", 6, c_nosec },
+    { "advapi32", "OpenThreadToken", 4, c_nosec }, { "advapi32", "GetTokenInformation", 5, c_nosec }, { "advapi32", "AllocateAndInitializeSid", 11, c_nosec },
+    { "advapi32", "FreeSid", 1, c_ok0 }, { "advapi32", "EqualSid", 2, c_nosec }, { "advapi32", "IsValidSid", 1, c_nosec }, { "advapi32", "GetLengthSid", 1, c_nosec },
+    { "advapi32", "InitializeAcl", 3, c_nosec }, { "advapi32", "AddAccessAllowedAce", 4, c_nosec }, { "advapi32", "AccessCheck", 8, c_nosec },
     { "version", "GetFileVersionInfoSizeA", 2, c_GetFileVersionInfoSizeA }, { "version", "GetFileVersionInfoA", 4, c_GetFileVersionInfoA }, { "version", "VerQueryValueA", 4, c_VerQueryValueA },
     { "msacm32", "acmMetrics", 3, c_acmMetrics }, { "msacm32", "acmStreamOpen", 8, c_acmNoDriver }, { "msacm32", "acmStreamClose", 2, c_ok0 }, { "msacm32", "acmStreamSize", 4, c_acmNoDriver },
     { "msacm32", "acmStreamPrepareHeader", 3, c_acmNoDriver }, { "msacm32", "acmStreamUnprepareHeader", 3, c_ok0 }, { "msacm32", "acmStreamConvert", 3, c_acmNoDriver },

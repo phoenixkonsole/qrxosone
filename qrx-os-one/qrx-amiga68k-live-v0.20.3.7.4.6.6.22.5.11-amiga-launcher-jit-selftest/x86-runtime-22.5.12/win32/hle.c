@@ -310,6 +310,15 @@ int qw_load(qwin *w, const char *path, int argc, char **argv)
     b = (uint8_t *)malloc((size_t)n);
     if (!b || fread(b, 1, (size_t)n, f) != (size_t)n) { fclose(f); free(b); return 0; }
     fclose(f);
+    if (n > 64 && b[0] == 'M' && b[1] == 'Z') {     /* a 16-bit starter: run what it would start */
+        extern int qw_ne_redirect(qwin *w, const char *path, char *out, size_t max);
+        static char alt[1200];
+        uint32_t o = (uint32_t)b[60] | (uint32_t)b[61] << 8 | (uint32_t)b[62] << 16 | (uint32_t)b[63] << 24;
+        if (o + 2u < (uint32_t)n && b[o] == 'N' && b[o + 1] == 'E' && qw_ne_redirect(w, path, alt, sizeof(alt))) {
+            free(b);
+            return qw_load(w, alt, argc, argv);
+        }
+    }
     snprintf(w->exe_path, sizeof(w->exe_path), "%s", path);
     x86_init(c);
     c->user = w;

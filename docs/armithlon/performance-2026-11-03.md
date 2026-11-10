@@ -603,3 +603,13 @@ The Sonic & Knuckles demo shows its intro with correct colours at about 38 frame
 - `VirtualAlloc` gives a program a free address it asks for, below the heap. A reservation starts on a 64 KB boundary, as on Windows. The game asks for fixed addresses and uses them without looking at the answer.
 - The game draws in a palette and expects a 256 colour desktop, so it joins Sonic CD on the list of programs that are told so.
 - `SetClipper` is no longer ignored. A primary surface with a clipper is drawn on in screen coordinates, and ours shows only the window, so the window's position is taken off the destination.
+
+## Update 2026-11-10: 16-bit starters
+
+There is still no Win16: the CPU core runs flat 32-bit code only. Many 16-bit programs of the time only start a 32-bit one, and `win32/ne.c` now recognises two kinds and runs the 32-bit program instead. Both the first program and `CreateProcess` go through it.
+
+- `NAME.EXE` next to `NAME.W32` runs the `.w32`. Freddi Fish's demo starts this way. It then runs its frame loop but draws nothing: after `waveOutReset` it writes no more sound buffers, and it seems to wait in its sound engine.
+- An InstallShield 3 `SETUP.EXE` next to `_INST32I.EX_` runs the engine in that archive. The archive is PKWARE DCL data, with a decoder that follows zlib's `contrib/blast`. Its files are unpacked once next to `SETUP.EXE`, where the engine finds `SETUP.INS` and the cabinets. The setups of the FF7 demo and NBA Jam Extreme reach the first step of their wizards. The files are left behind in the program's folder.
+- `waveOutRestart` starts what was written while paused, which Freddi's sound test relies on. `EnumFontFamiliesA` reports one font under the name asked for. The NT security calls fail with `ERROR_CALL_NOT_IMPLEMENTED`, as on Windows 95.
+
+Not checked: no installer was clicked through, and the survey of all programs did not run, because the temporary folder that held its scripts and unpacked games had been cleared. The new code acts only on NE programs, which all stopped before. `ctest` passes. The bitmap pane of the FF7 setup stays white.
