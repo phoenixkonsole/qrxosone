@@ -263,6 +263,20 @@ Beobachtet und nicht geklärt: Direkt nach `test_tempfile` konnte ein neuer Pyth
 starten, im übernächsten Prozess ging es wieder. Ein Programm im Boot-Skript erbt als aktuelles Verzeichnis
 `AROS Kickstart:`, auf das man nicht schreiben kann; Jobs beginnen deshalb mit `CD SYS:`.
 
+### Blender mit Python (10. November)
+
+Blender ist jetzt mit eingebettetem Python 3.5 gebaut (`WITH_PYTHON=ON`, 11 MB Code). Im Gast lädt `blender -b` Blenders
+eigene Python-Skripte in etwa 5 Sekunden, `bpy` arbeitet. Geprüft:
+
+- `bpy.app.version_string` und die Objekte der Startszene stimmen.
+- Ein Skript (`tree/scene.py`) dreht den Würfel, legt über Operatoren eine Kugel mit Spiegelmaterial und eine Ebene mit
+  Wolkentextur an, schaltet Strahlschatten ein, speichert eine `.blend` und rendert. Kern 1 übernimmt dabei 10 Kacheln.
+- Die gespeicherte Datei beginnt mit `BLENDER_V279`, ist also 32 Bit und Big Endian. Der native Mac-Build lädt sie, und
+  sein Bild ist **pixelgleich** mit dem Gast-Render. Damit ist der Weg über `.blend`-Dateien in beide Richtungen geprüft.
+
+Weitere Stubs für GL kamen durch das Python-Modul `bgl` dazu. `tools/blender/install_tree.sh` bringt Blender, Python und
+die Skripte in den Testbaum.
+
 ### Netz für 68k-Programme (10. November)
 
 68k-Programme bekommen BSD-Sockets auf den Sockets des Macs, über Dienst 4 der ARMithlon-Tür. AROSTCP und eine
