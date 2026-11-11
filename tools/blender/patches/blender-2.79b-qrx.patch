@@ -1408,7 +1408,7 @@ index abccab5..4b33731 100644
  	
  	Node *_transform(RTBuilder *builder)
 diff --git a/source/blender/render/intern/source/pipeline.c b/source/blender/render/intern/source/pipeline.c
-index 9ed1520..105987a 100644
+index 9ed1520..80994fc 100644
 --- a/source/blender/render/intern/source/pipeline.c
 +++ b/source/blender/render/intern/source/pipeline.c
 @@ -39,6 +39,8 @@
@@ -1428,7 +1428,7 @@ index 9ed1520..105987a 100644
  
  	if (source) {
  		/* reuse border flags from source renderer */
-@@ -1344,6 +1347,42 @@ static void main_render_result_new(Render *re)
+@@ -1344,6 +1347,46 @@ static void main_render_result_new(Render *re)
  	}
  }
  
@@ -1458,8 +1458,12 @@ index 9ed1520..105987a 100644
 +			if (c->fail_after && c->tiles == c->fail_after) {
 +				__asm__ volatile("illegal");  /* parks core 1 with a fault */
 +			}
-+			c->todo = NULL;
++			/* Core 0 hands out the next tile as soon as todo is empty, so it may not have taken
++			 * the last finished one yet: wait for that, and publish done before emptying todo,
++			 * or a finished tile is overwritten and the render waits for it forever. */
++			while (c->done) {}
 +			c->done = pa;
++			c->todo = NULL;
 +		}
 +		else if (c->quit) {
 +			return;
@@ -1471,7 +1475,7 @@ index 9ed1520..105987a 100644
  static void threaded_tile_processor(Render *re)
  {
  	RenderThread thread[BLENDER_MAX_THREADS];
-@@ -1353,6 +1392,10 @@ static void threaded_tile_processor(Render *re)
+@@ -1353,6 +1396,10 @@ static void threaded_tile_processor(Render *re)
  	rctf viewplane = re->viewplane;
  	double lastdraw, elapsed, redrawtime = 1.0f;
  	int totpart = 0, minx = 0, slice = 0, a, wait;
@@ -1482,7 +1486,7 @@ index 9ed1520..105987a 100644
  	
  	if (re->result == NULL)
  		return;
-@@ -1362,6 +1405,10 @@ static void threaded_tile_processor(Render *re)
+@@ -1362,6 +1409,10 @@ static void threaded_tile_processor(Render *re)
  	
  	/* assuming no new data gets added to dbase... */
  	R = *re;
@@ -1493,7 +1497,7 @@ index 9ed1520..105987a 100644
  	
  	/* set threadsafe break */
  	R.test_break = thread_break;
-@@ -1378,6 +1425,9 @@ static void threaded_tile_processor(Render *re)
+@@ -1378,6 +1429,9 @@ static void threaded_tile_processor(Render *re)
  		BLI_thread_queue_nowait(workqueue);
  		
  		/* start all threads */
@@ -1503,7 +1507,7 @@ index 9ed1520..105987a 100644
  		BLI_init_threads(&threads, do_render_thread, re->r.threads);
  		
  		for (a = 0; a < re->r.threads; a++) {
-@@ -1394,6 +1444,22 @@ static void threaded_tile_processor(Render *re)
+@@ -1394,6 +1448,22 @@ static void threaded_tile_processor(Render *re)
  				thread[a].duh = NULL;
  			}
  
@@ -1526,7 +1530,7 @@ index 9ed1520..105987a 100644
  			BLI_insert_thread(&threads, &thread[a]);
  		}
  		
-@@ -1403,6 +1469,34 @@ static void threaded_tile_processor(Render *re)
+@@ -1403,6 +1473,34 @@ static void threaded_tile_processor(Render *re)
  		while (1) {
  			elapsed = PIL_check_seconds_timer() - lastdraw;
  			wait = (redrawtime - elapsed)*1000;
@@ -1561,7 +1565,7 @@ index 9ed1520..105987a 100644
  			
  			/* handle finished part */
  			if ((pa=BLI_thread_queue_pop_timeout(donequeue, wait))) {
-@@ -1438,6 +1532,14 @@ static void threaded_tile_processor(Render *re)
+@@ -1438,6 +1536,14 @@ static void threaded_tile_processor(Render *re)
  			}
  		}
  		
@@ -1576,7 +1580,7 @@ index 9ed1520..105987a 100644
  		BLI_end_threads(&threads);
  		
  		if ((g_break=re->test_break(re->tbh)))
-@@ -3146,6 +3248,31 @@ const char *RE_GetActiveRenderView(Render *re)
+@@ -3146,6 +3252,31 @@ const char *RE_GetActiveRenderView(Render *re)
  static int render_initialize_from_main(Render *re, RenderData *rd, Main *bmain, Scene *scene, SceneRenderLayer *srl,
                                         Object *camera_override, unsigned int lay_override, int anim, int anim_init)
  {

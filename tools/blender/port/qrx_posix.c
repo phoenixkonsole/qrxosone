@@ -106,6 +106,45 @@ int unsetenv(const char *name)
 	return 0;
 }
 
+/* environ, defined here so the C library's own one is never linked. Referencing environ pulls in
+ * a start-up function that asks the C library to build the array, and the library counts the
+ * shell's local variables with a ScanVars hook that takes its arguments from the wrong place: it
+ * adds to the variable nodes themselves. The shell outlives the program, so every later program
+ * of that shell found broken variables, and CreateNewProc, which copies them, failed: pthreads,
+ * so Blender's render threads, did not start after Python or Blender had run once. Same contents
+ * as the library's: the shell's local variables, name=value. */
+char **environ;
+static void __attribute__((constructor)) qrx_environ_init(void)
+{
+	static char *none[1];
+	struct Process *me = (struct Process *)FindTask(NULL);
+	struct LocalVar *lv;
+	size_t n = 0;
+
+	environ = none;
+	if (me->pr_Task.tc_Node.ln_Type != NT_PROCESS) return;
+	for (lv = (struct LocalVar *)me->pr_LocalVars.mlh_Head; lv->lv_Node.ln_Succ; lv = (struct LocalVar *)lv->lv_Node.ln_Succ)
+		if (lv->lv_Node.ln_Type == LV_VAR && !(lv->lv_Flags & GVF_BINARY_VAR)) n++;
+	char **env = malloc((n + 1) * sizeof *env);
+	if (!env) return;
+	size_t i = 0;
+	for (lv = (struct LocalVar *)me->pr_LocalVars.mlh_Head; lv->lv_Node.ln_Succ && i < n; lv = (struct LocalVar *)lv->lv_Node.ln_Succ) {
+		if (lv->lv_Node.ln_Type != LV_VAR || (lv->lv_Flags & GVF_BINARY_VAR)) continue;
+		size_t nl = strlen(lv->lv_Node.ln_Name), vl = lv->lv_Len;
+		/* The shell may keep a trailing newline in the value, as GetVar strips it. */
+		while (vl && (lv->lv_Value[vl - 1] == '\n' || lv->lv_Value[vl - 1] == 0)) vl--;
+		char *e = malloc(nl + vl + 2);
+		if (!e) break;
+		memcpy(e, lv->lv_Node.ln_Name, nl);
+		e[nl] = '=';
+		memcpy(e + nl + 1, lv->lv_Value, vl);
+		e[nl + 1 + vl] = 0;
+		env[i++] = e;
+	}
+	env[i] = NULL;
+	environ = env;
+}
+
 /* Without a screen the shell has no console for stderr, so a batch job can ask for it in stdout. */
 static void __attribute__((constructor)) qrx_stderr_to_stdout(void)
 {
