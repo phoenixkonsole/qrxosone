@@ -7,6 +7,8 @@
  */
 #include "qrx_ppc.h"
 #include "qrx_ppc_jit.h"
+#include "qrx_pef.h"
+#include "qrx_mix.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -2211,6 +2213,2479 @@ static void test_jit_cache(void)
 }
 #endif
 
+/* P2.1: PEF/CFM container reader.  A synthetic fragment is described by real
+ * container bytes, loaded through qrx_pef_load() and entered through its main
+ * transition vector. */
+#define PEF_IMAGE_SIZE 208u
+#define PEF_CODE_OFF 96u
+#define PEF_LOADER_OFF 128u
+#define PEF_LOAD_BASE 0x8000u
+
+static void pef_put16(uint8_t *buf, uint32_t off, uint16_t value)
+{
+    buf[off] = (uint8_t)(value >> 8);
+    buf[off + 1u] = (uint8_t)value;
+}
+
+static void pef_put32(uint8_t *buf, uint32_t off, uint32_t value)
+{
+    pef_put16(buf, off, (uint16_t)(value >> 16));
+    pef_put16(buf, off + 2u, (uint16_t)value);
+}
+
+/* One code section and one loader section.  The code starts with a transition
+ * vector { entry, TOC }; its words already hold the runtime addresses for
+ * PEF_LOAD_BASE because relocation is not applied yet. */
+static void pef_build_fragment(uint8_t *buf)
+{
+    memset(buf, 0, PEF_IMAGE_SIZE);
+    pef_put32(buf, 0, 0x4A6F7921u);        /* 'Joy!' */
+    pef_put32(buf, 4, 0x70656666u);        /* 'peff' */
+    pef_put32(buf, 8, 0x70777063u);        /* 'pwpc' */
+    pef_put32(buf, 12, 1u);                /* formatVersion */
+    pef_put16(buf, 32, 2u);                /* sectionCount */
+    pef_put16(buf, 34, 1u);                /* instSectionCount */
+
+    /* Section 0: code at container offset 96. */
+    pef_put32(buf, 40, 0xFFFFFFFFu);       /* nameOffset -1 */
+    pef_put32(buf, 44, 0x8000u);           /* defaultAddress */
+    pef_put32(buf, 48, 32u);               /* totalSize */
+    pef_put32(buf, 52, 32u);               /* unpackedSize */
+    pef_put32(buf, 56, 0u);                /* packedSize */
+    pef_put32(buf, 60, PEF_CODE_OFF);      /* containerOffset */
+    buf[64] = 0;                           /* sectionKind: code */
+    buf[66] = 2;                           /* alignment */
+
+    /* Section 1: loader at container offset 128. */
+    pef_put32(buf, 68, 0xFFFFFFFFu);
+    pef_put32(buf, 72, 0x9000u);
+    pef_put32(buf, 76, 80u);
+    pef_put32(buf, 80, 80u);
+    pef_put32(buf, 84, 0u);
+    pef_put32(buf, 88, PEF_LOADER_OFF);
+    buf[92] = 4;                           /* sectionKind: loader */
+    buf[94] = 2;
+
+    /* Code: TVector at offset 0, fragment at offset 8 (entry 0x8008). */
+    pef_put32(buf, PEF_CODE_OFF + 0u, 0x8008u);
+    pef_put32(buf, PEF_CODE_OFF + 4u, 0u);
+    pef_put32(buf, PEF_CODE_OFF + 8u, 0x38600007u);  /* li r3,7 */
+    pef_put32(buf, PEF_CODE_OFF + 12u, 0x38630023u); /* addi r3,r3,35 */
+    pef_put32(buf, PEF_CODE_OFF + 16u, 0x39002000u); /* li r8,0x2000 */
+    pef_put32(buf, PEF_CODE_OFF + 20u, 0x90680000u); /* stw r3,0(r8) */
+    pef_put32(buf, PEF_CODE_OFF + 24u, 0x44000002u); /* sc */
+
+    /* Loader header: main in section 0 at offset 0, no init/term/imports. */
+    pef_put32(buf, PEF_LOADER_OFF + 0u, 0u);           /* mainSection */
+    pef_put32(buf, PEF_LOADER_OFF + 8u, 0xFFFFFFFFu);  /* initSection */
+    pef_put32(buf, PEF_LOADER_OFF + 16u, 0xFFFFFFFFu); /* termSection */
+    pef_put32(buf, PEF_LOADER_OFF + 40u, 74u);         /* loaderStringsOffset */
+    pef_put32(buf, PEF_LOADER_OFF + 44u, 56u);         /* exportHashOffset */
+    pef_put32(buf, PEF_LOADER_OFF + 52u, 1u);          /* exportedSymbolCount */
+
+    /* Export tables: one hash slot, one key, one entry, strings at 74. */
+    pef_put32(buf, PEF_LOADER_OFF + 56u, 1u << 18);    /* count 1, first 0 */
+    pef_put32(buf, PEF_LOADER_OFF + 64u, 0u);          /* class 0, name off 0 */
+    pef_put32(buf, PEF_LOADER_OFF + 68u, 8u);          /* symbolValue */
+    pef_put16(buf, PEF_LOADER_OFF + 72u, 0u);          /* sectionIndex */
+    memcpy(buf + PEF_LOADER_OFF + 74u, "_main", 6u);
+}
+
+static void test_pef_loader(void)
+{
+    static qrx_pef_t image;
+    static qrx_ppc_t tiny;
+    static uint8_t tiny_mem[0x1000];
+    uint8_t built[PEF_IMAGE_SIZE];
+    uint8_t damaged[PEF_IMAGE_SIZE];
+#ifdef __AROS__
+    qrx_ppc_t start;
+#endif
+    qrx_pef_status_t st;
+    uint32_t tvector;
+    unsigned before = failures;
+
+    pef_build_fragment(built);
+
+    /* Every malformed container ends in its own status instead of a crash. */
+    expect_u32("pef_short", (uint32_t)qrx_pef_parse(&image, built, 39u),
+               (uint32_t)QRX_PEF_ERR_SHORT);
+    memcpy(damaged, built, sizeof(damaged));
+    damaged[0] = 'X';
+    expect_u32("pef_magic", (uint32_t)qrx_pef_parse(&image, damaged, PEF_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_ERR_MAGIC);
+    memcpy(damaged, built, sizeof(damaged));
+    pef_put32(damaged, 8u, 0x6D36386Bu);   /* 'm68k' */
+    expect_u32("pef_arch", (uint32_t)qrx_pef_parse(&image, damaged, PEF_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_ERR_ARCH);
+    memcpy(damaged, built, sizeof(damaged));
+    pef_put32(damaged, 12u, 2u);
+    expect_u32("pef_version", (uint32_t)qrx_pef_parse(&image, damaged, PEF_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_ERR_VERSION);
+    memcpy(damaged, built, sizeof(damaged));
+    pef_put16(damaged, 32u, 0u);
+    expect_u32("pef_sections_zero", (uint32_t)qrx_pef_parse(&image, damaged, PEF_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_ERR_SECTIONS);
+    memcpy(damaged, built, sizeof(damaged));
+    pef_put16(damaged, 32u, 17u);
+    expect_u32("pef_sections_max", (uint32_t)qrx_pef_parse(&image, damaged, PEF_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_ERR_SECTIONS);
+    memcpy(damaged, built, sizeof(damaged));
+    pef_put32(damaged, 56u, 4u);
+    expect_u32("pef_packed", (uint32_t)qrx_pef_parse(&image, damaged, PEF_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_ERR_PACKED);
+    memcpy(damaged, built, sizeof(damaged));
+    pef_put32(damaged, 60u, 300u);
+    expect_u32("pef_offset", (uint32_t)qrx_pef_parse(&image, damaged, PEF_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_ERR_OFFSET);
+    memcpy(damaged, built, sizeof(damaged));
+    pef_put32(damaged, PEF_LOADER_OFF + 52u, 20u);
+    expect_u32("pef_exports", (uint32_t)qrx_pef_parse(&image, damaged, PEF_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_ERR_EXPORTS);
+
+    st = qrx_pef_parse(&image, built, PEF_IMAGE_SIZE);
+    expect_u32("pef_parse", (uint32_t)st, (uint32_t)QRX_PEF_OK);
+    expect_u32("pef_sections_parsed", image.section_count, 2u);
+    expect_u32("pef_loader_index", (uint32_t)image.loader_index, 1u);
+    expect_u32("pef_main_section", (uint32_t)image.main_section, 0u);
+    expect_u32("pef_export_count", image.export_count, 1u);
+    expect_u32("pef_import_count", image.import_count, 0u);
+    expect_u32("pef_library_count", image.library_count, 0u);
+    expect_u32("pef_export_value", image.exports[0].value, 8u);
+    expect_u32("pef_export_section", (uint32_t)image.exports[0].section_index, 0u);
+    expect_u32("pef_export_class", image.exports[0].symbol_class, 0u);
+    if (qrx_pef_string(&image, image.exports[0].name_offset) == 0 ||
+        strcmp(qrx_pef_string(&image, image.exports[0].name_offset), "_main") != 0) {
+        printf("FAIL pef_export_name\n");
+        failures++;
+    }
+    expect_u32("pef_find_code",
+               (uint32_t)(qrx_pef_find_export(&image, 0, "_main") + 1), 1u);
+    expect_u32("pef_find_any",
+               (uint32_t)(qrx_pef_find_export(&image, -1, "_main") + 1), 1u);
+    expect_u32("pef_find_wrong_class",
+               (uint32_t)(qrx_pef_find_export(&image, 1, "_main") + 1), 0u);
+    expect_u32("pef_find_missing",
+               (uint32_t)(qrx_pef_find_export(&image, 0, "_nope") + 1), 0u);
+    expect_u32("pef_string_oob", qrx_pef_string(&image, 80u) == 0 ? 1u : 0u, 1u);
+
+    memset(memory, 0, sizeof(memory));
+    qrx_ppc_init(&ppc, memory, (uint32_t)sizeof(memory));
+    qrx_ppc_init(&tiny, tiny_mem, (uint32_t)sizeof(tiny_mem));
+    expect_u32("pef_load_small",
+               (uint32_t)qrx_pef_load(&image, &tiny, PEF_LOAD_BASE),
+               (uint32_t)QRX_PEF_ERR_MEMORY);
+    st = qrx_pef_load(&image, &ppc, PEF_LOAD_BASE);
+    expect_u32("pef_load", (uint32_t)st, (uint32_t)QRX_PEF_OK);
+    expect_u32("pef_address0", qrx_pef_section_address(&image, 0), PEF_LOAD_BASE);
+    expect_u32("pef_address1", qrx_pef_section_address(&image, 1),
+               PEF_LOAD_BASE + 0x1000u);
+    expect_u32("pef_loader_copy", get32(PEF_LOAD_BASE + 0x1000u), 0u);
+    tvector = qrx_pef_main_tvector(&image);
+    expect_u32("pef_tvector", tvector, PEF_LOAD_BASE);
+    expect_u32("pef_entry", get32(tvector), PEF_LOAD_BASE + 8u);
+
+    ppc.cpu.pc = get32(tvector);
+    ppc.cpu.gpr[1] = 0x3000;
+    ppc.cpu.gpr[2] = 0x3000;
+#ifdef __AROS__
+    memcpy(memory_jit, memory, sizeof(memory));
+    start = ppc;
+#endif
+    expect_status("pef_run", qrx_ppc_run(&ppc, 1000), QRX_PPC_TRAP);
+    expect_u32("pef_run_r3", ppc.cpu.gpr[3], 42u);
+    expect_u32("pef_run_mem", get32(DATA_BASE), 42u);
+
+#ifdef __AROS__
+    if (jit_code) {
+        qrx_ppc_t native = start;
+
+        native.mem.data = memory_jit;
+        qrx_ppc_jit_reset(&jit);
+        expect_status("pef_jit", qrx_ppc_run_jit(&native, &jit, 1000),
+                      QRX_PPC_TRAP);
+        expect_u32("pef_jit_r3", native.cpu.gpr[3], 42u);
+        expect_u32("pef_jit_mem", get32_native(DATA_BASE), 42u);
+        compare_jit_state(&ppc, &native);
+    }
+#endif
+    report("pef_loader", before);
+}
+
+
+/* P2.1: PEF relocations.  The container has code, data and loader sections;
+ * the relocation stream fixes up a TVector12, an imported glue pointer and
+ * two section-relative words, so the fragment is entered through real
+ * addresses. */
+#define PEF3_IMAGE_SIZE 342u
+#define PEF3_CODE_OFF 128u
+#define PEF3_DATA_OFF 176u
+#define PEF3_LOADER_OFF 192u
+#define PEF3_BASE 0x8000u
+#define PEF3_IMPORT_ADDR 0x9300u
+
+static uint32_t pef_test_resolver(void *ctx, const char *library,
+                                  uint8_t symbol_class, const char *name)
+{
+    (void)ctx;
+    if (library && strcmp(library, "TestLib") == 0 &&
+        symbol_class == 4u && strcmp(name, "_glue") == 0)
+        return PEF3_IMPORT_ADDR;
+    return 0;
+}
+
+static void pef_build_reloc_fragment(uint8_t *buf)
+{
+    memset(buf, 0, PEF3_IMAGE_SIZE);
+    pef_put32(buf, 0, 0x4A6F7921u);        /* 'Joy!' */
+    pef_put32(buf, 4, 0x70656666u);        /* 'peff' */
+    pef_put32(buf, 8, 0x70777063u);        /* 'pwpc' */
+    pef_put32(buf, 12, 1u);                /* formatVersion */
+    pef_put16(buf, 32, 3u);                /* sectionCount */
+    pef_put16(buf, 34, 1u);                /* instSectionCount */
+
+    /* Section 0: code, 48 bytes at 128. */
+    pef_put32(buf, 40, 0xFFFFFFFFu);
+    pef_put32(buf, 44, 0u);
+    pef_put32(buf, 48, 48u);
+    pef_put32(buf, 52, 48u);
+    pef_put32(buf, 56, 0u);
+    pef_put32(buf, 60, PEF3_CODE_OFF);
+    buf[64] = 0;                           /* code */
+    buf[66] = 2;
+
+    /* Section 1: data, 16 bytes at 176. */
+    pef_put32(buf, 68, 0xFFFFFFFFu);
+    pef_put32(buf, 72, 0u);
+    pef_put32(buf, 76, 16u);
+    pef_put32(buf, 80, 16u);
+    pef_put32(buf, 84, 0u);
+    pef_put32(buf, 88, PEF3_DATA_OFF);
+    buf[92] = 1;                           /* unpacked data */
+    buf[94] = 2;
+
+    /* Section 2: loader, 150 bytes at 192. */
+    pef_put32(buf, 96, 0xFFFFFFFFu);
+    pef_put32(buf, 100, 0u);
+    pef_put32(buf, 104, 150u);
+    pef_put32(buf, 108, 150u);
+    pef_put32(buf, 112, 0u);
+    pef_put32(buf, 116, PEF3_LOADER_OFF);
+    buf[120] = 4;                          /* loader */
+    buf[122] = 2;
+
+    /* TVector12: entry offset 16, TOC offset 0, glue word left alone. */
+    pef_put32(buf, PEF3_CODE_OFF + 0u, 16u);
+    pef_put32(buf, PEF3_CODE_OFF + 4u, 0u);
+    pef_put32(buf, PEF3_CODE_OFF + 8u, 0u);
+    /* Imported glue pointer placeholder. */
+    pef_put32(buf, PEF3_CODE_OFF + 12u, 0u);
+    /* Fragment at offset 16: li r3,42; ori r7,r0,0x8000; lwz r9,12(r7);
+     * li r8,0x2000; stw r9,0(r8); sc.  ori (not lis) builds the real
+     * load address 0x8000, so the read hits base+12, the resolved
+     * import pointer in the TVector12. */
+    pef_put32(buf, PEF3_CODE_OFF + 16u, 0x3860002Au);
+    pef_put32(buf, PEF3_CODE_OFF + 20u, 0x60078000u);
+    pef_put32(buf, PEF3_CODE_OFF + 24u, 0x8127000Cu);
+    pef_put32(buf, PEF3_CODE_OFF + 28u, 0x39002000u);
+    pef_put32(buf, PEF3_CODE_OFF + 32u, 0x91280000u);
+    pef_put32(buf, PEF3_CODE_OFF + 36u, 0x44000002u);
+
+    /* Loader header: one import library, two relocation sections. */
+    pef_put32(buf, PEF3_LOADER_OFF + 0u, 0u);           /* mainSection */
+    pef_put32(buf, PEF3_LOADER_OFF + 4u, 0u);           /* mainOffset */
+    pef_put32(buf, PEF3_LOADER_OFF + 8u, 0xFFFFFFFFu);  /* initSection */
+    pef_put32(buf, PEF3_LOADER_OFF + 16u, 0xFFFFFFFFu); /* termSection */
+    pef_put32(buf, PEF3_LOADER_OFF + 24u, 1u);          /* importedLibraryCount */
+    pef_put32(buf, PEF3_LOADER_OFF + 28u, 1u);          /* totalImportedSymbols */
+    pef_put32(buf, PEF3_LOADER_OFF + 32u, 2u);          /* relocSectionCount */
+    pef_put32(buf, PEF3_LOADER_OFF + 36u, 108u);        /* relocInstrOffset */
+    pef_put32(buf, PEF3_LOADER_OFF + 40u, 132u);        /* loaderStringsOffset */
+    pef_put32(buf, PEF3_LOADER_OFF + 44u, 146u);        /* exportHashOffset */
+    pef_put32(buf, PEF3_LOADER_OFF + 48u, 0u);          /* exportHashTablePower */
+    pef_put32(buf, PEF3_LOADER_OFF + 52u, 0u);          /* exportedSymbolCount */
+
+    /* Imported library "TestLib" (strings at 132) and symbol "_glue". */
+    pef_put32(buf, PEF3_LOADER_OFF + 56u, 0u);          /* library nameOffset */
+    pef_put32(buf, PEF3_LOADER_OFF + 68u, 1u);          /* importedSymbolCount */
+    pef_put32(buf, PEF3_LOADER_OFF + 72u, 0u);          /* firstImportedSymbol */
+    pef_put32(buf, PEF3_LOADER_OFF + 80u, (4u << 24) | 8u); /* class 4, "_glue" */
+
+    /* Relocation headers: section 0 at 0, section 1 at 12. */
+    pef_put16(buf, PEF3_LOADER_OFF + 84u, 0u);
+    pef_put32(buf, PEF3_LOADER_OFF + 88u, 6u);
+    pef_put32(buf, PEF3_LOADER_OFF + 92u, 0u);
+    pef_put16(buf, PEF3_LOADER_OFF + 96u, 1u);
+    pef_put32(buf, PEF3_LOADER_OFF + 100u, 6u);
+    pef_put32(buf, PEF3_LOADER_OFF + 104u, 12u);
+
+    /* Section 0: SetPosition 0, TVector12 x1, SetPosition 12, SmByImport 0. */
+    pef_put16(buf, PEF3_LOADER_OFF + 108u, 0xA000u);
+    pef_put16(buf, PEF3_LOADER_OFF + 110u, 0u);
+    pef_put16(buf, PEF3_LOADER_OFF + 112u, 0x4400u);
+    pef_put16(buf, PEF3_LOADER_OFF + 114u, 0xA000u);
+    pef_put16(buf, PEF3_LOADER_OFF + 116u, 12u);
+    pef_put16(buf, PEF3_LOADER_OFF + 118u, 0x6000u);
+    /* Section 1: SetPosition 0, BySectD x1, SetPosition 4, SmBySection 0. */
+    pef_put16(buf, PEF3_LOADER_OFF + 120u, 0xA000u);
+    pef_put16(buf, PEF3_LOADER_OFF + 122u, 0u);
+    pef_put16(buf, PEF3_LOADER_OFF + 124u, 0x4200u);
+    pef_put16(buf, PEF3_LOADER_OFF + 126u, 0xA000u);
+    pef_put16(buf, PEF3_LOADER_OFF + 128u, 4u);
+    pef_put16(buf, PEF3_LOADER_OFF + 130u, 0x6600u);
+
+    /* String table and the mandatory (empty) export hash slot. */
+    memcpy(buf + PEF3_LOADER_OFF + 132u, "TestLib", 8u);
+    memcpy(buf + PEF3_LOADER_OFF + 140u, "_glue", 6u);
+    pef_put32(buf, PEF3_LOADER_OFF + 146u, 0u);
+}
+
+static void test_pef_reloc(void)
+{
+    static qrx_pef_t image;
+    uint8_t built[PEF3_IMAGE_SIZE];
+    uint8_t damaged[PEF3_IMAGE_SIZE];
+#ifdef __AROS__
+    qrx_ppc_t start;
+#endif
+    qrx_pef_status_t st;
+    unsigned before = failures;
+
+    pef_build_reloc_fragment(built);
+
+    memset(memory, 0, sizeof(memory));
+    qrx_ppc_init(&ppc, memory, (uint32_t)sizeof(memory));
+    expect_u32("pef_reloc_parse",
+               (uint32_t)qrx_pef_parse(&image, built, PEF3_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_OK);
+    expect_u32("pef_reloc_sections", image.section_count, 3u);
+    expect_u32("pef_reloc_loader_index", (uint32_t)image.loader_index, 2u);
+    expect_u32("pef_reloc_reloc_sections", image.reloc_section_count, 2u);
+    expect_u32("pef_reloc_header0", image.reloc_headers[0].reloc_count, 6u);
+    expect_u32("pef_reloc_header1",
+               image.reloc_headers[1].first_reloc_offset, 12u);
+    expect_u32("pef_reloc_load",
+               (uint32_t)qrx_pef_load(&image, &ppc, PEF3_BASE),
+               (uint32_t)QRX_PEF_OK);
+    /* Unresolved imports fail before the first write. */
+    expect_u32("pef_reloc_unresolved",
+               (uint32_t)qrx_pef_relocate(&image, &ppc, 0, 0),
+               (uint32_t)QRX_PEF_ERR_UNRESOLVED);
+    expect_u32("pef_reloc_no_partial", get32(PEF3_BASE), 16u);
+
+    st = qrx_pef_relocate(&image, &ppc, pef_test_resolver, 0);
+    expect_u32("pef_reloc_status", (uint32_t)st, (uint32_t)QRX_PEF_OK);
+    expect_u32("pef_reloc_tvec_entry", get32(PEF3_BASE), 0x8010u);
+    expect_u32("pef_reloc_tvec_toc", get32(PEF3_BASE + 4u), 0x9000u);
+    expect_u32("pef_reloc_tvec_glue_word", get32(PEF3_BASE + 8u), 0u);
+    expect_u32("pef_reloc_import", get32(PEF3_BASE + 12u), PEF3_IMPORT_ADDR);
+    expect_u32("pef_reloc_sectd", get32(PEF3_BASE + 0x1000u), 0x9000u);
+    expect_u32("pef_reloc_section0", get32(PEF3_BASE + 0x1004u), 0x8000u);
+
+    ppc.cpu.pc = get32(PEF3_BASE);
+    ppc.cpu.gpr[0] = 0;
+    ppc.cpu.gpr[1] = 0x3000;
+    ppc.cpu.gpr[2] = 0x3000;
+    expect_u32("pef_reloc_entry", ppc.cpu.pc, 0x8010u);
+#ifdef __AROS__
+    start = ppc;
+    memcpy(memory_jit, memory, sizeof(memory));
+#endif
+    expect_status("pef_reloc_run", qrx_ppc_run(&ppc, 1000), QRX_PPC_TRAP);
+    expect_u32("pef_reloc_run_r3", ppc.cpu.gpr[3], 42u);
+    expect_u32("pef_reloc_run_r9", ppc.cpu.gpr[9], PEF3_IMPORT_ADDR);
+    expect_u32("pef_reloc_run_mem", get32(DATA_BASE), PEF3_IMPORT_ADDR);
+
+#ifdef __AROS__
+    if (jit_code) {
+        qrx_ppc_t native = start;
+
+        native.mem.data = memory_jit;
+        qrx_ppc_jit_reset(&jit);
+        expect_status("pef_reloc_jit", qrx_ppc_run_jit(&native, &jit, 1000),
+                      QRX_PPC_TRAP);
+        expect_u32("pef_reloc_jit_r9", native.cpu.gpr[9], PEF3_IMPORT_ADDR);
+        expect_u32("pef_reloc_jit_mem", get32_native(DATA_BASE),
+                   PEF3_IMPORT_ADDR);
+        compare_jit_state(&ppc, &native);
+    }
+#endif
+
+    /* Invalid opcode in the relocation stream. */
+    memcpy(damaged, built, sizeof(damaged));
+    pef_put16(damaged, PEF3_LOADER_OFF + 108u, 0x7C00u);
+    memset(memory, 0, sizeof(memory));
+    qrx_ppc_init(&ppc, memory, (uint32_t)sizeof(memory));
+    expect_u32("pef_reloc_bad_parse",
+               (uint32_t)qrx_pef_parse(&image, damaged, PEF3_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_OK);
+    expect_u32("pef_reloc_bad_load",
+               (uint32_t)qrx_pef_load(&image, &ppc, PEF3_BASE),
+               (uint32_t)QRX_PEF_OK);
+    expect_u32("pef_reloc_bad_opcode",
+               (uint32_t)qrx_pef_relocate(&image, &ppc, pef_test_resolver, 0),
+               (uint32_t)QRX_PEF_ERR_RELOC);
+
+    /* A relocation header must name an existing section. */
+    memcpy(damaged, built, sizeof(damaged));
+    pef_put16(damaged, PEF3_LOADER_OFF + 84u, 7u);
+    expect_u32("pef_reloc_bad_section",
+               (uint32_t)qrx_pef_parse(&image, damaged, PEF3_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_ERR_RELOC);
+
+    /* The relocation area must stay inside the loader section. */
+    memcpy(damaged, built, sizeof(damaged));
+    pef_put32(damaged, PEF3_LOADER_OFF + 92u, 140u);
+    expect_u32("pef_reloc_bad_stream",
+               (uint32_t)qrx_pef_parse(&image, damaged, PEF3_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_ERR_RELOC);
+
+    report("pef_reloc", before);
+}
+
+/* --- P1.5 mixed mode ------------------------------------------------ */
+
+#define MIX_CODE 0x1200u
+#define MIX_GLUE 0x1800u
+#define MIX_SP_TOP 0x3000u
+#define MIX_SP_LIMIT 0x2800u
+#define MIX_SCRATCH 0x2200u
+#define MIX_GLUE_SP ((MIX_SP_TOP - 24u) & ~0xFu)
+
+#define MIX_F_ADD 0x1200u
+#define MIX_F_STACK 0x1240u
+#define MIX_F_FP 0x1260u
+#define MIX_F_IMPORT 0x1280u
+#define MIX_F_NESTED 0x12C0u
+#define MIX_F_BADSP 0x1300u
+#define MIX_F_UNKNOWN 0x1310u
+#define MIX_F_ILLEGAL 0x1320u
+#define MIX_F_SPIN 0x1330u
+#define MIX_F_SIG 0x1340u
+#define MIX_F_LFD 0x1360u
+#define MIX_F_SIG_IMPORT 0x1380u
+#define MIX_F_SIG_STACK 0x1400u
+#define MIX_F_SIG_BADSP 0x1480u
+#define MIX_F_PROC 0x14C0u
+#define MIX_F_PROC_BAD 0x1500u
+#define MIX_F_RDNEST 0x1540u
+#define MIX_F_RDCALL 0x1580u
+#define MIX_F_RDERR 0x15C0u
+#define MIX_F_PI 0x1600u        /* r3+r4+r5: the ProcInfo call target */
+#define MIX_F_PI0 0x1620u       /* no parameters, constant result */
+#define MIX_RD_CALL 0x20C0u     /* fat: 68k record first, PPC record second */
+#define MIX_RD_68K 0x2140u      /* 68k record only */
+#define MIX_RD_SPIN 0x2160u     /* PPC record, endless loop */
+#define MIX_RD_BADSP 0x2180u    /* PPC record that keeps its own stack */
+#define MIX_RD_SIG 0x21A0u      /* PPC record with nine integer parameters */
+#define MIX_RD_PI 0x21C0u       /* ProcInfo: three 4-byte parameters */
+#define MIX_RD_PI0 0x21E0u      /* ProcInfo: no parameters, void */
+#define MIX_RD_PINARROW 0x2240u /* ProcInfo: 1-byte and 2-byte parameters */
+#define MIX_RD_PIBAD 0x2260u    /* rewritten for rejected ProcInfos */
+#define MIX_F_PROC_PI 0x1640u   /* descriptor import, three arguments */
+#define MIX_F_PROC_PI68 0x1680u /* the same for a 68k-only descriptor */
+#define MIX_F_IDX_PI 0x16C0u    /* index import with a bound descriptor */
+#define MIX_PROC_PI 0x22C0u     /* fat: opaque 68k ProcInfo, PPC ProcInfo */
+#define MIX_PROC_PI68 0x2320u   /* 68k record only */
+#define MIX_GLUE_RD 0x2360u     /* glue case: fat, PPC ProcInfo names two */
+#define MIX_GLUE_RDBAD 0x23A0u  /* glue case: ProcInfo describes nothing */
+#define MIX_IDX_RD 0x23E0u      /* bound to index 5: fat, PPC ProcInfo */
+
+typedef struct {
+    qrx_mix_t *mix;
+    unsigned calls;
+    unsigned nested_ok;
+    uint32_t seen[2];
+    unsigned gcount;
+    unsigned fcount;
+    unsigned stack_count;
+    uint32_t stack0;
+    uint32_t stack1;
+    uint32_t ptr;
+    uint32_t sp;
+    double f0;
+    uint32_t sum;
+    uint32_t proc;
+    /* 68k -> PPC re-entry through a routine descriptor */
+    unsigned rd_ok;
+    unsigned rd_ok2;
+    unsigned rd_rd;
+    unsigned rd_bad;
+    unsigned rd_limit;
+    unsigned rd_sp;
+    unsigned rd_restore;
+    uint32_t rd_sp_seen;
+    uint32_t rd_back;
+    uint32_t rd_stack;
+    uint32_t rd_marker[2];
+} mix_ctx_t;
+
+/* 68k callback: D0 becomes r3, and it writes through guest memory. */
+static uint32_t mix_import_add(void *ctx, const qrx_mix_args_t *args,
+                               qrx_mix_result_t *extra)
+{
+    mix_ctx_t *c = (mix_ctx_t *)ctx;
+
+    (void)extra;
+    c->calls++;
+    c->seen[0] = args->gpr[0];
+    c->seen[1] = args->gpr[1];
+    put32(MIX_SCRATCH, args->gpr[0] + args->gpr[1]);
+    return 42u;
+}
+
+/* 68k callback that re-enters PPC code (68k -> PPC -> 68k -> PPC). */
+static uint32_t mix_import_nested(void *ctx, const qrx_mix_args_t *args,
+                                  qrx_mix_result_t *extra)
+{
+    mix_ctx_t *c = (mix_ctx_t *)ctx;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+
+    (void)args;
+    (void)extra;
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    in.gpr[0] = 20u;
+    in.gpr[1] = 22u;
+    in.gpr_count = 2u;
+    c->nested_ok =
+        qrx_mix_call(c->mix, MIX_F_ADD, 0, &in, &out, 4096u) == QRX_MIX_OK &&
+        out.gpr[0] == 42u;
+    return out.gpr[0] + 5u;
+}
+
+/* 68k callback with a fixed signature "iipd": two integers, a pointer and a
+ * double.  It checks that the bridge placed every class in the right register
+ * and writes through the pointer argument. */
+static uint32_t mix_import_sig(void *ctx, const qrx_mix_args_t *args,
+                               qrx_mix_result_t *extra)
+{
+    mix_ctx_t *c = (mix_ctx_t *)ctx;
+
+    (void)extra;
+    c->calls++;
+    c->gcount = args->gpr_count;
+    c->fcount = args->fpr_count;
+    c->seen[0] = args->gpr[0];
+    c->seen[1] = args->gpr[1];
+    c->ptr = args->gpr[2];
+    c->f0 = args->fpr[0];
+    put32(args->gpr[2], 0x55u);
+    return 7u;
+}
+
+/* 68k callback with ten integer parameters: the last two arrive in the
+ * parameter area and must show up as raw stack words. */
+static uint32_t mix_import_stack(void *ctx, const qrx_mix_args_t *args,
+                                 qrx_mix_result_t *extra)
+{
+    mix_ctx_t *c = (mix_ctx_t *)ctx;
+    unsigned i;
+
+    (void)extra;
+    c->calls++;
+    c->gcount = args->gpr_count;
+    c->stack_count = args->stack_count;
+    c->stack0 = args->stack[0];
+    c->stack1 = args->stack[1];
+    c->sp = args->sp;
+    c->sum = 0u;
+    for (i = 0; i < args->gpr_count; i++)
+        c->sum += args->gpr[i];
+    for (i = 0; i < args->stack_count; i++)
+        c->sum += args->stack[i];
+    return c->sum;
+}
+
+/* 68k callback reached through a routine descriptor: the bridge resolves the
+ * 68k record and reports its entry point in args->proc. */
+static uint32_t mix_import_proc(void *ctx, const qrx_mix_args_t *args,
+                                qrx_mix_result_t *extra)
+{
+    mix_ctx_t *c = (mix_ctx_t *)ctx;
+    unsigned i;
+
+    (void)extra;
+    c->calls++;
+    c->proc = args->proc;
+    c->gcount = args->gpr_count;
+    c->stack_count = args->stack_count;
+    c->stack0 = args->stack[0];
+    c->sp = args->sp;
+    c->sum = 0u;
+    for (i = 0; i < args->gpr_count; i++)
+        c->sum += args->gpr[i];
+    for (i = 0; i < args->stack_count; i++)
+        c->sum += args->stack[i];
+    return c->sum;
+}
+
+/* 68k callback reached from PPC that calls back into PPC through a routine
+ * descriptor.  It checks the returned value, the guest writes of the nested
+ * routine, the back chain and parameter word of the nested frame, and that the
+ * nested call left the outer CPU state untouched. */
+static uint32_t mix_import_rd_call(void *ctx, const qrx_mix_args_t *args,
+                                   qrx_mix_result_t *extra)
+{
+    mix_ctx_t *c = (mix_ctx_t *)ctx;
+    qrx_mix_sig_t sig2;
+    qrx_mix_sig_t sig9;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    qrx_ppc_state_t saved;
+    uint32_t r1;
+    unsigned i;
+
+    (void)extra;
+    c->calls++;
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    if (qrx_mix_sig_parse(&sig2, "ii", 'i') != QRX_MIX_OK ||
+        qrx_mix_sig_parse(&sig9, "iiiiiiiii", 'i') != QRX_MIX_OK)
+        return 0u;
+    r1 = c->mix->ppc->cpu.gpr[1];
+    c->rd_sp_seen = (r1 - QRX_MIX_LINKAGE) & ~0xFu;
+    saved = c->mix->ppc->cpu;
+
+    /* The fat descriptor lists its 68k record first; the PPC record is used. */
+    in.gpr[0] = args->gpr[0];
+    in.gpr[1] = args->gpr[1];
+    in.gpr_count = 2u;
+    c->rd_ok = qrx_mix_rd_invoke(c->mix, MIX_RD_CALL, &sig2, &in, &out, 200u) ==
+                   QRX_MIX_OK &&
+               out.gpr[0] == in.gpr[0] + in.gpr[1];
+    c->rd_restore = memcmp(&saved, &c->mix->ppc->cpu, sizeof(saved)) == 0;
+    c->rd_back = get32(c->rd_sp_seen);
+    c->rd_marker[0] = get32(MIX_SCRATCH + 0x10u);
+    c->rd_marker[1] = get32(MIX_SCRATCH + 0x14u);
+
+    /* Nine parameters put the last one into the nested parameter area. */
+    for (i = 0; i < 8u; i++)
+        in.gpr[i] = i + 1u;
+    in.gpr_count = 8u;
+    in.stack[0] = 9u;
+    in.stack_count = 1u;
+    c->rd_ok2 = qrx_mix_rd_invoke(c->mix, MIX_RD_SIG, &sig9, &in, &out, 200u) ==
+                    QRX_MIX_OK && out.gpr[0] == 12u;
+    c->rd_stack = get32(c->rd_sp_seen + QRX_MIX_LINKAGE);
+    return out.gpr[0] + 13u;
+}
+
+/* The 68k side of a real glue case: it holds nothing but a UniversalProcPtr
+ * (the descriptor address) and re-enters PPC without a signature, so the
+ * record's ProcInfo has to supply the placement.  The second descriptor has a
+ * ProcInfo that describes none; that attempt must fail and leave the CPU state
+ * exactly as the outer call left it. */
+static uint32_t mix_import_glue_pi(void *ctx, const qrx_mix_args_t *args,
+                                   qrx_mix_result_t *extra)
+{
+    mix_ctx_t *c = (mix_ctx_t *)ctx;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    qrx_ppc_state_t saved;
+    uint32_t r1;
+
+    (void)extra;
+    c->calls++;
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    r1 = c->mix->ppc->cpu.gpr[1];
+    c->rd_sp_seen = (r1 - QRX_MIX_LINKAGE) & ~0xFu;
+    saved = c->mix->ppc->cpu;
+
+    in.gpr[0] = args->gpr[0];
+    in.gpr[1] = args->gpr[1];
+    in.gpr_count = 2u;
+    c->rd_ok = qrx_mix_rd_invoke(c->mix, MIX_GLUE_RD, 0, &in, &out, 200u) ==
+                   QRX_MIX_OK &&
+               out.gpr[0] == in.gpr[0] + in.gpr[1];
+    c->rd_marker[0] = get32(0x2210u);
+    c->rd_marker[1] = get32(0x2214u);
+    c->rd_rd = qrx_mix_rd_invoke(c->mix, MIX_GLUE_RDBAD, 0, &in, &out, 200u) ==
+                   QRX_MIX_ERR_RD;
+    c->rd_restore = memcmp(&saved, &c->mix->ppc->cpu, sizeof(saved)) == 0;
+    c->rd_back = get32(c->rd_sp_seen);
+    return in.gpr[0] + in.gpr[1] + 1u;
+}
+
+/* The failing nested attempts.  Each must report its error and leave the outer
+ * CPU state exactly as it was, otherwise the callback could not continue. */
+static uint32_t mix_import_rd_errors(void *ctx, const qrx_mix_args_t *args,
+                                     qrx_mix_result_t *extra)
+{
+    mix_ctx_t *c = (mix_ctx_t *)ctx;
+    qrx_mix_sig_t sig;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    qrx_ppc_state_t saved;
+
+    (void)args;
+    (void)extra;
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    in.gpr_count = 2u;
+    c->calls++;
+    saved = c->mix->ppc->cpu;
+    if (qrx_mix_sig_parse(&sig, "ii", 'i') != QRX_MIX_OK)
+        return 0u;
+
+    c->rd_rd = qrx_mix_rd_invoke(c->mix, MIX_RD_68K, &sig, &in, &out, 200u) ==
+                   QRX_MIX_ERR_RD &&
+               memcmp(&saved, &c->mix->ppc->cpu, sizeof(saved)) == 0;
+    c->rd_bad = qrx_mix_rd_invoke(c->mix, MIX_SCRATCH, &sig, &in, &out, 200u) ==
+                    QRX_MIX_ERR_RD &&
+                memcmp(&saved, &c->mix->ppc->cpu, sizeof(saved)) == 0;
+    c->rd_limit = qrx_mix_rd_invoke(c->mix, MIX_RD_SPIN, &sig, &in, &out, 4u) ==
+                      QRX_MIX_ERR_LIMIT &&
+                  memcmp(&saved, &c->mix->ppc->cpu, sizeof(saved)) == 0;
+    c->rd_sp = qrx_mix_rd_invoke(c->mix, MIX_RD_BADSP, &sig, &in, &out, 100u) ==
+                   QRX_MIX_ERR_SP &&
+               memcmp(&saved, &c->mix->ppc->cpu, sizeof(saved)) == 0;
+    return 9u;
+}
+
+static void mix_load(void)
+{
+    memset(memory, 0, sizeof(memory));
+    qrx_ppc_init(&ppc, memory, (uint32_t)sizeof(memory));
+
+    /* 0x1200: r3 = r3 + r4, with a PowerOpen frame and saved LR. */
+    put32(MIX_F_ADD + 0u, 0x9421FFE0u);  /* stwu r1,-32(r1) */
+    put32(MIX_F_ADD + 4u, 0x7C0802A6u);  /* mflr r0 */
+    put32(MIX_F_ADD + 8u, 0x90010008u);  /* stw r0,8(r1) */
+    put32(MIX_F_ADD + 12u, 0x7C632214u); /* add r3,r3,r4 */
+    put32(MIX_F_ADD + 16u, 0x80010008u); /* lwz r0,8(r1) */
+    put32(MIX_F_ADD + 20u, 0x7C0803A6u); /* mtlr r0 */
+    put32(MIX_F_ADD + 24u, 0x38210020u); /* addi r1,r1,32 */
+    put32(MIX_F_ADD + 28u, 0x4E800020u); /* blr */
+
+    /* 0x1240: r3+r4 plus both stack arguments; r10 is kept as proof that the
+     * eighth register argument arrived. */
+    put32(MIX_F_STACK + 0u, 0x80A10018u);  /* lwz r5,24(r1) */
+    put32(MIX_F_STACK + 4u, 0x80C1001Cu);  /* lwz r6,28(r1) */
+    put32(MIX_F_STACK + 8u, 0x7C632214u);  /* add r3,r3,r4 */
+    put32(MIX_F_STACK + 12u, 0x7C632A14u); /* add r3,r3,r5 */
+    put32(MIX_F_STACK + 16u, 0x7C633214u); /* add r3,r3,r6 */
+    put32(MIX_F_STACK + 20u, 0x91402204u); /* stw r10,0x2204(0) */
+    put32(MIX_F_STACK + 24u, 0x4E800020u); /* blr */
+
+    /* 0x1260: f1 = f1 + f2. */
+    put32(MIX_F_FP + 0u, 0xEC21102Au); /* fadd f1,f1,f2 */
+    put32(MIX_F_FP + 4u, 0x4E800020u); /* blr */
+
+    /* 0x1280: import 1 with (r3,r4) = (7,35), result + 1. */
+    put32(MIX_F_IMPORT + 0u, 0x9421FFE0u);  /* stwu r1,-32(r1) */
+    put32(MIX_F_IMPORT + 4u, 0x7C0802A6u);  /* mflr r0 */
+    put32(MIX_F_IMPORT + 8u, 0x90010008u);  /* stw r0,8(r1) */
+    put32(MIX_F_IMPORT + 12u, 0x38000001u); /* li r0,1 */
+    put32(MIX_F_IMPORT + 16u, 0x38600007u); /* li r3,7 */
+    put32(MIX_F_IMPORT + 20u, 0x38800023u); /* li r4,35 */
+    put32(MIX_F_IMPORT + 24u, 0x44000002u); /* sc */
+    put32(MIX_F_IMPORT + 28u, 0x38630001u); /* addi r3,r3,1 */
+    put32(MIX_F_IMPORT + 32u, 0x80010008u); /* lwz r0,8(r1) */
+    put32(MIX_F_IMPORT + 36u, 0x7C0803A6u); /* mtlr r0 */
+    put32(MIX_F_IMPORT + 40u, 0x38210020u); /* addi r1,r1,32 */
+    put32(MIX_F_IMPORT + 44u, 0x4E800020u); /* blr */
+
+    /* 0x12C0: import 2, which itself calls back into PPC. */
+    put32(MIX_F_NESTED + 0u, 0x9421FFE0u);  /* stwu r1,-32(r1) */
+    put32(MIX_F_NESTED + 4u, 0x7C0802A6u);  /* mflr r0 */
+    put32(MIX_F_NESTED + 8u, 0x90010008u);  /* stw r0,8(r1) */
+    put32(MIX_F_NESTED + 12u, 0x38000002u); /* li r0,2 */
+    put32(MIX_F_NESTED + 16u, 0x44000002u); /* sc */
+    put32(MIX_F_NESTED + 20u, 0x80010008u); /* lwz r0,8(r1) */
+    put32(MIX_F_NESTED + 24u, 0x7C0803A6u); /* mtlr r0 */
+    put32(MIX_F_NESTED + 28u, 0x38210020u); /* addi r1,r1,32 */
+    put32(MIX_F_NESTED + 32u, 0x4E800020u); /* blr */
+
+    /* 0x1300: leaves the stack pointer moved. */
+    put32(MIX_F_BADSP + 0u, 0x9421FFF0u); /* stwu r1,-16(r1) */
+    put32(MIX_F_BADSP + 4u, 0x4E800020u); /* blr */
+
+    /* 0x1310: import index 15 is never registered. */
+    put32(MIX_F_UNKNOWN + 0u, 0x3800000Fu); /* li r0,15 */
+    put32(MIX_F_UNKNOWN + 4u, 0x44000002u); /* sc */
+
+    /* 0x1320: illegal instruction, 0x1330: endless branch. */
+    put32(MIX_F_ILLEGAL, 0x00000000u);
+    put32(MIX_F_SPIN, 0x48000000u); /* b . */
+
+    /* 0x1340: r3+r4 plus the first parameter-area word. */
+    put32(MIX_F_SIG + 0u, 0x80A10018u);  /* lwz r5,24(r1) */
+    put32(MIX_F_SIG + 4u, 0x7C632214u);  /* add r3,r3,r4 */
+    put32(MIX_F_SIG + 8u, 0x7C632A14u);  /* add r3,r3,r5 */
+    put32(MIX_F_SIG + 12u, 0x4E800020u); /* blr */
+
+    /* 0x1360: f1 = f1 + the double at 24(r1). */
+    put32(MIX_F_LFD + 0u, 0xC8410018u);  /* lfd f2,24(r1) */
+    put32(MIX_F_LFD + 4u, 0xEC21102Au);  /* fadd f1,f1,f2 */
+    put32(MIX_F_LFD + 8u, 0x4E800020u);  /* blr */
+
+    /* 0x1380: import 3 with (r3,r4,r5,f1) = (0x11,0x22,MIX_SCRATCH,1.5). */
+    put32(MIX_F_SIG_IMPORT + 0u, 0x9421FFE0u);  /* stwu r1,-32(r1) */
+    put32(MIX_F_SIG_IMPORT + 4u, 0x38000003u);  /* li r0,3 */
+    put32(MIX_F_SIG_IMPORT + 8u, 0x38600011u);  /* li r3,0x11 */
+    put32(MIX_F_SIG_IMPORT + 12u, 0x38800022u); /* li r4,0x22 */
+    put32(MIX_F_SIG_IMPORT + 16u, 0x3CA00000u); /* lis r5,0 */
+    put32(MIX_F_SIG_IMPORT + 20u, 0x60A52200u); /* ori r5,r5,0x2200 */
+    put32(MIX_F_SIG_IMPORT + 24u, 0xC8202100u); /* lfd f1,0x2100(0) */
+    put32(MIX_F_SIG_IMPORT + 28u, 0x44000002u); /* sc */
+    put32(MIX_F_SIG_IMPORT + 32u, 0x38630001u); /* addi r3,r3,1 */
+    put32(MIX_F_SIG_IMPORT + 36u, 0x38210020u); /* addi r1,r1,32 */
+    put32(MIX_F_SIG_IMPORT + 40u, 0x4E800020u); /* blr */
+
+    /* 0x1400: import 4 with r3..r10 = 1..8 and 0x21/0x22 at 24(r1)/28(r1). */
+    put32(MIX_F_SIG_STACK + 0u, 0x9421FFD0u);  /* stwu r1,-48(r1) */
+    put32(MIX_F_SIG_STACK + 4u, 0x38600001u);  /* li r3,1 */
+    put32(MIX_F_SIG_STACK + 8u, 0x38800002u);  /* li r4,2 */
+    put32(MIX_F_SIG_STACK + 12u, 0x38A00003u); /* li r5,3 */
+    put32(MIX_F_SIG_STACK + 16u, 0x38C00004u); /* li r6,4 */
+    put32(MIX_F_SIG_STACK + 20u, 0x38E00005u); /* li r7,5 */
+    put32(MIX_F_SIG_STACK + 24u, 0x39000006u); /* li r8,6 */
+    put32(MIX_F_SIG_STACK + 28u, 0x39200007u); /* li r9,7 */
+    put32(MIX_F_SIG_STACK + 32u, 0x39400008u); /* li r10,8 */
+    put32(MIX_F_SIG_STACK + 36u, 0x38000021u); /* li r0,0x21 */
+    put32(MIX_F_SIG_STACK + 40u, 0x90010018u); /* stw r0,24(r1) */
+    put32(MIX_F_SIG_STACK + 44u, 0x38000022u); /* li r0,0x22 */
+    put32(MIX_F_SIG_STACK + 48u, 0x9001001Cu); /* stw r0,28(r1) */
+    put32(MIX_F_SIG_STACK + 52u, 0x38000004u); /* li r0,4 */
+    put32(MIX_F_SIG_STACK + 56u, 0x44000002u); /* sc */
+    put32(MIX_F_SIG_STACK + 60u, 0x38630001u); /* addi r3,r3,1 */
+    put32(MIX_F_SIG_STACK + 64u, 0x38210030u); /* addi r1,r1,48 */
+    put32(MIX_F_SIG_STACK + 68u, 0x4E800020u); /* blr */
+
+    /* 0x1480: import 5 with a misaligned stack pointer. */
+    put32(MIX_F_SIG_BADSP + 0u, 0x3C200000u);  /* lis r1,0 */
+    put32(MIX_F_SIG_BADSP + 4u, 0x6021FFF8u);  /* ori r1,r1,0xFFF8 */
+    put32(MIX_F_SIG_BADSP + 8u, 0x38000005u);  /* li r0,5 */
+    put32(MIX_F_SIG_BADSP + 12u, 0x44000002u); /* sc */
+    put64(0x2100u, double_bits(1.5));
+
+    /* 0x14C0: import through the routine descriptor at 0x2040 with eight
+     * register arguments and one stack word, then increment the result. */
+    put32(MIX_F_PROC + 0u, 0x9421FFE0u);   /* stwu r1,-32(r1) */
+    put32(MIX_F_PROC + 4u, 0x38600001u);   /* li r3,1 */
+    put32(MIX_F_PROC + 8u, 0x38800002u);   /* li r4,2 */
+    put32(MIX_F_PROC + 12u, 0x38A00003u);  /* li r5,3 */
+    put32(MIX_F_PROC + 16u, 0x38C00004u);  /* li r6,4 */
+    put32(MIX_F_PROC + 20u, 0x38E00005u);  /* li r7,5 */
+    put32(MIX_F_PROC + 24u, 0x39000006u);  /* li r8,6 */
+    put32(MIX_F_PROC + 28u, 0x39200007u);  /* li r9,7 */
+    put32(MIX_F_PROC + 32u, 0x39400008u);  /* li r10,8 */
+    put32(MIX_F_PROC + 36u, 0x39600055u);  /* li r11,0x55 */
+    put32(MIX_F_PROC + 40u, 0x91610018u);  /* stw r11,24(r1) */
+    put32(MIX_F_PROC + 44u, 0x38002040u);  /* li r0,0x2040 */
+    put32(MIX_F_PROC + 48u, 0x44000002u);  /* sc */
+    put32(MIX_F_PROC + 52u, 0x38630001u);  /* addi r3,r3,1 */
+    put32(MIX_F_PROC + 56u, 0x38210020u);  /* addi r1,r1,32 */
+    put32(MIX_F_PROC + 60u, 0x4E800020u);  /* blr */
+
+    /* 0x1500: r0 addresses a descriptor that is never registered. */
+    put32(MIX_F_PROC_BAD + 0u, 0x38002080u); /* li r0,0x2080 */
+    put32(MIX_F_PROC_BAD + 4u, 0x44000002u); /* sc */
+
+    /* 0x1540: nested PPC target: records its arguments, returns their sum. */
+    put32(MIX_F_RDNEST + 0u, 0x90602210u);  /* stw r3,0x2210(0) */
+    put32(MIX_F_RDNEST + 4u, 0x90802214u);  /* stw r4,0x2214(0) */
+    put32(MIX_F_RDNEST + 8u, 0x7C632214u);  /* add r3,r3,r4 */
+    put32(MIX_F_RDNEST + 12u, 0x4E800020u); /* blr */
+    /* 0x1580: PPC caller whose import re-enters PPC through a descriptor. */
+    put32(MIX_F_RDCALL + 0u, 0x9421FFE0u);  /* stwu r1,-32(r1) */
+    put32(MIX_F_RDCALL + 4u, 0x7C0802A6u);  /* mflr r0 */
+    put32(MIX_F_RDCALL + 8u, 0x90010008u);  /* stw r0,8(r1) */
+    put32(MIX_F_RDCALL + 12u, 0x38000004u); /* li r0,4 */
+    put32(MIX_F_RDCALL + 16u, 0x3860000Bu); /* li r3,11 */
+    put32(MIX_F_RDCALL + 20u, 0x3880000Du); /* li r4,13 */
+    put32(MIX_F_RDCALL + 24u, 0x44000002u); /* sc */
+    put32(MIX_F_RDCALL + 28u, 0x38630001u); /* addi r3,r3,1 */
+    put32(MIX_F_RDCALL + 32u, 0x80010008u); /* lwz r0,8(r1) */
+    put32(MIX_F_RDCALL + 36u, 0x7C0803A6u); /* mtlr r0 */
+    put32(MIX_F_RDCALL + 40u, 0x38210020u); /* addi r1,r1,32 */
+    put32(MIX_F_RDCALL + 44u, 0x4E800020u); /* blr */
+    /* 0x15C0: the same caller for the failing nested attempts. */
+    put32(MIX_F_RDERR + 0u, 0x9421FFE0u);   /* stwu r1,-32(r1) */
+    put32(MIX_F_RDERR + 4u, 0x7C0802A6u);   /* mflr r0 */
+    put32(MIX_F_RDERR + 8u, 0x90010008u);   /* stw r0,8(r1) */
+    put32(MIX_F_RDERR + 12u, 0x38000005u);  /* li r0,5 */
+    put32(MIX_F_RDERR + 16u, 0x44000002u);  /* sc */
+    put32(MIX_F_RDERR + 20u, 0x80010008u);  /* lwz r0,8(r1) */
+    put32(MIX_F_RDERR + 24u, 0x7C0803A6u);  /* mtlr r0 */
+    put32(MIX_F_RDERR + 28u, 0x38210020u);  /* addi r1,r1,32 */
+    put32(MIX_F_RDERR + 32u, 0x4E800020u);  /* blr */
+    /* 0x1600: the ProcInfo target, r3 + r4 + r5. */
+    put32(MIX_F_PI + 0u, 0x7C632214u);  /* add r3,r3,r4 */
+    put32(MIX_F_PI + 4u, 0x7C632A14u);  /* add r3,r3,r5 */
+    put32(MIX_F_PI + 8u, 0x4E800020u);  /* blr */
+    /* 0x1620: the parameterless ProcInfo target. */
+    put32(MIX_F_PI0 + 0u, 0x3860004Du); /* li r3,77 */
+    put32(MIX_F_PI0 + 4u, 0x4E800020u); /* blr */
+    /* 0x1640: descriptor import whose placement comes from ProcInfo. */
+    put32(MIX_F_PROC_PI + 0u, 0x38600001u);  /* li r3,1 */
+    put32(MIX_F_PROC_PI + 4u, 0x38800002u);  /* li r4,2 */
+    put32(MIX_F_PROC_PI + 8u, 0x38A00003u);  /* li r5,3 */
+    put32(MIX_F_PROC_PI + 12u, 0x380022C0u); /* li r0,0x22C0 */
+    put32(MIX_F_PROC_PI + 16u, 0x44000002u); /* sc */
+    put32(MIX_F_PROC_PI + 20u, 0x38630001u); /* addi r3,r3,1 */
+    put32(MIX_F_PROC_PI + 24u, 0x4E800020u); /* blr */
+    /* 0x1680: the same through the 68k-only descriptor at 0x2320. */
+    put32(MIX_F_PROC_PI68 + 0u, 0x38600029u); /* li r3,41 */
+    put32(MIX_F_PROC_PI68 + 4u, 0x38002320u); /* li r0,0x2320 */
+    put32(MIX_F_PROC_PI68 + 8u, 0x44000002u); /* sc */
+    put32(MIX_F_PROC_PI68 + 12u, 0x4E800020u); /* blr */
+    /* 0x16C0: an index import whose placement comes from a bound descriptor. */
+    put32(MIX_F_IDX_PI + 0u, 0x38600001u);  /* li r3,1 */
+    put32(MIX_F_IDX_PI + 4u, 0x38800002u);  /* li r4,2 */
+    put32(MIX_F_IDX_PI + 8u, 0x38A00003u);  /* li r5,3 */
+    put32(MIX_F_IDX_PI + 12u, 0x38000005u); /* li r0,5 */
+    put32(MIX_F_IDX_PI + 16u, 0x44000002u); /* sc */
+    put32(MIX_F_IDX_PI + 20u, 0x38630001u); /* addi r3,r3,1 */
+    put32(MIX_F_IDX_PI + 24u, 0x4E800020u); /* blr */
+}
+
+static qrx_mix_status_t mix_setup(qrx_mix_t *mix, mix_ctx_t *ctx)
+{
+    mix_load();
+    if (ctx) {
+        memset(ctx, 0, sizeof(*ctx));
+        ctx->mix = mix;
+    }
+    return qrx_mix_init(mix, &ppc, MIX_GLUE, MIX_SP_TOP, MIX_SP_LIMIT);
+}
+
+static void test_mixed_call(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    qrx_mix_status_t st;
+    unsigned before = failures;
+
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_call_init", (uint32_t)mix_setup(&mix, 0),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_call_glue_word", get32(MIX_GLUE), 0x44000002u);
+    in.gpr[0] = 3u;
+    in.gpr[1] = 4u;
+    in.gpr_count = 2u;
+    st = qrx_mix_call(&mix, MIX_F_ADD, 0, &in, &out, 1000u);
+    expect_u32("mixed_call_status", (uint32_t)st, (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_call_result", out.gpr[0], 7u);
+    /* The callee built its frame below the glue SP and saved LR at 8(SP). */
+    expect_u32("mixed_call_frame", get32(MIX_GLUE_SP - 32u), MIX_GLUE_SP);
+    expect_u32("mixed_call_saved_lr", get32(MIX_GLUE_SP - 24u), MIX_GLUE);
+    expect_u32("mixed_call_back_chain", get32(MIX_GLUE_SP), 0u);
+    report("mixed_call", before);
+}
+
+static void test_mixed_stack(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    unsigned i;
+    unsigned before = failures;
+
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_stack_init", (uint32_t)mix_setup(&mix, 0),
+               (uint32_t)QRX_MIX_OK);
+    for (i = 0; i < QRX_MIX_ARGS; i++)
+        in.gpr[i] = (uint32_t)i + 1u;
+    in.gpr_count = QRX_MIX_ARGS;
+    in.stack[0] = 9u;
+    in.stack[1] = 10u;
+    in.stack_count = 2u;
+    expect_u32("mixed_stack_status",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_STACK, 0, &in, &out, 1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_stack_result", out.gpr[0], 22u);
+    expect_u32("mixed_stack_param0", get32(MIX_GLUE_SP + 24u), 9u);
+    expect_u32("mixed_stack_param1", get32(MIX_GLUE_SP + 28u), 10u);
+    expect_u32("mixed_stack_last_reg", get32(MIX_SCRATCH + 4u), 8u);
+    report("mixed_stack", before);
+}
+
+static void test_mixed_fpu(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_fpu_init", (uint32_t)mix_setup(&mix, 0),
+               (uint32_t)QRX_MIX_OK);
+    in.fpr[0] = 1.5;
+    in.fpr[1] = 2.25;
+    in.fpr_count = 2u;
+    expect_u32("mixed_fpu_status",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_FP, 0, &in, &out, 1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u64("mixed_fpu_result", double_bits(out.fpr), double_bits(3.75));
+    report("mixed_fpu", before);
+}
+
+static void test_mixed_import(void)
+{
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_import_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_import_register",
+               (uint32_t)qrx_mix_register(&mix, 1u, mix_import_add, &ctx, 0),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_import_status",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_IMPORT, 0, 0, &out, 1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_import_result", out.gpr[0], 43u);
+    expect_u32("mixed_import_calls", ctx.calls, 1u);
+    expect_u32("mixed_import_arg0", ctx.seen[0], 7u);
+    expect_u32("mixed_import_arg1", ctx.seen[1], 35u);
+    expect_u32("mixed_import_68k_store", get32(MIX_SCRATCH), 42u);
+    report("mixed_import", before);
+}
+
+static void test_mixed_nested(void)
+{
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_nested_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_nested_register",
+               (uint32_t)qrx_mix_register(&mix, 2u, mix_import_nested, &ctx, 0),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_nested_status",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_NESTED, 0, 0, &out, 10000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_nested_result", out.gpr[0], 47u);
+    expect_u32("mixed_nested_inner", ctx.nested_ok, 1u);
+    report("mixed_nested", before);
+}
+
+static void test_mixed_errors(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+
+    memset(&out, 0, sizeof(out));
+    mix_load();
+    memset(&mix, 0, sizeof(mix));
+    expect_u32("mixed_errors_bad_stack",
+               (uint32_t)qrx_mix_init(&mix, &ppc, MIX_GLUE, MIX_SP_TOP + 4u,
+                                      MIX_SP_LIMIT),
+               (uint32_t)QRX_MIX_ERR_ARG);
+    expect_u32("mixed_errors_small_stack",
+               (uint32_t)qrx_mix_init(&mix, &ppc, MIX_GLUE, MIX_SP_TOP,
+                                      MIX_SP_TOP),
+               (uint32_t)QRX_MIX_ERR_ARG);
+    expect_u32("mixed_errors_init",
+               (uint32_t)qrx_mix_init(&mix, &ppc, MIX_GLUE, MIX_SP_TOP,
+                                      MIX_SP_LIMIT),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_errors_unknown_import",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_UNKNOWN, 0, 0, &out, 1000u),
+               (uint32_t)QRX_MIX_ERR_IMPORT);
+    expect_u32("mixed_errors_illegal",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_ILLEGAL, 0, 0, &out, 1000u),
+               (uint32_t)QRX_MIX_ERR_RUN);
+    expect_u32("mixed_errors_limit",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_SPIN, 0, 0, &out, 100u),
+               (uint32_t)QRX_MIX_ERR_LIMIT);
+    expect_u32("mixed_errors_stack_restore",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_BADSP, 0, 0, &out, 1000u),
+               (uint32_t)QRX_MIX_ERR_SP);
+    report("mixed_errors", before);
+}
+
+static void test_mixed_sig_call(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_sig_t sig;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    unsigned i;
+    unsigned before = failures;
+
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_sig_call_parse",
+               (uint32_t)qrx_mix_sig_parse(&sig, "iiiiiiiiii", 'i'),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_sig_call_params", sig.nparams, 10u);
+    expect_u32("mixed_sig_call_ret", (uint32_t)sig.ret, (uint32_t)'i');
+    expect_u32("mixed_sig_call_init", (uint32_t)mix_setup(&mix, 0),
+               (uint32_t)QRX_MIX_OK);
+    for (i = 0; i < QRX_MIX_ARGS; i++)
+        in.gpr[i] = i + 1u;
+    in.gpr_count = QRX_MIX_ARGS;
+    in.stack[0] = 9u;
+    in.stack[1] = 10u;
+    in.stack_count = 2u;
+    expect_u32("mixed_sig_call_status",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_SIG, &sig, &in, &out,
+                                      1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_sig_call_result", out.gpr[0], 12u);
+    expect_u32("mixed_sig_call_stack0", get32(MIX_GLUE_SP + 24u), 9u);
+    expect_u32("mixed_sig_call_stack1", get32(MIX_GLUE_SP + 28u), 10u);
+    expect_u32("mixed_sig_call_r4_cleared", out.gpr[1], 0u);
+    report("mixed_sig_call", before);
+}
+
+static void test_mixed_sig_fp(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_sig_t sig;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    unsigned i;
+    unsigned before = failures;
+
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_sig_fp_parse",
+               (uint32_t)qrx_mix_sig_parse(&sig, "ddddddddd", 'f'),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_sig_fp_init", (uint32_t)mix_setup(&mix, 0),
+               (uint32_t)QRX_MIX_OK);
+    for (i = 0; i < QRX_MIX_ARGS; i++)
+        in.fpr[i] = (double)i + 1.0;
+    in.fpr_count = QRX_MIX_ARGS;
+    in.stack[0] = (uint32_t)(double_bits(9.0) >> 32);
+    in.stack[1] = (uint32_t)double_bits(9.0);
+    in.stack_count = 2u;
+    expect_u32("mixed_sig_fp_status",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_LFD, &sig, &in, &out,
+                                      1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u64("mixed_sig_fp_result", double_bits(out.fpr), double_bits(10.0));
+    expect_u32("mixed_sig_fp_stack0", get32(MIX_GLUE_SP + 24u), 0x40220000u);
+    expect_u32("mixed_sig_fp_stack1", get32(MIX_GLUE_SP + 28u), 0u);
+    expect_u32("mixed_sig_fp_gpr_masked", out.gpr[0], 0u);
+    report("mixed_sig_fp", before);
+}
+
+static void test_mixed_sig_import(void)
+{
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_sig_t sig;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_sig_import_parse",
+               (uint32_t)qrx_mix_sig_parse(&sig, "iipd", 'i'),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_sig_import_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_sig_import_register",
+               (uint32_t)qrx_mix_register(&mix, 3u, mix_import_sig, &ctx,
+                                          &sig),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_sig_import_status",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_SIG_IMPORT, 0, 0, &out,
+                                      1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_sig_import_result", out.gpr[0], 8u);
+    expect_u32("mixed_sig_import_gcount", ctx.gcount, 3u);
+    expect_u32("mixed_sig_import_fcount", ctx.fcount, 1u);
+    expect_u32("mixed_sig_import_int0", ctx.seen[0], 0x11u);
+    expect_u32("mixed_sig_import_int1", ctx.seen[1], 0x22u);
+    expect_u32("mixed_sig_import_ptr", ctx.ptr, MIX_SCRATCH);
+    expect_u64("mixed_sig_import_f0", double_bits(ctx.f0), double_bits(1.5));
+    expect_u32("mixed_sig_import_store", get32(MIX_SCRATCH), 0x55u);
+    report("mixed_sig_import", before);
+}
+
+static void test_mixed_sig_stack(void)
+{
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_sig_t sig;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_sig_stack_parse",
+               (uint32_t)qrx_mix_sig_parse(&sig, "iiiiiiiiii", 'i'),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_sig_stack_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_sig_stack_register",
+               (uint32_t)qrx_mix_register(&mix, 4u, mix_import_stack, &ctx,
+                                          &sig),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_sig_stack_status",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_SIG_STACK, 0, 0, &out,
+                                      1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_sig_stack_result", out.gpr[0], 104u);
+    expect_u32("mixed_sig_stack_gcount", ctx.gcount, QRX_MIX_ARGS);
+    expect_u32("mixed_sig_stack_count", ctx.stack_count, 2u);
+    expect_u32("mixed_sig_stack_word0", ctx.stack0, 0x21u);
+    expect_u32("mixed_sig_stack_word1", ctx.stack1, 0x22u);
+    expect_u32("mixed_sig_stack_sp", ctx.sp, MIX_GLUE_SP - 24u);
+    report("mixed_sig_stack", before);
+}
+
+static void test_mixed_sig_errors(void)
+{
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_sig_t sig;
+    qrx_mix_sig_t bad;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+
+    memset(&bad, 0, sizeof(bad));
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_sig_errors_type",
+               (uint32_t)qrx_mix_sig_parse(&bad, "iz", 'i'),
+               (uint32_t)QRX_MIX_ERR_SIG);
+    expect_u32("mixed_sig_errors_ret",
+               (uint32_t)qrx_mix_sig_parse(&bad, "i", 'x'),
+               (uint32_t)QRX_MIX_ERR_SIG);
+    expect_u32("mixed_sig_errors_null",
+               (uint32_t)qrx_mix_sig_parse(&bad, 0, 'i'),
+               (uint32_t)QRX_MIX_ERR_SIG);
+    expect_u32("mixed_sig_errors_too_long",
+               (uint32_t)qrx_mix_sig_parse(&bad, "iiiiiiiiiiiiiiiii", 'i'),
+               (uint32_t)QRX_MIX_ERR_SIG);
+    expect_u32("mixed_sig_errors_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_sig_errors_parse",
+               (uint32_t)qrx_mix_sig_parse(&sig, "ii", 'i'),
+               (uint32_t)QRX_MIX_OK);
+    in.gpr[0] = 1u;
+    in.gpr_count = 1u;
+    expect_u32("mixed_sig_errors_arg_count",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_SIG, &sig, &in, &out,
+                                      1000u),
+               (uint32_t)QRX_MIX_ERR_ARG);
+    expect_u32("mixed_sig_errors_parse10",
+               (uint32_t)qrx_mix_sig_parse(&sig, "iiiiiiiiii", 'i'),
+               (uint32_t)QRX_MIX_OK);
+    in.gpr_count = QRX_MIX_ARGS;
+    in.stack_count = 1u;
+    expect_u32("mixed_sig_errors_stack_count",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_SIG, &sig, &in, &out,
+                                      1000u),
+               (uint32_t)QRX_MIX_ERR_ARG);
+    expect_u32("mixed_sig_errors_register",
+               (uint32_t)qrx_mix_register(&mix, 5u, mix_import_sig, &ctx,
+                                          &sig),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_sig_errors_bad_sp",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_SIG_BADSP, 0, 0, &out,
+                                      1000u),
+               (uint32_t)QRX_MIX_ERR_ARG);
+    report("mixed_sig_errors", before);
+}
+
+#define MIX_RD 0x2000u
+#define MIX_RD_REL 0x1000u
+#define MIX_RD_END 0x3FFF0u
+#define MIX_PROC_RD 0x2040u
+#define MIX_PROC_BAD 0x2080u
+
+static void mix_put8(uint32_t addr, uint8_t value)
+{
+    memory[addr] = value;
+}
+
+static void mix_put16(uint32_t addr, uint16_t value)
+{
+    memory[addr] = (uint8_t)(value >> 8);
+    memory[addr + 1u] = (uint8_t)value;
+}
+
+/* RoutineDescriptor header; the records follow at rd + QRX_MIX_RD_HEADER. */
+static void mix_rd_header(uint32_t rd, int version, uint16_t count)
+{
+    mix_put16(rd + 0u, QRX_MIX_RD_TRAP);
+    mix_put8(rd + 2u, (uint8_t)version);
+    mix_put8(rd + 3u, 0u);
+    put32(rd + 4u, 0u);
+    mix_put8(rd + 8u, 0u);
+    mix_put8(rd + 9u, 0u);
+    mix_put16(rd + 10u, count);
+}
+
+static void mix_rd_record_pi(uint32_t rr, int isa, uint32_t proc_info,
+                             uint32_t entry, uint16_t flags)
+{
+    put32(rr + 0u, proc_info);
+    mix_put8(rr + 4u, 0u);
+    mix_put8(rr + 5u, (uint8_t)isa);
+    mix_put16(rr + 6u, flags);
+    put32(rr + 8u, entry);
+    put32(rr + 12u, 0u);
+    put32(rr + 16u, 0u);
+}
+
+static void mix_rd_record(uint32_t rr, int isa, uint32_t entry,
+                          uint16_t flags)
+{
+    /* 0xA1B2 describes no placement; these tests pass a signature. */
+    mix_rd_record_pi(rr, isa, 0x0000A1B2u, entry, flags);
+}
+
+static void test_mixed_rd(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_sig_t sig;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    qrx_mix_rd_t rd;
+    unsigned before = failures;
+
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    memset(&rd, 0, sizeof(rd));
+    expect_u32("mixed_rd_parse",
+               (uint32_t)qrx_mix_sig_parse(&sig, "iiiiiiiii", 'i'),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_init", (uint32_t)mix_setup(&mix, 0),
+               (uint32_t)QRX_MIX_OK);
+    mix_rd_header(MIX_RD, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record(MIX_RD + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC, MIX_F_SIG,
+                  0u);
+    expect_u32("mixed_rd_resolve",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_descriptor", rd.descriptor, MIX_RD);
+    expect_u32("mixed_rd_record", rd.record, MIX_RD + QRX_MIX_RD_HEADER);
+    expect_u32("mixed_rd_entry", rd.entry, MIX_F_SIG);
+    expect_u32("mixed_rd_count", rd.record_count, 1u);
+    expect_u32("mixed_rd_isa", (uint32_t)rd.isa, (uint32_t)QRX_MIX_RD_ISA_PPC);
+    expect_u32("mixed_rd_proc_info", rd.proc_info, 0x0000A1B2u);
+    expect_u32("mixed_rd_flags", rd.routine_flags, 0u);
+    /* Reserved fields are ignored, as the Mixed Mode Manager does. */
+    put32(MIX_RD + 4u, 0xFFFFFFFFu);
+    mix_put8(MIX_RD + 8u, 0x7Fu);
+    mix_put8(MIX_RD + 9u, 0xFFu);
+    put32(MIX_RD + QRX_MIX_RD_HEADER + 16u, 0x12345678u);
+    expect_u32("mixed_rd_reserved",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_reserved_entry", rd.entry, MIX_F_SIG);
+    /* Call through the descriptor: r3 + r4 + the first stack word. */
+    in.gpr[0] = 7u;
+    in.gpr[1] = 35u;
+    in.gpr_count = QRX_MIX_ARGS;
+    in.stack[0] = 5u;
+    in.stack_count = 1u;
+    expect_u32("mixed_rd_call",
+               (uint32_t)qrx_mix_rd_call(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                         &sig, &in, &out, 1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_result", out.gpr[0], 47u);
+    expect_u32("mixed_rd_stack_word", get32(MIX_GLUE_SP + 24u), 5u);
+    /* Fat descriptor: 68k record first, PPC record second. */
+    mix_rd_header(MIX_RD, QRX_MIX_RD_VERSION, 1u);
+    mix_rd_record(MIX_RD + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K, 0x1110u, 0u);
+    mix_rd_record(MIX_RD + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD,
+                  QRX_MIX_RD_ISA_PPC, MIX_F_SIG, 0u);
+    expect_u32("mixed_rd_fat_ppc",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_fat_ppc_record", rd.record,
+               MIX_RD + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD);
+    expect_u32("mixed_rd_fat_ppc_entry", rd.entry, MIX_F_SIG);
+    expect_u32("mixed_rd_fat_count", rd.record_count, 2u);
+    expect_u32("mixed_rd_fat_68k",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_68K,
+                                            &rd),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_fat_68k_entry", rd.entry, 0x1110u);
+    expect_u32("mixed_rd_fat_68k_isa", (uint32_t)rd.isa,
+               (uint32_t)QRX_MIX_RD_ISA_68K);
+    /* A relative procDescriptor is resolved against the descriptor. */
+    mix_rd_header(MIX_RD_REL, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record(MIX_RD_REL + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                  MIX_F_SIG - MIX_RD_REL, QRX_MIX_RD_FLAG_RELATIVE);
+    expect_u32("mixed_rd_relative",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD_REL,
+                                            QRX_MIX_RD_ISA_PPC, &rd),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_relative_entry", rd.entry, MIX_F_SIG);
+    expect_u32("mixed_rd_relative_flags", rd.routine_flags,
+               QRX_MIX_RD_FLAG_RELATIVE);
+    in.gpr[0] = 1u;
+    in.gpr[1] = 2u;
+    in.stack[0] = 3u;
+    expect_u32("mixed_rd_relative_call",
+               (uint32_t)qrx_mix_rd_call(&mix, MIX_RD_REL,
+                                         QRX_MIX_RD_ISA_PPC, &sig, &in, &out,
+                                         1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_relative_result", out.gpr[0], 6u);
+    report("mixed_rd", before);
+}
+
+static void test_mixed_rd_errors(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_rd_t rd;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    uint32_t saved_pc;
+    uint32_t rr = MIX_RD + QRX_MIX_RD_HEADER;
+    unsigned before = failures;
+
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    memset(&rd, 0, sizeof(rd));
+    expect_u32("mixed_rd_errors_init", (uint32_t)mix_setup(&mix, 0),
+               (uint32_t)QRX_MIX_OK);
+    mix_rd_header(MIX_RD, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record(rr, QRX_MIX_RD_ISA_PPC, MIX_F_SIG, 0u);
+    /* A word other than the Mixed Mode A-trap is not a descriptor. */
+    mix_put16(MIX_RD + 0u, 0xAB1Du);
+    expect_u32("mixed_rd_errors_trap",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    mix_put16(MIX_RD + 0u, QRX_MIX_RD_TRAP);
+    mix_put8(MIX_RD + 2u, 6u);
+    expect_u32("mixed_rd_errors_version",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    mix_put8(MIX_RD + 2u, QRX_MIX_RD_VERSION);
+    /* Dispatched descriptors are not supported. */
+    mix_put8(MIX_RD + 3u, 0x01u);
+    expect_u32("mixed_rd_errors_dispatched",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    mix_put8(MIX_RD + 3u, 0u);
+    mix_put16(MIX_RD + 10u, QRX_MIX_RD_MAX_RECORDS);
+    expect_u32("mixed_rd_errors_count",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* The header fits, the first record does not. */
+    mix_rd_header(MIX_RD_END, QRX_MIX_RD_VERSION, 0u);
+    expect_u32("mixed_rd_errors_truncated",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD_END,
+                                            QRX_MIX_RD_ISA_PPC, &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    expect_u32("mixed_rd_errors_outside",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD_END + 16u,
+                                            QRX_MIX_RD_ISA_PPC, &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* No PowerPC record at all. */
+    mix_rd_header(MIX_RD, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record(rr, QRX_MIX_RD_ISA_68K, 0x1110u, 0u);
+    expect_u32("mixed_rd_errors_no_ppc",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* Unsupported routine flags. */
+    mix_rd_record(rr, QRX_MIX_RD_ISA_PPC, MIX_F_SIG,
+                  QRX_MIX_RD_FLAG_NEEDS_PREP);
+    expect_u32("mixed_rd_errors_prepare",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    mix_rd_record(rr, QRX_MIX_RD_ISA_PPC, MIX_F_SIG,
+                  QRX_MIX_RD_FLAG_SELECTOR);
+    expect_u32("mixed_rd_errors_selector",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    mix_rd_record(rr, QRX_MIX_RD_ISA_PPC, MIX_F_SIG,
+                  QRX_MIX_RD_FLAG_INDEXABLE);
+    expect_u32("mixed_rd_errors_indexable",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    mix_rd_record(rr, QRX_MIX_RD_ISA_PPC, MIX_F_SIG, 0x0040u);
+    expect_u32("mixed_rd_errors_flag",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* Unusable entry points. */
+    mix_rd_record(rr, QRX_MIX_RD_ISA_PPC, 0u, 0u);
+    expect_u32("mixed_rd_errors_entry_zero",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    mix_rd_record(rr, QRX_MIX_RD_ISA_PPC, MIX_F_SIG + 1u, 0u);
+    expect_u32("mixed_rd_errors_entry_align",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    mix_rd_record(rr, QRX_MIX_RD_ISA_PPC, 0x40000u, 0u);
+    expect_u32("mixed_rd_errors_entry_limit",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* A relative offset that wraps below the descriptor address. */
+    mix_rd_record(rr, QRX_MIX_RD_ISA_PPC, 0xFFFFF000u,
+                  QRX_MIX_RD_FLAG_RELATIVE);
+    expect_u32("mixed_rd_errors_underflow",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* Records that are not selected are not validated. */
+    mix_rd_header(MIX_RD, QRX_MIX_RD_VERSION, 1u);
+    mix_rd_record(rr, QRX_MIX_RD_ISA_68K, 0x1111u, 0u);
+    mix_rd_record(rr + QRX_MIX_RD_RECORD, QRX_MIX_RD_ISA_PPC, MIX_F_SIG, 0u);
+    expect_u32("mixed_rd_errors_other_record",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_OK);
+    mix_rd_header(MIX_RD, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record(rr, QRX_MIX_RD_ISA_PPC, MIX_F_SIG, 0u);
+    expect_u32("mixed_rd_errors_isa",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, 7, &rd),
+               (uint32_t)QRX_MIX_ERR_RD);
+    expect_u32("mixed_rd_errors_null",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            0),
+               (uint32_t)QRX_MIX_ERR_ARG);
+    expect_u32("mixed_rd_errors_68k_call",
+               (uint32_t)qrx_mix_rd_call(&mix, MIX_RD, QRX_MIX_RD_ISA_68K, 0,
+                                         &in, &out, 100u),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* Resolving never runs guest code. */
+    saved_pc = ppc.cpu.pc;
+    ppc.cpu.pc = MIX_F_ILLEGAL;
+    expect_u32("mixed_rd_errors_pure",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD, QRX_MIX_RD_ISA_PPC,
+                                            &rd),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_errors_pure_pc", ppc.cpu.pc, MIX_F_ILLEGAL);
+    ppc.cpu.pc = saved_pc;
+    report("mixed_rd_errors", before);
+}
+
+static void test_mixed_proc_import(void)
+{
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_sig_t sig;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_proc_parse",
+               (uint32_t)qrx_mix_sig_parse(&sig, "iiiiiiiii", 'i'),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    /* Fat descriptor: an import must select the 68k record. */
+    mix_rd_header(MIX_PROC_RD, QRX_MIX_RD_VERSION, 1u);
+    mix_rd_record(MIX_PROC_RD + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K, 0x1110u,
+                  0u);
+    mix_rd_record(MIX_PROC_RD + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD,
+                  QRX_MIX_RD_ISA_PPC, MIX_F_SIG, 0u);
+    expect_u32("mixed_proc_register",
+               (uint32_t)qrx_mix_register_proc(&mix, MIX_PROC_RD,
+                                               mix_import_proc, &ctx, &sig),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_status",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_PROC, 0, 0, &out, 2000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_calls", ctx.calls, 1u);
+    expect_u32("mixed_proc_entry", ctx.proc, 0x1110u);
+    expect_u32("mixed_proc_gcount", ctx.gcount, QRX_MIX_ARGS);
+    expect_u32("mixed_proc_stack_count", ctx.stack_count, 1u);
+    expect_u32("mixed_proc_stack_word", ctx.stack0, 0x55u);
+    expect_u32("mixed_proc_sp", ctx.sp, MIX_GLUE_SP - 8u);
+    expect_u32("mixed_proc_sum", ctx.sum, 36u + 0x55u);
+    expect_u32("mixed_proc_result", out.gpr[0], 37u + 0x55u);
+    report("mixed_proc_import", before);
+}
+
+static void test_mixed_proc_errors(void)
+{
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_sig_t sig;
+    qrx_mix_sig_t bad;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_proc_errors_parse",
+               (uint32_t)qrx_mix_sig_parse(&sig, "ii", 'i'),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_errors_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    /* Values below QRX_MIX_IMPORTS stay import indices. */
+    expect_u32("mixed_proc_errors_low",
+               (uint32_t)qrx_mix_register_proc(&mix, 4u, mix_import_proc, &ctx,
+                                               &sig),
+               (uint32_t)QRX_MIX_ERR_ARG);
+    /* Not a routine descriptor. */
+    mix_rd_header(MIX_PROC_BAD, QRX_MIX_RD_VERSION, 0u);
+    mix_put16(MIX_PROC_BAD, 0xAB1Du);
+    expect_u32("mixed_proc_errors_bad_rd",
+               (uint32_t)qrx_mix_register_proc(&mix, MIX_PROC_BAD,
+                                               mix_import_proc, &ctx, &sig),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* No 68k record to call. */
+    mix_rd_header(MIX_PROC_RD, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record(MIX_PROC_RD + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC, MIX_F_SIG,
+                  0u);
+    expect_u32("mixed_proc_errors_no_68k",
+               (uint32_t)qrx_mix_register_proc(&mix, MIX_PROC_RD,
+                                               mix_import_proc, &ctx, &sig),
+               (uint32_t)QRX_MIX_ERR_RD);
+    mix_rd_record(MIX_PROC_RD + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K, 0x1110u,
+                  0u);
+    bad = sig;
+    bad.ret = 'x';
+    expect_u32("mixed_proc_errors_sig",
+               (uint32_t)qrx_mix_register_proc(&mix, MIX_PROC_RD,
+                                               mix_import_proc, &ctx, &bad),
+               (uint32_t)QRX_MIX_ERR_SIG);
+    expect_u32("mixed_proc_errors_register",
+               (uint32_t)qrx_mix_register_proc(&mix, MIX_PROC_RD,
+                                               mix_import_proc, &ctx, &sig),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_errors_duplicate",
+               (uint32_t)qrx_mix_register_proc(&mix, MIX_PROC_RD,
+                                               mix_import_proc, &ctx, &sig),
+               (uint32_t)QRX_MIX_ERR_ARG);
+    /* r0 holds a descriptor address that was never registered. */
+    expect_u32("mixed_proc_errors_unregistered",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_PROC_BAD, 0, 0, &out, 1000u),
+               (uint32_t)QRX_MIX_ERR_IMPORT);
+    /* The descriptor is resolved again on every call. */
+    mix_rd_record(MIX_PROC_RD + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC, MIX_F_SIG,
+                  0u);
+    expect_u32("mixed_proc_errors_mutated",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_PROC, 0, 0, &out, 1000u),
+               (uint32_t)QRX_MIX_ERR_RD);
+    report("mixed_proc_errors", before);
+}
+
+static void test_mixed_rd_nested(void)
+{
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    uint32_t outer_r1 = MIX_GLUE_SP - 32u;
+    unsigned before = failures;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_rd_nested_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    mix_rd_header(MIX_RD_CALL, QRX_MIX_RD_VERSION, 1u);
+    mix_rd_record(MIX_RD_CALL + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K, 0x2220u,
+                  0u);
+    mix_rd_record(MIX_RD_CALL + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD,
+                  QRX_MIX_RD_ISA_PPC, MIX_F_RDNEST, 0u);
+    mix_rd_header(MIX_RD_SIG, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record(MIX_RD_SIG + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC, MIX_F_SIG,
+                  0u);
+    expect_u32("mixed_rd_nested_register",
+               (uint32_t)qrx_mix_register(&mix, 4u, mix_import_rd_call, &ctx, 0),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_nested_status",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_RDCALL, 0, 0, &out, 4000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_nested_calls", ctx.calls, 1u);
+    expect_u32("mixed_rd_nested_ppc_record", ctx.rd_ok, 1u);
+    expect_u32("mixed_rd_nested_marker0", ctx.rd_marker[0], 11u);
+    expect_u32("mixed_rd_nested_marker1", ctx.rd_marker[1], 13u);
+    expect_u32("mixed_rd_nested_back_chain", ctx.rd_back, outer_r1);
+    expect_u32("mixed_rd_nested_sp", ctx.rd_sp_seen,
+               (outer_r1 - QRX_MIX_LINKAGE) & ~0xFu);
+    expect_u32("mixed_rd_nested_nine", ctx.rd_ok2, 1u);
+    expect_u32("mixed_rd_nested_stack_word", ctx.rd_stack, 9u);
+    expect_u32("mixed_rd_nested_restore", ctx.rd_restore, 1u);
+    expect_u32("mixed_rd_nested_depth", (uint32_t)mix.depth, 0u);
+    expect_u32("mixed_rd_nested_result", out.gpr[0], 26u);
+    report("mixed_rd_nested", before);
+}
+
+static void test_mixed_rd_nested_errors(void)
+{
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_rd_nested_errors_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    mix_rd_header(MIX_RD_68K, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record(MIX_RD_68K + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K, 0x2220u,
+                  0u);
+    mix_rd_header(MIX_RD_SPIN, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record(MIX_RD_SPIN + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                  MIX_F_SPIN, 0u);
+    mix_rd_header(MIX_RD_BADSP, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record(MIX_RD_BADSP + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                  MIX_F_BADSP, 0u);
+    expect_u32("mixed_rd_nested_errors_register",
+               (uint32_t)qrx_mix_register(&mix, 5u, mix_import_rd_errors, &ctx,
+                                          0),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_nested_errors_status",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_RDERR, 0, 0, &out, 2000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_nested_errors_calls", ctx.calls, 1u);
+    expect_u32("mixed_rd_nested_errors_68k", ctx.rd_rd, 1u);
+    expect_u32("mixed_rd_nested_errors_bad", ctx.rd_bad, 1u);
+    expect_u32("mixed_rd_nested_errors_limit", ctx.rd_limit, 1u);
+    expect_u32("mixed_rd_nested_errors_sp", ctx.rd_sp, 1u);
+    expect_u32("mixed_rd_nested_errors_depth", (uint32_t)mix.depth, 0u);
+    expect_u32("mixed_rd_nested_errors_result", out.gpr[0], 9u);
+    report("mixed_rd_nested_errors", before);
+}
+
+/* ProcInfo field helper: one 2-bit size code per parameter, five bits apart. */
+#define MIX_PI_PARAM(n, size) ((uint32_t)(size) << (11u + 5u * ((n) - 1u)))
+#define MIX_PI_THREE \
+    (2u | (3u << 4) | MIX_PI_PARAM(1, 3) | MIX_PI_PARAM(2, 3) | \
+     MIX_PI_PARAM(3, 3))
+#define MIX_PI_TWO (2u | (3u << 4) | MIX_PI_PARAM(1, 3) | MIX_PI_PARAM(2, 3))
+
+/* Rewrite the scratch descriptor with `proc_info` and decode it. */
+static qrx_mix_status_t mix_pi_decode(qrx_mix_t *mix, uint32_t descriptor,
+                                      uint32_t proc_info, uint32_t entry,
+                                      qrx_mix_rd_t *rd, qrx_mix_sig_t *sig)
+{
+    qrx_mix_status_t rc;
+
+    mix_rd_header(descriptor, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(descriptor + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                     proc_info, entry, 0u);
+    rc = qrx_mix_rd_resolve(mix, descriptor, QRX_MIX_RD_ISA_PPC, rd);
+    if (rc != QRX_MIX_OK)
+        return rc;
+    return qrx_mix_rd_procinfo_sig(rd, sig);
+}
+
+static void test_mixed_rd_procinfo(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_rd_t rd;
+    qrx_mix_sig_t sig;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+
+    memset(&rd, 0, sizeof(rd));
+    memset(&sig, 0, sizeof(sig));
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_rd_procinfo_init", (uint32_t)mix_setup(&mix, 0),
+               (uint32_t)QRX_MIX_OK);
+    /* Three 4-byte parameters, 4-byte result. */
+    mix_rd_header(MIX_RD_PI, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_RD_PI + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                     2u | (3u << 4) | MIX_PI_PARAM(1, 3) | MIX_PI_PARAM(2, 3) |
+                         MIX_PI_PARAM(3, 3),
+                     MIX_F_PI, 0u);
+    expect_u32("mixed_rd_procinfo_resolve",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD_PI,
+                                            QRX_MIX_RD_ISA_PPC, &rd),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_procinfo_decode",
+               (uint32_t)qrx_mix_rd_procinfo_sig(&rd, &sig),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_procinfo_count", sig.nparams, 3u);
+    expect_u32("mixed_rd_procinfo_p0", (uint32_t)(uint8_t)sig.params[0],
+               (uint32_t)'i');
+    expect_u32("mixed_rd_procinfo_p1", (uint32_t)(uint8_t)sig.params[1],
+               (uint32_t)'i');
+    expect_u32("mixed_rd_procinfo_p2", (uint32_t)(uint8_t)sig.params[2],
+               (uint32_t)'i');
+    expect_u32("mixed_rd_procinfo_ret", (uint32_t)(uint8_t)sig.ret,
+               (uint32_t)'i');
+    in.gpr[0] = 4u;
+    in.gpr[1] = 5u;
+    in.gpr[2] = 6u;
+    in.gpr_count = 3u;
+    expect_u32("mixed_rd_procinfo_call",
+               (uint32_t)qrx_mix_rd_invoke_procinfo(&mix, MIX_RD_PI, &in, &out,
+                                                    1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_procinfo_result", out.gpr[0], 15u);
+    expect_u32("mixed_rd_procinfo_depth", (uint32_t)mix.depth, 0u);
+    /* No parameters, no result: the entry is still called. */
+    mix_rd_header(MIX_RD_PI0, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_RD_PI0 + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC, 2u,
+                     MIX_F_PI0, 0u);
+    expect_u32("mixed_rd_procinfo_void_resolve",
+               (uint32_t)qrx_mix_rd_resolve(&mix, MIX_RD_PI0,
+                                            QRX_MIX_RD_ISA_PPC, &rd),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_procinfo_void_decode",
+               (uint32_t)qrx_mix_rd_procinfo_sig(&rd, &sig),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_procinfo_void_count", sig.nparams, 0u);
+    expect_u32("mixed_rd_procinfo_void_ret", (uint32_t)(uint8_t)sig.ret,
+               (uint32_t)'v');
+    memset(&in, 0, sizeof(in));
+    expect_u32("mixed_rd_procinfo_void_call",
+               (uint32_t)qrx_mix_rd_invoke_procinfo(&mix, MIX_RD_PI0, &in, &out,
+                                                    1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_procinfo_void_result", out.gpr[0], 0u);
+    /* A 1-byte and a 2-byte parameter each still occupy one register. */
+    mix_rd_header(MIX_RD_PINARROW, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_RD_PINARROW + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                     2u | (1u << 4) | MIX_PI_PARAM(1, 1) | MIX_PI_PARAM(2, 2),
+                     MIX_F_ADD, 0u);
+    expect_u32("mixed_rd_procinfo_narrow_decode",
+               (uint32_t)mix_pi_decode(&mix, MIX_RD_PINARROW,
+                                       2u | (1u << 4) | MIX_PI_PARAM(1, 1) |
+                                           MIX_PI_PARAM(2, 2),
+                                       MIX_F_ADD, &rd, &sig),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_procinfo_narrow_count", sig.nparams, 2u);
+    expect_u32("mixed_rd_procinfo_narrow_p1", (uint32_t)(uint8_t)sig.params[1],
+               (uint32_t)'i');
+    expect_u32("mixed_rd_procinfo_narrow_ret", (uint32_t)(uint8_t)sig.ret,
+               (uint32_t)'i');
+    memset(&in, 0, sizeof(in));
+    in.gpr[0] = 20u;
+    in.gpr[1] = 22u;
+    in.gpr_count = 2u;
+    expect_u32("mixed_rd_procinfo_narrow_call",
+               (uint32_t)qrx_mix_rd_invoke_procinfo(&mix, MIX_RD_PINARROW, &in,
+                                                    &out, 1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_procinfo_narrow_result", out.gpr[0], 42u);
+    /* Four parameters are the last the record can describe. */
+    expect_u32("mixed_rd_procinfo_four",
+               (uint32_t)mix_pi_decode(&mix, MIX_RD_PINARROW,
+                                       2u | (3u << 4) | MIX_PI_PARAM(1, 3) |
+                                           MIX_PI_PARAM(2, 3) |
+                                           MIX_PI_PARAM(3, 3) |
+                                           MIX_PI_PARAM(4, 3),
+                                       MIX_F_PI, &rd, &sig),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_procinfo_four_count", sig.nparams, 4u);
+    report("mixed_rd_procinfo", before);
+}
+
+static void test_mixed_rd_procinfo_errors(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_rd_t rd;
+    qrx_mix_sig_t sig;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    uint32_t pc;
+    unsigned before = failures;
+
+    memset(&rd, 0, sizeof(rd));
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_rd_procinfo_errors_init", (uint32_t)mix_setup(&mix, 0),
+               (uint32_t)QRX_MIX_OK);
+    memset(&sig, 0x5A, sizeof(sig));
+    /* Stack-based, dispatched and special-case conventions are not
+     * placement the bridge can reproduce in registers. */
+    expect_u32("mixed_rd_procinfo_errors_pascal",
+               (uint32_t)mix_pi_decode(&mix, MIX_RD_PIBAD, 0u, MIX_F_PI, &rd,
+                                       &sig),
+               (uint32_t)QRX_MIX_ERR_RD);
+    expect_u32("mixed_rd_procinfo_errors_cstack",
+               (uint32_t)mix_pi_decode(&mix, MIX_RD_PIBAD, 1u, MIX_F_PI, &rd,
+                                       &sig),
+               (uint32_t)QRX_MIX_ERR_RD);
+    expect_u32("mixed_rd_procinfo_errors_dispatched",
+               (uint32_t)mix_pi_decode(&mix, MIX_RD_PIBAD, 8u, MIX_F_PI, &rd,
+                                       &sig),
+               (uint32_t)QRX_MIX_ERR_RD);
+    expect_u32("mixed_rd_procinfo_errors_special",
+               (uint32_t)mix_pi_decode(&mix, MIX_RD_PIBAD, 15u, MIX_F_PI, &rd,
+                                       &sig),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* The signature is written only when the ProcInfo decodes. */
+    expect_u32("mixed_rd_procinfo_errors_untouched",
+               (uint32_t)(uint8_t)sig.params[0], 0x5Au);
+    /* A parameter field with a register hint but size code 0. */
+    expect_u32("mixed_rd_procinfo_errors_nosize",
+               (uint32_t)mix_pi_decode(&mix, MIX_RD_PIBAD, 2u | (0x1Cu << 11),
+                                       MIX_F_PI, &rd, &sig),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* A fifth parameter would need bits beyond bit 31. */
+    expect_u32("mixed_rd_procinfo_errors_five",
+               (uint32_t)mix_pi_decode(&mix, MIX_RD_PIBAD,
+                                       2u | (3u << 4) | MIX_PI_PARAM(1, 3) |
+                                           MIX_PI_PARAM(2, 3) |
+                                           MIX_PI_PARAM(3, 3) |
+                                           MIX_PI_PARAM(4, 3) | (1u << 31),
+                                       MIX_F_PI, &rd, &sig),
+               (uint32_t)QRX_MIX_ERR_RD);
+    expect_u32("mixed_rd_procinfo_errors_null_rd",
+               (uint32_t)qrx_mix_rd_procinfo_sig(0, &sig),
+               (uint32_t)QRX_MIX_ERR_ARG);
+    expect_u32("mixed_rd_procinfo_errors_null_sig",
+               (uint32_t)qrx_mix_rd_procinfo_sig(&rd, 0),
+               (uint32_t)QRX_MIX_ERR_ARG);
+    /* Invoking through a descriptor without a PPC record. */
+    mix_rd_header(MIX_RD_PIBAD, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_RD_PIBAD + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K, 2u,
+                     0x2220u, 0u);
+    expect_u32("mixed_rd_procinfo_errors_no_ppc",
+               (uint32_t)qrx_mix_rd_invoke_procinfo(&mix, MIX_RD_PIBAD, &in,
+                                                    &out, 1000u),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* A rejected ProcInfo stops before guest code runs. */
+    pc = ppc.cpu.pc;
+    expect_u32("mixed_rd_procinfo_errors_no_run",
+               (uint32_t)mix_pi_decode(&mix, MIX_RD_PIBAD, 0u, MIX_F_PI, &rd,
+                                       &sig),
+               (uint32_t)QRX_MIX_ERR_RD);
+    in.gpr[0] = 1u;
+    in.gpr[1] = 1u;
+    in.gpr[2] = 1u;
+    in.gpr_count = 3u;
+    expect_u32("mixed_rd_procinfo_errors_call",
+               (uint32_t)qrx_mix_rd_invoke_procinfo(&mix, MIX_RD_PIBAD, &in,
+                                                    &out, 1000u),
+               (uint32_t)QRX_MIX_ERR_RD);
+    expect_u32("mixed_rd_procinfo_errors_pc", ppc.cpu.pc, pc);
+    expect_u32("mixed_rd_procinfo_errors_result", out.gpr[0], 0u);
+    report("mixed_rd_procinfo_errors", before);
+}
+
+/* Descriptor imports without their own signature: the placement comes from
+ * the record's ProcInfo.  The fat descriptor's 68k record carries an opaque
+ * ProcInfo, so the PPC record has to win; the 68k-only descriptor falls back
+ * to its own record; an explicit signature still overrides ProcInfo; and a
+ * ProcInfo rewritten in guest memory changes the next call. */
+static void test_mixed_proc_procinfo(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_t mix2;
+    mix_ctx_t ctx;
+    mix_ctx_t ctx2;
+    qrx_mix_sig_t one;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+    uint32_t three = MIX_PI_THREE;
+    uint32_t two = MIX_PI_TWO;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_proc_pi_parse",
+               (uint32_t)qrx_mix_sig_parse(&one, "i", 'i'),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_pi_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    mix_rd_header(MIX_PROC_PI, QRX_MIX_RD_VERSION, 1u);
+    mix_rd_record_pi(MIX_PROC_PI + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K,
+                     0x0000A1B2u, 0x1120u, 0u);
+    mix_rd_record_pi(MIX_PROC_PI + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD,
+                     QRX_MIX_RD_ISA_PPC, three, MIX_F_PI, 0u);
+    expect_u32("mixed_proc_pi_register",
+               (uint32_t)qrx_mix_register_proc(&mix, MIX_PROC_PI,
+                                               mix_import_proc, &ctx, 0),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_pi_call",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_PROC_PI, 0, 0, &out, 2000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_pi_calls", ctx.calls, 1u);
+    expect_u32("mixed_proc_pi_entry", ctx.proc, 0x1120u);
+    expect_u32("mixed_proc_pi_gcount", ctx.gcount, 3u);
+    expect_u32("mixed_proc_pi_sum", ctx.sum, 6u);
+    expect_u32("mixed_proc_pi_stack_count", ctx.stack_count, 0u);
+    expect_u32("mixed_proc_pi_result", out.gpr[0], 7u);
+
+    /* 68k record only: its own ProcInfo describes the one argument. */
+    mix_rd_header(MIX_PROC_PI68, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_PROC_PI68 + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K,
+                     2u | (3u << 4) | MIX_PI_PARAM(1, 3), 0x1130u, 0u);
+    expect_u32("mixed_proc_pi68_register",
+               (uint32_t)qrx_mix_register_proc(&mix, MIX_PROC_PI68,
+                                               mix_import_proc, &ctx, 0),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_pi68_call",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_PROC_PI68, 0, 0, &out,
+                                      2000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_pi68_gcount", ctx.gcount, 1u);
+    expect_u32("mixed_proc_pi68_sum", ctx.sum, 41u);
+    expect_u32("mixed_proc_pi68_result", out.gpr[0], 41u);
+
+    /* An explicit signature is copied at registration and wins. */
+    /* mix_setup() reloads the guest image; the descriptors written above must
+     * survive, so only the bridge state of the second instance is reset. */
+    memset(&ctx2, 0, sizeof(ctx2));
+    ctx2.mix = &mix2;
+    expect_u32("mixed_proc_pi_explicit_init",
+               (uint32_t)qrx_mix_init(&mix2, &ppc, MIX_GLUE, MIX_SP_TOP,
+                                      MIX_SP_LIMIT),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_pi_explicit_register",
+               (uint32_t)qrx_mix_register_proc(&mix2, MIX_PROC_PI,
+                                               mix_import_proc, &ctx2, &one),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_pi_explicit_call",
+               (uint32_t)qrx_mix_call(&mix2, MIX_F_PROC_PI, 0, 0, &out,
+                                      2000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_pi_explicit_gcount", ctx2.gcount, 1u);
+    expect_u32("mixed_proc_pi_explicit_sum", ctx2.sum, 1u);
+    expect_u32("mixed_proc_pi_explicit_result", out.gpr[0], 2u);
+
+    /* Rewriting the PPC record's ProcInfo changes the next call: the derived
+     * placement is not cached from the registration. */
+    mix_rd_record_pi(MIX_PROC_PI + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD,
+                     QRX_MIX_RD_ISA_PPC, two, MIX_F_PI, 0u);
+    expect_u32("mixed_proc_pi_live_call",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_PROC_PI, 0, 0, &out, 2000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_pi_live_calls", ctx.calls, 3u);
+    expect_u32("mixed_proc_pi_live_gcount", ctx.gcount, 2u);
+    expect_u32("mixed_proc_pi_live_sum", ctx.sum, 3u);
+    expect_u32("mixed_proc_pi_live_result", out.gpr[0], 4u);
+    report("mixed_proc_procinfo", before);
+}
+
+static void test_mixed_proc_procinfo_errors(void)
+{
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+    uint32_t three = MIX_PI_THREE;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_proc_pi_errors_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    /* The PPC record's ProcInfo is stack-based: there is no placement to
+     * derive, and the 68k record's opaque value must not be used instead. */
+    mix_rd_header(MIX_PROC_PI, QRX_MIX_RD_VERSION, 1u);
+    mix_rd_record_pi(MIX_PROC_PI + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K,
+                     0x0000A1B2u, 0x1120u, 0u);
+    mix_rd_record_pi(MIX_PROC_PI + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD,
+                     QRX_MIX_RD_ISA_PPC, 0x00000001u, MIX_F_PI, 0u);
+    expect_u32("mixed_proc_pi_errors_fat_stack",
+               (uint32_t)qrx_mix_register_proc(&mix, MIX_PROC_PI,
+                                               mix_import_proc, &ctx, 0),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* 68k-only descriptor whose ProcInfo says nothing about placement. */
+    mix_rd_header(MIX_PROC_PI68, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_PROC_PI68 + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K,
+                     0x0000A1B2u, 0x1130u, 0u);
+    expect_u32("mixed_proc_pi_errors_68k_opaque",
+               (uint32_t)qrx_mix_register_proc(&mix, MIX_PROC_PI68,
+                                               mix_import_proc, &ctx, 0),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* A rejected descriptor took no slot: its import address stays unknown. */
+    expect_u32("mixed_proc_pi_errors_unregistered",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_PROC_PI68, 0, 0, &out,
+                                      1000u),
+               (uint32_t)QRX_MIX_ERR_IMPORT);
+
+    /* Register a decodable descriptor, then break its ProcInfo in guest
+     * memory: the next call fails before the callback runs. */
+    mix_rd_record_pi(MIX_PROC_PI + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD,
+                     QRX_MIX_RD_ISA_PPC, three, MIX_F_PI, 0u);
+    expect_u32("mixed_proc_pi_errors_register",
+               (uint32_t)qrx_mix_register_proc(&mix, MIX_PROC_PI,
+                                               mix_import_proc, &ctx, 0),
+               (uint32_t)QRX_MIX_OK);
+    mix_rd_record_pi(MIX_PROC_PI + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD,
+                     QRX_MIX_RD_ISA_PPC, 0u, MIX_F_PI, 0u);
+    expect_u32("mixed_proc_pi_errors_live",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_PROC_PI, 0, 0, &out, 1000u),
+               (uint32_t)QRX_MIX_ERR_RD);
+    expect_u32("mixed_proc_pi_errors_no_callback", ctx.calls, 0u);
+    expect_u32("mixed_proc_pi_errors_no_result", out.gpr[0], 0u);
+    /* Restoring the record serves the next call again. */
+    mix_rd_record_pi(MIX_PROC_PI + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD,
+                     QRX_MIX_RD_ISA_PPC, three, MIX_F_PI, 0u);
+    expect_u32("mixed_proc_pi_errors_restored",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_PROC_PI, 0, 0, &out, 2000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_proc_pi_errors_restored_calls", ctx.calls, 1u);
+    expect_u32("mixed_proc_pi_errors_restored_result", out.gpr[0], 7u);
+    report("mixed_proc_procinfo_errors", before);
+}
+
+/* qrx_mix_rd_invoke() without a signature takes the ProcInfo path: the same
+ * placement as qrx_mix_rd_invoke_procinfo(), an explicit signature still wins,
+ * and a void result keeps the callee's r3. */
+static void test_mixed_rd_invoke_procinfo(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    qrx_mix_sig_t one;
+    unsigned before = failures;
+
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_rd_invoke_pi_init", (uint32_t)mix_setup(&mix, 0),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_invoke_pi_parse",
+               (uint32_t)qrx_mix_sig_parse(&one, "i", 'i'),
+               (uint32_t)QRX_MIX_OK);
+    mix_rd_header(MIX_RD_PI, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_RD_PI + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                     MIX_PI_THREE, MIX_F_PI, 0u);
+    in.gpr[0] = 20u;
+    in.gpr[1] = 22u;
+    in.gpr[2] = 24u;
+    in.gpr_count = 3u;
+    expect_u32("mixed_rd_invoke_pi_status",
+               (uint32_t)qrx_mix_rd_invoke(&mix, MIX_RD_PI, 0, &in, &out,
+                                           1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_invoke_pi_result", out.gpr[0], 66u);
+    /* The explicit ProcInfo entry point is the same call. */
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_rd_invoke_pi_alias",
+               (uint32_t)qrx_mix_rd_invoke_procinfo(&mix, MIX_RD_PI, &in, &out,
+                                                    1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_invoke_pi_alias_result", out.gpr[0], 66u);
+    /* An explicit signature decides the placement, not the record: one placed
+     * argument reaches a callee whose ProcInfo names three, which the derived
+     * path would have rejected for its argument count. */
+    mix_rd_record_pi(MIX_RD_PI + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                     MIX_PI_THREE, MIX_F_RDNEST, 0u);
+    memset(&out, 0, sizeof(out));
+    in.gpr_count = 1u;
+    in.gpr[0] = 20u;
+    expect_u32("mixed_rd_invoke_pi_explicit",
+               (uint32_t)qrx_mix_rd_invoke(&mix, MIX_RD_PI, &one, &in, &out,
+                                           1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_invoke_pi_explicit_stored", get32(0x2210u), 20u);
+    /* A 0-byte result has no value: the mask drops r3, as everywhere else. */
+    mix_rd_header(MIX_RD_PI0, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_RD_PI0 + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC, 2u,
+                     MIX_F_PI0, 0u);
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_rd_invoke_pi_void",
+               (uint32_t)qrx_mix_rd_invoke(&mix, MIX_RD_PI0, 0, &in, &out,
+                                           1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_invoke_pi_void_result", out.gpr[0], 0u);
+    report("mixed_rd_invoke_procinfo", before);
+}
+
+static void test_mixed_rd_invoke_procinfo_errors(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    qrx_ppc_state_t saved;
+    unsigned before = failures;
+
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_rd_invoke_pi_errors_init", (uint32_t)mix_setup(&mix, 0),
+               (uint32_t)QRX_MIX_OK);
+    in.gpr_count = 3u;
+    /* A stack-based ProcInfo describes no placement; no guest code may run. */
+    mix_rd_header(MIX_RD_PIBAD, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_RD_PIBAD + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                     0x00000001u, MIX_F_PI, 0u);
+    in.gpr[0] = 20u;
+    in.gpr[1] = 22u;
+    in.gpr[2] = 24u;
+    saved = ppc.cpu;
+    expect_u32("mixed_rd_invoke_pi_errors_stack",
+               (uint32_t)qrx_mix_rd_invoke(&mix, MIX_RD_PIBAD, 0, &in, &out,
+                                           1000u),
+               (uint32_t)QRX_MIX_ERR_RD);
+    expect_u32("mixed_rd_invoke_pi_errors_state",
+               (uint32_t)(memcmp(&saved, &ppc.cpu, sizeof(saved)) == 0), 1u);
+    /* A 68k-only descriptor carries no PPC entry to run. */
+    mix_rd_header(MIX_RD_68K, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_RD_68K + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K,
+                     MIX_PI_THREE, 0x2220u, 0u);
+    expect_u32("mixed_rd_invoke_pi_errors_68k",
+               (uint32_t)qrx_mix_rd_invoke(&mix, MIX_RD_68K, 0, &in, &out,
+                                           1000u),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* A fifth parameter cannot be placed. */
+    mix_rd_header(MIX_RD_PI, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_RD_PI + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                     2u | (3u << 4) | (1u << 31), MIX_F_PI, 0u);
+    expect_u32("mixed_rd_invoke_pi_errors_fifth",
+               (uint32_t)qrx_mix_rd_invoke(&mix, MIX_RD_PI, 0, &in, &out,
+                                           1000u),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* A repaired record serves the next call again. */
+    mix_rd_record_pi(MIX_RD_PI + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                     MIX_PI_THREE, MIX_F_PI, 0u);
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_rd_invoke_pi_errors_restored",
+               (uint32_t)qrx_mix_rd_invoke(&mix, MIX_RD_PI, 0, &in, &out,
+                                           1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_invoke_pi_errors_restored_result", out.gpr[0], 66u);
+    report("mixed_rd_invoke_procinfo_errors", before);
+}
+
+/* qrx_mix_rd_call() derives the placement from ProcInfo when no signature is
+ * given, keeps the ISA gate ahead of any guest access, and still lets an
+ * explicit signature decide. */
+static void test_mixed_rd_call_procinfo(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    qrx_mix_sig_t one;
+    unsigned before = failures;
+
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_rd_call_pi_init", (uint32_t)mix_setup(&mix, 0),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_call_pi_parse",
+               (uint32_t)qrx_mix_sig_parse(&one, "i", 'i'),
+               (uint32_t)QRX_MIX_OK);
+    mix_rd_header(MIX_RD_PI, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_RD_PI + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                     MIX_PI_THREE, MIX_F_PI, 0u);
+    in.gpr[0] = 20u;
+    in.gpr[1] = 22u;
+    in.gpr[2] = 24u;
+    in.gpr_count = 3u;
+    expect_u32("mixed_rd_call_pi_status",
+               (uint32_t)qrx_mix_rd_call(&mix, MIX_RD_PI, QRX_MIX_RD_ISA_PPC,
+                                         0, &in, &out, 1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_call_pi_result", out.gpr[0], 66u);
+    /* An explicit signature decides the placement, not the record: one placed
+     * argument reaches a callee whose ProcInfo names three. */
+    mix_rd_record_pi(MIX_RD_PI + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                     MIX_PI_THREE, MIX_F_RDNEST, 0u);
+    memset(&out, 0, sizeof(out));
+    in.gpr_count = 1u;
+    expect_u32("mixed_rd_call_pi_explicit",
+               (uint32_t)qrx_mix_rd_call(&mix, MIX_RD_PI, QRX_MIX_RD_ISA_PPC,
+                                         &one, &in, &out, 1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_call_pi_explicit_stored", get32(0x2210u), 20u);
+    report("mixed_rd_call_procinfo", before);
+}
+
+static void test_mixed_rd_call_procinfo_errors(void)
+{
+    qrx_mix_t mix;
+    qrx_mix_args_t in;
+    qrx_mix_result_t out;
+    qrx_ppc_state_t saved;
+    unsigned before = failures;
+
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_rd_call_pi_errors_init", (uint32_t)mix_setup(&mix, 0),
+               (uint32_t)QRX_MIX_OK);
+    mix_rd_header(MIX_RD_PI, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_RD_PI + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                     0x00000001u, MIX_F_PI, 0u);
+    in.gpr_count = 3u;
+    saved = ppc.cpu;
+    expect_u32("mixed_rd_call_pi_errors_stack",
+               (uint32_t)qrx_mix_rd_call(&mix, MIX_RD_PI, QRX_MIX_RD_ISA_PPC,
+                                         0, &in, &out, 1000u),
+               (uint32_t)QRX_MIX_ERR_RD);
+    expect_u32("mixed_rd_call_pi_errors_state",
+               (uint32_t)(memcmp(&saved, &ppc.cpu, sizeof(saved)) == 0), 1u);
+    /* The ISA gate comes first: 68k code is never entered or even resolved. */
+    expect_u32("mixed_rd_call_pi_errors_isa",
+               (uint32_t)qrx_mix_rd_call(&mix, MIX_RD_PI, QRX_MIX_RD_ISA_68K,
+                                         0, &in, &out, 1000u),
+               (uint32_t)QRX_MIX_ERR_RD);
+    expect_u32("mixed_rd_call_pi_errors_isa_state",
+               (uint32_t)(memcmp(&saved, &ppc.cpu, sizeof(saved)) == 0), 1u);
+    /* A 68k-only descriptor carries no PPC entry to run. */
+    mix_rd_header(MIX_RD_68K, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_RD_68K + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K,
+                     MIX_PI_THREE, 0x2220u, 0u);
+    expect_u32("mixed_rd_call_pi_errors_68k",
+               (uint32_t)qrx_mix_rd_call(&mix, MIX_RD_68K, QRX_MIX_RD_ISA_PPC,
+                                         0, &in, &out, 1000u),
+               (uint32_t)QRX_MIX_ERR_RD);
+    /* A repaired record serves the next call again. */
+    mix_rd_record_pi(MIX_RD_PI + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                     MIX_PI_THREE, MIX_F_PI, 0u);
+    in.gpr[0] = 20u;
+    in.gpr[1] = 22u;
+    in.gpr[2] = 24u;
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_rd_call_pi_errors_restored",
+               (uint32_t)qrx_mix_rd_call(&mix, MIX_RD_PI, QRX_MIX_RD_ISA_PPC,
+                                         0, &in, &out, 1000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_rd_call_pi_errors_restored_result", out.gpr[0], 66u);
+    report("mixed_rd_call_procinfo_errors", before);
+}
+
+/* An index import carries no descriptor of its own, so a plain
+ * qrx_mix_register() call has nothing to derive from.  Binding one makes that
+ * descriptor's ProcInfo decide the placement: the PPC record's when the
+ * descriptor has one, the 68k record's otherwise.  A ProcInfo rewritten in
+ * guest memory changes the next call, an undecodable one fails the
+ * registration, and a later plain registration drops the binding again. */
+static void test_mixed_import_procinfo(void)
+{
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+    uint32_t three = MIX_PI_THREE;
+    uint32_t two = MIX_PI_TWO;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_index_pi_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    mix_rd_header(MIX_IDX_RD, QRX_MIX_RD_VERSION, 1u);
+    mix_rd_record_pi(MIX_IDX_RD + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K,
+                     0x0000A1B2u, 0x1140u, 0u);
+    mix_rd_record_pi(MIX_IDX_RD + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD,
+                     QRX_MIX_RD_ISA_PPC, three, MIX_F_RDNEST, 0u);
+    expect_u32("mixed_index_pi_register",
+               (uint32_t)qrx_mix_register_procinfo(&mix, 5u, MIX_IDX_RD,
+                                                   mix_import_proc, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_index_pi_call",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_IDX_PI, 0, 0, &out, 2000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_index_pi_calls", ctx.calls, 1u);
+    expect_u32("mixed_index_pi_proc", ctx.proc, 0u);
+    expect_u32("mixed_index_pi_gcount", ctx.gcount, 3u);
+    expect_u32("mixed_index_pi_sum", ctx.sum, 6u);
+    expect_u32("mixed_index_pi_result", out.gpr[0], 7u);
+
+    /* The binding is re-read on every call, not cached. */
+    mix_rd_record_pi(MIX_IDX_RD + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD,
+                     QRX_MIX_RD_ISA_PPC, two, MIX_F_RDNEST, 0u);
+    expect_u32("mixed_index_pi_live_call",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_IDX_PI, 0, 0, &out, 2000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_index_pi_live_gcount", ctx.gcount, 2u);
+    expect_u32("mixed_index_pi_live_sum", ctx.sum, 3u);
+    expect_u32("mixed_index_pi_live_result", out.gpr[0], 4u);
+    expect_u32("mixed_index_pi_live_calls", ctx.calls, 2u);
+
+    /* A ProcInfo that describes no placement stops the call before the
+     * callback and cannot be registered again. */
+    mix_rd_record_pi(MIX_IDX_RD + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD,
+                     QRX_MIX_RD_ISA_PPC, 0x00000001u, MIX_F_RDNEST, 0u);
+    expect_u32("mixed_index_pi_bad_call",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_IDX_PI, 0, 0, &out, 2000u),
+               (uint32_t)QRX_MIX_ERR_RD);
+    expect_u32("mixed_index_pi_bad_calls", ctx.calls, 2u);
+    expect_u32("mixed_index_pi_bad_register",
+               (uint32_t)qrx_mix_register_procinfo(&mix, 5u, MIX_IDX_RD,
+                                                   mix_import_proc, &ctx),
+               (uint32_t)QRX_MIX_ERR_RD);
+
+    /* A 68k-only descriptor falls back to its own record. */
+    mix_rd_header(MIX_IDX_RD, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_IDX_RD + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K,
+                     2u | (3u << 4) | MIX_PI_PARAM(1, 3), 0x1140u, 0u);
+    expect_u32("mixed_index_pi68_register",
+               (uint32_t)qrx_mix_register_procinfo(&mix, 5u, MIX_IDX_RD,
+                                                   mix_import_proc, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_index_pi68_call",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_IDX_PI, 0, 0, &out, 2000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_index_pi68_gcount", ctx.gcount, 1u);
+    expect_u32("mixed_index_pi68_sum", ctx.sum, 1u);
+    expect_u32("mixed_index_pi68_result", out.gpr[0], 2u);
+
+    /* An out-of-range index and a descriptor below the index range are
+     * arguments, not a descriptor that could be resolved. */
+    expect_u32("mixed_index_pi_args",
+               (uint32_t)qrx_mix_register_procinfo(&mix, QRX_MIX_IMPORTS,
+                                                   MIX_IDX_RD,
+                                                   mix_import_proc, &ctx),
+               (uint32_t)QRX_MIX_ERR_ARG);
+    expect_u32("mixed_index_pi_low",
+               (uint32_t)qrx_mix_register_procinfo(&mix, 5u, 8u,
+                                                   mix_import_proc, &ctx),
+               (uint32_t)QRX_MIX_ERR_ARG);
+
+    /* A plain registration drops the binding: the callback is raw again. */
+    expect_u32("mixed_index_pi_plain",
+               (uint32_t)qrx_mix_register(&mix, 5u, mix_import_proc, &ctx, 0),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_index_pi_plain_call",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_IDX_PI, 0, 0, &out, 2000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_index_pi_plain_gcount", ctx.gcount, QRX_MIX_ARGS);
+    report("mixed_import_procinfo", before);
+}
+
+/* A real glue case end to end: PPC calls an import, the 68k callback holds
+ * only a UniversalProcPtr and re-enters PPC through ProcInfo without a
+ * signature, then the outer PPC code continues.  The callee stores its two
+ * register arguments, so their placement is checked in guest memory, and the
+ * nested frame must hang below the caller's r1 with the caller as back chain. */
+static void test_mixed_glue_procinfo(void)
+{
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    uint32_t outer_r1 = MIX_GLUE_SP - 32u;
+    unsigned before = failures;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("mixed_glue_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    mix_rd_header(MIX_GLUE_RD, QRX_MIX_RD_VERSION, 1u);
+    mix_rd_record_pi(MIX_GLUE_RD + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_68K,
+                     0x0000A1B2u, 0x2220u, 0u);
+    mix_rd_record_pi(MIX_GLUE_RD + QRX_MIX_RD_HEADER + QRX_MIX_RD_RECORD,
+                     QRX_MIX_RD_ISA_PPC, MIX_PI_TWO, MIX_F_RDNEST, 0u);
+    mix_rd_header(MIX_GLUE_RDBAD, QRX_MIX_RD_VERSION, 0u);
+    mix_rd_record_pi(MIX_GLUE_RDBAD + QRX_MIX_RD_HEADER, QRX_MIX_RD_ISA_PPC,
+                     0x00000001u, MIX_F_RDNEST, 0u);
+    expect_u32("mixed_glue_register",
+               (uint32_t)qrx_mix_register(&mix, 4u, mix_import_glue_pi, &ctx,
+                                          0),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_glue_status",
+               (uint32_t)qrx_mix_call(&mix, MIX_F_RDCALL, 0, 0, &out, 4000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mixed_glue_calls", ctx.calls, 1u);
+    expect_u32("mixed_glue_ppc_entry", ctx.rd_ok, 1u);
+    expect_u32("mixed_glue_arg0", ctx.rd_marker[0], 11u);
+    expect_u32("mixed_glue_arg1", ctx.rd_marker[1], 13u);
+    expect_u32("mixed_glue_back_chain", ctx.rd_back, outer_r1);
+    expect_u32("mixed_glue_sp", ctx.rd_sp_seen,
+               (outer_r1 - QRX_MIX_LINKAGE) & ~0xFu);
+    expect_u32("mixed_glue_rejected", ctx.rd_rd, 1u);
+    expect_u32("mixed_glue_restore", ctx.rd_restore, 1u);
+    expect_u32("mixed_glue_depth", (uint32_t)mix.depth, 0u);
+    expect_u32("mixed_glue_result", out.gpr[0], 26u);
+    report("mixed_glue_procinfo", before);
+}
+
 int main(void)
 {
     unsigned emit_failures;
@@ -2262,6 +4737,35 @@ int main(void)
         test_jit_smc_midblock();
 #endif
     test_jit_faults();
+    test_pef_loader();
+    test_pef_reloc();
+    test_mixed_call();
+    test_mixed_stack();
+    test_mixed_fpu();
+    test_mixed_import();
+    test_mixed_nested();
+    test_mixed_errors();
+    test_mixed_sig_call();
+    test_mixed_sig_fp();
+    test_mixed_sig_import();
+    test_mixed_sig_stack();
+    test_mixed_sig_errors();
+    test_mixed_rd();
+    test_mixed_rd_errors();
+    test_mixed_proc_import();
+    test_mixed_proc_errors();
+    test_mixed_proc_procinfo();
+    test_mixed_proc_procinfo_errors();
+    test_mixed_rd_invoke_procinfo();
+    test_mixed_rd_invoke_procinfo_errors();
+    test_mixed_rd_call_procinfo();
+    test_mixed_rd_call_procinfo_errors();
+    test_mixed_import_procinfo();
+    test_mixed_glue_procinfo();
+    test_mixed_rd_nested();
+    test_mixed_rd_nested_errors();
+    test_mixed_rd_procinfo();
+    test_mixed_rd_procinfo_errors();
     test_fpu_double();
     test_fpu_single();
     test_fpu_compare();
@@ -2280,6 +4784,7 @@ int main(void)
         FreeVec(jit_code);
         jit_code = NULL;
     }
+
 #endif
     printf("QRXPPC: %u failure(s)\n", failures);
     return failures ? 1 : 0;

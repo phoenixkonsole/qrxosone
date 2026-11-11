@@ -18,9 +18,15 @@ mkdir -p "$OUT"
 cd "$REPO"
 
 echo "  CC  QRXPPC.elf"
-"$CC" -O2 -m68040 -fno-pic -fno-PIC -Itools/qrxppc \
+# -fno-optimize-sibling-calls: a tail call becomes a `bra.l` with an
+# R_68K_PC32 relocation, and elf2hunk can only express such a relocation below
+# 64 KiB of text.  The test binary is larger than that, so tail calls must stay
+# ordinary `jsr` (R_68K_32) instead.
+"$CC" -O2 -m68040 -fno-pic -fno-PIC -fno-optimize-sibling-calls \
+    -Itools/qrxppc \
     tools/qrxppc/qrx_ppc.c tools/qrxppc/qrx_ppc_fpu.c \
-    tools/qrxppc/qrx_ppc_jit.c tools/qrxppc/qrx_ppc_test.c \
+    tools/qrxppc/qrx_ppc_jit.c tools/qrxppc/qrx_pef.c \
+    tools/qrxppc/qrx_mix.c tools/qrxppc/qrx_ppc_test.c \
     -o "$OUT/QRXPPC.elf"
 
 echo "  HUNK QRXPPC"

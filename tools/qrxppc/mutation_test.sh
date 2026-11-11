@@ -110,6 +110,70 @@ MUTATIONS = {
         "if (ea >= ppc->mem.size ||\n"
         "        ppc->mem.size - ea < 2u) {",
     ),
+    "rd_version_check": (
+        "qrx_mix_status_t qrx_mix_rd_resolve(",
+        "byte != QRX_MIX_RD_VERSION",
+        "byte > QRX_MIX_RD_VERSION",
+    ),
+    "proc_rd_validation": (
+        "qrx_mix_status_t qrx_mix_register_proc(",
+        "if (rc != QRX_MIX_OK)\n        return rc;",
+        "if (rc != QRX_MIX_OK && 0)\n        return rc;",
+    ),
+    "rd_invoke_isa": (
+        "qrx_mix_status_t qrx_mix_rd_invoke(",
+        "qrx_mix_rd_resolve(mix, descriptor, QRX_MIX_RD_ISA_PPC, &info)",
+        "qrx_mix_rd_resolve(mix, descriptor, QRX_MIX_RD_ISA_68K, &info)",
+    ),
+    "nested_restore_off": (
+        "qrx_mix_status_t qrx_mix_call(",
+        "if (nested) {\n        p->cpu = saved;",
+        "if (nested && 0) {\n        p->cpu = saved;",
+    ),
+    "procinfo_convention": (
+        "qrx_mix_status_t qrx_mix_rd_procinfo_sig(",
+        "if ((rd->proc_info & QRX_MIX_PI_CONVENTION_MASK) !=\n"
+        "        QRX_MIX_PI_REGISTER_BASED)",
+        "if ((rd->proc_info & QRX_MIX_PI_CONVENTION_MASK) ==\n"
+        "        QRX_MIX_PI_REGISTER_BASED)",
+    ),
+    "procinfo_size_zero": (
+        "qrx_mix_status_t qrx_mix_rd_procinfo_sig(",
+        "if ((field & QRX_MIX_PI_PARAM_SIZE_MASK) == 0u)\n"
+        "            return QRX_MIX_ERR_RD;",
+        "if ((field & QRX_MIX_PI_PARAM_SIZE_MASK) == 4u)\n"
+        "            return QRX_MIX_ERR_RD;",
+    ),
+    "proc_import_ppc_info": (
+        "static qrx_mix_status_t mix_proc_import_sig(",
+        "if (rc == QRX_MIX_OK)",
+        "if (rc == QRX_MIX_OK && 0)",
+    ),
+    "proc_import_cached": (
+        "static qrx_mix_status_t mix_run(",
+        "if (mix->proc_sig_derived[slot]) {",
+        "if (mix->proc_sig_derived[slot] && 0) {",
+    ),
+    "rd_invoke_procinfo": (
+        "qrx_mix_status_t qrx_mix_rd_invoke(",
+        "if (!sig) {",
+        "if (!sig && 0) {",
+    ),
+    "rd_invoke_forced_pi": (
+        "qrx_mix_status_t qrx_mix_rd_invoke(",
+        "if (!sig) {",
+        "if (1) {",
+    ),
+    "rd_call_procinfo": (
+        "qrx_mix_status_t qrx_mix_rd_call(",
+        "if (!sig) {",
+        "if (!sig && 0) {",
+    ),
+    "index_procinfo": (
+        "static qrx_mix_status_t mix_run(",
+        "if (mix->import_desc_used[index]) {",
+        "if (mix->import_desc_used[index] && 0) {",
+    ),
 }
 
 
@@ -175,18 +239,56 @@ python3 "$TMP/driver.py" "$SRC/qrx_ppc_test.c" "$TMP/driver.c" test_jit_widths_l
 python3 "$TMP/driver.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_cache.c" test_jit_chain_cache_2way
 python3 "$TMP/driver.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_smc.c" test_jit_smc_midblock
 
+cat > "$TMP/driver_rd.py" <<'PYRD'
+import sys
+
+src, dst, test = sys.argv[1:4]
+text = open(src, encoding="utf-8").read()
+marker = "\nint main(void)\n"
+pos = text.index(marker)
+body = """
+int main(void)
+{
+    memset(memory, 0, sizeof(memory));
+    qrx_ppc_init(&ppc, memory, (uint32_t)sizeof(memory));
+    TEST_CALL();
+    printf("QRXPPC: %u failure(s)\\n", failures);
+    return failures ? 1 : 0;
+}
+""".replace("TEST_CALL", test)
+with open(dst, "w", encoding="utf-8") as out:
+    out.write(text[:pos] + body)
+PYRD
+
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_rd.c" test_mixed_rd_errors
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_proc.c" test_mixed_proc_errors
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_nested.c" test_mixed_rd_nested
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_pi.c" test_mixed_rd_procinfo
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_pi_err.c" test_mixed_rd_procinfo_errors
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_piproc.c" test_mixed_proc_procinfo
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_piproc_err.c" test_mixed_proc_procinfo_errors
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_invoke_pi.c" test_mixed_rd_invoke_procinfo
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_invoke_pi_err.c" test_mixed_rd_invoke_procinfo_errors
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_rdcall_pi.c" test_mixed_rd_call_procinfo
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_rdcall_pi_err.c" test_mixed_rd_call_procinfo_errors
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_idxpi.c" test_mixed_import_procinfo
+
 build_variant()
 {
     local name="$1"
     local jit_source="$2"
     local driver="${3:-$TMP/driver.c}"
+    local mix_source="${4:-$SRC/qrx_mix.c}"
     local elf="$TMP/$name.elf"
     local hunk="$TMP/$name.hunk"
     local hunk_out
 
-    "$CC" -O2 -m68040 -fno-pic -fno-PIC -I"$SRC" \
+    # Same flag as build.sh: tail calls would need a PC32 relocation, which
+    # elf2hunk cannot express past 64 KiB of text.
+    "$CC" -O2 -m68040 -fno-pic -fno-PIC -fno-optimize-sibling-calls \
+        -I"$SRC" \
         "$SRC/qrx_ppc.c" "$SRC/qrx_ppc_fpu.c" \
-        "$jit_source" "$driver" -o "$elf" > "$TMP/$name.build.log" 2>&1
+        "$jit_source" "$mix_source" "$driver" -o "$elf" > "$TMP/$name.build.log" 2>&1
     hunk_out="$("$ELF2HUNK" "$elf" "$hunk" 2>&1)"
     if printf '%s\n' "$hunk_out" | grep -q 'relocation(s) failed'; then
         echo "elf2hunk failed for $name" >&2
@@ -287,6 +389,187 @@ else
     survivors=$((survivors + 1))
 fi
 
+rd_mutant=rd_version_check
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$rd_mutant.c" "$rd_mutant"
+build_variant "$rd_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_rd.c" "$TMP/$rd_mutant.c"
+run_variant "$rd_mutant"
+if grep -q '^mixed_rd_errors: FAIL$' "$TMP/$rd_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$rd_mutant"
+elif grep -q '^mixed_rd_errors: PASS$' "$TMP/$rd_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$rd_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_rd_errors result)\n' "$rd_mutant"
+    tail -20 "$TMP/$rd_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+proc_mutant=proc_rd_validation
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$proc_mutant.c" "$proc_mutant"
+build_variant "$proc_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_proc.c" "$TMP/$proc_mutant.c"
+run_variant "$proc_mutant"
+if grep -q '^mixed_proc_errors: FAIL$' "$TMP/$proc_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$proc_mutant"
+elif grep -q '^mixed_proc_errors: PASS$' "$TMP/$proc_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$proc_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_proc_errors result)\n' "$proc_mutant"
+    tail -20 "$TMP/$proc_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+invoke_mutant=rd_invoke_isa
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$invoke_mutant.c" "rd_invoke_isa"
+build_variant "$invoke_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_nested.c" "$TMP/$invoke_mutant.c"
+run_variant "$invoke_mutant"
+if grep -q '^mixed_rd_nested: FAIL$' "$TMP/$invoke_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$invoke_mutant"
+elif grep -q '^mixed_rd_nested: PASS$' "$TMP/$invoke_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$invoke_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_rd_nested result)\n' "$invoke_mutant"
+    tail -20 "$TMP/$invoke_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+restore_mutant=nested_restore_off
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$restore_mutant.c" "nested_restore_off"
+build_variant "$restore_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_nested.c" "$TMP/$restore_mutant.c"
+run_variant "$restore_mutant"
+if grep -q '^mixed_rd_nested: FAIL$' "$TMP/$restore_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$restore_mutant"
+elif grep -q '^mixed_rd_nested: PASS$' "$TMP/$restore_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$restore_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_rd_nested result)\n' "$restore_mutant"
+    tail -20 "$TMP/$restore_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+
+pi_mutant=procinfo_convention
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$pi_mutant.c" "$pi_mutant"
+build_variant "$pi_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_pi.c" "$TMP/$pi_mutant.c"
+run_variant "$pi_mutant"
+if grep -q '^mixed_rd_procinfo: FAIL$' "$TMP/$pi_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$pi_mutant"
+elif grep -q '^mixed_rd_procinfo: PASS$' "$TMP/$pi_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$pi_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_rd_procinfo result)\n' "$pi_mutant"
+    tail -20 "$TMP/$pi_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+size_mutant=procinfo_size_zero
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$size_mutant.c" "$size_mutant"
+build_variant "$size_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_pi_err.c" "$TMP/$size_mutant.c"
+run_variant "$size_mutant"
+if grep -q '^mixed_rd_procinfo_errors: FAIL$' "$TMP/$size_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$size_mutant"
+elif grep -q '^mixed_rd_procinfo_errors: PASS$' "$TMP/$size_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$size_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_rd_procinfo_errors result)\n' "$size_mutant"
+    tail -20 "$TMP/$size_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+pip_mutant=proc_import_ppc_info
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$pip_mutant.c" "proc_import_ppc_info"
+build_variant "$pip_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_piproc.c" "$TMP/$pip_mutant.c"
+run_variant "$pip_mutant"
+if grep -q '^mixed_proc_procinfo: FAIL$' "$TMP/$pip_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$pip_mutant"
+elif grep -q '^mixed_proc_procinfo: PASS$' "$TMP/$pip_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$pip_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_proc_procinfo result)\n' "$pip_mutant"
+    tail -20 "$TMP/$pip_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+pic_mutant=proc_import_cached
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$pic_mutant.c" "proc_import_cached"
+build_variant "$pic_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_piproc_err.c" "$TMP/$pic_mutant.c"
+run_variant "$pic_mutant"
+if grep -q '^mixed_proc_procinfo_errors: FAIL$' "$TMP/$pic_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$pic_mutant"
+elif grep -q '^mixed_proc_procinfo_errors: PASS$' "$TMP/$pic_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$pic_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_proc_procinfo_errors result)\n' "$pic_mutant"
+    tail -20 "$TMP/$pic_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+rinv_mutant=rd_invoke_procinfo
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$rinv_mutant.c" "rd_invoke_procinfo"
+build_variant "$rinv_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_invoke_pi_err.c" "$TMP/$rinv_mutant.c"
+run_variant "$rinv_mutant"
+if grep -q '^mixed_rd_invoke_procinfo_errors: FAIL$' "$TMP/$rinv_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$rinv_mutant"
+elif grep -q '^mixed_rd_invoke_procinfo_errors: PASS$' "$TMP/$rinv_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$rinv_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_rd_invoke_procinfo_errors result)\n' "$rinv_mutant"
+    tail -20 "$TMP/$rinv_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+forced_mutant=rd_invoke_forced_pi
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$forced_mutant.c" "rd_invoke_forced_pi"
+build_variant "$forced_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_invoke_pi.c" "$TMP/$forced_mutant.c"
+run_variant "$forced_mutant"
+if grep -q '^mixed_rd_invoke_procinfo: FAIL$' "$TMP/$forced_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$forced_mutant"
+elif grep -q '^mixed_rd_invoke_procinfo: PASS$' "$TMP/$forced_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$forced_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_rd_invoke_procinfo result)\n' "$forced_mutant"
+    tail -20 "$TMP/$forced_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+call_mutant=rd_call_procinfo
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$call_mutant.c" "rd_call_procinfo"
+build_variant "$call_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_rdcall_pi_err.c" "$TMP/$call_mutant.c"
+run_variant "$call_mutant"
+if grep -q '^mixed_rd_call_procinfo_errors: FAIL$' "$TMP/$call_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$call_mutant"
+elif grep -q '^mixed_rd_call_procinfo_errors: PASS$' "$TMP/$call_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$call_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_rd_call_procinfo_errors result)\n' "$call_mutant"
+    tail -20 "$TMP/$call_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+idx_mutant=index_procinfo
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$idx_mutant.c" "$idx_mutant"
+build_variant "$idx_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_idxpi.c" "$TMP/$idx_mutant.c"
+run_variant "$idx_mutant"
+if grep -q '^mixed_import_procinfo: FAIL$' "$TMP/$idx_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$idx_mutant"
+elif grep -q '^mixed_import_procinfo: PASS$' "$TMP/$idx_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$idx_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_import_procinfo result)\n' "$idx_mutant"
+    tail -20 "$TMP/$idx_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
 cp -p "$BACKUP_QRXPPC" "$TREE/C/QRXPPC"
 cp -p "$BACKUP_STARTUP" "$STARTUP"
 rm -f "$GUEST_LOG"
@@ -297,6 +580,8 @@ if [ "$survivors" -ne 0 ]; then
     exit 1
 fi
 
-echo "mutation test PASS: $(( ${#mutants[@]} + 2 )) mutants killed"
+# The array holds the mutants that share the jit_widths_limit driver; the
+# thirteen single-mutant blocks below build their own driver.
+echo "mutation test PASS: $(( ${#mutants[@]} + 14 )) mutants killed"
 shasum -a 256 "$STARTUP" "$TREE/C/QRXPPC"
 rm -rf "$TMP"

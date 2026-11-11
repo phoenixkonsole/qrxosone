@@ -393,20 +393,21 @@ qrx_ppc_status_t qrx_ppc_step(qrx_ppc_t *p)
     case 12:
     case 13: {
         unsigned ca;
-        uint32_t r = add_carry(p->cpu.gpr[RA], (uint32_t)SIMM, 0, &ca);
+        uint32_t base = RA ? p->cpu.gpr[RA] : 0u;
+        uint32_t r = add_carry(base, (uint32_t)SIMM, 0, &ca);
         p->cpu.gpr[RT] = r;
         set_ca(p, ca);
         if (op == 13)
             set_cr0_result(p, r);
         break;
     }
-    /* addi */
+    /* addi (RA = 0 means the literal zero, not r0) */
     case 14:
-        p->cpu.gpr[RT] = p->cpu.gpr[RA] + (uint32_t)SIMM;
+        p->cpu.gpr[RT] = (RA ? p->cpu.gpr[RA] : 0u) + (uint32_t)SIMM;
         break;
     /* addis */
     case 15:
-        p->cpu.gpr[RT] = p->cpu.gpr[RA] + ((uint32_t)SIMM << 16);
+        p->cpu.gpr[RT] = (RA ? p->cpu.gpr[RA] : 0u) + ((uint32_t)SIMM << 16);
         break;
     /* bc / bcl */
     case 16: {

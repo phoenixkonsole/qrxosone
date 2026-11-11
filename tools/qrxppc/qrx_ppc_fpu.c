@@ -561,9 +561,9 @@ uint32_t qrx_fp_fctiw(qrx_ppc_t *p, uint64_t a, int truncate)
     fp_dec_t va;
     unsigned mode;
     double d;
-    int64_t truncated;
+    int32_t truncated;      /* fctiw returns a 32-bit integer */
     double fraction;
-    int64_t rounded;
+    int32_t rounded;
     int increment = 0;
     int inexact;
 
@@ -580,12 +580,14 @@ uint32_t qrx_fp_fctiw(qrx_ppc_t *p, uint64_t a, int truncate)
         return 0;
 
     memcpy(&d, &a, sizeof(d));
-    if (d >= 2147483648.0 || d < -2147483649.0) {
+    /* -2147483649 itself is out of range; rejecting it here keeps the
+     * truncation inside int32_t instead of relying on a libgcc int64 helper. */
+    if (d >= 2147483648.0 || d <= -2147483649.0) {
         fp_invalid(p, QRX_FPSCR_VX);
         return 0x80000000u;
     }
 
-    truncated = (int64_t)d;
+    truncated = (int32_t)d;
     fraction = d - (double)truncated;
     inexact = fraction != 0.0;
     mode = truncate ? 1u : (unsigned)(p->cpu.fpscr & QRX_FPSCR_RN_MASK);
@@ -613,14 +615,24 @@ uint32_t qrx_fp_fctiw(qrx_ppc_t *p, uint64_t a, int truncate)
         }
     }
 
-    rounded = truncated + increment;
-    if (rounded < -2147483648LL || rounded > 2147483647LL) {
-        fp_invalid(p, QRX_FPSCR_VX);
-        return 0x80000000u;
+    if (increment > 0) {
+        if (truncated == 2147483647) {
+            fp_invalid(p, QRX_FPSCR_VX);
+            return 0x80000000u;
+        }
+        rounded = truncated + 1;
+    } else if (increment < 0) {
+        if (truncated == (-2147483647 - 1)) {
+            fp_invalid(p, QRX_FPSCR_VX);
+            return 0x80000000u;
+        }
+        rounded = truncated - 1;
+    } else {
+        rounded = truncated;
     }
     if (inexact)
         fp_inexact(p, increment != 0);
-    return (uint32_t)(int32_t)rounded;
+    return (uint32_t)rounded;
 }
 
 void qrx_fp_compare(qrx_ppc_t *p, unsigned field,

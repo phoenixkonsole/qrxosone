@@ -1,8 +1,9 @@
 # QRXPPC — PPC32 reference core (P1.1–P1.4)
 
 Stand: 2026-11-09  
-Status: Integer-/FPU-Referenzkern und P1.4-Tier-1-68k-JIT mit differentiellen
-Gast-Tests; **kein MacOS-Start**.
+Status: Integer-/FPU-Referenzkern, P1.4-Tier-1-68k-JIT mit differentiellen
+Gast-Tests und PEF-Container-Reader (P2.1, ohne Relokationen und Toolbox);
+**kein MacOS-Start**.
 
 ## Zweck
 
@@ -12,8 +13,8 @@ diagnostizierbar: Jede nicht implementierte Instruktion endet mit
 `QRX_PPC_ILLEGAL`, jeder Speicher-/Alignmentfehler mit `QRX_PPC_FAULT`.
 
 Nicht enthalten sind FPU-Exception-Traps (MSR-FE0/FE1), `fres`/`frsqrte`,
-MMU, PPC-Exceptions, AltiVec, PEF/Code Fragment Manager, MacOS-Toolbox oder
-ein MacOS-X-Mach-O-Loader. Ein erfolgreicher
+MMU, PPC-Exceptions, AltiVec, MacOS-Toolbox, PEF-Relokationen/gepackte
+Sections oder ein MacOS-X-Mach-O-Loader. Ein erfolgreicher
 Interpreter-Test ist **keine** Aussage „MacOS läuft“.
 
 ## CPU-Zustand
@@ -166,6 +167,210 @@ Damit ist Mid-Block-SMC abgedeckt. Offen sind ISA-Tags und
 Seitengenerationen, FPU-JIT und AltiVec. Die Roadmap führt diese Punkte als offene
 P1.4-Arbeit.
 
+## PEF-Container (P2.1, Lesepfad)
+
+`tools/qrxppc/qrx_pef.c` liest PEF-Container (`Joy!peff`) für `pwpc`:
+Container-Header (40 B), Section-Header (28 B), den Loader-Header (56 B),
+Import-Bibliotheken (24 B), Import-Symbole (4 B) und die Export-Tabelle
+(Hash-Tabelle, Schlüssel-Tabelle, 10-Byte-Symboleinträge). Geprüft werden
+Magic, Formatversion, Architektur, Section-Zahl, Container-Grenzen, genau eine
+Loader-Section, die Gültigkeit von `main`/`init`/`term`, die Bereichsgrenzen der
+Symboltabellen und NUL-terminierte Namen. Jeder Fehler hat einen eigenen Status
+(`QRX_PEF_ERR_*`) statt eines Absturzes.
+
+`qrx_pef_load()` kopiert ausschließlich ungepackte Sections nach
+`base + index * 0x1000` und prüft die Gastgrenzen vor dem ersten Schreibzugriff;
+`qrx_pef_main_tvector()` liefert die Adresse des Main-TVec, dessen erstes Wort
+der Einstiegspunkt ist.
+
+`qrx_pef_relocate()` wendet die Relokationsanweisungen je Section an
+(Reloc-Header mit 12-Byte-Einträgen): `BySectDWithSkip`, die Wertegruppe
+(`BySectC`/`BySectD`, `TVector12`, `TVector8`, `VTable8`, `ImportRun`), die
+Indexgruppe (`SmByImport`, `SmSetSectC`/`SmSetSectD`, `SmBySection`),
+`IncrPosition`, `SmRepeat`, `SetPosition`, `LgByImport`, `LgRepeat` und
+`LgSetOrBySection`. `sectionC`/`sectionD` sind wie im PEF-Standard die
+Section-Adresse abzüglich `defaultAddress`. Alle Importe werden über einen
+`qrx_pef_resolver_t` **vor** dem ersten Schreibzugriff aufgelöst; ein
+unaufgelöster Import liefert `QRX_PEF_ERR_UNRESOLVED` und lässt den Speicher
+unverändert. Unbekannte Opcodes, ungültige Section-Indizes und Reloc-Streams
+außerhalb der Loader-Section enden als `QRX_PEF_ERR_RELOC`. Der Gast-Test `pef_loader` baut einen synthetischen
+Container mit TVec und Fragment-Code, lädt ihn, führt ihn interpretiert und per
+JIT aus und vergleicht den vollständigen Endzustand. `pef_reloc` prüft die
+Relokation an einem Drei-Section-Container (Code/Data/Loader): TVector12,
+`SmBySection`/`BySectD`- und `SmByImport`-Fixups, dazu die Negativfälle
+unaufgelöster Import, unbekannter Opcode, ungültiger Section-Index und
+Reloc-Stream außerhalb der Loader-Section.
+
+Nicht enthalten: gepackte Sections (`QRX_PEF_ERR_PACKED`), MacBinary/
+Resource-Forks, 68k-Container, Glue-Code-Erzeugung für Mixed Mode und jeder
+Toolbox-Aufruf. Der Resolver erhält Bibliothek, Symbolklasse und Namen und
+liefert die Adresse selbst; eine Export-Hash-Suche oder Lazy-Bindung gibt es
+nicht, alle Importe werden beim Laden aufgelöst. Ein geladener PEF-Container
+ist daher noch **keine** laufende MacOS-9-App.
+
+## Mixed Mode (P1.5)
+
+`tools/qrxppc/qrx_mix.c` verbindet 68k-Aufrufer mit PPC-Code und zurück. Die
+Brücke deckt den PowerOpen-/MacOS-9-Ausschnitt ab, den ein Glue-Stub braucht:
+`r1` ist 16-Byte-ausgerichtet, an `0(r1)` liegt die Linkage-Area (Rücksprung-SP,
+gespeichertes CR, gespeichertes LR, Reserve), ab `24(r1)` der Parameterbereich;
+`r2` ist RTOC, `r3..r10` und `f1..f8` tragen Integer- bzw. FP-Argumente,
+Ergebnisse kommen in `r3`/`r4` und `f1` zurück. `qrx_mix_call()` baut den
+Glue-Rahmen, setzt LR auf ein Sentinel-Wort (`sc`) und führt aus, bis der
+PPC-Code dorthin zurückspringt; ein nicht wiederhergestellter Stackpointer
+endet als `QRX_MIX_ERR_SP`.
+
+Argumente beschreibt eine Signatur (`qrx_mix_sig_parse`): pro Parameter ein
+Zeichen in Deklarationsreihenfolge, `i`/`p` für 32-Bit-Integer bzw. Pointer,
+`l` für 64-Bit-Integer und `d` für Double; der Rückgabetyp ist `v`, `i`, `l`
+oder `f`. Integer füllen `r3..r10`, Doubles `f1..f8` mit getrennten Zählern;
+was nicht mehr in seine Registerklasse passt, landet im Parameterbereich ab
+`24(r1)`, in Argumentreihenfolge, 4-Byte-ausgerichtet (`l`/`d` 8-Byte-
+ausgerichtet, hohes Wort zuerst). Ein `l` mit ungeradem Registerzähler wird
+verworfen, weil PowerOpen kein Paar teilt. `qrx_mix_call()` prüft die
+Argumentzahlen gegen die Signatur und maskiert das Ergebnis auf den
+Rückgabetyp (`v` löscht es, `i` liefert nur `r3`, `l` `r3:r4`, `f` nur `f1`).
+
+PPC-Code ruft 68k-Code über `sc` mit dem Import-Index in `r0` auf. Die Brücke
+übergibt die von der Import-Signatur benannten Argumente als
+`qrx_mix_args_t`: `gpr[]`/`fpr[]` je Klasse in Deklarationsreihenfolge,
+`stack[]` als rohe Wörter des Parameterbereichs und `sp` als Gastadresse von
+`24(r1)`. Sie ruft den registrierten Callback (im Gast echter 68k-Code) und
+setzt hinter dem `sc` das Ergebnis gemäß Rückgabetyp in `r3`, `r3:r4` oder
+`f1`; ein Import ohne Signatur erhält weiterhin `r3..r10`/`f1..f8` roh. Verschachtelte Aufrufe (68k-Callback ruft
+erneut PPC) bekommen einen eigenen Glue-Rahmen unterhalb des aktuellen PPC-SP;
+der komplette PPC-Zustand wird gesichert und wiederhergestellt. Jeder
+Fehlerfall hat einen eigenen Status: nicht registrierter Import,
+Halt/Fault/Illegal, erschöpftes Instruktionsbudget und Trap-Schleife.
+
+Ein Aufruf kann statt über eine nackte Einstiegsadresse über einen
+Mixed-Mode-Routine-Deskriptor im GastSpeicher laufen. `qrx_mix_rd_resolve()`
+prüft den 2-Byte-gepackten `RoutineDescriptor` (Trap-Wort `0xAAFE`, Version 7,
+`routineDescriptorFlags` 0, Record-Tabelle vollständig im Speicher, höchstens
+acht Records) und wählt den ersten Record mit passender ISA (`kM68kISA` 0,
+`kPowerPCISA` 1). `procDescriptor` wird absolut oder – mit
+`kProcDescriptorIsRelative` – relativ zur Deskriptoradresse aufgelöst und muss
+danach ausgerichtet und im Speicher liegen; Reservefelder und `selectorInfo`
+werden ignoriert. `qrx_mix_rd_call()` gibt die aufgelöste Adresse an
+`qrx_mix_call()`, sodass Signatur, Stack-Argumente und Rückgabemaskierung
+unverändert gelten. Abgelehnt werden Dispatch-Deskriptoren (Flags ungleich 0),
+`kFragmentNeedsPreparing`, Selektor-Flags, unbekannte Flag-Bits und ein
+fehlender PPC-Record. Das `ProcInfo` eines register-basierten Records wird auf
+Wunsch dekodiert (`qrx_mix_rd_procinfo_sig`): Konvention in Bits 0…3
+(`kRegisterBased` = 2), Ergebnisgröße in Bits 4…5, danach 5-Bit-Felder pro
+Parameter in Reihenfolge (Größe in Bits 0…1, Registerhinweis in Bits 2…4).
+Registerhinweise und Ergebnisregister bleiben ungenutzt, weil PowerOpen
+`r3`…`r10` und `f1`…`f8` nach Position vergibt; platziert wird nach den
+Größen: 1, 2 und 4 Byte als `i`, eine Ergebnisgröße von 0 als `v`.
+`qrx_mix_rd_invoke_procinfo()` löst Deskriptor und `ProcInfo` auf und ruft
+ohne eigene Signatur. Abgelehnt werden andere Konventionen (Stack-basiert,
+Dispatch, `kSpecialCase`), ein Feld mit Registerhinweis aber Größe 0 und ein
+fünfter Parameter, dessen Bits jenseits von Bit 31 liegen. Doppelte Werte,
+64-Bit-Integer und mehr als vier Parameter beschreibt ein `ProcInfo` nicht;
+dafür bleibt eine explizite Signatur nötig. Derselbe Weg steht
+`qrx_mix_rd_invoke()` offen: ohne Signatur leitet es die Platzierung aus dem
+`ProcInfo` des PPC-Records ab, und `qrx_mix_rd_invoke_procinfo()` ist genau
+dieser Aufruf; `qrx_mix_rd_call()` verhält sich bei `NULL` genauso, prüft aber
+zuerst die ISA.
+
+Dieselben Deskriptoren adressieren auch Imports: PPC-Code legt statt eines
+Import-Index die Adresse eines registrierten Deskriptors in `r0` (`r0 < 16`
+bleibt Index), die Brücke löst daraus den 68k-Record auf und übergibt dessen
+Einstiegspunkt als `args->proc`. `qrx_mix_register_proc()` prüft den Deskriptor
+schon bei der Registrierung, erlaubt höchstens acht Deskriptor-Importe und
+weist Duplikate ab; jeder Aufruf löst den Deskriptor erneut auf, damit
+Änderungen im Gastspeicher nicht unbemerkt bleiben. Ein Deskriptor ohne
+68k-Record oder ein nach der Registrierung ungültig gewordener Deskriptor
+endet als `QRX_MIX_ERR_RD`, ein nicht registrierter Deskriptor als
+`QRX_MIX_ERR_IMPORT`. Ohne eigene Signatur leitet die Brücke die Platzierung
+bei jedem Aufruf aus dem `ProcInfo` ab — vorzugsweise aus dem PPC-Record, bei
+einem reinen 68k-Deskriptor aus dem Record, den der Import aufruft. Ein
+`ProcInfo`, das die Platzierung nicht beschreibt, wird schon bei der
+Registrierung mit `QRX_MIX_ERR_RD` abgelehnt; eine ausdrückliche Signatur hat
+Vorrang.
+
+Der Test `mixed_call` prüft Argumente, Ergebnis, Glue-Wort, Back-Chain und das
+gespeicherte LR im Callee-Rahmen, `mixed_stack` die ersten acht Register- plus
+zwei Stack-Argumente, `mixed_fpu` die FP-Argumente und die `f1`-Rückgabe,
+`mixed_import` den 68k-Callback samt Speicherzugriff, `mixed_nested` den Pfad
+68k→PPC→68k→PPC und `mixed_errors` die Negativfälle. `mixed_sig_call` prüft
+zehn Integer-Parameter mit zwei Stack-Wörtern, `mixed_sig_fp` neun Doubles mit
+einem 8-Byte-ausgerichteten Stack-Double (`lfd` aus dem Parameterbereich),
+`mixed_sig_import` die gemischte Liste `iipd` über Register und Pointer,
+`mixed_sig_stack` zehn Integer bei einem Import (Stack-Wörter und `sp` im
+Callback) und `mixed_sig_errors` kaputte Signaturen, falsche Argumentzahlen
+und einen nicht 16-Byte-ausgerichteten Stackpointer. `mixed_rd` prüft einen
+Einzel-Record-Deskriptor (absolute Adresse, ignorierte Reservefelder, Aufruf
+mit Stack-Wort), einen Fat-Deskriptor mit 68k- vor PPC-Record, die ISA-Auswahl
+und einen relativen `procDescriptor`; `mixed_rd_errors` falsches Trap-Wort,
+falsche Version, Dispatch-Flags, zu viele Records, eine abgeschnittene
+Tabelle, einen Deskriptor außerhalb des Speichers, den fehlenden PPC-Record,
+`kFragmentNeedsPreparing`, Selektor-Flags, unbekannte Flags, unbrauchbare
+Einstiegspunkte, relativen Unterlauf und dass nicht gewählte Records nicht
+geprüft werden sowie die Auflösung selbst keinen Gastcode ausführt.
+`mixed_rd_nested` lässt einen 68k-Callback über `qrx_mix_rd_invoke()` wieder in
+PPC-Code springen: Fat-Deskriptor mit 68k-Record zuerst, zwei und neun
+Parameter (das neunte Wort liegt im verschachtelten Parameterbereich),
+Back-Chain auf den Rahmen des aufrufenden PPC-Codes und unveränderter
+CPU-Zustand nach der Rückkehr; `mixed_rd_nested_errors` prüft dabei einen
+68k-only-Deskriptor, eine Nicht-Deskriptor-Adresse, ein zu kleines
+Instruktionsbudget und einen Callee, der `r1` nicht zurückstellt, jeweils mit
+unverändertem CPU-Zustand danach. `mixed_rd_procinfo` ruft über
+`qrx_mix_rd_invoke_procinfo()` drei 4-Byte-Parameter auf (Ergebnis 15), dann
+einen parameterlosen Deskriptor mit `v`-Ergebnis und einen mit 1- und
+2-Byte-Parametern; geprüft werden die abgeleitete Signatur und das Ergebnis,
+vier Parameter sind der letzte darstellbare Fall. `mixed_rd_procinfo_errors`
+prüft die Ablehnung stack-basierter, Dispatch- und `kSpecialCase`-Konventionen,
+eines Feldes mit Registerhinweis ohne Größe, eines fünften Parameters und
+leerer Zeiger; die Signatur bleibt bei Fehlern unangetastet, und ein
+abgelehnter `ProcInfo` führt keinen Gastcode aus.
+`mixed_proc_import` ruft einen 68k-Callback über einen Fat-Deskriptor auf
+(acht Registerargumente, ein Stack-Wort, `args->proc` = 68k-Einstieg), und
+`mixed_proc_errors` prüft zu niedrige Adressen, Nicht-Deskriptoren, fehlenden
+68k-Record, kaputte Signatur, Duplikat, unregistrierten Deskriptor und einen
+nach der Registrierung veränderten Deskriptor. `mixed_proc_procinfo`
+registriert Deskriptor-Importe ohne eigene Signatur: bei einem Fat-Deskriptor
+mit undurchsichtigem `ProcInfo` im 68k-Record gewinnt der PPC-Record (drei
+4-Byte-Parameter), ein 68k-only-Deskriptor fällt auf seinen eigenen Record
+zurück, eine ausdrückliche Signatur hat Vorrang, und ein im Gastspeicher
+geändertes `ProcInfo` ändert schon den nächsten Aufruf (zwei statt drei
+Argumente). `mixed_proc_procinfo_errors` prüft die Ablehnung, wenn das
+`ProcInfo` des PPC-Records stack-basiert ist oder ein 68k-only-Deskriptor gar
+keines beschreibt, dass ein abgelehnter Deskriptor keinen Import-Slot belegt,
+dass ein nachträglich kaputtes `ProcInfo` den Aufruf mit `QRX_MIX_ERR_RD`
+beendet, ohne den Callback zu rufen, und dass die Reparatur den nächsten Aufruf
+wieder bedient. `mixed_rd_invoke_procinfo` prüft denselben Weg über
+`qrx_mix_rd_invoke()` ohne Signatur (drei Parameter mit Ergebnis 66, gleiches
+Ergebnis über `qrx_mix_rd_invoke_procinfo()`, Vorrang einer ausdrücklichen
+Signatur, `v`-Ergebnis behält `r3`), `mixed_rd_invoke_procinfo_errors` die
+Ablehnung eines stack-basierten `ProcInfo`, eines 68k-only-Deskriptors und eines
+fünften Parameters, jeweils mit unverändertem CPU-Zustand vor dem Gastcode, und
+die erneute Bedienung nach der Reparatur. `mixed_rd_call_procinfo` prüft die
+Ableitung über `qrx_mix_rd_call()` (Ergebnis 66, Vorrang einer ausdrücklichen
+Signatur), `mixed_rd_call_procinfo_errors` die ISA-Sperre vor jedem
+Deskriptorzugriff, ein stack-basiertes `ProcInfo`, einen 68k-only-Deskriptor und
+die erneute Bedienung nach der Reparatur. `mixed_glue_procinfo` bildet den
+Glue-Fall durchgängig ab: PPC ruft einen Import, der 68k-Callback hält nur eine
+UniversalProcPtr (die Deskriptoradresse) und springt ohne eigene Signatur über
+das `ProcInfo` des PPC-Records in PPC-Code, der seine beiden Registerargumente
+im Gastspeicher ablegt; geprüft werden Platzierung, Rückgabewert, Back-Chain des
+verschachtelten Rahmens, unveränderter CPU-Zustand und die Ablehnung eines
+zweiten Deskriptors, dessen `ProcInfo` keine Platzierung beschreibt. Ein Index-Import trägt selbst kein `ProcInfo`;
+`qrx_mix_register_procinfo()` bindet ihm deshalb einen Deskriptor, aus dem die
+Platzierung wie beim Deskriptor-Import abgeleitet und bei jedem Aufruf neu
+gelesen wird (`mixed_import_procinfo`). Beim Bau
+dieser Tests
+fiel auf, dass `addi`/`addis`/`addic` mit `RA=0` fälschlich `r0` statt des
+Literals 0 addierten; der Kern folgt jetzt der ISA.
+
+Nicht enthalten: Glue-Code-Erzeugung, Routine-Deskriptoren für Dispatch mit
+Selektoren, CFM-Fragmentvorbereitung, 68k-Einstiegspunkte (der Kern führt nur
+PPC aus), Aggregate/Unions und Varargs in
+Signaturen, eine Unterscheidung von `float`
+und `double` (jedes `float` wird als Double übergeben), eine über die
+`r1`-Prüfung hinausgehende Stack-Abwicklung, gemischte Codefragmente und das
+Umschalten zwischen 68k- und PPC-Code in einem laufenden Prozess.
+
 ## Status und Abbruch
 
 | Status | Bedeutung |
@@ -225,9 +430,10 @@ erzeugt mit Seed `0xC0DEF00D` 96 Fälle: 32 beliebige ungültige
 (`0xFFFFFFF8`–`0xFFFFFFFF`). Die 64 Zufallsfälle sind je zur Hälfte Load und
 Store, die 32 Grenzfälle ebenfalls. Jeder Fall schreibt unmittelbar vor dem
 faultenden Zugriff CR0 über eine zufällige der sechs CR0-schreibenden Formen;
-damit wird der Lazy-CR0-Commit vor dem Speicherhelfer geprüft. Im Host laufen 23 Fälle plus
+damit wird der Lazy-CR0-Commit vor dem Speicherhelfer geprüft. Im Host laufen 52 Fälle plus
 Byte-Selbsttest; der JIT wird dort nur als Byte-Emitter geprüft, nicht
-ausgeführt. Im ARMithlon-Gast laufen 37 Fälle, weil der SMC-Test, der
+ausgeführt. Im ARMithlon-Gast laufen 65 Fälle plus JIT-Emit-Selbsttest, weil der SMC-Test, der PEF-Lade- und der
+Relokationstest, die siebenundzwanzig Mixed-Mode-Fälle, der
 Breiten-/Grenztest, der kleine-Limit-Test, der Branch- und die
 Chaining-Tests sowie die Fuzz-Differentialtests dort den ausführbaren
 68k-Code benötigen.
@@ -243,11 +449,24 @@ Der Test gibt `QRXPPC: 0 failure(s)` aus; im Gastlauf wurden 0 Fehler
 protokolliert. Er läuft als normales 68k-AROS-Programm im Gast; es wird keine
 Gastsoftware auf dem Host ausgeführt.
 
+Der Testbuild stößt an eine Grenze von `elf2hunk`: Sobald der Text der
+Binärdatei 64 KiB überschreitet, lässt sich eine PC-relative Relokation
+(`R_68K_PC32`) nicht mehr als `RELRELOC32` ausdrücken, und das Werkzeug meldet
+`relocation offset N is too big for RELRELOC32` gefolgt von
+`1 relocation(s) failed in HUNK #0`. Solche Relokationen entstehen aus
+Tail-Calls (`return f(...)`), die GCC als `bra.l` übersetzt. Deshalb bauen
+`tools/qrxppc/build.sh` und der `build_variant` in
+`tools/qrxppc/mutation_test.sh` mit `-fno-optimize-sibling-calls`: Dann bleiben
+nur absolute `jsr`/`R_68K_32`-Bezüge übrig, und `elf2hunk` erzeugt wieder einen
+`loadseg()`-fähigen Hunk. Die Flagge ist kein Geschwindigkeitsschalter; sie
+darf nicht entfernt werden, solange der Text über 64 KiB liegt.
+
 ## Nächste Schritte
 
 1. P1.3-Rest: FPU-Exception-Traps, `mcrfs`/`mtfsfi`, Single-Arithmetik und
    `fres`/`frsqrte`.
 2. P1.4-Rest: ISA-Tag/Seitengeneration, Update-Formen der Speicherzugriffe
    und FPU-JIT.
-3. P1.5: 68k↔PPC-Mixed-Mode-ABI.
+3. P1.5-Rest: Glue-Code-Erzeugung, Dispatch-Deskriptoren mit Selektoren und
+   gemischte Codefragmente.
 4. Erst danach P2: PEF/Code Fragment Manager und MacOS-9-Toolbox-HLE.

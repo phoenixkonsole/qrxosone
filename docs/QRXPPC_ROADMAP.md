@@ -287,7 +287,7 @@ benutzten Weg. Der Einstieg vergleicht `cpu.pc` mit der Blockadresse, damit ein
 veralteter Eintrag nach einer Invalidierung keinen fremden Block ausführt;
 nicht genommene indirekte Branches nutzen den statischen Fallthrough-Link.
 
-Abnahme im ARMithlon-Gast: 37 Fälle, davon 19 bestehende Integer-/FPU-Fälle,
+Abnahme im ARMithlon-Gast: 65 Fälle, davon 19 bestehende Integer-/FPU-Fälle,
 der CR0-Test (`jit_cr0`), der Compare-/CR-Test (`compare_cr`), der
 Branch-Test (`jit_branch` mit genommenem/nicht genommenem Pfad, CR1, Link und
 CTR-Schleife), der Chaining-Test (`jit_chain`, ein nativer Einstieg für einen
@@ -304,7 +304,28 @@ zufällige JIT-Instruktionen), der Fault-Fuzz (`jit_fault_fuzz`, 96 Fälle mit
 zufälligen 32-Bit-Adressen, RAM-Grenz- und Wrap-Adressen sowie CR0-Commit vor
 dem Fault), der Breiten-/Grenztest (`jit_widths`), der logische Limit-Test
 (`jit_widths_limit`), zwei gezielte Fault-Differentialfälle (OOB und
-unaligned) und der SMC-/Cache-Test (`jit_cache_smc`); `QRXPPC: 0 failure(s)`.
+unaligned) und der SMC-/Cache-Test (`jit_cache_smc`), der PEF-Ladetest (`pef_loader`, synthetischer Container mit
+TVec, interpretiert und per JIT) und der Relokationstest (`pef_reloc`, TVec-,
+Import- und Section-Fixups mit Resolver, interpretiert und per JIT) sowie die
+siebenundzwanzig Mixed-Mode-Fälle (`mixed_call`, `mixed_stack`, `mixed_fpu`,
+`mixed_import`, `mixed_nested`, `mixed_errors`, `mixed_sig_call`,
+`mixed_sig_fp`, `mixed_sig_import`, `mixed_sig_stack`, `mixed_sig_errors`,
+`mixed_rd`, `mixed_rd_errors`, `mixed_proc_import`, `mixed_proc_errors`,
+`mixed_rd_nested`, `mixed_rd_nested_errors`, `mixed_rd_procinfo`,
+`mixed_rd_procinfo_errors`, `mixed_proc_procinfo`, `mixed_proc_procinfo_errors`,
+`mixed_rd_invoke_procinfo`, `mixed_rd_invoke_procinfo_errors`,
+`mixed_rd_call_procinfo`, `mixed_rd_call_procinfo_errors`, `mixed_glue_procinfo`,
+`mixed_import_procinfo`);
+die Deskriptor-Importe und beide Deskriptor-Einstiegspunkte ohne Signatur leiten
+die Platzierung aus dem `ProcInfo` ab, `mixed_glue_procinfo` prüft den
+durchgängigen Glue-Fall (PPC → Import → 68k-Callback mit UniversalProcPtr →
+PPC ohne Signatur) samt verschachteltem Rahmen und abgelehntem `ProcInfo`.
+Dieser Fall hängt an derselben Funktion wie die drei `qrx_mix_rd_invoke()`-
+Mutanten und braucht deshalb keine eigene Mutation. `mixed_import_procinfo`
+prüft Index-Importe, denen ein Deskriptor für die `ProcInfo`-Ableitung
+zugeordnet ist; eine zwanzigste Mutation schaltet genau diese Ableitung in
+`mix_run()` ab und wird von diesem Fall erkannt.
+`QRXPPC: 0 failure(s)`.
 Die bestehenden Fälle laufen zusätzlich per JIT auf einer separaten
 Speicherkopie und vergleichen den vollständigen CPU-/Speicherzustand. Der
 Gast-Mutationstest `tools/qrxppc/mutation_test.sh` baut sechs Varianten mit
@@ -312,7 +333,36 @@ entferntem Byte-/Halfword-Range- oder Halfword-Alignment-Check; alle sechs
 werden von `jit_widths_limit` erkannt. Eine siebte Variante durchsucht im
 Ziel-Cache nur den ersten Weg (wieder direkt abgebildet); sie wird von
 `jit_chain_cache_2way` erkannt, eine achte schaltet die Mid-Block-SMC-Prüfung ab
-und wird von `jit_smc_midblock` erkannt.
+und wird von `jit_smc_midblock` erkannt. Eine neunte akzeptiert jede
+Deskriptor-Version (`byte > 7` statt `!= 7`); sie wird von `mixed_rd_errors`
+erkannt. Eine zehnte überspringt die Deskriptorprüfung bei der Registrierung
+eines Imports; sie wird von `mixed_proc_errors` erkannt. Eine elfte lässt
+`qrx_mix_rd_invoke()` den 68k-Record wählen und wird von `mixed_rd_nested`
+erkannt, eine zwölfte stellt den CPU-Zustand nach einem verschachtelten Aufruf
+nicht wieder her und ebenfalls von `mixed_rd_nested`. Eine dreizehnte dreht die
+Konventionsprüfung in `qrx_mix_rd_procinfo_sig()` um und wird von
+`mixed_rd_procinfo` erkannt, eine vierzehnte lässt die Größenprüfung eines
+Parameterfeldes fallen und wird von `mixed_rd_procinfo_errors` erkannt. Eine
+fünfzehnte sucht die Import-Platzierung nur im 68k-Record und wird von
+`mixed_proc_procinfo` erkannt, eine sechzehnte legt die abgeleitete Signatur nur
+bei der Registrierung zugrunde und wird von `mixed_proc_procinfo_errors`
+erkannt. Eine siebzehnte schaltet die `ProcInfo`-Ableitung in
+`qrx_mix_rd_invoke()` ab und wird von `mixed_rd_invoke_procinfo_errors` erkannt,
+eine achtzehnte zieht das `ProcInfo` auch einer ausdrücklichen Signatur vor und
+wird von `mixed_rd_invoke_procinfo` erkannt. Eine neunzehnte schaltet die
+Ableitung in `qrx_mix_rd_call()` ab und wird von
+`mixed_rd_call_procinfo_errors` erkannt.
+
+Der Testbuild selbst stößt an eine Grenze von `elf2hunk`: Liegt der Text der
+Binärdatei über 64 KiB, kann das Werkzeug eine PC-relative Relokation
+(`R_68K_PC32`) nicht mehr als `RELRELOC32` ausdrücken und meldet
+`relocation offset N is too big for RELRELOC32`. Solche Relokationen entstehen
+aus Tail-Calls (`return f(...)`), die GCC als `bra.l` übersetzt; deshalb bauen
+`tools/qrxppc/build.sh` und `build_variant` in `mutation_test.sh` mit
+`-fno-optimize-sibling-calls`. Dann bleiben nur absolute `R_68K_32`-Bezüge
+übrig, und der Hunk ist wieder `loadseg()`-fähig. Die Flagge ist kein
+Geschwindigkeitsschalter und darf nicht entfernt werden, solange der Text die
+64 KiB überschreitet.
 
 Block-Chaining für direkte, bedingte und indirekte Branches ist damit
 umgesetzt. Offen für den vollständigen P1.4-Ausbau: ISA-Tag und
@@ -326,6 +376,27 @@ vollständige P1.4-Abnahme.
 - Übergang 68k → PPC und PPC → 68k.
 - Stackframes, Register-Rettung, Fehler- und Trap-Rückkehr.
 - Synthetische Mixed-Mode-Tests.
+
+Stand 2026-11-09: `tools/qrxppc/qrx_mix.c` implementiert den Übergang in beide
+Richtungen. `qrx_mix_call()` baut den PowerOpen-Glue-Rahmen (16-Byte
+augerichteter SP, Linkage-Area, Parameterbereich), legt Argumente in
+`r3..r10`/`f1..f8` und führt bis zum Sentinel-`sc` aus; PPC-Code ruft
+68k-Callbacks über `sc` mit dem Import-Index in `r0` auf, inklusive
+verschachtelter Aufrufe mit gesichertem PPC-Zustand. `qrx_mix_sig_t` beschreibt
+Parameter (`i`/`p`/`l`/`d`) und Rückgabetyp; `r3..r10` und `f1..f8` werden
+getrennt gefüllt, überzählige Argumente landen 8-Byte-ausgerichtet im
+Parameterbereich ab `24(r1)`, und Imports erhalten die Stack-Wörter samt `sp`
+im Callback. `qrx_mix_rd_resolve()`/`qrx_mix_rd_call()` akzeptieren zusätzlich
+einen Routine-Deskriptor im GastSpeicher: Trap-Wort, Version, Flags und
+Record-Tabelle werden geprüft, der erste Record passender ISA gewählt und
+`procDescriptor` absolut oder deskriptor-relativ aufgelöst. `qrx_mix_register_proc()`
+registriert einen 68k-Callback unter der Deskriptoradresse, den PPC-Code mit
+dieser Adresse in `r0` statt eines Import-Index anspricht; der Callback erhält
+den 68k-Einstiegspunkt als `args->proc`. Fünfzehn synthetische Fälle prüfen
+Rahmen, Register- und Stack-Argumente, gemischte Integer-/FP-Listen, Rückgabe,
+68k-Speicherzugriff, Deskriptoren und die Fehlerpfade. Offen: Glue-Code-Erzeugung, Aggregate/Varargs in Signaturen,
+Dispatch-Deskriptoren mit Selektoren, CFM-Fragmentvorbereitung und gemischte
+Codefragmente.
 
 Abnahme P1:
 
@@ -351,6 +422,17 @@ MacOS-Installation im Gast.
 - 68k-/PPC-Codefragmente und Mixed-Mode-Übergänge.
 - Speicherverwaltung, Handles, Zeigervalidierung.
 - Fehlerbehandlung statt Hänger.
+
+Stand 2026-11-09: `tools/qrxppc/qrx_pef.c` liest Container-Header,
+Section-Header, Loader-Header, Import- und Exporttabellen und lädt ungepackte
+Sections in den Gastspeicher, und `qrx_pef_relocate()` wendet die
+PEF-Relokationsanweisungen an: TVec-, Section- und Import-Fixups laufen über
+einen Resolver, der alle Importe vor dem ersten Schreibzugriff auflöst.
+`pef_loader` und `pef_reloc` führen synthetische Container interpretiert und
+per JIT aus. Der Mixed-Mode-Übergang steht als Brücke (P1.5) und nimmt
+auch Routine-Deskriptoren als Einsprungpunkt; offen sind gepackte
+Sections, MacBinary/Resource-Forks, 68k-Container, Dispatch-Deskriptoren
+mit Selektoren und Glue-Code-Erzeugung für echte MacOS-Aufrufe.
 
 #### P2.2 Toolbox-Minimum
 
