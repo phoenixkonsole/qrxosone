@@ -625,3 +625,19 @@ Freddi still shows a black window. The section it gets is the one shown, but it 
 Freddi Fish now draws its intro and plays its sound. Its main loop runs the game only after the window has had `WM_ACTIVATEAPP` with wParam 1 and `WM_SETFOCUS`. Windows sends both when `ShowWindow` shows a top-level window, but QRX86 sent them only from `SetFocus`. `ShowWindow` now activates the window, except for `SW_SHOWMINNOACTIVE`, `SW_SHOWNA` and `SW_SHOWNOACTIVATE`. If a control inside the window already has the focus, it keeps it.
 
 The survey of 66 programs is unchanged: the same 4 stop, and no other program changed its result or its screen size.
+
+## Update 2026-11-11: the Inno Setup of islepro
+
+`islepro` no longer stops. Its Inno Setup 2.0 wizard opens and goes as far as the licence page. Five things stood in the way:
+
+- `VirtualAlloc` reserved memory at addresses such as `10002000`; Windows always reserves on a 64 KB boundary. Delphi's heap commits and decommits 16 KB units counted from the address, so it left 8 KB of old data committed and later read it as a block header. That was the heap overwrite at `00401b04`. Reservations now start on a 64 KB boundary.
+- `MsgWaitForMultipleObjects` with `INFINITE` returned `WAIT_TIMEOUT` after 100 ms. The loader took that to mean that the program it had unpacked was done, and deleted it before it could start. A wait on processes now lasts until one ends or input arrives; waits on other handles keep the old behaviour.
+- `GetFileVersionInfoSizeA`, `GetFileVersionInfoA` and `VerQueryValueA` now read the version resource of any PE file, not only of our own system DLLs. Without it Inno stops with "Internal error S104" on the `SHFOLDR.DLL` it unpacks. `VerQueryValueA` walks the blocks and returns text values as ANSI.
+- `LoadLibrary` with a full path such as `C:\WINDOWS\is-XXXX.tmp\_shfoldr.dll` looked for the file below the program ("Internal error S105"). Such paths are now mapped as `CreateFile` maps them.
+- `CallWindowProcA` passed messages unchanged to our window procedures, which work in UTF-16. Delphi subclasses our buttons this way, and `WM_GETTEXT` wrote "< &Back" as UTF-16 into an 8-byte buffer, which broke the heap again. Text messages to our own procedures now go through the same ANSI bridge as `SendMessageA`.
+
+Also new: `EnumFontsA`, `CreatePenIndirect` and `CharLowerBuffA`.
+
+Still open: the licence text box stays empty, and Return does not choose Yes there, so no installation was finished.
+
+The survey of 66 programs now has 3 stops, down from 4. `islepro` reaches its first question, and the Japanese `aoe2demo` no longer reports `MEM_BAD_POINTER` and opens its 511x378 window, likely through the 64 KB reservations. No other program changed its result or its screen size.

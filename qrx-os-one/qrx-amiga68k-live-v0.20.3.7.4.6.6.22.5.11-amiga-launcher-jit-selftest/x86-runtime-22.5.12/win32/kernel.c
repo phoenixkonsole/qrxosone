@@ -660,6 +660,13 @@ FN(k_VirtualAlloc) {
         uint32_t from = (a[2] & 0x2000u) ? a[0] & ~0xFFFFu : a[0] & ~0xFFFu, len = (a[0] + n - from + 0xFFFu) & ~0xFFFu;
         if (x86_map(C, from, len, 1)) return from;
     }
+    /* A reservation starts on a 64 KB boundary, as under Windows. Delphi's heap commits and
+       decommits 16 KB units counted from the address: from 10002000 it left 8 KB of old data
+       committed and later read it as a block header (the Inno Setup of islepro). */
+    if (!a[0] && (a[2] & 0x2000u)) {
+        r = qw_alloc(w, n + 0x10000);
+        return r ? (r + 0xFFFFu) & ~0xFFFFu : 0;
+    }
     r = qw_alloc(w, n + 0x1000);
     return (r + 0xFFFu) & ~0xFFFu;
 }

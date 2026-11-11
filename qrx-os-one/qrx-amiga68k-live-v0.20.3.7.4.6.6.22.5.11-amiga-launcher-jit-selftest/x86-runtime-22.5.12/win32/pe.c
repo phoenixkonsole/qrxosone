@@ -131,6 +131,13 @@ static int find_dll_file(qwin *w, const char *name, char *out, size_t max)
     struct dirent *e;
     int searched_cwd = 0;
     lower_base(want, name, sizeof(want));
+    /* A full path such as C:\WINDOWS\is-XXXX.tmp\_shfoldr.dll (Inno Setup) is where the file
+       manager maps it, as for CreateFile. */
+    if (isalpha((unsigned char)name[0]) && name[1] == ':' && (name[2] == '\\' || name[2] == '/')) {
+        FILE *f;
+        qw_fs_map(w, name, out, max);
+        if ((f = fopen(out, "rb"))) { fclose(f); return 1; }
+    }
     if (sl) { size_t L = (size_t)(sl - w->exe_path); if (L >= sizeof(dir)) return 0; memcpy(dir, w->exe_path, L); dir[L] = 0; }
     else {
         const char *co = strrchr(w->exe_path, ':');

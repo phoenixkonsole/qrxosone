@@ -231,17 +231,25 @@ FN(x_LoadKeyboardLayoutA) { UNUSED; return 0x04090409u; }
 FN(x_MsgWaitForMultipleObjects) {        /* (n, handles, waitall, ms, mask): single thread */
     qevent ev;
     uint32_t ms = a[3] == 0xFFFFFFFFu ? 100 : a[3];
-    int r, k = qw_dinput_ready(w, a[1], a[0]);
+    int r, k, procs;
     uint32_t i;
-    if (k >= 0) return (uint32_t)k;                          /* DirectInput device has data */
-    for (i = 0; i < a[0] && i < 64; i++) if (qw_proc_signalled(w, x86_rd32(&w->cpu, a[1] + i * 4)) > 0) return i;
-    memset(&ev, 0, sizeof(ev));
-    r = qw_be_wait(w, ms, &ev);
-    if (r > 0) {
-        user_input_event(w, &ev);
-        k = qw_dinput_ready(w, a[1], a[0]);
-        return k >= 0 ? (uint32_t)k : a[0];                  /* device data, else "window message" */
-    }
+    /* INFINITE on processes does not time out. Inno Setup waits so for the program it unpacked,
+       and deleted it while that was still starting when this said WAIT_TIMEOUT. */
+    do {
+        if ((k = qw_dinput_ready(w, a[1], a[0])) >= 0) return (uint32_t)k;   /* DirectInput device has data */
+        for (i = 0, procs = a[0] > 0; i < a[0] && i < 64; i++) {
+            int s = qw_proc_signalled(w, x86_rd32(&w->cpu, a[1] + i * 4));
+            if (s > 0) return i;
+            if (s < 0) procs = 0;
+        }
+        memset(&ev, 0, sizeof(ev));
+        r = qw_be_wait(w, ms, &ev);
+        if (r > 0) {
+            user_input_event(w, &ev);
+            k = qw_dinput_ready(w, a[1], a[0]);
+            return k >= 0 ? (uint32_t)k : a[0];              /* device data, else "window message" */
+        }
+    } while (a[3] == 0xFFFFFFFFu && procs && !w->exiting);
     return 0x102;
 }
 FN(x_ToUnicode) { const qhle *t = qw_find_hle("user32", "ToAsciiEx"); return t ? t->fn(w, a) : 0; }

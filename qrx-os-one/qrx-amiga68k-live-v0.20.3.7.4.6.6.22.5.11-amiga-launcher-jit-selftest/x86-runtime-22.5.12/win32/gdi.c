@@ -612,6 +612,8 @@ FN(g_CreatePen) {
     if (o) { o->style = (int)a[0]; o->width = a[1] ? (int)a[1] : 1; o->color = rgb_of(a[2]); }
     return h;
 }
+/* LOGPEN: style, then the width as a POINT, then the colour. */
+FN(g_CreatePenIndirect) { uint32_t b[3]; b[0] = RD32(a[0]); b[1] = RD32(a[0] + 4); b[2] = RD32(a[0] + 12); return g_CreatePen(w, b); }
 FN(g_CreateSolidBrush) {
     uint32_t h = gdi_new(w, GO_BRUSH);
     qobj *o = O(w, h, GO_BRUSH);
@@ -1301,7 +1303,7 @@ const qhle qw_gdi32[] = {
     G("GetTextMetricsW", g_GetTextMetricsW, 2), G("TextOutW", g_TextOutW, 5), G("ExtTextOutW", g_ExtTextOutW, 8),
     G("CreateCompatibleDC", g_CreateCompatibleDC, 1), G("DeleteDC", g_DeleteDC, 1),
     G("CreateCompatibleBitmap", g_CreateCompatibleBitmap, 3), G("CreateBitmap", g_CreateBitmap, 5),
-    G("CreatePen", g_CreatePen, 3), G("CreateSolidBrush", g_CreateSolidBrush, 1), G("CreateBrushIndirect", g_CreateBrushIndirect, 1),
+    G("CreatePen", g_CreatePen, 3), G("CreatePenIndirect", g_CreatePenIndirect, 1), G("CreateSolidBrush", g_CreateSolidBrush, 1), G("CreateBrushIndirect", g_CreateBrushIndirect, 1),
     G("CreateFontW", g_CreateFontW, 14), G("CreateFontIndirectW", g_CreateFontIndirectW, 1),
     G("GetBitmapBits", g_GetBitmapBits, 3),
     G("SelectObject", g_SelectObject, 2), G("DeleteObject", g_DeleteObject, 1), G("GetObjectW", g_GetObjectW, 3),

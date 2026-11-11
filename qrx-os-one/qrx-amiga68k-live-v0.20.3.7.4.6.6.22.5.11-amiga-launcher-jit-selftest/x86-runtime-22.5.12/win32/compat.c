@@ -1209,6 +1209,7 @@ FN(c_LangId) { UNUSED; return 0x409; }
 FN(c_SystemTimeToFileTime) { WR32(a[1], 0xD53E8000u); WR32(a[1] + 4, 0x019DB1DEu); return 1; }
 FN(c_FormatDT) { uint32_t cap = a[5]; return cap ? wr_str(w, a[4], cap, "1998-01-01") + 1 : 11; }
 FN(c_CharUpperBuffA) { uint32_t i; for (i = 0; i < a[1]; i++) WR8(a[0] + i, (uint8_t)toupper(RD8(a[0] + i))); return a[1]; }
+FN(c_CharLowerBuffA) { uint32_t i; for (i = 0; i < a[1]; i++) WR8(a[0] + i, (uint8_t)tolower(RD8(a[0] + i))); return a[1]; }
 FN(c_CharToOemA) {
     uint32_t i = 0;
     for (;; i++) { uint8_t ch = (uint8_t)RD8(a[0] + i); WR8(a[1] + i, ch); if (!ch) break; }
@@ -1669,7 +1670,8 @@ void qw_midi_tick(qwin *w)
     }
 }
 
-/* (hdc, family, callback, lparam): the one font there is, under the name asked for. */
+/* (hdc, family, callback, lparam): the one font there is, under the name asked for. EnumFontsA
+   takes the same arguments and calls back the same way. */
 FN(c_EnumFontFamiliesA) {
     uint32_t lf = qw_alloc(w, 60 + 32), tm = qw_alloc(w, 80), i, r;
     char face[32];
@@ -1730,7 +1732,8 @@ FN(ole_VariantChangeType) { UNUSED; return 0x80020005u; }   /* DISP_E_TYPEMISMAT
 /* ================================================================ system DLLs as files */
 /* Our system DLLs have a version too: games refuse to start below the DirectX they need, and
  * The Gungan Frontier reads the answer without checking it. As in a real block, the fixed part
- * follows a header of 0x28 bytes. Other files report none: reading theirs is not done. */
+ * follows a header of 0x28 bytes. Other files report the version resource they carry: Inno
+ * Setup stops with "Internal error S104" when the SHFOLDR.DLL it unpacked has none. */
 #define VER_BLOCK 0x100u
 #define VER_FIXED 0x28u
 static int version_is_system(qwin *w, uint32_t path)
@@ -1743,13 +1746,89 @@ static int version_is_system(qwin *w, uint32_t path)
     if (!strncasecmp(p, "C:\\WINDOWS\\SYSTEM", 17)) return 1;
     return qw_is_hle_dll(b ? b + 1 : p);
 }
+static uint32_t le32at(const uint8_t *d, uint32_t n, uint32_t o) { return o + 4u <= n && o + 4u > o ? (uint32_t)d[o] | (uint32_t)d[o + 1] << 8 | (uint32_t)d[o + 2] << 16 | (uint32_t)d[o + 3] << 24 : 0u; }
+/* The file offset of an address, from the section that holds it; 0 if none does. */
+static uint32_t rva_off(const uint8_t *d, uint32_t n, uint32_t sec, uint32_t nsec, uint32_t r)
+{
+    uint32_t k;
+    for (k = 0; k < nsec; k++) {
+        uint32_t s = sec + k * 40u, va = le32at(d, n, s + 12), vs = le32at(d, n, s + 8), rs = le32at(d, n, s + 16);
+        if (r >= va && r < va + (vs > rs ? vs : rs)) return le32at(d, n, s + 20) + (r - va);
+    }
+    return 0;
+}
+/* The RT_VERSION resource of a PE file (its first name and language), copied to *out.
+   Returns its size, 0 when the file has none. */
+static uint32_t version_of_file(qwin *w, uint32_t path, uint8_t **out)
+{
+    char p[300], host[1200];
+    FILE *f;
+    uint8_t *d = NULL;
+    long fl;
+    uint32_t n, pe, nsec, opt, rva, sec, dir = 0, lvl, at = 0, size = 0, off = 0;
+    *out = NULL;
+    rd_str(w, path, p, sizeof(p));
+    qw_fs_map(w, p, host, sizeof(host));
+    if (!(f = fopen(host, "rb"))) return 0;
+    fseek(f, 0, SEEK_END); fl = ftell(f); fseek(f, 0, SEEK_SET);
+    if (fl < 0x100 || fl > (64L << 20) || !(d = (uint8_t *)malloc((size_t)fl)) || fread(d, 1, (size_t)fl, f) != (size_t)fl) { fclose(f); free(d); return 0; }
+    fclose(f);
+    n = (uint32_t)fl;
+#define OFF(r) rva_off(d, n, sec, nsec, r)
+    pe = le32at(d, n, 60);
+    if (d[0] != 'M' || d[1] != 'Z' || pe + 0x80u > n || memcmp(d + pe, "PE\0\0", 4)) goto done;
+    nsec = (uint32_t)(d[pe + 6] | d[pe + 7] << 8);
+    opt = (uint32_t)(d[pe + 20] | d[pe + 21] << 8);
+    sec = pe + 24u + opt;
+    if (opt < 0x78u || sec + nsec * 40u > n) goto done;
+    rva = le32at(d, n, pe + 24 + 0x70);
+    if (!rva || !(off = OFF(rva))) goto done;
+    /* Three levels: type 16, then the first name, then the first language's data entry. */
+    for (dir = 0, lvl = 0; lvl < 2; lvl++) {
+        uint32_t e, cnt = (le32at(d, n, off + dir + 12) & 0xFFFFu) + (le32at(d, n, off + dir + 12) >> 16);
+        for (e = 0, at = 0; e < cnt && e < 4096u; e++)
+            if (lvl || le32at(d, n, off + dir + 16 + e * 8) == 16u) { at = le32at(d, n, off + dir + 20 + e * 8); break; }
+        if (!(at & 0x80000000u)) goto done;
+        dir = at & 0x7FFFFFFFu;
+    }
+    {
+        uint32_t cnt = (le32at(d, n, off + dir + 12) & 0xFFFFu) + (le32at(d, n, off + dir + 12) >> 16), data, from;
+        if (!cnt) goto done;
+        at = le32at(d, n, off + dir + 20);
+        if (at & 0x80000000u) goto done;
+        data = le32at(d, n, off + at);
+        size = le32at(d, n, off + at + 4);
+        from = OFF(data);
+        if (!size || size > (1u << 20) || !from || from + size > n || !(*out = (uint8_t *)malloc(size))) { size = 0; goto done; }
+        memcpy(*out, d + from, size);
+    }
+#undef OFF
+done:
+    free(d);
+    return size;
+}
+/* A real block holds UTF-16 text; VerQueryValueA answers in ANSI, which it writes into the
+   second half of the buffer, so the size asked for is twice the resource. */
 FN(c_GetFileVersionInfoSizeA) {
+    uint8_t *v;
+    uint32_t k;
     if (a[1]) WR32(a[1], 0);
-    return version_is_system(w, a[0]) ? VER_BLOCK : 0;
+    if (version_is_system(w, a[0])) return VER_BLOCK;
+    k = version_of_file(w, a[0], &v);
+    free(v);
+    return k ? k * 2u : 0;
 }
 FN(c_GetFileVersionInfoA) {
     uint32_t i;
-    if (!version_is_system(w, a[0]) || a[2] < VER_BLOCK) return 0;
+    uint8_t *v;
+    if (!version_is_system(w, a[0])) {
+        uint32_t k = version_of_file(w, a[0], &v);
+        if (!k) return 0;
+        for (i = 0; i < a[2]; i++) x86_wr8(C, a[3] + i, i < k ? v[i] : 0);
+        free(v);
+        return 1;
+    }
+    if (a[2] < VER_BLOCK) return 0;
     for (i = 0; i < VER_BLOCK; i += 4) WR32(a[3] + i, 0);
     WR32(a[3], VER_BLOCK | (0x34u << 16));
     WR32(a[3] + VER_FIXED, 0xFEEF04BDu);
@@ -1759,14 +1838,50 @@ FN(c_GetFileVersionInfoA) {
     WR32(a[3] + VER_FIXED + 16, 0x00040008u); WR32(a[3] + VER_FIXED + 20, 0x00000190u);
     return 1;
 }
+/* Walks the blocks: wLength, wValueLength, wType, the key in UTF-16, the value, the children,
+   each on a 4-byte boundary. "\" is the fixed part; text values come back as ANSI. */
 FN(c_VerQueryValueA) {
-    char q[64];
+    char q[200], *part, *next;
+    uint32_t blk = a[0], total = x86_rd16(C, a[0]), val, vlen;
     rd_str(w, a[1], q, sizeof(q));
     if (a[2]) WR32(a[2], 0);
     if (a[3]) WR32(a[3], 0);
-    if (strcmp(q, "\\") || RD32(a[0] + VER_FIXED) != 0xFEEF04BDu) return 0;
-    if (a[2]) WR32(a[2], a[0] + VER_FIXED);
-    if (a[3]) WR32(a[3], 0x34u);
+    for (part = q; *part; part = next) {
+        while (*part == '\\') part++;
+        if (!*part) break;
+        for (next = part; *next && *next != '\\'; next++) ;
+        if (*next) *next++ = 0;
+        uint32_t len = x86_rd16(C, blk), key = blk + 6, c = key, child, found = 0;
+        while (x86_rd16(C, c)) c += 2;
+        child = ((c + 2 + 3) & ~3u) + ((x86_rd16(C, blk + 2) * (x86_rd16(C, blk + 4) == 1 ? 2u : 1u) + 3) & ~3u);
+        while (child + 6 < blk + len) {
+            uint32_t cl = x86_rd16(C, child), k = 0;
+            char name[100];
+            if (cl < 6) break;
+            for (c = child + 6; k + 1 < sizeof(name) && x86_rd16(C, c); c += 2) name[k++] = (char)x86_rd16(C, c);
+            name[k] = 0;
+            if (!strcasecmp(name, part)) { blk = child; found = 1; break; }
+            child = (child + cl + 3) & ~3u;
+        }
+        if (!found) return 0;
+    }
+    {
+        uint32_t c = blk + 6;
+        while (x86_rd16(C, c)) c += 2;
+        val = (c + 2 + 3) & ~3u;
+        vlen = x86_rd16(C, blk + 2);
+    }
+    if (blk == a[0]) {                                     /* "\": VS_FIXEDFILEINFO */
+        if (RD32(val) != 0xFEEF04BDu) val = a[0] + VER_FIXED;   /* our own block has no key */
+        if (RD32(val) != 0xFEEF04BDu) return 0;
+        vlen = 0x34u;
+    } else if (x86_rd16(C, blk + 4) == 1) {                /* text: an ANSI copy in the second half */
+        uint32_t to = a[0] + total + (val - a[0]), i;
+        for (i = 0; i < vlen; i++) x86_wr8(C, to + i, (uint8_t)x86_rd16(C, val + i * 2));
+        val = to;
+    }
+    if (a[2]) WR32(a[2], val);
+    if (a[3]) WR32(a[3], vlen);
     return 1;
 }
 /* Some engines look for ddraw.dll in the system directory before loading it. */
@@ -2010,7 +2125,7 @@ const qhle qw_compat[] = {
     /* user32 */
     U("WaitForInputIdle", c_ok0, 2), U("GetUpdateRect", c_ok0, 3), U("GetUpdateRgn", c_ok0, 3), U("GetWindowThreadProcessId", c_GetWindowThreadProcessId, 2),
     U("GetTopWindow", c_ok0, 1), U("EnumThreadWindows", c_ok1, 3), U("EnumWindows", c_ok1, 2), U("SetSysColors", c_ok1, 3),
-    U("GetKeyNameTextA", c_GetKeyNameTextA, 3), U("CharUpperBuffA", c_CharUpperBuffA, 2), U("CharToOemA", c_CharToOemA, 2), U("OemToCharA", c_CharToOemA, 2),
+    U("GetKeyNameTextA", c_GetKeyNameTextA, 3), U("CharUpperBuffA", c_CharUpperBuffA, 2), U("CharLowerBuffA", c_CharLowerBuffA, 2), U("CharToOemA", c_CharToOemA, 2), U("OemToCharA", c_CharToOemA, 2),
     U("mouse_event", c_ok0, 5), U("keybd_event", c_ok0, 4), U("GetCaretBlinkTime", c_ok1, 0), U("GetDoubleClickTime", c_ok1, 0),
     U("ShowWindowAsync", c_ok1, 2), U("CloseWindow", c_ok1, 1), U("SetScrollPos", c_ok0, 4), U("SetScrollRange", c_ok1, 5), U("GetScrollPos", c_ok0, 2),
     U("ShowScrollBar", c_ok1, 3), U("SetScrollInfo", c_ok0, 4), U("GetKeyboardType", c_ok0, 1), U("GetInputState", c_ok0, 0),
@@ -2076,7 +2191,7 @@ const qhle qw_compat[] = {
     { "oleaut32", "SysStringLen", 1, ole_SysStringLen }, { "oleaut32", "#7", 1, ole_SysStringLen }, { "oleaut32", "VariantInit", 1, ole_VariantInit }, { "oleaut32", "#8", 1, ole_VariantInit },
     { "oleaut32", "VariantClear", 1, ole_VariantClear }, { "oleaut32", "#9", 1, ole_VariantClear }, { "oleaut32", "VariantCopy", 2, ole_VariantCopy }, { "oleaut32", "#10", 2, ole_VariantCopy },
     { "oleaut32", "VariantCopyInd", 2, ole_VariantCopy }, { "oleaut32", "VariantChangeTypeEx", 5, ole_VariantChangeType }, { "oleaut32", "VariantChangeType", 4, ole_VariantChangeType },
-    { "gdi32", "EnumFontFamiliesA", 4, c_EnumFontFamiliesA }, { "advapi32", "InitializeSecurityDescriptor", 2, c_ok1 }, { "advapi32", "SetSecurityDescriptorDacl", 4, c_ok1 }, { "advapi32", "OpenProcessToken", 3, c_nosec }, { "advapi32", "LookupPrivilegeValueA", 3, c_nosec }, { "advapi32", "AdjustTokenPrivileges", 6, c_nosec },
+    { "gdi32", "EnumFontFamiliesA", 4, c_EnumFontFamiliesA }, { "gdi32", "EnumFontsA", 4, c_EnumFontFamiliesA }, { "advapi32", "InitializeSecurityDescriptor", 2, c_ok1 }, { "advapi32", "SetSecurityDescriptorDacl", 4, c_ok1 }, { "advapi32", "OpenProcessToken", 3, c_nosec }, { "advapi32", "LookupPrivilegeValueA", 3, c_nosec }, { "advapi32", "AdjustTokenPrivileges", 6, c_nosec },
     { "advapi32", "OpenThreadToken", 4, c_nosec }, { "advapi32", "GetTokenInformation", 5, c_nosec }, { "advapi32", "AllocateAndInitializeSid", 11, c_nosec },
     { "advapi32", "FreeSid", 1, c_ok0 }, { "advapi32", "EqualSid", 2, c_nosec }, { "advapi32", "IsValidSid", 1, c_nosec }, { "advapi32", "GetLengthSid", 1, c_nosec },
     { "advapi32", "InitializeAcl", 3, c_nosec }, { "advapi32", "AddAccessAllowedAce", 4, c_nosec }, { "advapi32", "AccessCheck", 8, c_nosec },
