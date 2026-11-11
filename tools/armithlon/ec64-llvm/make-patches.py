@@ -11,12 +11,18 @@ CORE = ['llvm/CMakeLists.txt', 'llvm/include/llvm/TargetParser/Triple.h', 'llvm/
         'clang/lib/Basic/Targets.cpp', 'clang/lib/Basic/Targets/M68k.h', 'clang/lib/CodeGen/CodeGenModule.cpp',
         'clang/lib/CodeGen/Targets/M68k.cpp', 'clang/lib/Driver/ToolChains/CommonArgs.cpp',
         'lld/ELF/Arch/M68k64.cpp', 'lld/ELF/CMakeLists.txt', 'lld/ELF/Target.h', 'lld/ELF/Target.cpp',
-        'lld/ELF/Driver.cpp', 'lld/ELF/InputFiles.cpp', 'lld/ELF/ScriptParser.cpp']
+        'lld/ELF/Driver.cpp', 'lld/ELF/InputFiles.cpp', 'lld/ELF/ScriptParser.cpp',
+        # AROS as an OS (from AROS's tools/crosstools/llvm clang-20 and llvm-20 patches)
+        'clang/include/clang/Options/Options.td', 'clang/lib/Basic/Targets/OSTargets.h',
+        'clang/lib/Driver/CMakeLists.txt', 'clang/lib/Driver/Driver.cpp',
+        'clang/lib/Driver/ToolChains/AROS.cpp', 'clang/lib/Driver/ToolChains/AROS.h',
+        'clang/lib/Lex/InitHeaderSearch.cpp']
+NEW = {'lld/ELF/Arch/M68k64.cpp', 'clang/lib/Driver/ToolChains/AROS.cpp', 'clang/lib/Driver/ToolChains/AROS.h'}
 def lines(p):
     return open(p, encoding='utf8').read().splitlines(True) if os.path.exists(p) else []
 with tempfile.TemporaryDirectory() as tmp:
     subprocess.run(['tar', 'xJf', f'{work}/dl/{V}.tar.xz', '-C', tmp, '--exclude=*/test/*',
-                    *[f'{V}/{c}' for c in CORE if c != 'lld/ELF/Arch/M68k64.cpp'], f'{V}/llvm/lib/Target/M68k'], check=True)
+                    *[f'{V}/{c}' for c in CORE if c not in NEW], f'{V}/llvm/lib/Target/M68k'], check=True)
     out = []
     for c in CORE:
         out += difflib.unified_diff(lines(f'{tmp}/{V}/{c}'), lines(f'{work}/{V}/{c}'), 'a/' + c, 'b/' + c)

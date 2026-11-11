@@ -527,7 +527,25 @@
                                            AM.SymbolFlags);
        return true;
      }
-@@ -620,7 +621,7 @@
+@@ -331,6 +332,17 @@
+                                           SDNode *Root) const {
+   if (OptLevel == CodeGenOptLevel::None)
+     return false;
++
++  // A memory-to-memory MOVE joins the load's chain with the store's. When they
++  // differ, as for an outgoing argument (stored on the call sequence's chain)
++  // loaded from memory on the main chain, this ties two call sequences together
++  // and the list scheduler cannot order them (it crashes on nested sequences).
++  if (auto *Ld = dyn_cast<LoadSDNode>(N.getNode()))
++    if (auto *St = dyn_cast<StoreSDNode>(U)) {
++      SDValue StChain = St->getChain();
++      if (StChain != SDValue(Ld, 1) && StChain != Ld->getChain())
++        return false;
++    }
+ 
+   if (U == Root) {
+     switch (U->getOpcode()) {
+@@ -620,7 +632,7 @@
      } else
        llvm_unreachable("Unhandled symbol reference node.");
  
@@ -536,7 +554,7 @@
      return true;
    }
  
-@@ -681,9 +682,9 @@
+@@ -681,9 +693,9 @@
  
    case ISD::GLOBAL_OFFSET_TABLE: {
      SDValue GOT = CurDAG->getTargetExternalSymbol(
@@ -548,7 +566,7 @@
      ReplaceNode(Node, Res);
      return;
    }
-@@ -736,7 +737,7 @@
+@@ -736,7 +748,7 @@
    }
  
    // If this is a frame index, grab it
@@ -557,7 +575,7 @@
      LLVM_DEBUG(dbgs() << "SUCCESS matched FI\n");
      return true;
    }
-@@ -964,6 +965,14 @@
+@@ -964,6 +976,14 @@
    if (AM.isPCRelative()) {
      LLVM_DEBUG(dbgs() << "REJECT: Cannot match PC relative address\n");
      return false;
@@ -611,8 +629,16 @@
  
    for (auto OP :
         {ISD::SREM, ISD::UREM, ISD::UDIVREM, ISD::SDIVREM,
-@@ -108,7 +116,7 @@
+@@ -104,11 +112,14 @@
      setOperationAction(OP, MVT::i32, Custom);
+   }
+ 
+-  for (auto OP : {ISD::SHL_PARTS, ISD::SRA_PARTS, ISD::SRL_PARTS})
++  // i64 parts are the halves of a 128-bit shift (compiler-rt's ti functions).
++  for (auto OP : {ISD::SHL_PARTS, ISD::SRA_PARTS, ISD::SRL_PARTS}) {
+     setOperationAction(OP, MVT::i32, Custom);
++    setOperationAction(OP, MVT::i64, Custom);
++  }
  
    // Add/Sub overflow ops with MVT::Glues are lowered to CCR dependences.
 -  for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
@@ -620,7 +646,7 @@
      setOperationAction(ISD::ADDC, VT, Custom);
      setOperationAction(ISD::ADDE, VT, Custom);
      setOperationAction(ISD::SUBC, VT, Custom);
-@@ -116,7 +124,7 @@
+@@ -116,7 +127,7 @@
    }
  
    // SADDO and friends are legal with this setup, i hope
@@ -629,7 +655,7 @@
      setOperationAction(ISD::SADDO, VT, Custom);
      setOperationAction(ISD::UADDO, VT, Custom);
      setOperationAction(ISD::SSUBO, VT, Custom);
-@@ -126,7 +134,7 @@
+@@ -126,7 +137,7 @@
    setOperationAction(ISD::BR_JT, MVT::Other, Expand);
    setOperationAction(ISD::BRCOND, MVT::Other, Custom);
  
@@ -638,7 +664,7 @@
      setOperationAction(ISD::BR_CC, VT, Expand);
      setOperationAction(ISD::SELECT, VT, Custom);
      setOperationAction(ISD::SELECT_CC, VT, Expand);
-@@ -134,19 +142,19 @@
+@@ -134,19 +145,19 @@
      setOperationAction(ISD::SETCCCARRY, VT, Custom);
    }
  
@@ -665,7 +691,14 @@
  
    setOperationAction(ISD::VASTART, MVT::Other, Custom);
    setOperationAction(ISD::VAEND, MVT::Other, Expand);
-@@ -162,8 +170,8 @@
+@@ -157,13 +168,15 @@
+   setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
+ 
+   setOperationAction(ISD::DYNAMIC_STACKALLOC, PtrVT, Custom);
++  setOperationAction(ISD::FRAMEADDR, PtrVT, Custom);
++  setOperationAction(ISD::RETURNADDR, PtrVT, Custom);
+ 
+   computeRegisterProperties(STI.getRegisterInfo());
  
    // We lower the `atomic-compare-and-swap` to `__sync_val_compare_and_swap`
    // for subtarget < M68020
@@ -676,7 +709,7 @@
                       Subtarget.atLeastM68020() ? Legal : LibCall);
  
    setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
-@@ -185,7 +193,7 @@
+@@ -185,7 +198,7 @@
            ISD::ATOMIC_LOAD_UMAX,
            ISD::ATOMIC_SWAP,
        },
@@ -685,7 +718,7 @@
  
    setMinFunctionAlignment(Align(2));
  }
-@@ -199,12 +207,12 @@
+@@ -199,12 +212,12 @@
  
  Register
  M68k64TargetLowering::getExceptionPointerRegister(const Constant *) const {
@@ -700,7 +733,7 @@
  }
  
  InlineAsm::ConstraintCode
-@@ -267,7 +275,7 @@
+@@ -267,7 +280,7 @@
  static SDValue CreateCopyOfByValArgument(SDValue Src, SDValue Dst,
                                           SDValue Chain, ISD::ArgFlagsTy Flags,
                                           SelectionDAG &DAG, const SDLoc &DL) {
@@ -709,7 +742,7 @@
  
    return DAG.getMemcpy(
        Chain, DL, Dst, Src, SizeNode, Flags.getNonZeroByValAlign(),
-@@ -336,7 +344,7 @@
+@@ -336,7 +349,7 @@
          return false;
      } else {
        unsigned Opcode = Def->getOpcode();
@@ -718,7 +751,7 @@
            Def->getOperand(1).isFI()) {
          FI = Def->getOperand(1).getIndex();
          Bytes = Flags.getByValSize();
-@@ -452,9 +460,11 @@
+@@ -452,9 +465,11 @@
    // partial types
    int Offset = VA.getLocMemOffset();
    if (VA.getValVT() == MVT::i8) {
@@ -732,7 +765,7 @@
    }
  
    // TODO Interrupt handlers
-@@ -540,7 +550,7 @@
+@@ -540,7 +555,7 @@
    M68k64MachineFunctionInfo *MFI = MF.getInfo<M68k64MachineFunctionInfo>();
    // const M68k64RegisterInfo *TRI = Subtarget.getRegisterInfo();
  
@@ -741,7 +774,7 @@
      report_fatal_error("M68k64 interrupts may not be called directly");
  
    auto Attr = MF.getFunction().getFnAttribute("disable-tail-calls");
-@@ -951,6 +961,8 @@
+@@ -951,6 +966,8 @@
        const TargetRegisterClass *RC;
        if (RegVT == MVT::i32)
          RC = &M68k64::XR32RegClass;
@@ -750,7 +783,7 @@
        else
          llvm_unreachable("Unknown argument type!");
  
-@@ -1154,7 +1166,7 @@
+@@ -1154,7 +1171,7 @@
  
      // ??? How will this work if CC does not use registers for args passing?
      // ??? What if I return multiple structs?
@@ -759,7 +792,7 @@
      Chain = DAG.getCopyToReg(Chain, DL, RetValReg, Val, Glue);
      Glue = Chain.getValue(1);
  
-@@ -1343,8 +1355,8 @@
+@@ -1343,8 +1360,8 @@
          switch (Reg) {
          default:
            break;
@@ -770,7 +803,18 @@
            if (++NumInRegs == MaxInRegs)
              return false;
            break;
-@@ -1448,10 +1460,10 @@
+@@ -1417,6 +1434,10 @@
+     return LowerVASTART(Op, DAG);
+   case ISD::DYNAMIC_STACKALLOC:
+     return LowerDYNAMIC_STACKALLOC(Op, DAG);
++  case ISD::FRAMEADDR:
++    return LowerFRAMEADDR(Op, DAG);
++  case ISD::RETURNADDR:
++    return LowerRETURNADDR(Op, DAG);
+   case ISD::SHL_PARTS:
+     return LowerShiftLeftParts(Op, DAG);
+   case ISD::SRA_PARTS:
+@@ -1448,10 +1469,10 @@
  SDValue M68k64TargetLowering::getTLSGetAddr(GlobalAddressSDNode *GA,
                                            SelectionDAG &DAG,
                                            unsigned TargetFlags) const {
@@ -783,7 +827,7 @@
  
    PointerType *PtrTy = PointerType::get(*DAG.getContext(), 0);
  
-@@ -1476,22 +1488,22 @@
+@@ -1476,22 +1497,22 @@
    SDValue TGA =
        DAG.getTargetGlobalAddress(GA->getGlobal(), GA, GA->getValueType(0),
                                   GA->getOffset(), M68k64II::MO_TLSLD);
@@ -811,7 +855,7 @@
  }
  
  SDValue M68k64TargetLowering::LowerTLSLocalExec(GlobalAddressSDNode *GA,
-@@ -1500,7 +1512,7 @@
+@@ -1500,7 +1521,7 @@
    SDValue TGA =
        DAG.getTargetGlobalAddress(GA->getGlobal(), GA, GA->getValueType(0),
                                   GA->getOffset(), M68k64II::MO_TLSLE);
@@ -820,7 +864,44 @@
  }
  
  SDValue M68k64TargetLowering::LowerGlobalTLSAddress(SDValue Op,
-@@ -3044,7 +3056,7 @@
+@@ -1658,6 +1679,18 @@
+   // that doing a bittest on the i32 value is ok.
+   if (Src.getValueType() == MVT::i8 || Src.getValueType() == MVT::i16)
+     Src = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i32, Src);
++
++  // There is only a 32-bit BTST on registers, which takes the bit number modulo
++  // 32. For a 64-bit value shift the upper half down when bit 5 of the number is
++  // set (shift counts run to 63 in long mode), then test the low half.
++  if (Src.getValueType() == MVT::i64) {
++    SDValue Amt = DAG.getZExtOrTrunc(BitNo, DL, MVT::i64);
++    Amt = DAG.getNode(ISD::AND, DL, MVT::i64, Amt,
++                      DAG.getConstant(32, DL, MVT::i64));
++    Src = DAG.getNode(ISD::SRL, DL, MVT::i64, Src, Amt);
++    Src = DAG.getNode(ISD::TRUNCATE, DL, MVT::i32, Src);
++    BitNo = DAG.getZExtOrTrunc(BitNo, DL, MVT::i32);
++  }
+ 
+   // If the operand types disagree, extend the shift amount to match.  Since
+   // BTST ignores high bits (like shifts) we can use anyextend.
+@@ -3019,6 +3052,8 @@
+         return std::make_pair(0U, &M68k64::DR16RegClass);
+       case MVT::i32:
+         return std::make_pair(0U, &M68k64::DR32RegClass);
++      case MVT::i64:
++        return std::make_pair(0U, &M68k64::DR64RegClass);
+       default:
+         break;
+       }
+@@ -3029,6 +3064,8 @@
+         return std::make_pair(0U, &M68k64::AR16RegClass);
+       case MVT::i32:
+         return std::make_pair(0U, &M68k64::AR32RegClass);
++      case MVT::i64:
++        return std::make_pair(0U, &M68k64::AR64RegClass);
+       default:
+         break;
+       }
+@@ -3044,7 +3081,7 @@
  /// Determines whether the callee is required to pop its own arguments.
  /// Callee pop is necessary to support tail calls.
  bool M68k64::isCalleePop(CallingConv::ID CC, bool IsVarArg, bool GuaranteeTCO) {
@@ -829,6 +910,73 @@
  }
  
  // Return true if it is OK for this CMOV pseudo-opcode to be cascaded
+@@ -3376,6 +3413,33 @@
+ // bytes in one go. Touching the stack at 4K increments is necessary to ensure
+ // that the guard pages used by the OS virtual memory manager are allocated in
+ // correct sequence.
++// The frame is LINK A6: the caller's A6 at 0(A6), the return address at 8(A6),
++// 8 bytes each in long mode. Taking the address forces a frame pointer.
++SDValue M68k64TargetLowering::LowerFRAMEADDR(SDValue Op,
++                                             SelectionDAG &DAG) const {
++  MachineFunction &MF = DAG.getMachineFunction();
++  MF.getFrameInfo().setFrameAddressIsTaken(true);
++  EVT VT = Op.getValueType();
++  SDLoc DL(Op);
++  unsigned Depth = Op.getConstantOperandVal(0);
++  SDValue FrameAddr =
++      DAG.getCopyFromReg(DAG.getEntryNode(), DL, M68k64::QA6, VT);
++  while (Depth--)
++    FrameAddr = DAG.getLoad(VT, DL, DAG.getEntryNode(), FrameAddr,
++                            MachinePointerInfo());
++  return FrameAddr;
++}
++
++SDValue M68k64TargetLowering::LowerRETURNADDR(SDValue Op,
++                                              SelectionDAG &DAG) const {
++  EVT VT = Op.getValueType();
++  SDLoc DL(Op);
++  SDValue Frame = LowerFRAMEADDR(Op, DAG);
++  SDValue Slot = DAG.getNode(ISD::ADD, DL, VT, Frame,
++                             DAG.getConstant(8, DL, VT));
++  return DAG.getLoad(VT, DL, DAG.getEntryNode(), Slot, MachinePointerInfo());
++}
++
+ SDValue M68k64TargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
+                                                     SelectionDAG &DAG) const {
+   MachineFunction &MF = DAG.getMachineFunction();
+@@ -3443,8 +3507,8 @@
+ 
+   SDValue Zero = DAG.getConstant(0, DL, VT);
+   SDValue One = DAG.getConstant(1, DL, VT);
+-  SDValue MinusRegisterSize = DAG.getSignedConstant(-32, DL, VT);
+-  SDValue RegisterSizeMinus1 = DAG.getConstant(32 - 1, DL, VT);
++  SDValue MinusRegisterSize = DAG.getSignedConstant(-(int64_t)VT.getSizeInBits(), DL, VT);
++  SDValue RegisterSizeMinus1 = DAG.getConstant(VT.getSizeInBits() - 1, DL, VT);
+   SDValue ShamtMinusRegisterSize =
+       DAG.getNode(ISD::ADD, DL, VT, Shamt, MinusRegisterSize);
+   SDValue RegisterSizeMinus1Shamt =
+@@ -3495,8 +3559,8 @@
+ 
+   SDValue Zero = DAG.getConstant(0, DL, VT);
+   SDValue One = DAG.getConstant(1, DL, VT);
+-  SDValue MinusRegisterSize = DAG.getSignedConstant(-32, DL, VT);
+-  SDValue RegisterSizeMinus1 = DAG.getConstant(32 - 1, DL, VT);
++  SDValue MinusRegisterSize = DAG.getSignedConstant(-(int64_t)VT.getSizeInBits(), DL, VT);
++  SDValue RegisterSizeMinus1 = DAG.getConstant(VT.getSizeInBits() - 1, DL, VT);
+   SDValue ShamtMinusRegisterSize =
+       DAG.getNode(ISD::ADD, DL, VT, Shamt, MinusRegisterSize);
+   SDValue RegisterSizeMinus1Shamt =
+--- a/llvm/lib/Target/M68k64/M68k64ISelLowering.h
++++ b/llvm/lib/Target/M68k64/M68k64ISelLowering.h
+@@ -176,6 +176,8 @@
+   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
+   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
+   SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
++  SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
++  SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
+   SDValue LowerShiftLeftParts(SDValue Op, SelectionDAG &DAG) const;
+   SDValue LowerShiftRightParts(SDValue Op, SelectionDAG &DAG, bool IsSRA) const;
+ 
 --- a/llvm/lib/Target/M68k64/M68k64InstrArithmetic.td
 +++ b/llvm/lib/Target/M68k64/M68k64InstrArithmetic.td
 @@ -38,15 +38,18 @@
@@ -1243,6 +1391,33 @@
    def : Pat<(!cast<SDPatternOperator>("atomic_cmp_swap_i"#size) !cast<ComplexPattern>("MxCP_"#mode):$ptr,
                                                                  !cast<MxRegOp>("MxDRD"#size):$cmp,
                                                                  !cast<MxRegOp>("MxDRD"#size):$new),
+--- a/llvm/lib/Target/M68k64/M68k64InstrBits.td
++++ b/llvm/lib/Target/M68k64/M68k64InstrBits.td
+@@ -133,8 +133,11 @@
+ multiclass MxBITPatR<MxInst INSTd, MxInst INSTi, SDNode NODE> {
+ def : Pat<(NODE MxType32d.VT:$dst, MxType32d.VT:$bitno),
+           (INSTd MxType32d.ROp:$dst, MxType32d.ROp:$bitno)>;
+-def : Pat<(NODE MxType32d.VT:$dst, MxType32d.IPat:$bitno),
+-          (INSTi MxType32d.ROp:$dst, MxType32d.IOp:$bitno)>;
++// imm (not IPat) makes TableGen turn the constant into a TargetConstant; with
++// IPat the bit number stayed an ordinary Constant, was put in a register, and
++// the immediate field got that register's number.
++def : Pat<(NODE MxType32d.VT:$dst, (i32 imm:$bitno)),
++          (INSTi MxType32d.ROp:$dst, imm:$bitno)>;
+ }
+ 
+ defm : MxBITPatR<BTST32dd, BTST32di, MxBtst>;
+@@ -143,8 +146,8 @@
+                      MxOperand MEMOpd, ComplexPattern MEMPat> {
+ def : Pat<(NODE (TYPE.Load MEMPat:$dst), TYPE.VT:$bitno),
+           (INSTd MEMOpd:$dst, TYPE.ROp:$bitno)>;
+-def : Pat<(NODE (TYPE.Load MEMPat:$dst), TYPE.IPat:$bitno),
+-          (INSTi MEMOpd:$dst, TYPE.IOp:$bitno)>;
++def : Pat<(NODE (TYPE.Load MEMPat:$dst), (TYPE.VT imm:$bitno)),
++          (INSTi MEMOpd:$dst, imm:$bitno)>;
+ }
+ 
+ defm : MxBITPatM<BTST8qd, BTST8qi, MxBtst,
 --- a/llvm/lib/Target/M68k64/M68k64InstrCompiler.td
 +++ b/llvm/lib/Target/M68k64/M68k64InstrCompiler.td
 @@ -16,35 +16,33 @@

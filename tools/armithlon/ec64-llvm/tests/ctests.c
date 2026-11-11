@@ -38,6 +38,28 @@ i64 test_calls(void) {
     for (int i = 0; i < 16; i++) { r = ops[i & 1](r + i); r += sw(i & 7); }
     return r;
 }
+/* A sparse switch over format characters: 'A' to 'x' needs a 64-bit mask, which becomes a bit test */
+static int fmtkind(int c) {
+    switch (c) { case 'A': case 'E': case 'G': case 'X': case 'a': case 'c': case 'd': case 'e': case 'g':
+    case 'i': case 'o': case 'p': case 's': case 'u': case 'x': return 1; default: return 0; }
+}
+i64 test_bittest(void) {
+    i64 r = 0;
+    for (int c = 0; c < 128; c++) r = r * 3 + fmtkind(c) + (c & 1);
+    return r;
+}
+/* __builtin_frame_address and __builtin_return_address: the callee sees the caller's frame */
+__attribute__((noinline)) static void *callers_frame(void **ret) {
+    *ret = __builtin_return_address(0);
+    return __builtin_frame_address(1);
+}
+__attribute__((noinline)) static i64 frame_check(void) {
+    void *ret, *up = callers_frame(&ret);
+    void *mine = __builtin_frame_address(0);
+    i64 inside = (char *)ret > (char *)frame_check && (char *)ret < (char *)frame_check + 4096;
+    return (up == mine) * 2 + inside;
+}
+i64 test_frames(void) { return frame_check() + frame_check() * 10; }
 /* structs in all their ways */
 struct point { i16 x; i8 c; i32 y; i64 z; };
 struct small { u8 a, b; };
@@ -152,5 +174,5 @@ i64 test_memory(void) {
 #ifdef HOST_TEST
 #include <stdio.h>
 #define T(n) printf(#n " %016llx\n", (unsigned long long)test_##n());
-int main(void) { T(sizes) T(globals) T(calls) T(structs) T(varargs) T(widths) T(sha256) T(sort) T(list) T(memory) return 0; }
+int main(void) { T(sizes) T(globals) T(calls) T(bittest) T(frames) T(structs) T(varargs) T(widths) T(sha256) T(sort) T(list) T(memory) return 0; }
 #endif
