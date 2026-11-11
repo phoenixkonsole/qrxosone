@@ -901,7 +901,28 @@
        default:
          break;
        }
-@@ -3044,7 +3081,7 @@
+@@ -3038,13 +3075,27 @@
+     }
+   }
+ 
+-  return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
++  // An explicit register ("{d0}", from `register long x asm("d0")`) with a 64-bit
++  // value is the 64-bit register: the default lookup finds the 32-bit D0 first.
++  std::pair<unsigned, const TargetRegisterClass *> R =
++      TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
++  if (VT == MVT::i64 && R.first && R.second &&
++      (M68k64::DR32RegClass.contains(R.first) ||
++       M68k64::AR32RegClass.contains(R.first))) {
++    const TargetRegisterClass *RC64 =
++        M68k64::DR32RegClass.contains(R.first) ? &M68k64::DR64RegClass
++                                               : &M68k64::AR64RegClass;
++    if (MCRegister Super = TRI->getMatchingSuperReg(
++            R.first, M68k64::MxSubRegIndex32Lo, RC64))
++      return std::make_pair(unsigned(Super), RC64);
++  }
++  return R;
+ }
+ 
  /// Determines whether the callee is required to pop its own arguments.
  /// Callee pop is necessary to support tail calls.
  bool M68k64::isCalleePop(CallingConv::ID CC, bool IsVarArg, bool GuaranteeTCO) {
@@ -910,7 +931,7 @@
  }
  
  // Return true if it is OK for this CMOV pseudo-opcode to be cascaded
-@@ -3376,6 +3413,33 @@
+@@ -3376,6 +3427,33 @@
  // bytes in one go. Touching the stack at 4K increments is necessary to ensure
  // that the guard pages used by the OS virtual memory manager are allocated in
  // correct sequence.
@@ -944,7 +965,7 @@
  SDValue M68k64TargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
                                                      SelectionDAG &DAG) const {
    MachineFunction &MF = DAG.getMachineFunction();
-@@ -3443,8 +3507,8 @@
+@@ -3443,8 +3521,8 @@
  
    SDValue Zero = DAG.getConstant(0, DL, VT);
    SDValue One = DAG.getConstant(1, DL, VT);
@@ -955,7 +976,7 @@
    SDValue ShamtMinusRegisterSize =
        DAG.getNode(ISD::ADD, DL, VT, Shamt, MinusRegisterSize);
    SDValue RegisterSizeMinus1Shamt =
-@@ -3495,8 +3559,8 @@
+@@ -3495,8 +3573,8 @@
  
    SDValue Zero = DAG.getConstant(0, DL, VT);
    SDValue One = DAG.getConstant(1, DL, VT);

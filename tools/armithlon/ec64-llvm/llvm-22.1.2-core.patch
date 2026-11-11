@@ -599,7 +599,7 @@
  def read__only__relocs : Separate<["-"], "read_only_relocs">;
  def remap : Flag<["-"], "remap">;
  def rewrite_objc : Flag<["-"], "rewrite-objc">, Flags<[NoXarchOption]>,
-@@ -6621,6 +6637,21 @@
+@@ -6621,6 +6637,23 @@
  def fno_pie : Flag<["-"], "fno-pie">, Group<f_Group>;
  def pie : Flag<["-"], "pie">, Group<Link_Group>;
  def no_pie : Flag<["-"], "no-pie">, Group<Link_Group>;
@@ -618,6 +618,8 @@
 +def nosysbase : Flag<["-"], "nosysbase">, Alias<no_sysbase>;
 +def noposixc : Flag<["-"], "noposixc">, Alias<no_posixc>;
 +def nostdc : Flag<["-"], "nostdc">, Alias<no_stdc>;
++// deadwood's AROS gcc: leave out the C libraries (libm, libstdlib, libcrt)
++def noclibs : Flag<["-"], "noclibs">, Alias<no_stdc>;
  
  } // let Vis = [Default, FlangOption]
  
