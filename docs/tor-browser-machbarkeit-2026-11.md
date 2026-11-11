@@ -5,10 +5,10 @@ Stand 2026-11-06. Getestet auf dem Mac M1 mit ARMithlon.
 ## Ergebnis
 
 - **Der tor-Daemon läuft als natives 68k-AROS-Programm.** tor 0.4.9.9 baut mit OpenSSL 3.5.4 und libevent 2.1.12 und baut im Gast echte 3-Hop-Circuits auf, bisher nur in einem privaten Testnetz auf dem Mac.
-- **Das echte Tor-Netz wurde nicht kontaktiert.** Über die Anonymität im echten Einsatz sagt dieser Stand nichts aus.
+- **Das echte Tor-Netz ist getestet** (2026-11-10, siehe unten): Bootstrap, Circuits, Exit und Onion-Dienst funktionieren. Über die Anonymität im echten Einsatz sagt das nichts aus.
 - **Tor Browser selbst läuft nicht.** Ein nativer Gecko-Port auf 68k ist ein Vorhaben von Personenjahren, und ich rate davon ab.
 - **Entschieden:** Der Nutzer hat Pfad E mit einem 64-Bit-68100EC64 gewählt, siehe den Abschnitt zur Entscheidung unten.
-- **Offen:** ob ein Test im echten Tor-Netz stattfinden soll. Der WEB-Eintrag im App-Menü ist unverändert.
+- Der WEB-Eintrag im App-Menü ist unverändert.
 
 ## Was fertig ist
 
@@ -66,9 +66,24 @@ Alle Tests liefen im Gast, die Gegenstellen auf dem Loopback des Macs. Das priva
 - Übersprungen wurden die Tests für zstd, lzma und zwei RNG-Pfade, die hier nicht zutreffen.
 - `relay`, `dirauth` und `pow` sind nicht eingebaut, ihre Tests entfallen.
 
+### Test im echten Tor-Netz (2026-11-10, vom Nutzer freigegeben)
+
+tor im Gast mit Standardeinstellungen, ohne Testnetz-Optionen, Datenverzeichnis auf HostFS. Der SOCKS-Port wurde vom Mac aus benutzt.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Bootstrap | 100 % nach etwa 35 s beim ersten Start |
+| Circuits | 3-Hop-Circuits über öffentliche Relays gebaut, darunter Conflux-Circuits |
+| `check.torproject.org/api/ip` über den Gast | `IsTor: true`, eine Exit-Adresse. Ohne Tor vom Mac: `IsTor: false` |
+| Onion-Dienst (die Adresse des Tor-Projekts) | HTTP 200 nach 6 s |
+| 5 MB über Tor | Vollständig, etwa 0,9 MB/s |
+| Sauberes Beenden | `rc=0`. Die einzige Warnung war die absichtlich offene Control-Schnittstelle des Tests |
+
+Damit sind der echte Konsens, die Verzeichnisserver, TLS mit echten Relays, Exits und Onion-Dienste geprüft. Über die Anonymität im Einsatz sagt das nichts. Die Grenzen unten gelten weiter: kein Speicherschutz, Schlüssel und Zufall vom Host, keine Bridges.
+
 ### Nicht geprüft
 
-- Das echte Tor-Netz, Onion-Dienste, Dauerbetrieb über 20 Minuten.
+- Dauerbetrieb über 20 Minuten im echten Netz.
 - Ob das Verhalten im Netz von einem normalen tor unterscheidbar ist. Das gilt auch für den TLS-Fingerabdruck dieser OpenSSL-Konfiguration.
 - Ctrl-C, gleichzeitig laufende x86-Programme, ein Start aus der normalen Desktop-Umgebung.
 
