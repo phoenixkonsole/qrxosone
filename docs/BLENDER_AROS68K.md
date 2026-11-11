@@ -259,8 +259,8 @@ CPythons eigene Tests, einzeln im Gast gestartet:
 | test_socket | 648 Tests, 376 übersprungen, 7 Fehlschläge, 97 Fehler | fehlende Socket-Optionen und -Attribute, IPv6, Unix-Sockets |
 | test_math, test_float | nicht bis zum Ende gelaufen | sehr umfangreich, `test_float` stand nach 2 Minuten |
 
-Beobachtet und nicht geklärt: Direkt nach `test_tempfile` konnte ein neuer Python-Prozess einmal keinen zweiten Thread
-starten, im übernächsten Prozess ging es wieder. Ein Programm im Boot-Skript erbt als aktuelles Verzeichnis
+Dass direkt nach `test_tempfile` ein neuer Python-Prozess einmal keinen zweiten Thread starten konnte, ist inzwischen
+erklärt, siehe „Zweiter Lauf in derselben Shell“. Ein Programm im Boot-Skript erbt als aktuelles Verzeichnis
 `AROS Kickstart:`, auf das man nicht schreiben kann; Jobs beginnen deshalb mit `CD SYS:`.
 
 ### Blender mit Python (10. November)
@@ -289,13 +289,49 @@ Server auf dem Mac, `select`, ein Echo-Server im Gast mit Client in einem zweite
 per HTTP laden.
 
 Grenzen: nur IPv4, höchstens 64 Sockets, kein `sendmsg`/`recvmsg`, kein TLS, weil OpenSSL noch nicht gebaut ist. Wer
-wartet, fragt alle 2 ms nach. Die Engine im Bundle braucht diese Tür-Änderung, sie kommt mit dem nächsten Bau aus dem
-Branch.
+wartet, fragt alle 2 ms nach.
+
+Seit dem 11. November liegt der Stand in `claude/qrx-22.5.11`, und die Engine im Bundle ist daraus neu gebaut
+(`.build/m1-merged`, 59 von 60 Engine-Tests bestanden; der eine, `IDCMP_mouse_redraw_close_concurrent`, scheiterte nur
+im parallelen Lauf mit `-j8` und bestand einzeln dreimal). Mit ihr besteht der Netztest im Gast 7 von 7, mit der alten
+blieb er stehen. Die alte Engine liegt daneben als `armithlon-engine.vor-blender-merge-2026-11-11`.
+
+### Zweiter Lauf in derselben Shell (11. November)
+
+Ein zweites `blender -b` in derselben Shell hing beim Rendern, ebenso Blender nach einem Python-Lauf, nach `C:Avail`
+oder einem kleinen Testprogramm aber nicht. Ohne Kern 1 hing es jedes Mal, mit Kern 1 meist. Ursachen, von außen nach
+innen:
+
+- **`environ` aus der C-Bibliothek beschädigt die Shell.** Wer `environ` benutzt (Python, damit auch Blender), zieht aus
+  `libcrtprog` eine Startfunktion, die die `crt`-Bibliothek das Array bauen lässt. Die Bibliothek zählt die lokalen
+  Variablen der Shell mit einem `ScanVars`-Hook, der seine Argumente von der falschen Stelle nimmt: Er zählt in die
+  Knoten der Variablen selbst hinein (gefunden mit `QRX_FULL_TRACE_RAMW_RANGE` auf den ersten Knoten, Schreiber im
+  Code der aus `LIBS:` geladenen Bibliothek). Die Shell lebt länger als das Programm. Danach hatten `process`, `RC` und
+  `Result2` keine Namen mehr, und `CreateNewProc`, das die Variablen in jeden neuen Prozess kopiert, schlug fehl, ohne
+  `IoErr` zu setzen. `pthread_create` meldete `EAGAIN`, und Blender startet seinen Render-Thread ohne Prüfung.
+  Abhilfe: `tools/blender/port/qrx_posix.c` definiert `environ` selbst und füllt es aus den lokalen Variablen, so wird
+  der Code der Bibliothek gar nicht erst gelinkt. Python sieht in `os.environ` dieselben Einträge wie vorher.
+- **`pthread_cond_timedwait` mit verstrichener Frist wartet ewig.** AROS rechnet die Frist in eine relative Zeit um und
+  prüft nur, ob sie null ist. Eine schon vergangene Frist ergibt eine negative Zeit, die `timer.device` als rund 136 Jahre
+  liest. Blenders Hauptschleife wartet in Schritten von 5 ms, ein Taskwechsel dazwischen genügte.
+  `tools/blender/port/qrx_pthread.c` meldet dann sofort `ETIMEDOUT` und wartet sonst relativ. Das traf Blender mit Kern 1:
+  Ohne Render-Thread auf Kern 0 rendert Kern 1 dann eben alle 80 Kacheln, aber nur, wenn die Hauptschleife nicht in
+  diesem Warten stecken bleibt.
+- **Übergabe an Kern 1.** Kern 1 leerte erst `todo` und meldete dann `done`. Dazwischen konnte Kern 0 schon die nächste
+  Kachel vergeben, und war Kern 1 mit ihr fertig, bevor der Hauptthread wieder an der Reihe war, überschrieb er eine
+  fertige Kachel. Jetzt meldet er zuerst und wartet, bis Kern 0 die vorige abgeholt hat. Diesen Fall habe ich nicht
+  beobachtet, er folgt aus dem Code.
+
+Geprüft: zweimal Blender hintereinander in einer Shell, je fünf Läufe ohne und mit Kern 1, alle fertig (mit Kern 1 je
+8 bis 11 von 80 Kacheln auf Kern 1). Netztest und danach zweimal Blender in einer Shell mit der neuen Bundle-Engine.
+Nach Python stimmen die Shell-Variablen. Das Bild der Python-Szene ist weiter **pixelgleich** mit dem Mac-Render
+(0 von 76.800 Pixeln). Nicht geprüft: der Fall nach `test_tempfile` selbst, und ob die `crt`-Bibliothek
+außerhalb dieses Ports weitere Programme trifft. Vermutlich betrifft es jedes AROS-Programm, das `environ` benutzt.
 
 ### Offene Entscheidungen
 
 1. **Oberfläche und OpenGL:** Für die GUI braucht es eine Host-GL-Tür für 68k-Programme in der Engine, oder man
    nimmt Mesa im Gast. Bei den gemessenen Zeiten halte ich Mesa für unbrauchbar, und der GUI-Weg hängt außerdem an Python 3
    und einer C++-Standardbibliothek.
-2. **Distribution:** `blender -b` ist ein Kommandozeilenprogramm. Es lohnt sich erst nach dem Engine-Update, weil
-   es sonst falsche Bilder liefert. Ein Eintrag im App-Menü ergibt vor der Oberfläche wenig Sinn.
+2. **Distribution:** `blender -b` ist ein Kommandozeilenprogramm. Die Engine im Bundle ist seit dem 11. November auf
+   dem nötigen Stand. Ein Eintrag im App-Menü ergibt vor der Oberfläche trotzdem wenig Sinn.
