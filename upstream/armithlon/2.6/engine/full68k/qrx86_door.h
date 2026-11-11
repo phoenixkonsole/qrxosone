@@ -10,6 +10,8 @@
 #define QRX86_DOOR_MAGIC UINT32_C(0x51383644)
 /* +16 reads feature bits. Service 4 with no page directory: sockets for native 68k programs. */
 #define QRX86_DOOR_FEATURE_NATIVE_NET UINT32_C(1)
+/* Service 8: OpenGL 2.1 for native 68k programs (qrx_gl68k.c). */
+#define QRX86_DOOR_FEATURE_GL UINT32_C(2)
 void qrx86_door_attach(QRXFullCPU *c);
 void qrx86_door_report(void);
 #endif
