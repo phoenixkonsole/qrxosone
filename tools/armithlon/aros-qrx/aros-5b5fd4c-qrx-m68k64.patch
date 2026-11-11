@@ -475,7 +475,7 @@ index 00000000..1e420b78
 +
 diff --git a/arch/m68k64-all/exec/preparecontext.c b/arch/m68k64-all/exec/preparecontext.c
 new file mode 100644
-index 00000000..f676b7f1
+index 00000000..322de773
 --- /dev/null
 +++ b/arch/m68k64-all/exec/preparecontext.c
 @@ -0,0 +1,78 @@
@@ -523,7 +523,7 @@ index 00000000..f676b7f1
 +        {
 +#if defined(__AROSEXEC_SMP__)
 +            case TASKTAG_AFFINITY:
-+                IntETask(task->tc_UnionETask.tc_ETask)->iet_CpuAffinity = t->ti_Data;
++                IntETask(task->tc_UnionETask.tc_ETask)->iet_CpuAffinity = (cpumask_t *)t->ti_Data;
 +                break;
 +#endif
 +#define STACKARG(argno)                         \
@@ -1303,10 +1303,10 @@ index 00000000..158e9618
 +%copy_includes mmake=compiler-includes path=asm/m68k64 dir=asm
 diff --git a/arch/m68k64-all/kernel/cpu_init.c b/arch/m68k64-all/kernel/cpu_init.c
 new file mode 100644
-index 00000000..2c1fa0c9
+index 00000000..34ec31b4
 --- /dev/null
 +++ b/arch/m68k64-all/kernel/cpu_init.c
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,28 @@
 +/*
 +    Copyright (C) 2023, The AROS Development Team. All rights reserved.
 +*/
@@ -1328,6 +1328,8 @@ index 00000000..2c1fa0c9
 +
 +static int cpu_Init(struct KernelBase *KernelBase)
 +{
++    /* The 68100EC64 has no FPU yet: the context is the integer registers, PC and SR */
++    KernelBase->kb_ContextSize = sizeof(struct AROSCPUContext);
 +
 +    return TRUE;
 +}
@@ -1695,10 +1697,10 @@ index 00000000..0dc7c4ea
 +}
 diff --git a/arch/m68k64-native/exec/exec_platform.h b/arch/m68k64-native/exec/exec_platform.h
 new file mode 100644
-index 00000000..e69d6bb0
+index 00000000..1b6bbfea
 --- /dev/null
 +++ b/arch/m68k64-native/exec/exec_platform.h
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,208 @@
 +/*
 +    Copyright (C) 2023, The AROS Development Team. All rights reserved.
 +*/
@@ -1717,19 +1719,30 @@ index 00000000..e69d6bb0
 +extern struct Hook Exec_TaskSpinLockFailHook;
 +extern void Exec_TaskSpinUnlock(spinlock_t *);
 +
-+extern void Kernel_40_KrnSpinInit(spinlock_t *, void *);
-+#define EXEC_SPINLOCK_INIT(a) Kernel_40_KrnSpinInit((a), NULL)
-+extern spinlock_t *Kernel_43_KrnSpinLock(spinlock_t *, struct Hook *, ULONG, void *);
-+#define EXEC_SPINLOCK_LOCK(a,b) Kernel_43_KrnSpinLock((a), NULL, (b), NULL)
-+#define EXECTASK_SPINLOCK_LOCK(a,b) Kernel_43_KrnSpinLock((a), &Exec_TaskSpinLockFailHook, (b), NULL)
-+extern void Kernel_44_KrnSpinUnLock(spinlock_t *, void *);
-+#define EXEC_SPINLOCK_UNLOCK(a) Kernel_44_KrnSpinUnLock((a), NULL)
-+#define EXECTASK_SPINLOCK_UNLOCK(a) Kernel_44_KrnSpinUnLock((a), NULL); \
-+            Exec_TaskSpinUnlock((a))
++extern void Kernel_49_KrnSpinInit(spinlock_t *, void *);
++extern spinlock_t *Kernel_52_KrnSpinLock(spinlock_t *, struct Hook *, ULONG, void *);
++extern void Kernel_53_KrnSpinUnLock(spinlock_t *, void *);
 +
++/* As on x86: lock, fail hook, mode */
++#define EXEC_SPINLOCK_INIT(a)       Kernel_49_KrnSpinInit((a), NULL)
++#define EXEC_SPINLOCK_LOCK(a,b,c)   Kernel_52_KrnSpinLock((a), (b), (c), NULL)
++#define EXEC_SPINLOCK_UNLOCK(a)     Kernel_53_KrnSpinUnLock((a), NULL)
++
++/* Moves a task to the list of a new state, under the lists' spinlocks (x86 does it in a syscall) */
++struct Task;
++/* as on x86: a special state that gets the scheduling code to unspin tasks */
++#define TS_UNSPIN 0x10
++extern void Exec_M68K64ReschedTask(struct Task *task, ULONG state);
++#define krnSysCallReschedTask(task, state) Exec_M68K64ReschedTask((task), (state))
++
++#include "etask.h"
 +#endif
 +
 +#include "tls.h"
++
++#if !defined(AROS_NO_ATOMIC_OPERATIONS)
++#include <aros/atomic.h>
++#endif
 +
 +struct Exec_PlatformData
 +{
@@ -1890,9 +1903,9 @@ index 00000000..e69d6bb0
 +#define SET_THIS_TASK(x)        TLS_SET(ThisTask,(x))
 +#else
 +#define SET_THIS_TASK(x)        TLS_SET(ThisTask,(x)); \
-+    KrnSpinLock(&PrivExecBase(SysBase)->TaskRunningSpinLock, NULL, SPINLOCK_MODE_WRITE); \
++    EXEC_SPINLOCK_LOCK(&PrivExecBase(SysBase)->TaskRunningSpinLock, NULL, SPINLOCK_MODE_WRITE); \
 +    AddHead(&PrivExecBase(SysBase)->TaskRunning, (struct Node *)(x)); \
-+    KrnSpinUnLock(&PrivExecBase(SysBase)->TaskRunningSpinLock)
++    EXEC_SPINLOCK_UNLOCK(&PrivExecBase(SysBase)->TaskRunningSpinLock)
 +#endif
 +
 +#endif /* __EXEC_PLATFORM_H */
@@ -1950,15 +1963,15 @@ index 00000000..7c1983d9
 +TARGETDIR = $(BD_OBJDIR$(BDID))
 diff --git a/arch/m68k64-native/exec/platform_init.c b/arch/m68k64-native/exec/platform_init.c
 new file mode 100644
-index 00000000..13ee98fa
+index 00000000..710fb256
 --- /dev/null
 +++ b/arch/m68k64-native/exec/platform_init.c
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,213 @@
 +/*
 +    Copyright (C) 2023, The AROS Development Team. All rights reserved.
 +*/
 +
-+#define DEBUG 1
++#define DEBUG 0
 +
 +#include <aros/debug.h>
 +#include <aros/cpu.h>
@@ -1976,6 +1989,7 @@ index 00000000..13ee98fa
 +#include <stdio.h>
 +
 +#include "kernel_cpu.h"
++#include <exec/rawfmt.h>
 +
 +#include "exec_intern.h"
 +#if defined(__AROSEXEC_SMP__)
@@ -1984,40 +1998,59 @@ index 00000000..13ee98fa
 +
 +extern void IdleTask(struct ExecBase *);
 +
-+int Exec_RISCVCPUInit(struct ExecBase *SysBase)
++int Exec_M68K64CPUInit(struct ExecBase *SysBase)
 +{
 +    struct Task *BootTask, *CPUIdleTask;
-+#if defined(__AROSEXEC_SMP__)
 +    int cpu, cpunum = KrnGetCPUCount();
-+#endif
 +    char *taskName;
 +
 +    D(bug("[Exec] %s()\n", __PRETTY_FUNCTION__));
 +
 +    BootTask = GET_THIS_TASK;
 +
-+    D(bug("[Exec] %s: launched from %s @ 0x%p\n", __PRETTY_FUNCTION__, BootTask->tc_Node.ln_Name, BootTask));
++    D(bug("[Exec] %s: launched from %s @ 0x%p, %d cores\n", __PRETTY_FUNCTION__, BootTask->tc_Node.ln_Name, BootTask, cpunum));
 +
 +#if defined(__AROSEXEC_SMP__)
-+    if (cpunum == 0)
++    /*
++        As x86 does (cpu_PrepareExec): every task is bound to a core from now on. The tasks that exist
++        stay on core 0, new ones on the core that creates them unless they ask otherwise. exec's
++        Forbid() and the code that relies on it only keep other tasks on the same core out.
++    */
 +    {
++        struct Task *t;
++        void *mask = KrnAllocCPUMask();
++
++        KrnGetCPUMask(0, mask);
++        PrivExecBase(SysBase)->CPUMask = mask;
++#define BIND0(task) do { if (!IntETask((task)->tc_UnionETask.tc_ETask)->iet_CpuAffinity) { \
++            IntETask((task)->tc_UnionETask.tc_ETask)->iet_CpuAffinity = KrnAllocCPUMask(); \
++            KrnGetCPUMask(0, IntETask((task)->tc_UnionETask.tc_ETask)->iet_CpuAffinity); } } while (0)
++        BIND0(BootTask);
++        ForeachNode(&SysBase->TaskReady, t)
++            BIND0(t);
++        ForeachNode(&SysBase->TaskWait, t)
++            BIND0(t);
++#undef BIND0
++        PrivExecBase(SysBase)->IntFlags |= EXECF_CPUAffinity;
++    }
 +#endif
 +
-+#if defined(__AROSEXEC_SMP__)
-+    }
-+
++    /* One idle task per core, bound to it */
 +    for (cpu = 0; cpu < cpunum; cpu ++)
 +    {
-+        taskName = AllocVec(15, MEMF_CLEAR);
-+#if (0)
-+        sprintf( taskName, "CPU #%02d Idle", cpu);
-+#endif
-+#else
-+    taskName = "System Idle";
-+#endif
-+        CPUIdleTask = NewCreateTask(TASKTAG_NAME   , taskName,
++        IPTR nameArg[1] = { cpu };
 +#if defined(__AROSEXEC_SMP__)
-+                                TASKTAG_AFFINITY   , KrnGetCPUMask(cpu),
++        void *cpuMask = KrnAllocCPUMask();
++
++        KrnGetCPUMask(cpu, cpuMask);
++#endif
++
++        taskName = AllocVec(16, MEMF_CLEAR);
++        if (taskName)
++            RawDoFmt("CPU #%02ld Idle", (RAWARG)nameArg, RAWFMTFUNC_STRING, taskName);
++        CPUIdleTask = NewCreateTask(TASKTAG_NAME   , taskName ? taskName : "System Idle",
++#if defined(__AROSEXEC_SMP__)
++                                TASKTAG_AFFINITY   , cpuMask,
 +#endif
 +                                TASKTAG_PRI        , -127,
 +                                TASKTAG_PC         , IdleTask,
@@ -2026,14 +2059,16 @@ index 00000000..13ee98fa
 +
 +        if (CPUIdleTask)
 +        {
-+            D(
-+                bug("[Exec] %s: %s Task created @ 0x%p\n", __PRETTY_FUNCTION__, CPUIdleTask->tc_Node.ln_Name, CPUIdleTask);
-+#if defined(__AROSEXEC_SMP__)
-+                bug("[Exec] %s: CPU Affinity : %08x\n", __PRETTY_FUNCTION__, GetIntETask(CPUIdleTask)->iet_CpuAffinity);
-+#endif
-+            )
++            D(bug("[Exec] %s: %s Task created @ 0x%p\n", __PRETTY_FUNCTION__, CPUIdleTask->tc_Node.ln_Name, CPUIdleTask));
 +        }
++    }
++
 +#if defined(__AROSEXEC_SMP__)
++    /* Start the other cores: the kernel does that in supervisor state, through TRAP #3 */
++    if (cpunum > 1)
++    {
++        register unsigned long fn asm("d0") = 1;        /* M68K64_TRAP3_STARTCORES */
++        asm volatile ("trap #3" : "+d"(fn) : : "d1", "a0", "a1", "memory", "cc");
 +    }
 +#endif
 +
@@ -2063,39 +2098,88 @@ index 00000000..13ee98fa
 +{
 +    struct Task *curTask, *nxtTask;
 +
-+    Kernel_43_KrnSpinLock(&PrivExecBase(SysBase)->TaskSpinningLock, NULL,
++    Kernel_52_KrnSpinLock(&PrivExecBase(SysBase)->TaskSpinningLock, NULL,
 +                SPINLOCK_MODE_WRITE, NULL);
 +    ForeachNodeSafe(&PrivExecBase(SysBase)->TaskSpinning, curTask, nxtTask)
 +    {
 +        if (GetIntETask(curTask)->iet_SpinLock == thisLock)
 +        {
-+            Kernel_43_KrnSpinLock(&PrivExecBase(SysBase)->TaskReadySpinLock, NULL,
++            Kernel_52_KrnSpinLock(&PrivExecBase(SysBase)->TaskReadySpinLock, NULL,
 +                SPINLOCK_MODE_WRITE, NULL);
 +            Disable();
 +            Remove(&curTask->tc_Node);
 +            Enqueue(&SysBase->TaskReady, &curTask->tc_Node);
-+            Kernel_44_KrnSpinUnLock(&PrivExecBase(SysBase)->TaskReadySpinLock, NULL);
++            Kernel_53_KrnSpinUnLock(&PrivExecBase(SysBase)->TaskReadySpinLock, NULL);
 +            Enable();
 +        }
 +    }
-+    Kernel_44_KrnSpinUnLock(&PrivExecBase(SysBase)->TaskSpinningLock, NULL);
++    Kernel_53_KrnSpinUnLock(&PrivExecBase(SysBase)->TaskSpinningLock, NULL);
 +}
 +
-+int Exec_RISCVCPUSMPInit(struct ExecBase *SysBase)
++static spinlock_t *m68k64_ListLock(struct ExecBase *SysBase, ULONG state, struct List **list)
 +{
-+    int cpu, thiscpu = KrnGetCPUNumber();
++    switch (state)
++    {
++    case TS_RUN:   *list = &PrivExecBase(SysBase)->TaskRunning;  return &PrivExecBase(SysBase)->TaskRunningSpinLock;
++    case TS_READY: *list = &SysBase->TaskReady;                  return &PrivExecBase(SysBase)->TaskReadySpinLock;
++    case TS_WAIT:  *list = &SysBase->TaskWait;                   return &PrivExecBase(SysBase)->TaskWaitSpinLock;
++    case TS_SPIN:  *list = &PrivExecBase(SysBase)->TaskSpinning; return &PrivExecBase(SysBase)->TaskSpinningLock;
++    default:       *list = NULL;                                 return NULL;
++    }
++}
++
++/* krnSysCallReschedTask(): x86 does this in a syscall, here Disable() keeps this core out */
++void Exec_M68K64ReschedTask(struct Task *task, ULONG state)
++{
++    struct List *list;
++    spinlock_t *lock;
++
++    Disable();
++
++    lock = m68k64_ListLock(SysBase, task->tc_State, &list);
++    if (lock)
++        EXEC_SPINLOCK_LOCK(lock, NULL, SPINLOCK_MODE_WRITE);
++    if (task->tc_State != TS_INVALID && task->tc_State != TS_TOMBSTONED)
++        Remove(&task->tc_Node);
++    if (lock)
++        EXEC_SPINLOCK_UNLOCK(lock);
++
++    if (state == TS_REMOVED)
++        task->tc_State = TS_TOMBSTONED;
++    else
++    {
++        if (state == TS_UNSPIN)
++            state = TS_READY;
++        task->tc_State = state;
++        lock = m68k64_ListLock(SysBase, state, &list);
++        if (list)
++        {
++            if (lock)
++                EXEC_SPINLOCK_LOCK(lock, NULL, SPINLOCK_MODE_WRITE);
++            Enqueue(list, &task->tc_Node);
++            if (lock)
++                EXEC_SPINLOCK_UNLOCK(lock);
++        }
++    }
++
++    Enable();
++}
++
++int Exec_M68K64CPUSMPInit(struct ExecBase *SysBase)
++{
 +
 +    /* set up the task spinning hook */
 +    Exec_TaskSpinLockFailHook.h_Entry = (HOOKFUNC)Exec_TaskSpinLockFailFunc;
 +
 +    D(bug("[Exec] %s: Task SpinLock Fail hook @ 0x%p initialised (func @ 0x%p)\n", __PRETTY_FUNCTION__, &Exec_TaskSpinLockFailHook, Exec_TaskSpinLockFailHook.h_Entry));
 +
++    return TRUE;
 +}
 +
-+ADD2INITLIB(Exec_RISCVCPUSMPInit, -127)
++ADD2INITLIB(Exec_M68K64CPUSMPInit, -127)
 +#endif
 +
-+ADD2INITLIB(Exec_RISCVCPUInit, 0)
++ADD2INITLIB(Exec_M68K64CPUInit, 0)
 diff --git a/arch/m68k64-native/exec/superstate.c b/arch/m68k64-native/exec/superstate.c
 new file mode 100644
 index 00000000..6a97b6ad
@@ -2147,6 +2231,74 @@ index 00000000..7c10d485
 +
 +    AROS_LIBFUNC_EXIT
 +} /* UserState() */
+diff --git a/arch/m68k64-native/kernel/alloccpumask.c b/arch/m68k64-native/kernel/alloccpumask.c
+new file mode 100644
+index 00000000..a39fbdd8
+--- /dev/null
++++ b/arch/m68k64-native/kernel/alloccpumask.c
+@@ -0,0 +1,27 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    KrnAllocCPUMask on the 68100EC64: a CPU mask is one cpumask_t (64 cores), TASKAFFINITY_ANY means all.
++    See rom/kernel/alloccpumask.c for documentation.
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++#include <exec/memory.h>
++#include <exec/tasks.h>
++
++#include <kernel_base.h>
++#include "kernel_smp.h"
++
++#include <proto/exec.h>
++#include <proto/kernel.h>
++
++AROS_LH0(void *, KrnAllocCPUMask,
++    struct KernelBase *, KernelBase, 42, Kernel)
++{
++    AROS_LIBFUNC_INIT
++
++    return AllocMem(sizeof(cpumask_t), MEMF_PUBLIC | MEMF_CLEAR);
++
++    AROS_LIBFUNC_EXIT
++}
+diff --git a/arch/m68k64-native/kernel/clearcpumask.c b/arch/m68k64-native/kernel/clearcpumask.c
+new file mode 100644
+index 00000000..5567bb52
+--- /dev/null
++++ b/arch/m68k64-native/kernel/clearcpumask.c
+@@ -0,0 +1,29 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    KrnClearCPUMask on the 68100EC64: a CPU mask is one cpumask_t (64 cores), TASKAFFINITY_ANY means all.
++    See rom/kernel/clearcpumask.c for documentation.
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++#include <exec/memory.h>
++#include <exec/tasks.h>
++
++#include <kernel_base.h>
++#include "kernel_smp.h"
++
++#include <proto/exec.h>
++#include <proto/kernel.h>
++
++AROS_LH1(void, KrnClearCPUMask,
++    AROS_LHA(void *, mask, A0),
++    struct KernelBase *, KernelBase, 44, Kernel)
++{
++    AROS_LIBFUNC_INIT
++
++    if (mask && (IPTR)mask != TASKAFFINITY_ANY)
++        *(cpumask_t *)mask = 0;
++
++    AROS_LIBFUNC_EXIT
++}
 diff --git a/arch/m68k64-native/kernel/cli.c b/arch/m68k64-native/kernel/cli.c
 new file mode 100644
 index 00000000..e654c6f3
@@ -2179,12 +2331,153 @@ index 00000000..e654c6f3
 +
 +    AROS_LIBFUNC_EXIT
 +}
+diff --git a/arch/m68k64-native/kernel/cpuinmask.c b/arch/m68k64-native/kernel/cpuinmask.c
+new file mode 100644
+index 00000000..5f6a78c9
+--- /dev/null
++++ b/arch/m68k64-native/kernel/cpuinmask.c
+@@ -0,0 +1,31 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    KrnCPUInMask on the 68100EC64: a CPU mask is one cpumask_t (64 cores), TASKAFFINITY_ANY means all.
++    See rom/kernel/cpuinmask.c for documentation.
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++#include <exec/memory.h>
++#include <exec/tasks.h>
++
++#include <kernel_base.h>
++#include "kernel_smp.h"
++
++#include <proto/exec.h>
++#include <proto/kernel.h>
++
++AROS_LH2(BOOL, KrnCPUInMask,
++    AROS_LHA(uint32_t, id, D0),
++    AROS_LHA(void *, mask, A0),
++    struct KernelBase *, KernelBase, 46, Kernel)
++{
++    AROS_LIBFUNC_INIT
++
++    if (!mask || (IPTR)mask == TASKAFFINITY_ANY)
++        return TRUE;
++    return id < M68K64_MAX_CORES && ((*(cpumask_t *)mask >> id) & 1);
++
++    AROS_LIBFUNC_EXIT
++}
+diff --git a/arch/m68k64-native/kernel/freecpumask.c b/arch/m68k64-native/kernel/freecpumask.c
+new file mode 100644
+index 00000000..3352302d
+--- /dev/null
++++ b/arch/m68k64-native/kernel/freecpumask.c
+@@ -0,0 +1,29 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    KrnFreeCPUMask on the 68100EC64: a CPU mask is one cpumask_t (64 cores), TASKAFFINITY_ANY means all.
++    See rom/kernel/freecpumask.c for documentation.
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++#include <exec/memory.h>
++#include <exec/tasks.h>
++
++#include <kernel_base.h>
++#include "kernel_smp.h"
++
++#include <proto/exec.h>
++#include <proto/kernel.h>
++
++AROS_LH1(void, KrnFreeCPUMask,
++    AROS_LHA(void *, mask, A0),
++    struct KernelBase *, KernelBase, 43, Kernel)
++{
++    AROS_LIBFUNC_INIT
++
++    if (mask && (IPTR)mask != TASKAFFINITY_ANY)
++        FreeMem(mask, sizeof(cpumask_t));
++
++    AROS_LIBFUNC_EXIT
++}
+diff --git a/arch/m68k64-native/kernel/getcpucount.c b/arch/m68k64-native/kernel/getcpucount.c
+new file mode 100644
+index 00000000..3db5909e
+--- /dev/null
++++ b/arch/m68k64-native/kernel/getcpucount.c
+@@ -0,0 +1,27 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    KrnGetCPUCount on the 68100EC64: a CPU mask is one cpumask_t (64 cores), TASKAFFINITY_ANY means all.
++    See rom/kernel/getcpucount.c for documentation.
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++#include <exec/memory.h>
++#include <exec/tasks.h>
++
++#include <kernel_base.h>
++#include "kernel_smp.h"
++
++#include <proto/exec.h>
++#include <proto/kernel.h>
++
++AROS_LH0(unsigned int, KrnGetCPUCount,
++    struct KernelBase *, KernelBase, 40, Kernel)
++{
++    AROS_LIBFUNC_INIT
++
++    return m68k64_CoreCount ? m68k64_CoreCount : 1;
++
++    AROS_LIBFUNC_EXIT
++}
+diff --git a/arch/m68k64-native/kernel/getcpumask.c b/arch/m68k64-native/kernel/getcpumask.c
+new file mode 100644
+index 00000000..9a7f1247
+--- /dev/null
++++ b/arch/m68k64-native/kernel/getcpumask.c
+@@ -0,0 +1,30 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    KrnGetCPUMask on the 68100EC64: a CPU mask is one cpumask_t (64 cores), TASKAFFINITY_ANY means all.
++    See rom/kernel/getcpumask.c for documentation.
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++#include <exec/memory.h>
++#include <exec/tasks.h>
++
++#include <kernel_base.h>
++#include "kernel_smp.h"
++
++#include <proto/exec.h>
++#include <proto/kernel.h>
++
++AROS_LH2(void, KrnGetCPUMask,
++    AROS_LHA(uint32_t, id, D0),
++    AROS_LHA(void *, mask, A0),
++    struct KernelBase *, KernelBase, 45, Kernel)
++{
++    AROS_LIBFUNC_INIT
++
++    if (mask && (IPTR)mask != TASKAFFINITY_ANY && id < M68K64_MAX_CORES)
++        *(cpumask_t *)mask |= (cpumask_t)1 << id;
++
++    AROS_LIBFUNC_EXIT
++}
 diff --git a/arch/m68k64-native/kernel/intr.c b/arch/m68k64-native/kernel/intr.c
 new file mode 100644
-index 00000000..a20f5d55
+index 00000000..44d19363
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/intr.c
-@@ -0,0 +1,240 @@
+@@ -0,0 +1,297 @@
 +/*
 +    Copyright (C) 2026, The AROS Development Team. All rights reserved.
 +
@@ -2213,6 +2506,9 @@ index 00000000..a20f5d55
 +#include "kernel_intr.h"
 +#include "kernel_syscall.h"
 +#include "kernel_scheduler.h"
++#include "kernel_smp.h"
++
++extern void cpu_Trap3(regs_t *regs);
 +
 +#define D(x)
 +#define DIRQ(x)
@@ -2233,7 +2529,8 @@ index 00000000..a20f5d55
 +        0 SR, 2 format and vector offset, 4 reserved, 8 PC, and for format 1 16 the fault address.
 +    struct ExceptionContext (272 bytes) goes below it:
 +        0 d[16], 128 a[16] (a[7] at 184), 256 pc, 264 sr, 266 Flags, 268 reserved
-+    'reserved' keeps the size of the frame, so the exit puts the stack back where it was.
++    The exit reads the frame's format again to put the stack back where it was: the context may
++    belong to another task by then, after a task switch.
 +
 +    Privileged instructions llvm-mc does not know yet are written as words:
 +        $007C $0700     ori.w #$0700,sr     mask interrupts while the kernel runs
@@ -2270,7 +2567,16 @@ index 00000000..a20f5d55
 +    "2: lea     (272,%sp), %a0\n"
 +    "   adda.q  %d1, %a0\n"
 +    "3: move.q  %a0, (184,%sp)\n"
-+    "   moveq   #0, %d0\n"
++    /* A8 is the core's TLS. A core that is just starting has none yet: see kernel_smp.c */
++    "   .short  0xA009, 0x2048\n"          /* movea.q a8,a0 */
++    "   move.q  %a0, %d2\n"
++    "   bne     7f\n"
++    "   move.q  %sp, %a0\n"
++    "   move.q  %a0, -(%sp)\n"
++    "   jsr     (cpu_SecondaryStart,%pc)\n"
++    "   adda.q  #8, %sp\n"
++    "   bra     8f\n"
++    "7: moveq   #0, %d0\n"
 +    "   move.w  (274,%sp), %d0\n"
 +    "   and.l   #4095, %d0\n"
 +    "   lsr.l   #2, %d0\n"
@@ -2279,14 +2585,22 @@ index 00000000..a20f5d55
 +    "   move.q  %a0, -(%sp)\n"
 +    "   jsr     (cpu_Exception,%pc)\n"
 +    "   adda.q  #16, %sp\n"
++    "8:\n"
 +    /* Back to user state: the frame goes where it came from, the user stack into USP */
 +    "   move.w  (264,%sp), %d0\n"
 +    "   btst    #13, %d0\n"
 +    "   bne     4f\n"
 +    "   move.q  (184,%sp), %a0\n"
 +    "   .short  0x4E7B, 0x8800\n"
-+    "   lea     (272,%sp), %a0\n"
-+    "   move.l  (268,%sp), %d1\n"
++    /* The frame size again from the hardware frame: 'reserved' belongs to the task now */
++    "   moveq   #16, %d1\n"
++    "   move.w  (274,%sp), %d2\n"
++    "   lsr.w   #8, %d2\n"
++    "   lsr.w   #4, %d2\n"
++    "   cmpi.w  #1, %d2\n"
++    "   bne     6f\n"
++    "   moveq   #24, %d1\n"
++    "6: lea     (272,%sp), %a0\n"
 +    "   adda.q  %d1, %a0\n"
 +    "   suba.q  #16, %a0\n"
 +    "   move.q  %a0, (184,%sp)\n"
@@ -2385,24 +2699,50 @@ index 00000000..a20f5d55
 +    {
 +    case M68K64_VEC_IRQ(M68K64_IRQ_TIMER):
 +        DIRQ(bug("[Kernel] timer\n"));
-+        if (KernelBase)
-+            krnRunIRQHandlers(KernelBase, IRQ_TIMER);
-+        if (SysBase && (IDNESTCOUNT_GET < 0))
-+            core_Cause(INTB_VERTB, 1L << INTB_VERTB);
++        if (GetCPUNumber() == 0)
++        {
++            /* Core 0 runs the VBlank servers, which also count its quantum */
++            if (KernelBase)
++                krnRunIRQHandlers(KernelBase, IRQ_TIMER);
++            if (SysBase && (IDNESTCOUNT_GET < 0))
++                core_Cause(INTB_VERTB, 1L << INTB_VERTB);
++        }
++        else
++        {
++            /* The other cores only count their own quantum, as the VBlank server does */
++            if (!SCHEDELAPSED_GET || (--SCHEDELAPSED_GET == 0))
++            {
++                FLAG_SCHEDQUANTUM_SET;
++                FLAG_SCHEDSWITCH_SET;
++            }
++        }
 +        if (!(regs->sr & SR_SUPERVISOR))
 +            core_ExitInterrupt(regs);
 +        break;
 +
 +    case M68K64_VEC_IRQ(M68K64_IRQ_IPI):
 +        DIRQ(bug("[Kernel] signal from another core\n"));
-+        if (KernelBase)
-+            krnRunIRQHandlers(KernelBase, IRQ_IPI);
++        cpu_HandleIPI(regs);
 +        if (!(regs->sr & SR_SUPERVISOR))
 +            core_ExitInterrupt(regs);
 +        break;
 +
 +    case M68K64_VEC_TRAP(0):
 +        cpu_Syscall(regs);
++        break;
++
++    case M68K64_VEC_TRAP(3):
++        cpu_Trap3(regs);
++        break;
++
++    case M68K64_VEC_TRAP(2):
++        /* Test machine only: end the run with the code in D0, movec d0,$8F1 */
++        asm volatile ("   move.q %0, %%d0\n   .short 0x4E7B, 0x08F1" : : "d"(regs->d[0]) : "d0");
++        break;
++
++    case M68K64_VEC_TRAP(1):
++        /* krnPutC: the character in D0 to the console, movec d0,$8F0 */
++        asm volatile ("   move.q %0, %%d0\n   .short 0x4E7B, 0x08F0" : : "d"(regs->d[0]) : "d0");
 +        break;
 +
 +    default:
@@ -2418,9 +2758,19 @@ index 00000000..a20f5d55
 +        /* A fault. There is no exception handler mechanism for traps yet. */
 +        bug("[Kernel] exception %lu at pc 0x%016lx, sr 0x%04x\n", vector,
 +            (unsigned long)regs->pc, regs->sr);
-+        bug("[Kernel] d0 %016lx d1 %016lx a0 %016lx a7 %016lx\n",
-+            (unsigned long)regs->d[0], (unsigned long)regs->d[1],
-+            (unsigned long)regs->a[0], (unsigned long)regs->a[7]);
++        {
++            int i;
++            UQUAD *sp = (UQUAD *)regs->a[7];
++
++            for (i = 0; i < 8; i++)
++                bug("[Kernel] d%d %016lx  a%d %016lx\n", i, (unsigned long)regs->d[i],
++                    i, (unsigned long)regs->a[i]);
++            bug("[Kernel] stack:");
++            for (i = 0; i < 8; i++)
++                bug(" %016lx", (unsigned long)sp[i]);
++            bug("\n[Kernel] task 0x%p '%s'\n", GET_THIS_TASK,
++                GET_THIS_TASK ? GET_THIS_TASK->tc_Node.ln_Name : "");
++        }
 +        for (;;)
 +            asm volatile (".short 0x4E72, 0x2700");     /* stop #$2700 */
 +    }
@@ -2723,6 +3073,31 @@ index 00000000..f77202f8
 +    : : [swi_no] "i" (n) : "d0", "d1", "a0", "a1", "memory", "cc");
 +
 +#endif /* CPU_M68K64_H_ */
+diff --git a/arch/m68k64-native/kernel/kernel_debug.c b/arch/m68k64-native/kernel/kernel_debug.c
+new file mode 100644
+index 00000000..19e529cb
+--- /dev/null
++++ b/arch/m68k64-native/kernel/kernel_debug.c
+@@ -0,0 +1,19 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    Debug output of the 68100EC64 kernel. The machine's console is MOVEC $8F0, which is
++    privileged, and bug() runs in user state too, so a character goes through TRAP #1 with the
++    character in D0. intr.c writes it out.
++*/
++
++#include <aros/kernel.h>
++#include <kernel_base.h>
++#include <kernel_debug.h>
++
++int krnPutC(int chr, struct KernelBase *KernelBase)
++{
++    register unsigned long c asm("d0") = (unsigned char)chr;
++
++    asm volatile ("trap #1" : : "d"(c) : "memory", "cc");
++    return 1;
++}
 diff --git a/arch/m68k64-native/kernel/kernel_intern.h b/arch/m68k64-native/kernel/kernel_intern.h
 new file mode 100644
 index 00000000..97e3ffac
@@ -2801,169 +3176,313 @@ index 00000000..97e3ffac
 +}
 +
 +#endif /*KERNEL_INTERN_H_*/
+diff --git a/arch/m68k64-native/kernel/kernel_ipi.h b/arch/m68k64-native/kernel/kernel_ipi.h
+new file mode 100644
+index 00000000..e0ad50d7
+--- /dev/null
++++ b/arch/m68k64-native/kernel/kernel_ipi.h
+@@ -0,0 +1,2 @@
++/* exec's signal.c includes kernel_ipi.h for core_DoCallIPI() */
++#include "kernel_smp.h"
 diff --git a/arch/m68k64-native/kernel/kernel_scheduler.c b/arch/m68k64-native/kernel/kernel_scheduler.c
 new file mode 100644
-index 00000000..9ff8826c
+index 00000000..994aa796
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_scheduler.c
-@@ -0,0 +1,271 @@
+@@ -0,0 +1,438 @@
 +/*
-+    Copyright (C) 2023, The AROS Development Team. All rights reserved.
++    The x86 scheduler (arch/all-pc/kernel/kernel_scheduler.c) with the affinity test of the
++    68100EC64 port in place of the APIC one.
++
++    Copyright (C) 2017-2023, The AROS Development Team. All rights reserved.
 +*/
 +
 +#include <exec/alerts.h>
 +#include <exec/execbase.h>
 +#include <exec/lists.h>
 +#include <proto/exec.h>
++
++#define __KERNEL_NOLIBBASE__
 +#include <proto/kernel.h>
 +
-+//#include <kernel_base.h>
-+struct KernelBase;
++#include <kernel_base.h>
 +#include <kernel_debug.h>
 +#include <kernel_scheduler.h>
 +
 +#include "kernel_cpu.h"
 +
-+#define AROS_NO_ATOMIC_OPERATIONS
 +#include <exec_platform.h>
 +
 +#include <aros/types/spinlock_s.h>
 +
 +#include <etask.h>
 +
-+#undef bug
++#define __AROS_KERNEL__
++
 +#include "exec_intern.h"
-+#undef bug
-+#include "kernel_intern.h"
 +
++
++#define LOWSTACKWARN
++#define SCHEDULERASCII_DEBUG
++
++#ifdef DEBUG
++#undef DEBUG
++#endif
++#define DEBUG 0
++
++#if (DEBUG > 0)
++#define DSCHED(x) x
++#else
 +#define DSCHED(x)
++#endif
 +
-+/* Check if the currently running task on this cpu should be rescheduled */
++#if (DEBUG > 0) && defined(SCHEDULERASCII_DEBUG)
++#define DEBUGCOLOR_SET       "\033[31m"
++#define DEBUGFUNCCOLOR_SET   "\033[31;1m"
++#define DEBUGCOLOR_RESET     "\033[0m"
++#else
++#define DEBUGCOLOR_SET
++#define DEBUGFUNCCOLOR_SET
++#define DEBUGCOLOR_RESET
++#endif
++
++#if defined(__AROSEXEC_SMP__)
++/* For x86's core_APIC_CPUInMask(): the affinity is a cpumask_t pointer, none or TASKAFFINITY_ANY is every core */
++static inline BOOL m68k64_CPUInMask(cpuid_t cpuNo, void *mask)
++{
++    if (!mask || (IPTR)mask == TASKAFFINITY_ANY)
++        return TRUE;
++    return (*(cpumask_t *)mask >> cpuNo) & 1;
++}
++#endif
++
++/* Check if the currently running task on this cpu should be rescheduled.. */
 +BOOL core_Schedule(void)
 +{
-+#if defined(DEBUG)
-+    int cpunum = GetCPUNumber();
-+    (void)cpunum;
++#if defined(__AROSEXEC_SMP__) || (DEBUG > 0)
++    cpuid_t cpuNo;
 +#endif
-+    struct Task *task = GET_THIS_TASK;
++    struct Task *task;
 +    BOOL corereschedule = TRUE;
 +
-+    DSCHED(bug("[Kernel:%02d] core_Schedule()\n", cpunum));
++    DSCHED(bug("[Kernel]" DEBUGFUNCCOLOR_SET " %s()" DEBUGCOLOR_RESET "\n", __func__);)
++
++    task = GET_THIS_TASK;
++#if defined(__AROSEXEC_SMP__) || (DEBUG > 0)
++    cpuNo = KrnGetCPUNumber();
++#endif
++
++    DSCHED(
++        bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: running Task @ 0x%p" DEBUGCOLOR_RESET "\n", cpuNo, __func__, task);
++        bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: '%s', state %08X" DEBUGCOLOR_RESET "\n", cpuNo, __func__, task->tc_Node.ln_Name, task->tc_State);
++    )
 +
 +    FLAG_SCHEDSWITCH_CLEAR;
 +
-+    /* If task has pending exception, reschedule it so that the dispatcher may handle the exception */
-+    if (!(task->tc_Flags & TF_EXCEPT))
++    if (task)
 +    {
++        if (
 +#if defined(__AROSEXEC_SMP__)
-+        KrnSpinLock(&PrivExecBase(SysBase)->TaskReadySpinLock, NULL,
-+                    SPINLOCK_MODE_READ);
++            (task->tc_State == TS_TOMBSTONED) ||
 +#endif
-+        /* Is the TaskReady empty? If yes, then the running task is the only one. Let it work */
-+        if (IsListEmpty(&SysBase->TaskReady))
-+            corereschedule = FALSE;
-+        else
++            (task->tc_State == TS_REMOVED))
 +        {
-+            struct Task *nexttask;
-+#if defined(__AROSEXEC_SMP__)
-+            int cpunum = GetCPUNumber();
-+            uint32_t cpumask = (1 << cpunum);
++            /* always let finalising tasks finish... */
++            corereschedule = FALSE;
++#if defined(__AROSEXEC_SMP__) || (DEBUG > 0)
++            bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: letting finalising task run.." DEBUGCOLOR_RESET "\n", cpuNo, __func__);
 +#endif
-+            /*
-+                    If there are tasks ready for this cpu that have equal or lower priority,
-+                    and the current task has used its alloted time - reschedule so they can run
-+                */
-+            for (nexttask = (struct Task *)GetHead(&SysBase->TaskReady); nexttask != NULL; nexttask = (struct Task *)GetSucc(nexttask))
-+            {
-+#if defined(__AROSEXEC_SMP__)
-+                if ((GetIntETask(nexttask)->iet_CpuAffinity  & cpumask) == cpumask)
-+                {
-+#endif
-+                    if (nexttask->tc_Node.ln_Pri <= task->tc_Node.ln_Pri)
-+                    {
-+                        /* If the running task did not used it's whole quantum yet, let it work */
-+                        if (!FLAG_SCHEDQUANTUM_ISSET)
-+                            corereschedule = FALSE;
-+                    }
-+                    break;
-+#if defined(__AROSEXEC_SMP__)
-+                }
-+#endif
-+            }
 +        }
++        else if (!(task->tc_Flags & TF_EXCEPT))
++        {
 +#if defined(__AROSEXEC_SMP__)
-+        KrnSpinUnLock(&PrivExecBase(SysBase)->TaskReadySpinLock);
++            KrnSpinLock(&PrivExecBase(SysBase)->TaskReadySpinLock, NULL,
++                        SPINLOCK_MODE_READ);
++#endif
++            /* Is the TaskReady empty? If yes, then the running task is the only one. Let it work */
++            if (IsListEmpty(&SysBase->TaskReady))
++                corereschedule = FALSE;
++            else
++            {
++                struct Task *nexttask;
++                /*
++                        If there are tasks ready for this cpu that have equal or lower priority,
++                        and the current task has used its alloted time - reschedule so they can run
++                    */
++                for (nexttask = (struct Task *)GetHead(&SysBase->TaskReady); nexttask != NULL; nexttask = (struct Task *)GetSucc(nexttask))
++                {
++#if defined(__AROSEXEC_SMP__)
++                    if (!(PrivExecBase(SysBase)->IntFlags & EXECF_CPUAffinity) || (GetIntETask(nexttask) && m68k64_CPUInMask(cpuNo, GetIntETask(nexttask)->iet_CpuAffinity)))
++                    {
++#endif
++                     if (
++#if defined(__AROSEXEC_SMP__)
++                            (task->tc_State != TS_SPIN) &&
++
++#endif
++                            (nexttask->tc_Node.ln_Pri <= task->tc_Node.ln_Pri))
++                        {
++                            /* If the running task did not used it's whole quantum yet, let it work */
++                            if (!FLAG_SCHEDQUANTUM_ISSET)
++                                corereschedule = FALSE;
++                        }
++                        break;
++#if defined(__AROSEXEC_SMP__)
++                    }
++#endif
++                }
++            }
++#if defined(__AROSEXEC_SMP__)
++            KrnSpinUnLock(&PrivExecBase(SysBase)->TaskReadySpinLock);
++#endif
++        }
++
++#if defined(__AROSEXEC_SMP__)
++        if ((!corereschedule) && (task->tc_State == TS_SPIN))
++            task->tc_State = TS_RUN;
 +#endif
 +    }
 +
 +    DSCHED
 +        (
 +            if (corereschedule)
-+                bug("[Kernel:%02d] '%s' @ 0x%p needs rescheduled ..\n", cpunum, task->tc_Node.ln_Name, task);
++                bug("[Kernel:%03u]" DEBUGCOLOR_SET " '%s' @ 0x%p needs rescheduled .." DEBUGCOLOR_RESET "\n", cpuNo, task->tc_Node.ln_Name, task);
 +        )
 +
 +    return corereschedule;
 +}
 +
-+/* Switch the currently running task on this cpu to ready state */
++/*
++    Switch the currently running task on this cpu
++    if it is running , switch it to the ready state
++    on SMP builds, if exec has set TS_SPIN,
++    switch it to the spinning list.
++*/
 +void core_Switch(void)
 +{
-+#if defined(DEBUG)
-+    int cpunum = GetCPUNumber();
-+#endif
-+    struct Task *task = GET_THIS_TASK;
++    cpuid_t cpuNo;
++    struct Task *task;
++    ULONG showAlert = 0;
++    BOOL doSwitch = TRUE;
++    struct ETask * taskEtask = NULL;
 +
-+    DSCHED(bug("[Kernel:%02d] core_Switch(%08x)\n", cpunum, task->tc_State));
++    DSCHED(bug("[Kernel]" DEBUGFUNCCOLOR_SET " %s()" DEBUGCOLOR_RESET "\n", __func__);)
 +
-+    if (task->tc_State == TS_RUN)
++    cpuNo = KrnGetCPUNumber();
++    task = GET_THIS_TASK;
++
++    DSCHED(
++        bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Current running Task @ 0x%p" DEBUGCOLOR_RESET "\n", cpuNo, __func__, task);
++    )
++    if ((!task) || (task->tc_State == TS_INVALID))
 +    {
-+        DSCHED(bug("[Kernel:%02d] Switching away from '%s' @ 0x%p\n", cpunum, task->tc_Node.ln_Name, task));
++        bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: called on invalid task!" DEBUGCOLOR_RESET "\n", cpuNo, __func__);
++        doSwitch = FALSE;
++    }
++    DSCHED(
++        bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Task name '%s'" DEBUGCOLOR_RESET "\n", cpuNo, __func__, task->tc_Node.ln_Name);
++        bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Task state = %08X" DEBUGCOLOR_RESET "\n", cpuNo, __func__, task->tc_State);
++    )
 +#if defined(__AROSEXEC_SMP__)
-+        KrnSpinLock(&PrivExecBase(SysBase)->TaskRunningSpinLock, NULL,
-+                    SPINLOCK_MODE_WRITE);
-+        Remove(&task->tc_Node);
-+        KrnSpinUnLock(&PrivExecBase(SysBase)->TaskRunningSpinLock);
++    if (doSwitch && task->tc_State == TS_TOMBSTONED)
++        doSwitch = FALSE;
 +#endif
++    if (!doSwitch)
++    {
++        bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Letting Task continue to run.." DEBUGCOLOR_RESET "\n", cpuNo, __func__);
++        return;
++    }
++
++    DSCHED(
++        bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Switching away from Task" DEBUGCOLOR_RESET "\n", cpuNo, __func__);
++    )
++
++#if defined(__AROSEXEC_SMP__)
++    KrnSpinLock(&PrivExecBase(SysBase)->TaskRunningSpinLock, NULL,
++                SPINLOCK_MODE_WRITE);
++#else
++    if (task->tc_State != TS_RUN && task->tc_State != TS_REMOVED)
++#endif
++    REMOVE(&task->tc_Node);
++#if defined(__AROSEXEC_SMP__)
++    KrnSpinUnLock(&PrivExecBase(SysBase)->TaskRunningSpinLock);
++    if (task->tc_State == TS_REMOVED)
++        task->tc_State = TS_TOMBSTONED;
++#endif
++
++    DSCHED(bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Task removed from list, state = %08X" DEBUGCOLOR_RESET "\n", cpuNo, __func__, task->tc_State);)
++
++    if ((task->tc_State != TS_WAIT) &&
++#if defined(__AROSEXEC_SMP__)
++        (task->tc_State != TS_SPIN) &&
++        (task->tc_State != TS_TOMBSTONED) &&
++#endif
++        (task->tc_State != TS_REMOVED))
 +        task->tc_State = TS_READY;
 +
-+        /* if the current task has gone out of stack bounds, suspend it to prevent further damage to the system */
-+        if (task->tc_SPReg <= task->tc_SPLower || task->tc_SPReg > task->tc_SPUpper)
-+        {
-+            bug("[Kernel:%02d] '%s' @ 0x%p went out of stack limits\n", cpunum, task->tc_Node.ln_Name, task);
-+            bug("[Kernel:%02d]  - Lower 0x%p, upper 0x%p, SP 0x%p\n", cpunum, task->tc_SPLower, task->tc_SPUpper, task->tc_SPReg);
++    /* if the current task has gone out of stack bounds, suspend it to prevent further damage to the system */
++    if (task->tc_SPReg <= task->tc_SPLower || task->tc_SPReg > task->tc_SPUpper)
++    {
++        bug("[Kernel:%03u]" DEBUGCOLOR_SET " ERROR! Task (%s) went out of stack limits" DEBUGCOLOR_RESET "\n", cpuNo, task->tc_Node.ln_Name);
++        bug("[Kernel:%03u]" DEBUGCOLOR_SET "  - Lower Bound = 0x%p, Upper Bound = 0x%p" DEBUGCOLOR_RESET "\n", cpuNo, task->tc_SPLower, task->tc_SPUpper);
++        bug("[Kernel:%03u]" DEBUGCOLOR_SET "  - SP = 0x%p" DEBUGCOLOR_RESET "\n", cpuNo, task->tc_SPReg);
 +
-+            task->tc_SigWait    = 0;
-+            task->tc_State      = TS_WAIT;
-+#if defined(__AROSEXEC_SMP__)
-+            KrnSpinLock(&PrivExecBase(SysBase)->TaskWaitSpinLock, NULL,
-+                        SPINLOCK_MODE_WRITE);
++        task->tc_SigWait    = 0;
++        task->tc_State      = TS_WAIT;
++
++        showAlert = AN_StackProbe;
++#if defined(LOWSTACKWARN)
++    }
++    else if (task->tc_SPReg <= task->tc_SPLower + 1024)
++    {
++        bug("[Kernel:%03u]" DEBUGCOLOR_SET " WARNING - Task (%s) close to stack limits" DEBUGCOLOR_RESET "\n", cpuNo, task->tc_Node.ln_Name);
 +#endif
-+            Enqueue(&SysBase->TaskWait, &task->tc_Node);
-+#if defined(__AROSEXEC_SMP__)
-+            KrnSpinUnLock(&PrivExecBase(SysBase)->TaskWaitSpinLock);
-+#endif
++    }
++    task->tc_IDNestCnt = IDNESTCOUNT_GET;
 +
-+            Alert(AN_StackProbe);
-+        }
-+
-+        task->tc_IDNestCnt = IDNESTCOUNT_GET;
-+
++    if (task->tc_State == TS_READY)
++    {
 +        if (task->tc_Flags & TF_SWITCH)
 +            AROS_UFC1NR(void, task->tc_Switch, AROS_UFCA(struct ExecBase *, SysBase, A6));
 +
-+        if (task->tc_State == TS_READY)
-+        {
-+            DSCHED(bug("[Kernel:%02d] Setting '%s' @ 0x%p as ready\n", cpunum, task->tc_Node.ln_Name, task));
++        DSCHED(bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Setting '%s' @ 0x%p as ready" DEBUGCOLOR_RESET "\n", cpuNo, __func__, task->tc_Node.ln_Name, task);)
 +#if defined(__AROSEXEC_SMP__)
-+            KrnSpinLock(&PrivExecBase(SysBase)->TaskReadySpinLock, NULL,
++        KrnSpinLock(&PrivExecBase(SysBase)->TaskReadySpinLock, NULL,
++                SPINLOCK_MODE_WRITE);
++#endif
++        Enqueue(&SysBase->TaskReady, &task->tc_Node);
++#if defined(__AROSEXEC_SMP__)
++        KrnSpinUnLock(&PrivExecBase(SysBase)->TaskReadySpinLock);
++#endif
++    }
++#if defined(__AROSEXEC_SMP__)
++    else if (task->tc_State == TS_SPIN)
++    {
++        DSCHED(bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Setting '%s' @ 0x%p to spin" DEBUGCOLOR_RESET "\n", cpuNo, __func__, task->tc_Node.ln_Name, task);)
++        KrnSpinLock(&PrivExecBase(SysBase)->TaskSpinningLock, NULL,
++                    SPINLOCK_MODE_WRITE);
++        Enqueue(&PrivExecBase(SysBase)->TaskSpinning, &task->tc_Node);
++        KrnSpinUnLock(&PrivExecBase(SysBase)->TaskSpinningLock);
++    }
++#endif
++    else if(
++#if defined(__AROSEXEC_SMP__)
++        (task->tc_State != TS_TOMBSTONED) &&
++#endif
++        (task->tc_State != TS_REMOVED))
++    {
++        DSCHED(bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Setting '%s' @ 0x%p to wait" DEBUGCOLOR_RESET "\n", cpuNo, __func__, task->tc_Node.ln_Name, task);)
++#if defined(__AROSEXEC_SMP__)
++        KrnSpinLock(&PrivExecBase(SysBase)->TaskWaitSpinLock, NULL,
 +                    SPINLOCK_MODE_WRITE);
 +#endif
-+            Enqueue(&SysBase->TaskReady, &task->tc_Node);
++        Enqueue(&SysBase->TaskWait, &task->tc_Node);
 +#if defined(__AROSEXEC_SMP__)
-+            KrnSpinUnLock(&PrivExecBase(SysBase)->TaskReadySpinLock);
++        KrnSpinUnLock(&PrivExecBase(SysBase)->TaskWaitSpinLock);
 +#endif
-+        }
 +    }
++    if (showAlert)
++        Alert(showAlert);
 +}
 +
 +/* Dispatch a "new" ready task on this cpu */
@@ -2971,15 +3490,11 @@ index 00000000..9ff8826c
 +{
 +    struct Task *newtask;
 +    struct Task *task = GET_THIS_TASK;
-+#if defined(__AROSEXEC_SMP__) || defined(DEBUG)
-+    int cpunum = GetCPUNumber();
-+    (void)cpunum;
-+#endif
-+#if defined(__AROSEXEC_SMP__)
-+    uint32_t cpumask = (1 << cpunum);
++#if defined(__AROSEXEC_SMP__) || (DEBUG > 0)
++    cpuid_t cpuNo = KrnGetCPUNumber();
 +#endif
 +
-+    DSCHED(bug("[Kernel:%02d] core_Dispatch()\n", cpunum));
++    DSCHED(bug("[Kernel:%03u]" DEBUGFUNCCOLOR_SET " %s()" DEBUGCOLOR_RESET "\n", cpuNo, __func__);)
 +
 +#if defined(__AROSEXEC_SMP__)
 +    KrnSpinLock(&PrivExecBase(SysBase)->TaskReadySpinLock, NULL,
@@ -2988,10 +3503,10 @@ index 00000000..9ff8826c
 +    for (newtask = (struct Task *)GetHead(&SysBase->TaskReady); newtask != NULL; newtask = (struct Task *)GetSucc(newtask))
 +    {
 +#if defined(__AROSEXEC_SMP__)
-+        if ((GetIntETask(newtask)->iet_CpuAffinity & cpumask) == cpumask)
++        if (!(PrivExecBase(SysBase)->IntFlags & EXECF_CPUAffinity) || (GetIntETask(newtask) && m68k64_CPUInMask(cpuNo, GetIntETask(newtask)->iet_CpuAffinity)))
 +        {
 +#endif
-+            Remove(&newtask->tc_Node);
++            REMOVE(&newtask->tc_Node);
 +            break;
 +#if defined(__AROSEXEC_SMP__)
 +        }
@@ -3002,93 +3517,444 @@ index 00000000..9ff8826c
 +#endif
 +
 +    if ((!newtask) && (task) && (task->tc_State != TS_WAIT))
++    {
++#if defined(__AROSEXEC_SMP__)
++        if (task->tc_State == TS_SPIN)
++        {
++            DSCHED(bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Waking spinning task '%s' @ 0x%p" DEBUGCOLOR_RESET "\n",
++                cpuNo, __func__newtask->tc_Node.ln_Name, newtask);)
++#if 0
++bug("----> such unspinning should not take place!" DEBUGCOLOR_RESET "\n");
++            KrnSpinLock(&PrivExecBase(SysBase)->TaskSpinningLock, NULL,
++                    SPINLOCK_MODE_WRITE);
++            REMOVE(&task->tc_Node);
++            KrnSpinUnLock(&PrivExecBase(SysBase)->TaskSpinningLock);
++#endif
++            task->tc_State = TS_READY;
++        }
++#endif
 +        newtask = task;
++    }
 +
 +    if (newtask != NULL)
 +    {
-+        if (newtask->tc_State == TS_READY || newtask->tc_State == TS_RUN)
-+        {
-+            DSCHED(bug("[Kernel:%02d] Preparing to run '%s' @ 0x%p\n",
-+                cpunum, newtask->tc_Node.ln_Name, newtask));
++        BOOL launchtask = FALSE, sleeptask = FALSE;
 +
-+            SysBase->DispCount++;
++        if (newtask->tc_State == TS_READY)
++        {
++            DSCHED(bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Preparing to run '%s' @ 0x%p" DEBUGCOLOR_RESET "\n",
++                cpuNo, __func__, newtask->tc_Node.ln_Name, newtask);)
++
 +            IDNESTCOUNT_SET(newtask->tc_IDNestCnt);
 +            SET_THIS_TASK(newtask);
 +            SCHEDELAPSED_SET(SCHEDQUANTUM_GET);
 +            FLAG_SCHEDQUANTUM_CLEAR;
-+
++        }
++        if  ((newtask->tc_State == TS_READY) || (newtask->tc_State == TS_RUN))
++        {
 +            /* Check the stack of the task we are about to launch. */
 +            if ((newtask->tc_SPReg <= newtask->tc_SPLower) ||
 +                (newtask->tc_SPReg > newtask->tc_SPUpper))
++            {
 +                newtask->tc_State     = TS_WAIT;
++                sleeptask = TRUE;
++            }
 +            else
++            {
 +                newtask->tc_State     = TS_RUN;
++                launchtask = TRUE;
++            }
++        }
++        else if (
++#if defined(__AROSEXEC_SMP__)
++            (task->tc_State == TS_TOMBSTONED ) ||
++#endif
++            (task->tc_State == TS_REMOVED))
++        {
++#if defined(__AROSEXEC_SMP__) || (DEBUG > 0)
++            // The task is on its way out ...
++            bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: --> Dispatching finalizing/tombstoned task?" DEBUGCOLOR_RESET "\n", cpuNo, __func__);
++            bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: --> Task @ 0x%p '%s', state %08X" DEBUGCOLOR_RESET "\n", cpuNo, __func__, task, task->tc_Node.ln_Name, newtask->tc_State);
++#endif
 +        }
 +
-+        BOOL launchtask = TRUE;
-+#if defined(__AROSEXEC_SMP__)
-+        if (newtask->tc_State == TS_SPIN)
++        if (sleeptask)
 +        {
-+            /* move it to the spinning list */
-+            KrnSpinLock(&PrivExecBase(SysBase)->TaskSpinningLock, NULL,
-+                SPINLOCK_MODE_WRITE);
-+            AddHead(&PrivExecBase(SysBase)->TaskSpinning, &newtask->tc_Node);
-+            KrnSpinUnLock(&PrivExecBase(SysBase)->TaskSpinningLock);
-+            launchtask = FALSE;
-+        }
-+#endif
-+        if (newtask->tc_State == TS_WAIT)
-+        {
++            DSCHED(bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Moving '%s' @ 0x%p to wait queue" DEBUGCOLOR_RESET "\n", cpuNo, __func__, newtask->tc_Node.ln_Name, newtask);)
 +#if defined(__AROSEXEC_SMP__)
 +            KrnSpinLock(&PrivExecBase(SysBase)->TaskWaitSpinLock, NULL,
 +                        SPINLOCK_MODE_WRITE);
 +#endif
-+            Enqueue(&SysBase->TaskWait, &task->tc_Node);
++            Enqueue(&SysBase->TaskWait, &newtask->tc_Node);
 +#if defined(__AROSEXEC_SMP__)
 +            KrnSpinUnLock(&PrivExecBase(SysBase)->TaskWaitSpinLock);
 +#endif
-+            launchtask = FALSE;
 +        }
 +
 +        if (!launchtask)
 +        {
 +            /* if the new task shouldn't run - force a reschedule */
-+            DSCHED(bug("[Kernel:%02d] Skipping '%s' @ 0x%p (state %08x)\n", cpunum, newtask->tc_Node.ln_Name, newtask, newtask->tc_State));
++            DSCHED(bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Skipping '%s' @ 0x%p (state %08X)" DEBUGCOLOR_RESET "\n", cpuNo, __func__, newtask->tc_Node.ln_Name, newtask, newtask->tc_State);)
 +
 +            core_Switch();
 +            newtask = core_Dispatch();
 +        }
 +        else
 +        {
-+            DSCHED(bug("[Kernel:%02d] Launching '%s' @ 0x%p (state %08x)\n", cpunum, newtask->tc_Node.ln_Name, newtask, newtask->tc_State));
++#if defined(AROS_NO_ATOMIC_OPERATIONS)
++            SysBase->DispCount++;
++#else
++            AROS_ATOMIC_INC(SysBase->DispCount);
++#endif
++            DSCHED(bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Launching '%s' @ 0x%p (state %08X)" DEBUGCOLOR_RESET "\n", cpuNo, __func__, newtask->tc_Node.ln_Name, newtask, newtask->tc_State);)
 +        }
 +    }
 +    else
 +    {
-+        /* Go idle if there is nothing to do */
-+        DSCHED(bug("[Kernel:%02d] No ready Task(s) - entering sleep mode\n", cpunum));
++        /* Go idle if there is nothing to do ... */
++        DSCHED(bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: No ready Task(s) - entering sleep mode" DEBUGCOLOR_RESET "\n", cpuNo, __func__);)
 +
 +        /*
 +         * Idle counter is incremented every time when we enter here,
 +         * not only once. This is correct.
 +         */
++#if defined(AROS_NO_ATOMIC_OPERATIONS)
 +        SysBase->IdleCount++;
++#else
++        AROS_ATOMIC_INC(SysBase->IdleCount);
++#endif
 +        FLAG_SCHEDSWITCH_SET;
 +    }
 +
 +    return newtask;
 +}
+diff --git a/arch/m68k64-native/kernel/kernel_smp.c b/arch/m68k64-native/kernel/kernel_smp.c
+new file mode 100644
+index 00000000..d5940a24
+--- /dev/null
++++ b/arch/m68k64-native/kernel/kernel_smp.c
+@@ -0,0 +1,249 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    Several cores on the 68100EC64, see kernel_smp.h. The control registers used here:
++        $80A    stack for the next core this one starts
++        $80B    number of cores
++        $80D    signal (level 6) to a mask of cores; a waiting core starts on its first one
++        $80E    this core's number
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++#include <exec/memory.h>
++#include <exec/tasks.h>
++#include <hardware/intbits.h>
++
++#include <proto/exec.h>
++#include <utility/hooks.h>
++
++#include "kernel_base.h"
++#include "kernel_cpu.h"
++#include "kernel_intern.h"
++#include "kernel_debug.h"
++#include "kernel_scheduler.h"
++#include "kernel_smp.h"
++#include <exec_platform.h>
++
++#define D(x)
++
++#define CORE_STACK_SIZE         65536
++
++unsigned int m68k64_CoreCount;
++volatile cpumask_t m68k64_CoresUp;
++volatile unsigned long m68k64_IPIPending[M68K64_MAX_CORES];
++static tls_t *cpu_TLS[M68K64_MAX_CORES];
++static void ipi_RunHooks(unsigned int me);
++
++extern void cpu_StartTimer(void);
++extern void cpu_Dispatch(regs_t *regs);
++
++static void movec_startsp(void *sp)
++{
++    asm volatile ("   move.q %0, %%d0\n   .short 0x4E7B, 0x080A" : : "d"(sp) : "d0");
++}
++
++static void movec_signal(cpumask_t mask)
++{
++    asm volatile ("   move.q %0, %%d0\n   .short 0x4E7B, 0x080D" : : "d"(mask) : "d0", "memory");
++}
++
++static unsigned long movec_coreid(void)
++{
++    unsigned long id;
++    asm volatile ("   .short 0x4E7A, 0x080E\n   move.q %%d0, %0" : "=d"(id) : : "d0");
++    return id;
++}
++
++/* Core 0, supervisor state (TRAP #3 from exec's platform init): starts the other cores one by one */
++void cpu_StartSecondaries(void)
++{
++    tls_t *boot = TLS_PTR_GET();
++    struct KernelBase *KernelBase = (struct KernelBase *)boot->KernelBase;
++    unsigned int n;
++
++    m68k64_CoresUp = (cpumask_t)1 << boot->CPUNumber;
++
++    for (n = 1; n < m68k64_CoreCount && n < M68K64_MAX_CORES; n++)
++    {
++        tls_t *t = AllocMem(sizeof(tls_t), MEMF_PUBLIC | MEMF_CLEAR);
++        UBYTE *stack = AllocMem(CORE_STACK_SIZE, MEMF_PUBLIC | MEMF_CLEAR);
++        unsigned long wait;
++
++        if (!t || !stack)
++        {
++            bug("[Kernel:%02u] no memory to start core %u\n", boot->CPUNumber, n);
++            break;
++        }
++        t->SysBase = boot->SysBase;
++        t->KernelBase = boot->KernelBase;
++        t->ThisTask = NULL;
++        t->CPUNumber = n;
++        t->IDNestCnt = -1;
++        t->TDNestCnt = -1;
++        t->Quantum = SCHEDQUANTUM_VALUE;
++        t->Elapsed = SCHEDQUANTUM_VALUE;
++        cpu_TLS[n] = t;
++        __atomic_thread_fence(__ATOMIC_SEQ_CST);
++
++        movec_startsp(stack + CORE_STACK_SIZE - 16);
++        movec_signal((cpumask_t)1 << n);
++
++        for (wait = 0; wait < 100000000UL; wait++)
++            if (__atomic_load_n(&m68k64_CoresUp, __ATOMIC_ACQUIRE) & ((cpumask_t)1 << n))
++                break;
++        if (!(m68k64_CoresUp & ((cpumask_t)1 << n)))
++            bug("[Kernel:%02u] core %u did not come up\n", boot->CPUNumber, n);
++    }
++}
++
++/*
++    A new core, from intr.c: it took its first level 6 signal with A8 still 0. There is nothing to
++    return to, so it picks a task from exec's ready list, as a task switch would.
++*/
++void cpu_SecondaryStart(regs_t *regs)
++{
++    unsigned long id = movec_coreid();
++    tls_t *t = id < M68K64_MAX_CORES ? cpu_TLS[id] : NULL;
++    struct KernelBase *KernelBase;
++
++    if (!t)
++        for (;;)
++            asm volatile (".short 0x4E72, 0x2700");     /* stop: no TLS was made for this core */
++
++    TLS_PTR_SET(t);
++    KernelBase = (struct KernelBase *)t->KernelBase;
++    __atomic_fetch_and(&m68k64_IPIPending[id], 0, __ATOMIC_SEQ_CST);
++
++    cpu_StartTimer();
++    __atomic_fetch_or(&m68k64_CoresUp, (cpumask_t)1 << id, __ATOMIC_SEQ_CST);
++    bug("[Kernel:%02u] core up\n", (unsigned)id);
++
++    cpu_Dispatch(regs);
++}
++
++/* Level 6: messages from other cores */
++void cpu_HandleIPI(regs_t *regs)
++{
++    unsigned int me = GetCPUNumber();
++    unsigned long bits = __atomic_exchange_n(&m68k64_IPIPending[me], 0, __ATOMIC_SEQ_CST);
++
++    if (bits & (1UL << IPI_CALL_HOOK))
++        ipi_RunHooks(me);
++    if (bits & (1UL << IPI_RESCHEDULE))
++    {
++        FLAG_SCHEDQUANTUM_SET;
++        FLAG_SCHEDSWITCH_SET;
++    }
++}
++
++/* Any state: the signal itself needs MOVEC, which is privileged, so it goes through TRAP #3 */
++void core_DoIPI(unsigned char ipi_number, void *cpu_mask, struct KernelBase *KernelBase)
++{
++    cpumask_t targets, up = __atomic_load_n(&m68k64_CoresUp, __ATOMIC_ACQUIRE);
++    unsigned int me = GetCPUNumber(), n;
++
++    if (!cpu_mask || (IPTR)cpu_mask == TASKAFFINITY_ANY)
++        targets = up & ~((cpumask_t)1 << me);
++    else
++        targets = *(cpumask_t *)cpu_mask & up;
++    if (!targets)
++        return;
++
++    for (n = 0; n < M68K64_MAX_CORES; n++)
++        if (targets & ((cpumask_t)1 << n))
++            __atomic_fetch_or(&m68k64_IPIPending[n], 1UL << ipi_number, __ATOMIC_SEQ_CST);
++
++    {
++        register unsigned long fn asm("d0") = M68K64_TRAP3_SIGNAL;
++        register unsigned long mask asm("d1") = targets;
++        asm volatile ("trap #3" : "+d"(fn) : "d"(mask) : "memory", "cc");
++    }
++}
++
++/* TRAP #3 in supervisor state */
++void cpu_Trap3(regs_t *regs)
++{
++    switch (regs->d[0])
++    {
++    case M68K64_TRAP3_STARTCORES:
++        cpu_StartSecondaries();
++        break;
++    case M68K64_TRAP3_SIGNAL:
++        movec_signal(regs->d[1]);
++        break;
++    }
++}
++
++/*
++    Running a hook on other cores (exec's Signal() uses it for tasks bound to another core).
++    A pool of IPIHooks; each core has a bitmask of the pool slots waiting for it.
++*/
++#define IPI_SLOTS 32
++static struct IPIHook ipi_Slot[IPI_SLOTS];
++static volatile ULONG ipi_SlotBusy[IPI_SLOTS];
++static volatile cpumask_t ipi_SlotWant[IPI_SLOTS], ipi_SlotDone[IPI_SLOTS];
++static volatile unsigned long ipi_HooksFor[M68K64_MAX_CORES];
++
++static void ipi_RunHooks(unsigned int me)
++{
++    unsigned long slots = __atomic_exchange_n(&ipi_HooksFor[me], 0, __ATOMIC_SEQ_CST);
++    unsigned int i;
++
++    for (i = 0; i < IPI_SLOTS; i++)
++    {
++        if (!(slots & (1UL << i)))
++            continue;
++        CALLHOOKPKT(&ipi_Slot[i].ih_Hook, NULL, 0);
++        if ((__atomic_or_fetch(&ipi_SlotDone[i], (cpumask_t)1 << me, __ATOMIC_SEQ_CST) == ipi_SlotWant[i])
++            && ipi_Slot[i].ih_Async)
++            __atomic_store_n(&ipi_SlotBusy[i], 0, __ATOMIC_RELEASE);
++    }
++}
++
++int core_DoCallIPI(struct Hook *hook, void *cpu_mask, int async, int nargs, IPTR *args, void *_KB)
++{
++    struct KernelBase *KernelBase = _KB;
++    cpumask_t targets, up = __atomic_load_n(&m68k64_CoresUp, __ATOMIC_ACQUIRE);
++    unsigned int me = GetCPUNumber(), i, n;
++    struct IPIHook *ipi;
++
++    if (!hook || nargs > IPI_CALL_HOOK_MAX_ARGS)
++        return FALSE;
++    if (!cpu_mask || (IPTR)cpu_mask == TASKAFFINITY_ANY)
++        targets = up & ~((cpumask_t)1 << me);
++    else
++        targets = *(cpumask_t *)cpu_mask & up;
++    if (!targets)
++        return FALSE;
++
++    /* A free slot; the others free theirs as their cores run them */
++    for (i = 0;; i = (i + 1) % IPI_SLOTS)
++    {
++        ULONG free = 0;
++        if (__atomic_compare_exchange_n(&ipi_SlotBusy[i], &free, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
++            break;
++    }
++    ipi = &ipi_Slot[i];
++    ipi->ih_Hook.h_Entry = hook->h_Entry;
++    ipi->ih_Hook.h_SubEntry = hook->h_SubEntry;
++    ipi->ih_Hook.h_Data = hook->h_Data;
++    for (n = 0; n < (unsigned)nargs; n++)
++        ipi->ih_Args[n] = args[n];
++    ipi->ih_Async = async;
++    ipi_SlotWant[i] = targets;
++    __atomic_store_n(&ipi_SlotDone[i], 0, __ATOMIC_SEQ_CST);
++
++    for (n = 0; n < M68K64_MAX_CORES; n++)
++        if (targets & ((cpumask_t)1 << n))
++            __atomic_fetch_or(&ipi_HooksFor[n], 1UL << i, __ATOMIC_SEQ_CST);
++    core_DoIPI(IPI_CALL_HOOK, &targets, KernelBase);
++
++    if (!async)
++    {
++        while (__atomic_load_n(&ipi_SlotDone[i], __ATOMIC_ACQUIRE) != targets)
++            ;
++        __atomic_store_n(&ipi_SlotBusy[i], 0, __ATOMIC_RELEASE);
++    }
++    return TRUE;
++}
+diff --git a/arch/m68k64-native/kernel/kernel_smp.h b/arch/m68k64-native/kernel/kernel_smp.h
+new file mode 100644
+index 00000000..f9afad4d
+--- /dev/null
++++ b/arch/m68k64-native/kernel/kernel_smp.h
+@@ -0,0 +1,53 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    Several cores of the 68100EC64 machine. Core 0 boots AROS, then starts the others: each takes
++    its first signal (level 6) with the stack core 0 named in MOVEC $80A, and the shared vector
++    table sends it to cpu_SecondaryStart(), see intr.c. All cores share exec's task lists.
++*/
++
++#ifndef KERNEL_SMP_H_
++#define KERNEL_SMP_H_
++
++#include <aros/cpu.h>
++
++struct ExceptionContext;
++struct KernelBase;
++
++#define M68K64_MAX_CORES        64
++
++/* Messages a core finds in its pending bits when the level 6 signal comes */
++#define IPI_NOP                 0
++#define IPI_RESCHEDULE          1
++#define IPI_CALL_HOOK           2
++
++/* Kernel calls through TRAP #3, D0 is the function */
++#define M68K64_TRAP3_STARTCORES 1   /* start every other core */
++#define M68K64_TRAP3_SIGNAL     2   /* D1: mask of cores to get a level 6 signal */
++
++extern unsigned int m68k64_CoreCount;
++extern volatile cpumask_t m68k64_CoresUp;
++extern volatile unsigned long m68k64_IPIPending[M68K64_MAX_CORES];
++
++/* A hook run on other cores, as on x86 (exec's signal.c uses its arguments) */
++#include <utility/hooks.h>
++#include <aros/types/spinlock_s.h>
++#define IPI_CALL_HOOK_MAX_ARGS  5
++struct IPIHook
++{
++    struct Hook     ih_Hook;
++    IPTR            ih_Args[IPI_CALL_HOOK_MAX_ARGS];
++    uint32_t *      ih_CPUDone;
++    uint32_t *      ih_CPURequested;
++    int             ih_Async;
++    spinlock_t      ih_Lock;
++    spinlock_t      ih_SyncLock;
++};
++
++void cpu_StartSecondaries(void);
++void cpu_SecondaryStart(struct ExceptionContext *regs);
++void cpu_HandleIPI(struct ExceptionContext *regs);
++void core_DoIPI(unsigned char ipi_number, void *cpu_mask, struct KernelBase *KernelBase);
++int core_DoCallIPI(struct Hook *hook, void *cpu_mask, int async, int nargs, IPTR *args, void *_KB);
++
++#endif
 diff --git a/arch/m68k64-native/kernel/mmakefile.src b/arch/m68k64-native/kernel/mmakefile.src
 new file mode 100644
-index 00000000..d745c0f9
+index 00000000..b1148412
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/mmakefile.src
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,38 @@
 +
 +include $(SRCDIR)/config/aros.cfg
 +
 +CFILES := \
-+        cli intr issuper kernel_cpu kernel_scheduler sti tags
++        cli intr issuper kernel_cpu kernel_debug kernel_scheduler kernel_smp sti tags \
++        spininit spinislocked spinlock spintrylock spinunlock \
++        alloccpumask freecpumask clearcpumask getcpumask cpuinmask getcpucount schedulecpu
 +
 +PLATFILES := 
 +
@@ -3120,6 +3986,235 @@ index 00000000..d745c0f9
 +  files="$(CFILES) $(PLATFILES)" asmfiles="$(AFILES)" compiler=kernel
 +
 +%common
+diff --git a/arch/m68k64-native/kernel/schedulecpu.c b/arch/m68k64-native/kernel/schedulecpu.c
+new file mode 100644
+index 00000000..67354a69
+--- /dev/null
++++ b/arch/m68k64-native/kernel/schedulecpu.c
+@@ -0,0 +1,28 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    KrnScheduleCPU on the 68100EC64: a CPU mask is one cpumask_t (64 cores), TASKAFFINITY_ANY means all.
++    See rom/kernel/schedulecpu.c for documentation.
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++#include <exec/memory.h>
++#include <exec/tasks.h>
++
++#include <kernel_base.h>
++#include "kernel_smp.h"
++
++#include <proto/exec.h>
++#include <proto/kernel.h>
++
++AROS_LH1(void, KrnScheduleCPU,
++    AROS_LHA(void *, mask, A0),
++    struct KernelBase *, KernelBase, 47, Kernel)
++{
++    AROS_LIBFUNC_INIT
++
++    core_DoIPI(IPI_RESCHEDULE, mask, KernelBase);
++
++    AROS_LIBFUNC_EXIT
++}
+diff --git a/arch/m68k64-native/kernel/spininit.c b/arch/m68k64-native/kernel/spininit.c
+new file mode 100644
+index 00000000..49a53daf
+--- /dev/null
++++ b/arch/m68k64-native/kernel/spininit.c
+@@ -0,0 +1,27 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    KrnSpinInit on the 68100EC64. See rom/kernel/spininit.c for documentation.
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++#include <exec/tasks.h>
++#include <aros/types/spinlock_s.h>
++
++#include <kernel_base.h>
++
++#include <proto/kernel.h>
++
++AROS_LH1(void, KrnSpinInit,
++    AROS_LHA(spinlock_t *, lock, A0),
++    struct KernelBase *, KernelBase, 49, Kernel)
++{
++    AROS_LIBFUNC_INIT
++
++    lock->s_Owner = NULL;
++    lock->initialized = 1;
++    __atomic_store_n(&lock->lock, SPINLOCK_UNLOCKED, __ATOMIC_SEQ_CST);
++
++    AROS_LIBFUNC_EXIT
++}
+diff --git a/arch/m68k64-native/kernel/spinislocked.c b/arch/m68k64-native/kernel/spinislocked.c
+new file mode 100644
+index 00000000..db383a75
+--- /dev/null
++++ b/arch/m68k64-native/kernel/spinislocked.c
+@@ -0,0 +1,25 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    KrnSpinIsLocked on the 68100EC64. See rom/kernel/spinislocked.c for documentation.
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++#include <exec/tasks.h>
++#include <aros/types/spinlock_s.h>
++
++#include <kernel_base.h>
++
++#include <proto/kernel.h>
++
++AROS_LH1(int, KrnSpinIsLocked,
++    AROS_LHA(spinlock_t *, lock, A0),
++    struct KernelBase *, KernelBase, 50, Kernel)
++{
++    AROS_LIBFUNC_INIT
++
++    return __atomic_load_n(&lock->lock, __ATOMIC_ACQUIRE) != SPINLOCK_UNLOCKED;
++
++    AROS_LIBFUNC_EXIT
++}
+diff --git a/arch/m68k64-native/kernel/spinlock.c b/arch/m68k64-native/kernel/spinlock.c
+new file mode 100644
+index 00000000..56f9b178
+--- /dev/null
++++ b/arch/m68k64-native/kernel/spinlock.c
+@@ -0,0 +1,35 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    KrnSpinLock: spins until it gets the lock. The fail hook (exec's task spinning) is not used yet: a task that has to wait keeps its core on the 68100EC64. See rom/kernel/spinlock.c for documentation.
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++#include <exec/tasks.h>
++#include <aros/types/spinlock_s.h>
++
++#include <kernel_base.h>
++
++#include <proto/kernel.h>
++
++extern spinlock_t *m68k64_SpinTry(spinlock_t *lock, ULONG mode);
++
++AROS_LH3(spinlock_t *, KrnSpinLock,
++    AROS_LHA(spinlock_t *, lock, A1),
++    AROS_LHA(struct Hook *, failhook, A0),
++    AROS_LHA(ULONG, mode, D0),
++    struct KernelBase *, KernelBase, 52, Kernel)
++{
++    AROS_LIBFUNC_INIT
++
++    while (!m68k64_SpinTry(lock, mode))
++    {
++        while (__atomic_load_n(&lock->lock, __ATOMIC_RELAXED) &
++               (mode == SPINLOCK_MODE_WRITE ? ~0U : SPINLOCKF_WRITE))
++            ;
++    }
++    return lock;
++
++    AROS_LIBFUNC_EXIT
++}
+diff --git a/arch/m68k64-native/kernel/spintrylock.c b/arch/m68k64-native/kernel/spintrylock.c
+new file mode 100644
+index 00000000..6ffd3368
+--- /dev/null
++++ b/arch/m68k64-native/kernel/spintrylock.c
+@@ -0,0 +1,47 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    KrnSpinTryLock: one attempt. A write lock is SPINLOCKF_WRITE in the lock word, a read lock counts readers below it; CAS is atomic between the cores on the 68100EC64. See rom/kernel/spintrylock.c for documentation.
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++#include <exec/tasks.h>
++#include <aros/types/spinlock_s.h>
++
++#include <kernel_base.h>
++
++#include <proto/kernel.h>
++
++spinlock_t *m68k64_SpinTry(spinlock_t *lock, ULONG mode)
++{
++    unsigned int old = __atomic_load_n(&lock->lock, __ATOMIC_RELAXED);
++
++    if (mode == SPINLOCK_MODE_WRITE)
++    {
++        old = SPINLOCK_UNLOCKED;
++        if (__atomic_compare_exchange_n(&lock->lock, &old, SPINLOCKF_WRITE, 0,
++                                        __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
++            return lock;
++        return NULL;
++    }
++
++    if (old & SPINLOCKF_WRITE)
++        return NULL;
++    if (__atomic_compare_exchange_n(&lock->lock, &old, old + 1, 0,
++                                    __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
++        return lock;
++    return NULL;
++}
++
++AROS_LH2(spinlock_t *, KrnSpinTryLock,
++    AROS_LHA(spinlock_t *, lock, A0),
++    AROS_LHA(ULONG, mode, D0),
++    struct KernelBase *, KernelBase, 51, Kernel)
++{
++    AROS_LIBFUNC_INIT
++
++    return m68k64_SpinTry(lock, mode);
++
++    AROS_LIBFUNC_EXIT
++}
+diff --git a/arch/m68k64-native/kernel/spinunlock.c b/arch/m68k64-native/kernel/spinunlock.c
+new file mode 100644
+index 00000000..fca324a3
+--- /dev/null
++++ b/arch/m68k64-native/kernel/spinunlock.c
+@@ -0,0 +1,31 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    KrnSpinUnLock on the 68100EC64. See rom/kernel/spinunlock.c for documentation.
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++#include <exec/tasks.h>
++#include <aros/types/spinlock_s.h>
++
++#include <kernel_base.h>
++
++#include <proto/kernel.h>
++
++AROS_LH1(void, KrnSpinUnLock,
++    AROS_LHA(spinlock_t *, lock, A0),
++    struct KernelBase *, KernelBase, 53, Kernel)
++{
++    AROS_LIBFUNC_INIT
++
++    unsigned int v = __atomic_load_n(&lock->lock, __ATOMIC_RELAXED);
++
++    lock->s_Owner = NULL;
++    if (v & SPINLOCKF_WRITE)
++        __atomic_store_n(&lock->lock, SPINLOCK_UNLOCKED, __ATOMIC_RELEASE);
++    else if (v)
++        __atomic_fetch_sub(&lock->lock, 1, __ATOMIC_RELEASE);
++
++    AROS_LIBFUNC_EXIT
++}
 diff --git a/arch/m68k64-native/kernel/sti.c b/arch/m68k64-native/kernel/sti.c
 new file mode 100644
 index 00000000..ed1cd192
@@ -3228,10 +4323,10 @@ index 00000000..76e71e17
 +}
 diff --git a/arch/m68k64-native/kernel/tls.h b/arch/m68k64-native/kernel/tls.h
 new file mode 100644
-index 00000000..85e5d195
+index 00000000..c162f949
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/tls.h
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,63 @@
 +#ifndef ASM_TLS_H
 +#define ASM_TLS_H
 +
@@ -3274,10 +4369,11 @@ index 00000000..85e5d195
 +        __tls; \
 +    })
 +
++/* Callers pass a variable named __tls, so the local here must not be called that */
 +#define TLS_PTR_SET(ptr) \
 +    do { \
-+        tls_t *__tls = (ptr); \
-+        __asm__ volatile(".short 0xA00C\n\tmove.l %0,%%a0" : : "a"(__tls) : "memory"); \
++        tls_t *__tls_set_ptr = (ptr); \
++        __asm__ volatile(".short 0xA00C\n\tmove.l %0,%%a0" : : "a"(__tls_set_ptr) : "memory"); \
 +    } while (0)
 +
 +#define TLS_GET(name) \
@@ -3546,10 +4642,10 @@ index 00000000..2595e9b1
 +%common
 diff --git a/arch/m68k64-native/qrx/kernel/kernel_startup.c b/arch/m68k64-native/qrx/kernel/kernel_startup.c
 new file mode 100644
-index 00000000..a275f0cd
+index 00000000..24bc6a05
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/kernel/kernel_startup.c
-@@ -0,0 +1,250 @@
+@@ -0,0 +1,266 @@
 +/*
 +    Copyright (C) 2013-2026, The AROS Development Team. All rights reserved.
 +*/
@@ -3587,6 +4683,7 @@ index 00000000..a275f0cd
 +#undef KernelBase
 +#include "tls.h"
 +#include "tags.h"
++#include "kernel_smp.h"
 +
 +#undef TARGET_SECTION_COMMENT
 +#define TARGET_SECTION_COMMENT "\n#"
@@ -3596,6 +4693,7 @@ index 00000000..a275f0cd
 +void __attribute__((used)) kernel_cstart(struct TagItem *msg);
 +
 +extern void cpu_SetupVectors(void);
++extern void qrx_selftest(void);
 +extern void cpu_StartTimer(void);
 +
 +/* AROS_STACKSIZE is in bytes here */
@@ -3714,6 +4812,9 @@ index 00000000..a275f0cd
 +        /* movec $80E,d0: this core's number */
 +        asm volatile ("   .short 0x4E7A, 0x080E\n   move.q %%d0, %0" : "=d"(core) : : "d0");
 +        __tls->CPUNumber = core;
++        /* movec $80B,d0: the number of cores */
++        asm volatile ("   .short 0x4E7A, 0x080B\n   move.q %%d0, %0" : "=d"(core) : : "d0");
++        m68k64_CoreCount = core;
 +    }
 +    TLS_PTR_SET(__tls);
 +
@@ -3751,7 +4852,10 @@ index 00000000..a275f0cd
 +        if (memlower < protlower)
 +        {
 +            /* Protect the bootstrap area from further use. AllocAbs will do the trick */
-+            ((struct MemHeaderExt *)mh)->mhe_AllocAbs((struct MemHeaderExt *)mh, protupper-protlower, (void *)protlower);
++            APTR got = ((struct MemHeaderExt *)mh)->mhe_AllocAbs((struct MemHeaderExt *)mh, protupper-protlower, (void *)protlower);
++            D(bug("[Kernel] protected 0x%p bytes at 0x%p: %s\n", protupper - protlower, protlower, got ? "ok" : "FAILED"));
++            if (!got)
++                krnPanic(NULL, "Cannot protect the boot area");
 +        }
 +    }
 +
@@ -3795,8 +4899,16 @@ index 00000000..a275f0cd
 +    D(bug("[Kernel] InitCode(RTF_COLDSTART) ...\n"));
 +    InitCode(RTF_COLDSTART, 0);
 +
++    /* Nothing else in the kickstart yet: the test of exec can run here */
++    if (cmdline && strstr(cmdline, "selftest"))
++        qrx_selftest();
++
 +    /* The above should not return */
 +    krnPanic(KernelBase, "System Boot Failed!");
++
++    /* User state: STOP is privileged, so just stay here */
++    for (;;)
++        asm volatile ("nop");
 +}
 +
 +
@@ -3849,10 +4961,10 @@ index 00000000..bf4b33d1
 +}
 diff --git a/arch/m68k64-native/qrx/kernel/mmakefile.src b/arch/m68k64-native/qrx/kernel/mmakefile.src
 new file mode 100644
-index 00000000..4533babf
+index 00000000..32d11655
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/kernel/mmakefile.src
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,52 @@
 +
 +include $(SRCDIR)/config/aros.cfg
 +
@@ -3869,7 +4981,7 @@ index 00000000..4533babf
 +	-I$(SRCDIR)/rom/exec
 +
 +CFILES := \
-+        kernel_startup
++        kernel_startup selftest
 +
 +PLATFILES := 
 +
@@ -3883,6 +4995,8 @@ index 00000000..4533babf
 +#MM- kernel-qrx-m68k64-quick: setup-native-m68k64-qrx-quick kernel-kernel-kobj-quick kernel-exec-kobj-quick kernel-task-kobj-quick kernel-qrx-m68k64
 +
 +ELFCORELIBS := -L$(AROS_LIB) -larossupport -lautoinit -llibinit -lstdc.static
++# soft float and 128-bit helpers from compiler-rt (the core has no FPU)
++ELFCORELIBS += $(TARGET_C_LIBS)
 +ifeq ("$(AROS_TOOLCHAIN)","gnu")
 +ELFCORELIBS += -L$(CROSSTOOLSDIR)/lib/gcc/$(AROS_TARGET_CPU)-aros/$(TARGET_GCC_VER) -lgcc
 +endif
@@ -3903,6 +5017,171 @@ index 00000000..4533babf
 +  files="$(CFILES) $(PLATFILES)" asmfiles="$(AFILES)" compiler=kernel
 +
 +%common
+diff --git a/arch/m68k64-native/qrx/kernel/selftest.c b/arch/m68k64-native/qrx/kernel/selftest.c
+new file mode 100644
+index 00000000..295e0e23
+--- /dev/null
++++ b/arch/m68k64-native/qrx/kernel/selftest.c
+@@ -0,0 +1,159 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    A boot-time test of exec on the 68100EC64, run with "selftest" on the kernel command line
++    when nothing else is in the kickstart yet. Two tasks pass a ball with Signal/Wait, and two busy
++    tasks of the same priority only both get on if the timer preempts them. The result ends the test
++    machine (TRAP #2, the code in D0): 0 when everything passed.
++*/
++
++#include <aros/kernel.h>
++#include <exec/tasks.h>
++#include <exec/execbase.h>
++#include <proto/exec.h>
++#include <exec/memory.h>
++
++#include "kernel_intern.h"
++#include "kernel_smp.h"
++
++#define ROUNDS 5
++#define WORKERS 8
++#define WORKER_STEPS 20000
++#define BUSY_STEPS 3000000UL
++
++static struct
++{
++    struct Task *boot, *ping, *pong;
++    BYTE done_sig;
++    volatile ULONG passes;
++    volatile UQUAD count[2];
++    volatile UQUAD seen_other[2];   /* how often a busy task saw the other one move on */
++    volatile UQUAD shared;          /* changed atomically by the workers */
++    volatile ULONG cores_seen;      /* bit n: a worker ran on core n */
++} st;
++
++static void report_done(void)
++{
++    __atomic_fetch_add(&st.passes, 1, __ATOMIC_SEQ_CST);
++    Signal(st.boot, 1UL << st.done_sig);
++}
++
++/* A mask with one core in it, for TASKTAG_AFFINITY */
++static void *core_mask(unsigned int core)
++{
++    /* what KrnAllocCPUMask() and KrnGetCPUMask() make; this test runs inside the kernel module */
++    cpumask_t *m = AllocMem(sizeof(cpumask_t), MEMF_PUBLIC | MEMF_CLEAR);
++
++    if (m)
++        *m = (cpumask_t)1 << (core % m68k64_CoreCount);
++    return m;
++}
++
++static void ping_task(void)
++{
++    int i;
++    /* ping runs before NewCreateTask() returns to the boot task, so it says who it is itself */
++    st.ping = FindTask(NULL);
++    for (i = 0; i < ROUNDS; i++)
++    {
++        Signal(st.pong, SIGF_SINGLE);
++        Wait(SIGF_SINGLE);
++    }
++    report_done();
++}
++
++static void pong_task(void)
++{
++    int i;
++    for (i = 0; i < ROUNDS; i++)
++    {
++        Wait(SIGF_SINGLE);
++        Signal(st.ping, SIGF_SINGLE);
++    }
++    report_done();
++}
++
++static void busy(int me)
++{
++    UQUAD i, last = st.count[!me];
++    for (i = 0; i < BUSY_STEPS; i++)
++    {
++        st.count[me]++;
++        if (st.count[!me] != last)
++        {
++            last = st.count[!me];
++            st.seen_other[me]++;
++        }
++    }
++    report_done();
++}
++/*
++    Workers bound to the cores in turn. exec's semaphores rely on Forbid(), which only keeps out
++    tasks on the same core in this AROS, so the shared count is atomic here. Each worker then signals
++    the boot task on core 0, which goes through core_DoCallIPI() from the other cores.
++*/
++static void worker(void)
++{
++    int i;
++
++    for (i = 0; i < WORKER_STEPS; i++)
++        __atomic_fetch_add(&st.shared, 1, __ATOMIC_RELAXED);
++    __atomic_fetch_or(&st.cores_seen, 1UL << GetCPUNumber(), __ATOMIC_RELAXED);
++    report_done();
++}
++
++static void busy0(void) { busy(0); }
++static void busy1(void) { busy(1); }
++
++static void end_machine(unsigned long code)
++{
++    register unsigned long c asm("d0") = code;
++    for (;;)
++        asm volatile ("trap #2" : : "d"(c));
++}
++
++void qrx_selftest(void)
++{
++    struct KernelBase *KernelBase = (struct KernelBase *)TLS_GET(KernelBase);
++    ULONG got = 0;
++
++    st.boot = FindTask(NULL);
++    st.done_sig = AllocSignal(-1);
++    bug("[selftest] boot task 0x%p, done signal %d\n", st.boot, st.done_sig);
++
++    /* The busy tasks share the boot task's priority, ping and pong are above it */
++    st.pong = NewCreateTask(TASKTAG_NAME, "selftest pong", TASKTAG_PRI, 1, TASKTAG_PC, pong_task, TAG_DONE);
++    NewCreateTask(TASKTAG_NAME, "selftest ping", TASKTAG_PRI, 1, TASKTAG_PC, ping_task, TAG_DONE);
++    /* With more cores than one the busy tasks run on cores 1 and 2 (or 1 and 0), side by side */
++    NewCreateTask(TASKTAG_NAME, "selftest busy 0", TASKTAG_PRI, 0, TASKTAG_PC, busy0,
++                  TASKTAG_AFFINITY, core_mask(1), TAG_DONE);
++    NewCreateTask(TASKTAG_NAME, "selftest busy 1", TASKTAG_PRI, 0, TASKTAG_PC, busy1,
++                  TASKTAG_AFFINITY, core_mask(m68k64_CoreCount > 2 ? 2 : 0), TAG_DONE);
++
++    {
++        int w;
++        for (w = 0; w < WORKERS; w++)
++            NewCreateTask(TASKTAG_NAME, "selftest worker", TASKTAG_PRI, 0, TASKTAG_PC, worker,
++                          TASKTAG_AFFINITY, core_mask(w), TAG_DONE);
++    }
++
++    while (st.passes < 4 + WORKERS)
++        got |= Wait(1UL << st.done_sig);
++
++    bug("[selftest] ping/pong: %d rounds done\n", ROUNDS);
++    bug("[selftest] busy 0: %lu steps, saw busy 1 move %lu times\n",
++        (unsigned long)st.count[0], (unsigned long)st.seen_other[0]);
++    bug("[selftest] busy 1: %lu steps, saw busy 0 move %lu times\n",
++        (unsigned long)st.count[1], (unsigned long)st.seen_other[1]);
++
++    bug("[selftest] workers: %lu of %lu increments, ran on cores %08lx (%u cores)\n",
++        (unsigned long)st.shared, (unsigned long)WORKERS * WORKER_STEPS, (unsigned long)st.cores_seen, m68k64_CoreCount);
++
++    {
++        int ok = st.count[0] == BUSY_STEPS && st.count[1] == BUSY_STEPS &&
++                 st.seen_other[0] > 0 && st.seen_other[1] > 0 &&
++                 st.shared == (UQUAD)WORKERS * WORKER_STEPS;
++        bug("[selftest] %s\n", ok ? "PASS: tasks switch, the timer preempts, cores signal each other" : "FAIL");
++        end_machine(ok ? 0 : 1);
++    }
++}
 diff --git a/arch/m68k64-native/qrx/mmakefile.src b/arch/m68k64-native/qrx/mmakefile.src
 new file mode 100644
 index 00000000..1eca1aca
@@ -4078,6 +5357,29 @@ index e7ff4647..43ad6aab 100644
  #elif defined(__riscv)
  #define AROS_PRINTER_MAGIC   0x8082          /* ret */
  #else
+diff --git a/compiler/include/aros/symbolsets.h b/compiler/include/aros/symbolsets.h
+index 18741e5b..68887d74 100644
+--- a/compiler/include/aros/symbolsets.h
++++ b/compiler/include/aros/symbolsets.h
+@@ -182,9 +182,18 @@ for                                                                          \
+    or else your program won't link when symbolsets are used.
+    This is so to ensure that symbolsets are properly handled and thus things get
+    properly initialized. */
++#if defined(__m68k64__)
++/* Kernel, exec and task are linked into one image, and each defines this marker. lld does not
++   accept the same absolute symbol twice as GNU ld does, so it is weak; references still resolve. */
++#define THIS_PROGRAM_HANDLES_SYMBOLSET(x) \
++    extern int __##x##__symbol_set_handler_missing; \
++    asm(".weak __" #x "__symbol_set_handler_missing\n" \
++        ".set __" #x "__symbol_set_handler_missing, 0\n");
++#else
+ #define THIS_PROGRAM_HANDLES_SYMBOLSET(x) \
+     AROS_MAKE_ASM_SYM(int, __##x##__symbol_set_handler_missing, __##x##__symbol_set_handler_missing, 0); \
+     AROS_EXPORT_ASM_SYM(__##x##__symbol_set_handler_missing);
++#endif
+     
+ #endif
+ 
 diff --git a/compiler/include/asm.c b/compiler/include/asm.c
 index 7d8dec88..9de087d5 100644
 --- a/compiler/include/asm.c
@@ -4119,11 +5421,32 @@ index fb0deae2..5baa1a89 100644
  #elif defined __mc68000__
  #include <aros/m68k/cpucontext.h>
  #elif defined __powerpc__
+diff --git a/compiler/include/utility/tagitem.h b/compiler/include/utility/tagitem.h
+index 6b67c3f4..1e2321a3 100644
+--- a/compiler/include/utility/tagitem.h
++++ b/compiler/include/utility/tagitem.h
+@@ -14,7 +14,16 @@
+ #endif
+ #include <stdarg.h>
+ 
++#if AROS_BIG_ENDIAN && (AROS_SIZEOFPTR == 8)
++/*
++    Tag lists are often built as arrays of IPTR (the varargs tag macros, AROS_SLOWSTACKTAGS).
++    With a 32-bit Tag at the start of the 8-byte slot, a big-endian 64-bit CPU would read the
++    upper half of the IPTR, which is 0 (TAG_DONE). So Tag fills the slot there.
++*/
++typedef IPTR Tag;
++#else
+ typedef ULONG Tag;
++#endif
+ 
+ struct TagItem
+ {
 diff --git a/configure.in b/configure.in
-index ecfba952..4864fc7f 100644
+index ecfba952..bbb25f8f 100644
 --- a/configure.in
 +++ b/configure.in
-@@ -2069,6 +2069,34 @@ case "$target_os" in
+@@ -2069,6 +2069,36 @@ case "$target_os" in
          esac
          ;;
  
@@ -4136,6 +5459,8 @@ index ecfba952..4864fc7f 100644
 +        aros_shared_default="no"
 +        llvm_target_cpu="M68k64"
 +        PLATFORM_EXECSMP="#define __AROSPLATFORM_SMP__"
++        dnl The 68100EC64 machine has several cores: exec is built for SMP.
++        ENABLE_EXECSMP="#define __AROSEXEC_SMP__"
 +        dnl There is no GNU assembler for the 68100EC64: clang's integrated one does it all.
 +        if test "$toolchain_c_compiler" = "clang"; then
 +            aros_config_aflags="$""(WARN_ALL) -x assembler-with-cpp -c"
@@ -4158,7 +5483,7 @@ index ecfba952..4864fc7f 100644
      native*)
          aros_flavour="standalone"
          aros_target_arch="native"
-@@ -4402,6 +4430,7 @@ if test "${use_kernel_cc_wrapper}" = "yes"; then
+@@ -4402,6 +4432,7 @@ if test "${use_kernel_cc_wrapper}" = "yes"; then
              prefix2=${PWD}/${aros_tools_dir}/${aros_target_cpu}-${aros_target_arch}${aros_target_suffix}-elf
  
              chmod a+x ${prefix2}-gcc
@@ -4166,7 +5491,7 @@ index ecfba952..4864fc7f 100644
  
              ln -sf $aros_kernel_ld$aros_host_exe_suffix         ${prefix2}-ld$aros_host_exe_suffix
          ],
-@@ -4418,6 +4447,12 @@ if test "${use_kernel_cc_wrapper}" = "yes"; then
+@@ -4418,6 +4449,12 @@ if test "${use_kernel_cc_wrapper}" = "yes"; then
          ${aros_targetcfg_dir}/elf-specs:${elf_specs_in}
          ${aros_tools_dir}/${aros_target_cpu}-${aros_target_arch}${aros_target_suffix}-elf-gcc:scripts/elf-gcc.in
      )
@@ -4197,6 +5522,20 @@ index 6d7149c3..10fb551e 100644
  
  #ifndef PC
  #error unsupported CPU type
+diff --git a/rom/exec/initresident.c b/rom/exec/initresident.c
+index 36c15163..3db52ff6 100644
+--- a/rom/exec/initresident.c
++++ b/rom/exec/initresident.c
+@@ -77,7 +77,8 @@
+         /* ...initialize automatically... */
+         struct init
+         {
+-            ULONG dSize;
++            /* IPTR as genmodule writes it: a ULONG reads only the upper half on big-endian 64-bit */
++            IPTR dSize;
+             APTR vectors;
+             APTR structure;
+             ULONG_FUNC init;
 diff --git a/rom/kernel/mmakefile.src b/rom/kernel/mmakefile.src
 index 311035d3..73b476e2 100644
 --- a/rom/kernel/mmakefile.src
@@ -4212,6 +5551,29 @@ index 311035d3..73b476e2 100644
  USER_INCLUDES := $(PRIV_KERNEL_INCLUDES)
  USER_CPPFLAGS := -D__AROS_EXEC_LIBRARY__ \
  	        -DAROS_ARCHITECTURE="\"$(AROS_TARGET_PLATFORM)\""
+diff --git a/rom/task/task_init.c b/rom/task/task_init.c
+index 648eeed8..6988135a 100644
+--- a/rom/task/task_init.c
++++ b/rom/task/task_init.c
+@@ -213,11 +213,15 @@ static LONG taskres_Init(struct TaskResBase *TaskResBase)
+ static LONG taskres_Exit(struct TaskResBase *TaskResBase)
+ {
+ #ifdef TASKRES_ENABLE
+-    SetFunction((struct Library *)SysBase, -176*LIB_VECTSIZE, TaskResBase->trb_NewAddTask);
+-    SetFunction((struct Library *)SysBase, -48*LIB_VECTSIZE, TaskResBase->trb_RemTask);
++    /* Init may have failed before it patched these: then there is nothing to put back */
++    if (TaskResBase->trb_NewAddTask)
++        SetFunction((struct Library *)SysBase, -176*LIB_VECTSIZE, TaskResBase->trb_NewAddTask);
++    if (TaskResBase->trb_RemTask)
++        SetFunction((struct Library *)SysBase, -48*LIB_VECTSIZE, TaskResBase->trb_RemTask);
+ #endif /* TASKRES_ENABLE */
+ 
+-    CloseLibrary(TaskResBase->trb_UtilityBase);
++    if (TaskResBase->trb_UtilityBase)
++        CloseLibrary(TaskResBase->trb_UtilityBase);
+ 
+     return TRUE;
+ }
 diff --git a/scripts/elf-clang.in b/scripts/elf-clang.in
 new file mode 100644
 index 00000000..25f8231c
