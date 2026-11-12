@@ -5,6 +5,10 @@
 #   - ColdReboot(): the run ends with a reboot, the loader starts the system again
 #   - a fault without a trap handler: exec's alert, then a reboot
 #   - the DOS boot through dosboot and the emergency console to the AROS shell, with input
+#   - the boot from an FFS disk (qrxdisk.device, afs.handler) and a C program built with the m68k64
+#     clang against the AROS C library, loaded from C: with its libraries from LIBS:
+# The disk test needs the clang wrapper for m68k64-unknown-aros as $CLANG (default: clang in PATH)
+# and libclang_rt.builtins-m68k64.a in the SDK's lib directory.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 B="$(cd "$1" && pwd)"; W="${2:-$(mktemp -d)}"; mkdir -p "$W"
@@ -36,5 +40,24 @@ QRXBOOT_INPUT='echo "Hallo von QRX OS One"\nset x 42\necho "x ist $x"\nresident\
     "$A/Devs/dosboot.resource" > "$W/shell.txt" 2>&1
 check "DOS boot to the shell" "$W/shell.txt" "The AROS Development Team" "1> " "Hallo von QRX OS One" \
     "x ist 42" "Echo                           INTERNAL" "SYS:"
+rm -rf "$W/sys"; mkdir -p "$W/sys/C" "$W/sys/Libs"
+echo "m68k64" > "$W/sys/AROS.boot"
+cp "$A/Libs/crt.library" "$A/Libs/stdlib.library" "$A/Libs/m.library" "$W/sys/Libs/"
+CLANG="${CLANG:-clang}"
+TOOLS=$(ls -d "$(dirname "$B")"/*/tools 2>/dev/null | grep -v /native- | head -1)     # collect-aros of the AROS build
+if PATH="$TOOLS:$(dirname "$(command -v "$CLANG")"):$PATH" "$CLANG" --sysroot "$A/Development" -O2 -o "$W/sys/C/hello" "$HERE/tests/hello.c" > "$W/hello-build.txt" 2>&1 &&
+   python3 -I "$HERE/mkffsimg.py" "$W/sys" "$W/disk.img" 32 QRXSYS; then
+    QRXBOOT_DISK="$W/disk.img" QRXBOOT_CMDLINE="econsole" QRXBOOT_INPUT='cd\nhello eins "zwei drei"\n' \
+        "$W/qrxboot" "$CORE" 40 2 512 "$A/Libs/utility.library" "$A/Libs/aros.library" \
+        "$A/boot/native/Devs/timer.device" "$A/boot/native/Libs/expansion.library" "$A/Devs/bootloader.resource" \
+        "$A/Libs/dos.library" "$A/Devs/lddemon.resource" "$A/L/econsole-handler" "$A/Devs/FileSystem.resource" \
+        "$A/L/afs-handler" "$A/Devs/qrxdisk.device" "$A/Devs/shell.resource" "$A/Devs/shellcommands.resource" \
+        "$A/Devs/dosboot.resource" > "$W/disk.txt" 2>&1
+    check "boot from disk, C program" "$W/disk.txt" "QRXSYS:" "sizeof(long) 8, sizeof(void *) 8" \
+        "argc 3: [hello] [eins] [zwei drei]" "sorted: -7 0 3 42 1000000000000" "double: 13.000, 4.33333, int 130" \
+        "last byte 5a" "read back: written by hello, 1000000000000"
+else
+    echo "FAIL boot from disk: could not build hello or the image (see $W/hello-build.txt)"; fail=$((fail + 1))
+fi
 echo "$fail failures"
 exit $((fail != 0))

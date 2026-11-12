@@ -25,6 +25,47 @@ index de479bdc..817f9c5a 100644
 +  files="$(FILES)" uselibs="stdc.static"
  
  %common
+diff --git a/arch/m68k64-all/crt/mmakefile.src b/arch/m68k64-all/crt/mmakefile.src
+new file mode 100644
+index 00000000..6680ba15
+--- /dev/null
++++ b/arch/m68k64-all/crt/mmakefile.src
+@@ -0,0 +1,35 @@
++#
++
++include $(SRCDIR)/config/aros.cfg
++
++#MM compiler-m-m68k64 : includes-asm_h-m68k64
++#MM compiler-stdlib-m68k64 : includes-asm_h-m68k64
++#MM compiler-crt-m68k64 : includes-asm_h-m68k64
++#MM linklibs-romhack-m68k64 : includes-asm_h-m68k64
++
++USER_AFLAGS 	:= -I$(GENINCDIR)
++
++STDLIB_M68K64_ASMFILES := \
++    stdc/longjmp \
++    stdc/setjmp
++
++%build_archspecific \
++  mainmmake=compiler-m \
++  modname=m maindir=compiler/crt \
++  arch=m68k64 files="stdc/fenv"
++
++%build_archspecific \
++  mainmmake=compiler-stdlib \
++  modname=stdlib maindir=compiler/crt \
++  arch=m68k64 \
++  files="" asmfiles="$(STDLIB_M68K64_ASMFILES)"
++
++%build_archspecific \
++  mainmmake=compiler-crt maindir=compiler/crt \
++  modname=crt arch=m68k64 \
++  asmfiles="posixc/siglongjmp posixc/sigsetjmp posixc/vfork posixc/vfork_longjmp"
++
++# dos.library links setjmp()/longjmp() from here, see linklibs-romhack in compiler/crt
++%build_linklib mmake=linklibs-romhack-m68k64 libname=romhack asmfiles="$(STDLIB_M68K64_ASMFILES)" sdk="private"
++
++%common
 diff --git a/arch/m68k64-all/crt/posixc/.gitignore b/arch/m68k64-all/crt/posixc/.gitignore
 new file mode 100644
 index 00000000..0d77ed2f
@@ -32,25 +73,6 @@ index 00000000..0d77ed2f
 +++ b/arch/m68k64-all/crt/posixc/.gitignore
 @@ -0,0 +1 @@
 +mmakefile
-diff --git a/arch/m68k64-all/crt/posixc/mmakefile.src b/arch/m68k64-all/crt/posixc/mmakefile.src
-new file mode 100644
-index 00000000..91374d84
---- /dev/null
-+++ b/arch/m68k64-all/crt/posixc/mmakefile.src
-@@ -0,0 +1,13 @@
-+
-+include $(SRCDIR)/config/aros.cfg
-+
-+USER_AFLAGS 	:= -I$(GENINCDIR)
-+
-+#MM- compiler-posixc-m68k64 : includes-asm_h
-+
-+%build_archspecific \
-+  mainmmake=compiler-posixc modname=posixc maindir=compiler/crt/posixc \
-+  arch=m68k64 \
-+  asmfiles="siglongjmp sigsetjmp vfork vfork_longjmp"
-+
-+%common
 diff --git a/arch/m68k64-all/crt/posixc/siglongjmp.s b/arch/m68k64-all/crt/posixc/siglongjmp.s
 new file mode 100644
 index 00000000..f70e1df2
@@ -211,30 +233,6 @@ index 00000000..38e42588
 +	move.q (120,%a0), %sp
 +	move.q (%a0), %a1
 +	jmp (%a1)
-diff --git a/arch/m68k64-all/crt/stdc/mmakefile.src b/arch/m68k64-all/crt/stdc/mmakefile.src
-new file mode 100644
-index 00000000..3172a97f
---- /dev/null
-+++ b/arch/m68k64-all/crt/stdc/mmakefile.src
-@@ -0,0 +1,18 @@
-+#
-+
-+include $(SRCDIR)/config/aros.cfg
-+
-+USER_AFLAGS 	:= -I$(GENINCDIR)
-+
-+%build_archspecific \
-+  mainmmake=compiler-stdc \
-+  modname=stdc maindir=compiler/crt/stdc \
-+  arch=m68k64 \
-+  files="fenv" asmfiles="longjmp setjmp"
-+
-+#MM compiler-stdc-m68k64 : compiler-stdc-includes includes-asm_h-m68k64
-+
-+# dos.library links setjmp()/longjmp() from here, see linklibs-romhack in compiler/crt
-+#MM linklibs-romhack-m68k64 : includes-asm_h-m68k64
-+
-+%build_linklib mmake=linklibs-romhack-m68k64 libname=romhack asmfiles="longjmp setjmp" sdk="private"
 diff --git a/arch/m68k64-all/crt/stdc/setjmp.s b/arch/m68k64-all/crt/stdc/setjmp.s
 new file mode 100644
 index 00000000..2f62f96d
@@ -1186,10 +1184,10 @@ index 00000000..9326c14e
 +#endif	/* !_FENV_H_ */
 diff --git a/arch/m68k64-all/include/aros/genmodule.h b/arch/m68k64-all/include/aros/genmodule.h
 new file mode 100644
-index 00000000..bda74faa
+index 00000000..fed94c15
 --- /dev/null
 +++ b/arch/m68k64-all/include/aros/genmodule.h
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,109 @@
 +/*
 +    Copyright (C) 2026, The AROS Development Team. All rights reserved.
 +
@@ -1273,6 +1271,7 @@ index 00000000..bda74faa
 +            "\tjsr (__aros_setoffsettable,%%pc)\n"                      \
 +            "\tadda.q #8, %%sp\n"                                       \
 +            "\tjmp (" #fname ",%%pc)\n"                                 \
++            : :                                                         \
 +        );                                                              \
 +    }
 +
@@ -1280,12 +1279,19 @@ index 00000000..bda74faa
 +     __AROS_GM_STACKCALL(fname, libbasename, AROS_SLIB_ENTRY(fname, libbasename, lvo))
 +
 +/* Macro: AROS_GM_STACKALIAS(functionname, libbasename, lvo)
-+   An alias for function 'functionname'
++   An entry 'alias' for function 'functionname'. An ELF alias (.set) to a symbol of another
++   object comes out undefined with the integrated assembler, so this is a jump: it leaves the
++   stack arguments and all registers alone.
 +*/
 +#define __AROS_GM_STACKALIAS(fname, alias) \
 +    void alias(void); \
-+    asm(".weak " __GM_STRINGIZE(alias) "\n" \
-+        "\t.set " __GM_STRINGIZE(alias) "," #fname \
++    asm(".pushsection .text\n" \
++        "\t.globl " __GM_STRINGIZE(alias) "\n" \
++        "\t.type " __GM_STRINGIZE(alias) ", @function\n" \
++        "\t.p2align 1\n" \
++        __GM_STRINGIZE(alias) ":\n" \
++        "\tjmp (" #fname ",%pc)\n" \
++        "\t.popsection\n" \
 +    );
 +#define AROS_GM_STACKALIAS(fname, libbasename, lvo) \
 +    __AROS_GM_STACKALIAS(fname, AROS_SLIB_ENTRY(fname, libbasename, lvo))
@@ -5582,6 +5588,395 @@ index 00000000..1eca1aca
 +#MM kernel-exec-qrx-m68k64-kobj : kernel-exec-native-m68k64-kobj
 +
 +%common
+diff --git a/arch/m68k64-native/qrx/qrxdisk/mmakefile.src b/arch/m68k64-native/qrx/qrxdisk/mmakefile.src
+new file mode 100644
+index 00000000..5e1f3567
+--- /dev/null
++++ b/arch/m68k64-native/qrx/qrxdisk/mmakefile.src
+@@ -0,0 +1,10 @@
++include $(SRCDIR)/config/aros.cfg
++
++# A disk in RAM for the 68100EC64 reference machine: the boot loader puts a disk image at the top
++# of RAM and names it on the command line with qrxdisk=<address>,<size> (hex).
++
++%build_module mmake=kernel-qrxdisk \
++  modname=qrxdisk modtype=device \
++  files="qrxdisk_device" uselibs="stdc.static"
++
++%common
+diff --git a/arch/m68k64-native/qrx/qrxdisk/qrxdisk.conf b/arch/m68k64-native/qrx/qrxdisk/qrxdisk.conf
+new file mode 100644
+index 00000000..0533704e
+--- /dev/null
++++ b/arch/m68k64-native/qrx/qrxdisk/qrxdisk.conf
+@@ -0,0 +1,12 @@
++##begin config
++version 1.0
++basename QRXDisk
++libbasetype struct QRXDiskBase
++residentpri 4
++beginio_func beginio
++abortio_func abortio
++options noexpunge
++##end config
++##begin cdefprivate
++#include "qrxdisk_intern.h"
++##end cdefprivate
+diff --git a/arch/m68k64-native/qrx/qrxdisk/qrxdisk_device.c b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_device.c
+new file mode 100644
+index 00000000..f175f470
+--- /dev/null
++++ b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_device.c
+@@ -0,0 +1,328 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    Desc: qrxdisk.device, a disk in RAM for the 68100EC64 reference machine.
++
++    The boot loader puts a disk image (512-byte blocks) at the top of RAM, outside the memory it
++    gives to exec, and names it on the kernel command line as qrxdisk=<address>,<size> in hex.
++    Unit 0 reads and writes it. At init the device adds a boot node DH0: for it, with the
++    Fast File System (afs.handler), which dosboot then mounts and boots from. The FAT handler of
++    this AROS snapshot does not convert all its little-endian fields, so it does not work on a
++    big-endian CPU.
++*/
++
++#include <aros/debug.h>
++#include <aros/symbolsets.h>
++#include <exec/errors.h>
++#include <exec/io.h>
++#include <exec/memory.h>
++#include <devices/newstyle.h>
++#include <devices/trackdisk.h>
++#include <dos/dos.h>
++#include <dos/dosextens.h>
++#include <dos/filehandler.h>
++#include <libraries/expansion.h>
++#include <aros/bootloader.h>
++
++#include <proto/bootloader.h>
++#include <proto/exec.h>
++#include <proto/expansion.h>
++
++#include <string.h>
++
++#include LC_LIBDEFS_FILE
++
++#define BLOCK_SIZE          512
++#define BLOCKS_PER_TRACK    32
++#define QRXDISK_DOSTYPE     0x444f5301  /* DOS\1, the Fast File System: afs.handler */
++
++static const UWORD SupportedCommands[] =
++{
++    CMD_RESET, CMD_READ, CMD_WRITE, CMD_UPDATE, CMD_CLEAR, CMD_STOP, CMD_START, CMD_FLUSH,
++    TD_MOTOR, TD_SEEK, TD_FORMAT, TD_REMOVE, TD_CHANGENUM, TD_CHANGESTATE, TD_PROTSTATUS,
++    TD_GETDRIVETYPE, TD_GETNUMTRACKS, TD_ADDCHANGEINT, TD_REMCHANGEINT, TD_GETGEOMETRY,
++    TD_READ64, TD_WRITE64, TD_FORMAT64, NSCMD_TD_READ64, NSCMD_TD_WRITE64, NSCMD_TD_FORMAT64,
++    NSCMD_DEVICEQUERY,
++    0
++};
++
++static UQUAD parse_hex(const char **s)
++{
++    UQUAD v = 0;
++    const char *p = *s;
++
++    if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X'))
++        p += 2;
++    for (;; p++)
++    {
++        char c = *p;
++        if (c >= '0' && c <= '9') v = v * 16 + (c - '0');
++        else if (c >= 'a' && c <= 'f') v = v * 16 + (c - 'a' + 10);
++        else if (c >= 'A' && c <= 'F') v = v * 16 + (c - 'A' + 10);
++        else break;
++    }
++    *s = p;
++    return v;
++}
++
++static void add_bootnode(LIBBASETYPEPTR base)
++{
++    struct Library *ExpansionBase = OpenLibrary("expansion.library", 0);
++    IPTR *pp;
++    struct DosEnvec *de;
++    struct DeviceNode *dn;
++    UQUAD blocks = base->qd_Size / BLOCK_SIZE;
++
++    if (!ExpansionBase)
++        return;
++    pp = AllocMem(sizeof(IPTR) * 4 + sizeof(struct DosEnvec), MEMF_PUBLIC | MEMF_CLEAR);
++    if (pp)
++    {
++        pp[0] = (IPTR)"DH0";
++        pp[1] = (IPTR)"qrxdisk.device";
++        pp[2] = 0;          /* unit */
++        pp[3] = 0;          /* OpenDevice() flags */
++        de = (struct DosEnvec *)&pp[4];
++        de->de_TableSize = DE_BOOTBLOCKS;
++        de->de_SizeBlock = BLOCK_SIZE / 4;
++        de->de_Surfaces = 1;
++        de->de_SectorPerBlock = 1;
++        de->de_BlocksPerTrack = BLOCKS_PER_TRACK;
++        de->de_Reserved = 2;        /* the boot block */
++        de->de_LowCyl = 0;
++        de->de_HighCyl = blocks / BLOCKS_PER_TRACK - 1;
++        de->de_NumBuffers = 32;
++        de->de_BufMemType = MEMF_PUBLIC;
++        de->de_MaxTransfer = 0x01000000;
++        de->de_Mask = (IPTR)~0;
++        de->de_BootPri = 0;
++        de->de_DosType = QRXDISK_DOSTYPE;
++
++        dn = MakeDosNode(pp);
++        if (dn)
++        {
++            AddBootNode(0, ADNF_STARTPROC, dn, NULL);
++            D(bug("[qrxdisk] boot node DH0: for %lu blocks\n", (unsigned long)blocks));
++        }
++    }
++    CloseLibrary(ExpansionBase);
++}
++
++static int GM_UNIQUENAME(Init)(LIBBASETYPEPTR base)
++{
++    APTR BootLoaderBase = OpenResource("bootloader.resource");
++    struct List *args;
++    struct Node *node;
++
++    if (!BootLoaderBase || !(args = GetBootInfo(BL_Args)))
++        return TRUE;
++
++    ForeachNode(args, node)
++    {
++        if (strncmp(node->ln_Name, "qrxdisk=", 8) == 0)
++        {
++            const char *p = node->ln_Name + 8;
++            UQUAD addr = parse_hex(&p), size = 0;
++
++            if (*p == ',')
++            {
++                p++;
++                size = parse_hex(&p);
++            }
++            if (addr && size >= BLOCK_SIZE * BLOCKS_PER_TRACK)
++            {
++                base->qd_Image = (UBYTE *)addr;
++                base->qd_Size = size & ~(UQUAD)(BLOCK_SIZE - 1);
++            }
++        }
++    }
++
++    if (base->qd_Image)
++        add_bootnode(base);
++    return TRUE;
++}
++
++static int GM_UNIQUENAME(Open)(LIBBASETYPEPTR base, struct IORequest *io, ULONG unitnum, ULONG flags)
++{
++    if (unitnum != 0 || !base->qd_Image)
++    {
++        io->io_Error = IOERR_OPENFAIL;
++        return FALSE;
++    }
++    io->io_Unit = &base->qd_Unit;
++    io->io_Error = 0;
++    return TRUE;
++}
++
++static int GM_UNIQUENAME(Close)(LIBBASETYPEPTR base, struct IORequest *io)
++{
++    io->io_Unit = NULL;
++    return TRUE;
++}
++
++ADD2INITLIB(GM_UNIQUENAME(Init), 0)
++ADD2OPENDEV(GM_UNIQUENAME(Open), 0)
++ADD2CLOSEDEV(GM_UNIQUENAME(Close), 0)
++
++/* Reads and writes are copies, so every command is done at once */
++static BYTE transfer(LIBBASETYPEPTR base, struct IOExtTD *iotd, UQUAD offset, BOOL write)
++{
++    ULONG len = iotd->iotd_Req.io_Length;
++
++    iotd->iotd_Req.io_Actual = 0;
++    if ((offset | len) & (BLOCK_SIZE - 1))
++        return IOERR_BADADDRESS;
++    if (offset > base->qd_Size || len > base->qd_Size - offset)
++        return TDERR_SeekError;
++    if (write)
++        CopyMem(iotd->iotd_Req.io_Data, base->qd_Image + offset, len);
++    else
++        CopyMem(base->qd_Image + offset, iotd->iotd_Req.io_Data, len);
++    iotd->iotd_Req.io_Actual = len;
++    return 0;
++}
++
++AROS_LH1(void, beginio,
++    AROS_LHA(struct IOExtTD *, iotd, A1),
++    LIBBASETYPEPTR, base, 5, QRXDisk)
++{
++    AROS_LIBFUNC_INIT
++
++    struct IOStdReq *io = &iotd->iotd_Req;
++    UQUAD offset64 = ((UQUAD)io->io_Actual << 32) | io->io_Offset;
++    BYTE err = 0;
++    BOOL reply = TRUE;
++
++    io->io_Message.mn_Node.ln_Type = NT_MESSAGE;
++
++    switch (io->io_Command)
++    {
++    case CMD_READ:
++    case ETD_READ:
++        err = transfer(base, iotd, io->io_Offset, FALSE);
++        break;
++
++    case CMD_WRITE:
++    case ETD_WRITE:
++    case TD_FORMAT:
++    case ETD_FORMAT:
++        err = transfer(base, iotd, io->io_Offset, TRUE);
++        break;
++
++    case TD_READ64:
++    case NSCMD_TD_READ64:
++        err = transfer(base, iotd, offset64, FALSE);
++        break;
++
++    case TD_WRITE64:
++    case NSCMD_TD_WRITE64:
++    case TD_FORMAT64:
++    case NSCMD_TD_FORMAT64:
++        err = transfer(base, iotd, offset64, TRUE);
++        break;
++
++    case TD_GETGEOMETRY:
++    {
++        struct DriveGeometry *dg = (struct DriveGeometry *)io->io_Data;
++        ULONG blocks = base->qd_Size / BLOCK_SIZE;
++
++        if (io->io_Length < sizeof(struct DriveGeometry))
++        {
++            err = IOERR_BADLENGTH;
++            break;
++        }
++        memset(dg, 0, sizeof(*dg));
++        dg->dg_SectorSize = BLOCK_SIZE;
++        dg->dg_TotalSectors = blocks;
++        dg->dg_Cylinders = blocks / BLOCKS_PER_TRACK;
++        dg->dg_CylSectors = BLOCKS_PER_TRACK;
++        dg->dg_Heads = 1;
++        dg->dg_TrackSectors = BLOCKS_PER_TRACK;
++        dg->dg_BufMemType = MEMF_PUBLIC;
++        dg->dg_DeviceType = DG_DIRECT_ACCESS;
++        dg->dg_Flags = 0;
++        io->io_Actual = sizeof(*dg);
++        break;
++    }
++
++    case NSCMD_DEVICEQUERY:
++    {
++        struct NSDeviceQueryResult *dq = (struct NSDeviceQueryResult *)io->io_Data;
++
++        if (io->io_Length < sizeof(struct NSDeviceQueryResult))
++        {
++            err = IOERR_BADLENGTH;
++            break;
++        }
++        dq->DevQueryFormat = 0;
++        dq->SizeAvailable = sizeof(struct NSDeviceQueryResult);
++        dq->DeviceType = NSDEVTYPE_TRACKDISK;
++        dq->DeviceSubType = 0;
++        dq->SupportedCommands = (UWORD *)SupportedCommands;
++        io->io_Actual = sizeof(struct NSDeviceQueryResult);
++        break;
++    }
++
++    case TD_CHANGENUM:
++        io->io_Actual = 1;
++        break;
++
++    case TD_CHANGESTATE:    /* 0: a disk is in the drive */
++    case TD_PROTSTATUS:     /* 0: not write protected */
++        io->io_Actual = 0;
++        break;
++
++    case TD_GETDRIVETYPE:
++        io->io_Actual = DRIVE3_5;
++        break;
++
++    case TD_GETNUMTRACKS:
++        io->io_Actual = base->qd_Size / BLOCK_SIZE / BLOCKS_PER_TRACK;
++        break;
++
++    case TD_ADDCHANGEINT:
++        /* The disk never changes: keep the request, as trackdisk.device does, and never reply */
++        reply = FALSE;
++        break;
++
++    case TD_REMCHANGEINT:
++    case CMD_RESET:
++    case CMD_UPDATE:
++    case ETD_UPDATE:
++    case CMD_CLEAR:
++    case ETD_CLEAR:
++    case CMD_STOP:
++    case CMD_START:
++    case CMD_FLUSH:
++    case TD_MOTOR:
++    case ETD_MOTOR:
++    case TD_SEEK:
++    case ETD_SEEK:
++    case TD_REMOVE:
++        io->io_Actual = 0;
++        break;
++
++    default:
++        err = IOERR_NOCMD;
++        break;
++    }
++
++    io->io_Error = err;
++    if (!reply)
++        io->io_Flags &= ~IOF_QUICK;
++    else if (!(io->io_Flags & IOF_QUICK))
++        ReplyMsg(&io->io_Message);
++
++    AROS_LIBFUNC_EXIT
++}
++
++AROS_LH1(LONG, abortio,
++    AROS_LHA(struct IOExtTD *, iotd, A1),
++    LIBBASETYPEPTR, base, 6, QRXDisk)
++{
++    AROS_LIBFUNC_INIT
++
++    return 0;
++
++    AROS_LIBFUNC_EXIT
++}
+diff --git a/arch/m68k64-native/qrx/qrxdisk/qrxdisk_intern.h b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_intern.h
+new file mode 100644
+index 00000000..6ce05fd5
+--- /dev/null
++++ b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_intern.h
+@@ -0,0 +1,15 @@
++#ifndef QRXDISK_INTERN_H
++#define QRXDISK_INTERN_H
++
++#include <exec/devices.h>
++#include <exec/types.h>
++
++struct QRXDiskBase
++{
++    struct Device   qd_Device;
++    struct Unit     qd_Unit;
++    UBYTE          *qd_Image;       /* the disk image the boot loader put in RAM */
++    UQUAD           qd_Size;        /* its size in bytes, a multiple of 512 */
++};
++
++#endif
 diff --git a/compiler/arossupport/include/asmcall.h b/compiler/arossupport/include/asmcall.h
 index 2041aeea..40035525 100644
 --- a/compiler/arossupport/include/asmcall.h
@@ -5606,6 +6001,31 @@ index c21238d3..fc0a6354 100644
  #else
  #   error unsupported CPU type
  #endif
+diff --git a/compiler/crt/posixc/vfwprintf.c b/compiler/crt/posixc/vfwprintf.c
+index 3835fe13..305a276f 100644
+--- a/compiler/crt/posixc/vfwprintf.c
++++ b/compiler/crt/posixc/vfwprintf.c
+@@ -11,7 +11,7 @@
+ #include "__fdesc.h"
+ #include "__stdio.h"
+ 
+-static int __putwc(wchar_t wc, void *fh);
++static int __putwc(int c, void *fh);
+ /*****************************************************************************
+ 
+     NAME */
+@@ -59,8 +59,10 @@ static int __putwc(wchar_t wc, void *fh);
+     return __wvcformat ((void *)BADDR(fdesc->fcb->handle), __putwc, format, args);
+ } /* vfwprintf */
+ 
+-static int __putwc(wchar_t wc, void *fhp)
++/* __wvcformat() passes the character as an int, see aros/stdc/wchar.h */
++static int __putwc(int c, void *fhp)
+ {
++    wchar_t wc = (wchar_t)c;
+     BPTR fh = MKBADDR(fhp);
+     if (FWrite(fh, &wc, 1, sizeof(wchar_t)) == WEOF)
+     {
 diff --git a/compiler/crt/stdc/include/aros/stdc/fenv.h b/compiler/crt/stdc/include/aros/stdc/fenv.h
 index 8655d386..7ad54e0b 100644
 --- a/compiler/crt/stdc/include/aros/stdc/fenv.h

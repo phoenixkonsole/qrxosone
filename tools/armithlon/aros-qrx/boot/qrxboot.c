@@ -6,7 +6,10 @@
  * The kernel command line is $QRXBOOT_CMDLINE, "selftest" by default. When the system ends the run
  * with a reboot (0x101 cold, 0x102 warm, see SC_REBOOT in the kernel), the loader loads it again and
  * starts it with " rebooted" added to the command line, as a reset would; 0x100 is power off.
- * $QRXBOOT_INPUT is the console input, with \n for a new line. */
+ * $QRXBOOT_INPUT is the console input, with \n for a new line.
+ * $QRXBOOT_DISK=<image> puts a disk image at the top of RAM, outside exec's memory, and adds
+ * qrxdisk=<address>,<size> to the command line for qrxdisk.device. Its contents stay over a reboot;
+ * with $QRXBOOT_DISK_WRITE set they are written back to the file at the end. */
 #include "qrx68100ec64.h"
 #include <inttypes.h>
 #include <stdio.h>
@@ -53,6 +56,8 @@ static uint64_t tagp;
 static void tag(uint64_t t, uint64_t v) { p64(tagp, t); p64(tagp + 8, v); tagp += 16; }
 
 static FILE *map;
+static uint8_t *disk;
+static uint64_t disk_size;
 static char *input;
 static uint64_t bss_list[64][2];
 static unsigned nbss;
@@ -149,8 +154,15 @@ static long long boot(int argc, char **argv, double seconds, unsigned cores, con
     uint64_t data = align(kernel_end, 4096), bssl = data;
     for (unsigned k = 0; k < nbss; k++) { p64(bssl + k * 16, bss_list[k][0]); p64(bssl + k * 16 + 8, bss_list[k][1]); }
     p64(bssl + nbss * 16, 0); p64(bssl + nbss * 16 + 8, 0);
-    uint64_t cmd = bssl + (nbss + 1) * 16, name = cmd + 64;
-    snprintf((char *)ram + cmd, 64, "%s", cmdline);
+    uint64_t cmd = bssl + (nbss + 1) * 16, name = cmd + 256;
+    uint64_t mem_upper = ram_size;
+    if (disk) {
+        uint64_t at = (ram_size - disk_size) & ~UINT64_C(4095);
+        memcpy(ram + at, disk, disk_size);
+        mem_upper = at;
+        snprintf((char *)ram + cmd, 256, "%s qrxdisk=0x%" PRIx64 ",0x%" PRIx64, cmdline, at, disk_size);
+    } else
+        snprintf((char *)ram + cmd, 256, "%s", cmdline);
     strcpy((char *)ram + name, "qrxboot");
     uint64_t tags = align(name + 64, 16);
     tagp = tags;
@@ -164,7 +176,7 @@ static long long boot(int argc, char **argv, double seconds, unsigned cores, con
     tag(KRN_ProtAreaStart, LOAD);
     tag(KRN_ProtAreaEnd, prot_end);
     tag(KRN_MEMLower, MEM_LOWER);
-    tag(KRN_MEMUpper, ram_size);
+    tag(KRN_MEMUpper, mem_upper);
     tag(0, 0);
     /* In 32-bit mode: movea.l #tags,a0 ($207C) and jmp start ($4EF9) */
     p16(STUB, 0x207C); p32(STUB + 2, (uint32_t)tags);
@@ -190,6 +202,7 @@ static long long boot(int argc, char **argv, double seconds, unsigned cores, con
         printf("        a8 (TLS) %016" PRIx64 ", d0 %016" PRIx64 ", vbr %016" PRIx64 "\n", c->a[8], c->d[0], c->vbr);
     }
     qec64_machine_free(m);
+    if (disk) memcpy(disk, ram + mem_upper, disk_size);     /* the disk keeps what the system wrote */
     munmap(ram, ram_size);
     return code;
 }
@@ -211,7 +224,17 @@ int main(int argc, char **argv)
         }
         *o = 0;
     }
-    char cmdline[64];
+    if (getenv("QRXBOOT_DISK")) {
+        FILE *f = fopen(getenv("QRXBOOT_DISK"), "rb");
+        if (!f) { perror(getenv("QRXBOOT_DISK")); return 2; }
+        fseek(f, 0, SEEK_END);
+        disk_size = (uint64_t)ftell(f) & ~UINT64_C(511);
+        rewind(f);
+        disk = malloc(disk_size);
+        if (!disk || fread(disk, 1, disk_size, f) != disk_size) return 2;
+        fclose(f);
+    }
+    char cmdline[256];
     snprintf(cmdline, sizeof cmdline, "%s", env ? env : "selftest");
     for (int n = 0; n < MAX_BOOTS; n++) {
         long long code = boot(argc, argv, seconds, cores, cmdline);
@@ -223,6 +246,10 @@ int main(int argc, char **argv)
             continue;
         }
         if (code == END_POWEROFF) puts("=== power off");
+        if (disk && getenv("QRXBOOT_DISK_WRITE")) {
+            FILE *f = fopen(getenv("QRXBOOT_DISK"), "r+b");
+            if (f) { fwrite(disk, 1, disk_size, f); fclose(f); }
+        }
         return code == 0 || code == END_POWEROFF ? 0 : 1;
     }
     puts("=== too many reboots");
