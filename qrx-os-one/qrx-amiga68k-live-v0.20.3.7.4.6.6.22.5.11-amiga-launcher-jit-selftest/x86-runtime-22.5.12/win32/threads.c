@@ -71,6 +71,32 @@ static void co_prepare(qctx *c, void *stack, size_t size, void (*entry)(void))
     memset(sp, 0, 18 * 4);
     c->sp = sp;
 }
+#elif defined(__m68k64__)
+/* 68100EC64 long mode (m68k64 clang): arguments in 8-byte stack slots, D2-D7/A2-A6
+ * callee-saved, soft float, so no FPU registers to keep. */
+void qw_co_switch(qctx *from, qctx *to);
+__asm__(
+    ".text\n"
+    ".globl qw_co_switch\n"
+    "qw_co_switch:\n"
+    "    move.q (8,%sp),%a0\n"
+    "    move.q (16,%sp),%a1\n"
+    "    lea (-88,%sp),%sp\n"
+    "    movem.q %d2-%d7/%a2-%a6,(0,%sp)\n"
+    "    move.q %sp,(0,%a0)\n"
+    "    move.q (0,%a1),%sp\n"
+    "    movem.q (0,%sp),%d2-%d7/%a2-%a6\n"
+    "    lea (88,%sp),%sp\n"
+    "    rts\n");
+static void co_prepare(qctx *c, void *stack, size_t size, void (*entry)(void))
+{
+    uint64_t *sp = (uint64_t *)(((uintptr_t)stack + size - 32u) & ~(uintptr_t)15u);
+    *--sp = 0;                        /* return address of entry: never used */
+    *--sp = (uint64_t)(uintptr_t)entry;
+    sp -= 11;                         /* d2-d7/a2-a6 */
+    memset(sp, 0, 11 * 8);
+    c->sp = sp;
+}
 #else
 #include <ucontext.h>
 typedef struct { ucontext_t u; } qhostctx;

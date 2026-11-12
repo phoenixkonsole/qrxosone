@@ -58,6 +58,27 @@ Für Tests mit dem Mac-Build heißt das: Den Zustand des Gastes, etwa INI-Dateie
 
 Grenzen: Der Mac-Build ist Little Endian, der m68k64 Big Endian. Ein Test, der beides zusammen prüft, braucht `m68k64-clang` und eine C-Bibliothek für das 64-Bit-AROS, und die gibt es noch nicht.
 
+## Erster nativer Lauf auf dem 68100EC64 (2026-11-12)
+
+qrx-win32 und der QRX86-Core laufen als native 64-Bit-Programme auf dem 64-Bit-AROS. Getestet wurde auf der Referenzmaschine mit zwei Kernen, Start von einer FFS-Platte, mit der C-Bibliothek des AROS 64.
+
+| Teil | Stand |
+| --- | --- |
+| Build | `build-ec64.sh` mit dem m68k64-clang. Headless (`-DQRX_NO_AROS_BACKEND`), ohne x86-JIT. Am Quelltext war nur der Fiber-Wechsel in `threads.c` neu (`__m68k64__`: D2-D7/A2-A6 mit `movem.q`, keine FPU-Register) |
+| Fflush.exe, Skript `wait 16000`, `snap` | Das Bild ist **Byte für Byte gleich** mit dem 64-Bit-Mac-Build (1.447.413 Byte). Das gilt mit dem korrigierten clang, ohne Umgehung im Quelltext. Damit sind 64 Bit und Big Endian zusammen für diesen Pfad geprüft |
+| Der 32-Bit-Gast-Build | Unverändert, die HUNK-Datei hat denselben SHA-256 wie vorher |
+
+Gefunden auf dem Weg:
+
+- **Fehler im m68k64-Backend:** Die Stack-Neuausrichtung im Prolog (`BuildStackAlignAND`) nahm immer D0 als Hilfsregister und zerstörte so ein Argument in D0. Ausgelöst wurde sie von `jmp_buf`, das im AROS-Header `aligned(16)` ist. Getroffen hat es `run_loop` mit `stop_eip`, und der verschachtelte Aufruf von `DllMain` lief deshalb über seinen Haltepunkt hinaus. Die Tor-Sitzung hat das im Backend behoben, mit Regressionstest. Programme müssen mit dem neuen clang gebaut werden. Die AROS-Bibliotheken waren zu dem Zeitpunkt noch mit dem alten gebaut.
+- **Werkzeug:** Mit einer Befehls- und Aufrufspur, die man zwischen dem Mac-Build und dem EC64 vergleicht, findet man solche Fehler schnell. Der Mac-Build dient dabei als Referenz.
+
+Nicht geprüft:
+
+- Threads und der Ton-Dienst, also der neue Fiber-Wechsel. Fflush braucht beides in diesen 16 Sekunden nicht.
+- Andere Spiele, DirectDraw und x87-lastiger Code. Gleitkomma läuft als Soft-Float.
+- Die Geschwindigkeit: Das Bild lag innerhalb einer Laufzeit von 25 Minuten vor, für 16 Sekunden virtuelle Zeit. Wann genau, ist nicht gemessen. Der EC64 ist ein Interpreter, darin läuft der x86-Interpreter, und Gleitkomma wird in Software gerechnet.
+
 ## Reihenfolge
 
 1. **Classic:** Das 32-Bit-System als eigene Instanz in der 64-Bit-Maschine starten, mit gemeinsamem HostFS und Fenster auf dem Mac. Setzt voraus, dass der EC64 im Emulator läuft. Das ist Sache der AROS-64-Arbeit auf `claude/tor-browser-aros68k-343c56`.
