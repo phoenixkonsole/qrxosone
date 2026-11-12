@@ -179,7 +179,7 @@ unshield cannot read a file that spans two cabinets; that was not seen to matter
 | Flip chains | Up to 7 back buffers | GTA, which asks for 7 |
 | `waveOut`, `timeSetEvent` | Host mixer voice over a ring; timers on a service thread | GTA music through Miles |
 | MIDI | `midiOut*` and `midiStream*` on the macOS DLS synthesizer (`macos/qrx_midi.m`) | Doom95: 500 messages, output peak 31908 of 32767 |
-| Winsock | `wsock32` and `ws2_32` on host sockets (`full68k/qrx_hostnet.c`) | `hostnet_tests`, and `nettest.exe` under AROS: 512 KB TCP echo, UDP, refused connection |
+| Winsock | `wsock32` and `ws2_32` on host sockets (`full68k/qrx_hostnet.c`) | `hostnet_tests`, and `nettest.exe` under AROS: 512 KB TCP echo, UDP, refused connection, two threads sending 2 MB each into full socket buffers |
 | Direct3D 5, 6, 7 | `IDirect3D2`, `3`, `7` and their devices on the host renderer, with textures from DirectDraw surfaces, colour key, vertex buffers | `d3d5test.exe`, `d3d7test.exe`: image checked, 300 frames in 54 and 85 ms headless |
 | Vulkan | `vulkan-1` on MoltenVK through 32-bit structure conversion (`full68k/qrx_hostapi_vk.c`) | `vktest.exe`: shaders, vertex buffer, swapchain, image checked, 300 frames in about 100 ms |
 | Registry, INI files, file mappings, `mmio`, old file calls | `win32/compat.c`. The registry persists in `QRXREG.TXT` beside the game | GTA reads its settings this way |
@@ -258,7 +258,29 @@ How it was checked, on the Mac M1 (log: `benchmarks/armithlon-m1-2026-11-03/dire
 A bug that has nothing to do with the network showed up: after GTA quits cleanly from a game, it
 saves `GTADATA/PLAYER_A.DAT`, and the next start of any level stops with a page fault at
 `eip=00414ce3`, in single player too. It reads video mode 6 from GTA's mode table and finds no
-entry there. Putting the original file back gets past it. It is not fixed yet.
+entry there. Putting the original file back gets past it. Fixed on 2026-11-06, see below.
+
+The cause was QRX86's `EnumDisplayModes`, not the file:
+
+- GTA keeps only modes of 15, 16 and 32 bits with an aspect of 4:3 or 8:5, up to 1600 wide. Our list had two of those, 640x480x16 and 800x600x16. A dump of the table in a running game showed these two entries.
+- When GTA loads `PLAYER_A.DAT`, the function at `0x414c70` compares the stored byte with the number of modes, which also includes other values that were 0 here. If the byte is smaller it picks mode 6, otherwise mode 0. It never uses the byte as a mode. This is GTA's own code, and it expects at least seven modes.
+- The shipped file holds 6, which was not smaller than 2, so the game got mode 0. Quitting then stored 0, which is smaller than 2, so the next start asked for mode 6, past the end of the table.
+
+`EnumDisplayModes` now also lists 320x200, 320x240, 400x300, 512x384 and 640x400 in 16 bits, and 400x300 and 512x384 in 8 bits, in ascending order. The largest mode stays 800x600. That gives GTA seven modes, and its mode 6 is 800x600x16.
+
+This has a visible effect: GTA's levels now always run at 800x600 instead of 640x480, with the shipped file too, and its menus stay at 640x480. The file now keeps 6 after a quit.
+
+How it was checked, on the Mac M1, with `QRX_TEST_KEYS` and `QRX_RTG_CAPTURE`, in a copy of the game:
+
+| Check | Result |
+| --- | --- |
+| Old list: level, Esc, Enter, new start | Page fault at `eip=00414ce3`, as reported |
+| New list, shipped data: level, Esc, Enter, new start | `PLAYER_A.DAT` is written during the quit; the new start shows a level at 800x600 |
+| New list, with the file an earlier quit left behind, which holds 0 | Shows a level at 800x600 |
+| Flips in the level | 42 ms on average, the same as at 640x480 |
+| The 31 other programs that import `ddraw`, old list against new, 38 s without input, three at once | 28 alike in display mode, capture size and stop message. Daytona, `s3d_demo` and the second Tomb Raider II demo differed, and were alike in a second run of 66 s |
+
+Many of those 31 do not reach a display mode in that time, so the comparison says little about them, and nothing was played. Multiplayer was not run again with the new list. The mode keys in the game, which step through the table, were not tried.
 
 Not checked: two computers, which means `QRX_DPLAY_HOST` and broadcast over a real network, and whether
 the macOS firewall asks for permission there; more than two players; a whole deathmatch to its
@@ -447,7 +469,7 @@ Checked with a scripted test program: every button set, default button, Escape, 
 
 `PropertySheetA` and `W`, `CreatePropertySheetPage` and the `PSM_` messages are real, with wizards and with plain sheets, modal and modeless. Pages are created when first shown and get the `PSN_` notifications. Tabs are a row of buttons, since there is no tab control.
 
-`J2swc123.exe` (Jazz Jackrabbit 2) installs from start to end: 58 files and 40 MB. The installed `Jazz2.exe` then faults at `eip=0049c38b`.
+`J2swc123.exe` (Jazz Jackrabbit 2) installs from start to end, about 40 MB.
 
 This work uncovered general faults that were hiding behind the stub:
 
@@ -481,3 +503,141 @@ Rogue Squadron no longer stops at its assertion and draws frames; how well it ru
 To check a hardware 3D picture, use `QRX_HG_CAPTURE=file QRX_HG_CAPTURE_FRAME=n`. `QRX_RTG_CAPTURE` shows guest video memory only, where such a program is simply black.
 
 Still open: the level looks dark in both renderers, with or without the JIT (mean brightness 11 of 255 in the software renderer). Whether that is correct has not been settled.
+
+## Update 2026-11-06, second part: Jazz Jackrabbit 2 plays
+
+The shareware version goes from its own installer through intro, menu and episode choice into the first level at 60 frames a second, and the character runs both ways under the arrow keys.
+
+- `FILD` and `FISTP` on 64 bits lost data, because the x87 here keeps doubles with 53 bits of mantissa. Pentium-era memory copies use exactly that pair, and every eighth pixel came out black, with dots elsewhere. A register still holding what `FILD` put there now writes those exact bits back. This is in the CPU core, so it covers every program with such a copy.
+- A `WH_KEYBOARD` hook did not get the extended key bit in `lParam`. The game files arrows under `vk | 0x100`, so its menu worked through messages while the level saw no arrows. Doom95, which also reads through a hook, still answers its arrow keys.
+- `SPI_GETNONCLIENTMETRICS` returned nothing and the game computed a window of negative size from the garbage. It now fills the structure, in both the ANSI and the wide form.
+- `InsertMenuItem`, `WSAAsyncSelect`, `WSAAsyncGetHostByName`, `WSACancelAsyncRequest`, `GetClipRgn` and `OffsetClipRgn` are new.
+
+Limits:
+
+- `WSAAsyncSelect` accepts the call and delivers no events, so network play in such programs does not work yet.
+- Sound in the game has not been listened to.
+
+## Update 2026-11-06, third part: Microsoft's C runtime, exceptions, MFC
+
+Programs that bring their own `MSVCRT.DLL` now run on it, and MFC programs show their dialogs. Max Payne reaches its start dialog, finds the host GPU and starts its Direct3D 8 driver. SimCity 3000 loads and runs into a null pointer in one of its DLLs. Neither is playable yet.
+
+- A program with `MSVCRT.DLL` beside it uses that file. The built-in table covers only part of the runtime, and heap and exceptions cannot be split between the two.
+- `RaiseException` and `RtlUnwind` are real for exceptions raised by software. Handlers run as guest code and return through a thunk, because a C++ catch never returns. As on Windows, a frame of the system's is on the chain while a handler runs: the C++ runtime takes the head of the chain, unwinds and links that head in again, and without the frame a frame ended up pointing at itself. Page faults still stop the program.
+- `VirtualAlloc` ignored the address it was given, so each commit in reserved memory took new memory. SimCity 3000 spent 7.7 of every 10 seconds there.
+- HostFS refused every access above 64 MB. Max Payne's archive is 98 MB. The limit is now 2 GB, the range of the guest's signed positions.
+- Direct3D 8: `GetAdapterIdentifier` and `GetDeviceCaps` wrote the larger Direct3D 9 structures, which zeroed a return address in Max Payne's driver. The caps were all zero and now hold plausible values. `GetDepthStencilSurface`, `GetRenderTarget` and `GetBackBuffer` return objects without contents. `QRX_D3D_LOG=1` names the methods a game wants and the host lacks.
+- The import table cut names at 95 characters, so long C++ names did not resolve. `LoadLibrary` also looks in the current directory, 64 modules can be loaded instead of 16, `WH_CBT` delivers `HCBT_CREATEWND`, and `CreateDialogIndirectParamA` and `DialogBoxIndirectParamA` are real instead of returning 0.
+- Also new: a silent `IDirectSound3DBuffer` (the sound plays unpositioned), `LoadCursorFromFile`, `WriteProfileStringA`, `winmm` ordinal 2, `SHGetDesktopFolder` and `SHGetSpecialFolderLocation` as failing stubs, and resource names of the form `#1024`.
+
+Survey of 66 programs, 40 seconds each: 14 stop, against 18 before this work, and no program that ran before now stops. The survey sees crashes and window sizes, not whether a game plays. `MSIFDEMO` now shows its settings dialog first, which the old stub skipped, and goes on to Direct3D after OK.
+
+Limits:
+
+- Max Payne ends with a message from its graphics engine after Play. It now asks for `GetSurfaceLevel`, the start of the texture path.
+- SimCity 3000 faults at `78711d9b`, and `SetFilePointer` takes about 0.5 ms a call.
+- `clawdins` and `gmdemins` unpack and then start a 16-bit InstallShield `SETUP.EXE`, which is not supported. The same message, `no PE header`, stops the setups of Worms 2, FF7, Fighter Tactics, Jam X and two more programs; whether each of those is 16-bit or DOS has not been checked.
+- Static text in some MFC dialogs stays empty and a check box label is cut off in Monster Truck Madness 2.
+- Under the JIT a jump to address 0 hangs where the interpreter reports the fault. Use `QRX86_NOJIT` when a program stops without a message.
+- Diablo's shareware program stops at the message `exp1:C:\Diablo\Spawn`, not examined.
+
+## Update 2026-11-07: Max Payne reaches its loading screen
+
+Max Payne's demo now draws its loading screen through Direct3D 8 on the host, with correct textures and a moving bar. After 12 frames it stops presenting, so it is still not playable.
+
+- New in the Direct3D 8 and 9 wrappers: surfaces for texture levels and free memory (`GetSurfaceLevel`, `GetDesc`, `LockRect`, `UnlockRect`, `GetLevelDesc`, `GetLevelCount`), and `CreateImageSurface`, `CopyRects` and `UpdateTexture`.
+- Also new: `ValidateDevice`, `GetAvailableTextureMem`, `ResourceManagerDiscardBytes`, and `SetPixelShader` on Direct3D 8, which accepts the call and does nothing.
+- `CheckDeviceFormat` no longer accepts everything: it answers yes only for formats `CreateTexture` can handle and for depth formats. DXT is therefore refused, and a game has to choose another format. `CheckDeviceMultiSampleType` accepts "no multisampling", which it refused before.
+- `QRX_D3D_LOG=1` now also names Direct3D calls that return a failure.
+
+What the stop looks like: after the last frame the game loads a few more textures, then runs a loop at about 780 passes a second that calls `PeekMessage`, the DirectInput devices, `QueryPerformanceCounter` and `GetFileAttributes("C:\\data")`, and calls Direct3D no more. The interpreter behaves the same, so the JIT is not the cause.
+
+Ruled out: key presses, and making `SetForegroundWindow` and `SetActiveWindow` real, which changed nothing and was taken out again. All calls in the loop return success. The `-developer` switch creates `verbose_<computer>.txt`, but it stayed empty in these runs. The cause is not known.
+
+## Update 2026-11-07, second part: The Gungan Frontier and Pit Droids reach their menus
+
+Both Lucas Learning demos start and show their menus, The Gungan Frontier at up to 61 frames a second. Input reaches them in a test with timed keys and clicks; neither has been played further than that.
+
+- The version API returned nothing, and both games read the answer without checking it. Everything in `C:\WINDOWS\SYSTEM` and our system DLLs now report version 4.08.00.400. Other files still report no version.
+- `FindFirstFile` also finds `DDHELP.EXE`, `DDRAW16.DLL`, `DSOUND.VXD`, `D3DIM.DLL` and `D3DRM.DLL` in the system folder, which these games look for.
+- `IDirectSound::GetCaps` reported wrong flags and no sample rates. It now reports mono and stereo, 8 and 16 bit, and rates from 100 to 100000 Hz.
+
+`ChildWindowFromPoint` is new as well, for `pbdemo`.
+
+Both games were run from folders laid out by hand, with the data in `Data\`, because their installers cannot run here. Sound has not been listened to.
+
+## Update 2026-11-07, third part: Virtua Fighter 2 fights, Turok draws in Glide
+
+Virtua Fighter 2's demo goes from the title through the arcade mode and the character profile into a fight, at about 60 flips a second. Turok's demo starts from its launcher and draws 3D scenes through Glide. Neither has been played by hand.
+
+- With an 8-bit DirectDraw mode set, `GetDeviceCaps` now reports a palette device. Virtua Fighter 2 asks before it makes its palette, and used a null pointer without it.
+- A DIB section's pixels live in the program's memory. `GetBitmapBits` read an unused copy and returned nothing, and `GetObject` reported 32 bits. Both now answer from the section, at its depth, with `bmBits` set.
+- Glide 2 gained `guTexAllocateMemory`, `guTexDownloadMipMap`, `guTexSource`, `guTexMemReset`, `guDrawTriangleWithClip`, `grHints`, `grTexDownloadTablePartial` and several calls without an effect. `grDrawLine` draws nothing, and `grLfbLock` refuses, so a program cannot reach the frame buffer.
+- The chip keeps 12 bits of pixel position, and Glide programs add 786432 to snap a float to its grid. Positions now wrap the same way; before, Turok's vertices landed far off screen.
+- In a W buffer the depth comes from `oow`, not `ooz`, and a texture unit's own 1/w counts only after `grHints` asked for it. `glidetest` had set W-buffer mode while it filled only `ooz`, which real hardware would not have drawn as intended. It now sets the Z buffer.
+
+Survey of 66 programs: 11 stop, down from 13, and no program that ran before now stops.
+
+Limits:
+
+- Virtua Fighter 2's sky behind the arena is black, and whether it should be has not been checked.
+- Turok has no fog, as `grFogMode` does nothing, and a later frame after key presses was all black. Why is not known.
+- Turok was run from a folder laid out by hand, with its data in `data\`, and `w95turokdemov101` still stops in the survey because of its flat layout.
+- `turok2demo` and `turok3dfx` were not looked at.
+
+## Update 2026-11-07, fourth part: static TLS, BSTR, fog
+
+- Images with a TLS directory, such as Delphi programs, now get their block. Every thread gets a copy of the template, found through `fs:[2C]`. The indices come from the top of the array that `TlsAlloc` fills from the bottom. TLS callbacks are not run; a message says so when an image has some.
+- `oleaut32` has `SysAllocString`, `SysAllocStringLen`, `SysReAllocStringLen`, `SysFreeString`, `SysStringLen`, `VariantInit`, `VariantClear` and `VariantCopy`, also under their ordinals. `VariantChangeType` refuses every conversion. `OpenProcessToken`, `LookupPrivilegeValueA` and `AdjustTokenPrivileges` fail, and `GetSystemDefaultLCID` is new.
+- `VirtualFree` with `MEM_DECOMMIT` zeroes the pages, because Windows returns decommitted pages zeroed. This did not fix anything seen so far.
+- Glide table fog is mapped to the host's linear fog over w: the table gives where the fog begins and where it is full. Turok's picture did not visibly change, so this is not confirmed to work.
+
+Limits:
+
+- `islepro`, an Inno Setup 2.0.18 installer, now gets past its TLS and stops at `00401b04` in Delphi's memory manager, where text has overwritten the link of a free block. The interpreter stops at the same place, so the JIT is not the cause. Why the block is overwritten is not known.
+
+## Update 2026-11-07, fifth part: Sonic & Knuckles shows its intro
+
+The Sonic & Knuckles demo shows its intro with correct colours at about 38 frames a second. Stretching its 8-bit picture takes about 4.6 of every 10 seconds. It has not been played, and key presses in a test did not visibly end the intro.
+
+- `VirtualAlloc` gives a program a free address it asks for, below the heap. A reservation starts on a 64 KB boundary, as on Windows. The game asks for fixed addresses and uses them without looking at the answer.
+- The game draws in a palette and expects a 256 colour desktop, so it joins Sonic CD on the list of programs that are told so.
+- `SetClipper` is no longer ignored. A primary surface with a clipper is drawn on in screen coordinates, and ours shows only the window, so the window's position is taken off the destination.
+
+## Update 2026-11-10: 16-bit starters
+
+There is still no Win16: the CPU core runs flat 32-bit code only. Many 16-bit programs of the time only start a 32-bit one, and `win32/ne.c` now recognises two kinds and runs the 32-bit program instead. Both the first program and `CreateProcess` go through it.
+
+- `NAME.EXE` next to `NAME.W32` runs the `.w32`. Freddi Fish's demo starts this way. It then runs its frame loop but draws nothing: after `waveOutReset` it writes no more sound buffers, and it seems to wait in its sound engine.
+- An InstallShield 3 `SETUP.EXE` next to `_INST32I.EX_` runs the engine in that archive. The archive is PKWARE DCL data, with a decoder that follows zlib's `contrib/blast`. Its files are unpacked once next to `SETUP.EXE`, where the engine finds `SETUP.INS` and the cabinets. The setups of the FF7 demo and NBA Jam Extreme reach the first step of their wizards. The files are left behind in the program's folder.
+- `waveOutRestart` starts what was written while paused, which Freddi's sound test relies on. `EnumFontFamiliesA` reports one font under the name asked for. The NT security calls fail with `ERROR_CALL_NOT_IMPLEMENTED`, as on Windows 95.
+
+No installer was clicked through, and the bitmap pane of the FF7 setup stays white. The survey of 66 programs ran again after its scripts and unpacked games were rebuilt: 4 stop, down from 9, and no program that ran before now stops. The six former 16-bit stops all open a window, and `clawdins` starts its engine. Still stopping: `galac15` (a DOS program), `islepro`, and `sonic_cd` and `w95turokdemov101`, which need their folders laid out by hand. `ctest` passes.
+
+## Update 2026-11-10, second part: a reused bitmap handle
+
+A DIB section that was deleted kept its entry in the table of DIB sections. When `CreateDIBSection` handed out the same handle again, blits read the old, freed memory. Freddi Fish does exactly that: it creates a section, deletes it, and creates the one it draws into. The new entry now replaces the old one.
+
+Freddi still shows a black window. The section it gets is the one shown, but it never writes a pixel into it, so its own logic waits before the first picture. Reporting a 256 colour desktop did not change that. The survey is unchanged: 4 stop, as before.
+
+## Update 2026-11-10, third part: showing a window activates it
+
+Freddi Fish now draws its intro and plays its sound. Its main loop runs the game only after the window has had `WM_ACTIVATEAPP` with wParam 1 and `WM_SETFOCUS`. Windows sends both when `ShowWindow` shows a top-level window, but QRX86 sent them only from `SetFocus`. `ShowWindow` now activates the window, except for `SW_SHOWMINNOACTIVE`, `SW_SHOWNA` and `SW_SHOWNOACTIVATE`. If a control inside the window already has the focus, it keeps it.
+
+The survey of 66 programs is unchanged: the same 4 stop, and no other program changed its result or its screen size.
+
+## Update 2026-11-11: the Inno Setup of islepro
+
+`islepro` no longer stops. Its Inno Setup 2.0 wizard opens and goes as far as the licence page. Five things stood in the way:
+
+- `VirtualAlloc` reserved memory at addresses such as `10002000`; Windows always reserves on a 64 KB boundary. Delphi's heap commits and decommits 16 KB units counted from the address, so it left 8 KB of old data committed and later read it as a block header. That was the heap overwrite at `00401b04`. Reservations now start on a 64 KB boundary.
+- `MsgWaitForMultipleObjects` with `INFINITE` returned `WAIT_TIMEOUT` after 100 ms. The loader took that to mean that the program it had unpacked was done, and deleted it before it could start. A wait on processes now lasts until one ends or input arrives; waits on other handles keep the old behaviour.
+- `GetFileVersionInfoSizeA`, `GetFileVersionInfoA` and `VerQueryValueA` now read the version resource of any PE file, not only of our own system DLLs. Without it Inno stops with "Internal error S104" on the `SHFOLDR.DLL` it unpacks. `VerQueryValueA` walks the blocks and returns text values as ANSI.
+- `LoadLibrary` with a full path such as `C:\WINDOWS\is-XXXX.tmp\_shfoldr.dll` looked for the file below the program ("Internal error S105"). Such paths are now mapped as `CreateFile` maps them.
+- `CallWindowProcA` passed messages unchanged to our window procedures, which work in UTF-16. Delphi subclasses our buttons this way, and `WM_GETTEXT` wrote "< &Back" as UTF-16 into an 8-byte buffer, which broke the heap again. Text messages to our own procedures now go through the same ANSI bridge as `SendMessageA`.
+
+Also new: `EnumFontsA`, `CreatePenIndirect` and `CharLowerBuffA`.
+
+Still open: the licence text box stays empty, and Return does not choose Yes there, so no installation was finished.
+
+The survey of 66 programs now has 3 stops, down from 4. `islepro` reaches its first question, and the Japanese `aoe2demo` no longer reports `MEM_BAD_POINTER` and opens its 511x378 window, likely through the 64 KB reservations. No other program changed its result or its screen size.

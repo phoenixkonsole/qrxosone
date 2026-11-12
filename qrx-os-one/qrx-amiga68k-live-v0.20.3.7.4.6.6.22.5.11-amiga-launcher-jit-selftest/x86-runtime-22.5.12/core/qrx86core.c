@@ -726,6 +726,7 @@ static void fpush(x86cpu *c, double v)
 {
     c->top = (c->top - 1) & 7;
     c->st[c->top] = v;
+    c->st_exact[c->top] = 0;
     c->ftw &= (uint16_t)~(3u << (c->top * 2));
 }
 static void fpop(x86cpu *c)
@@ -929,8 +930,16 @@ static void fpu_exec(x86cpu *c, const prefix_t *p, uint8_t op)
             case 1: m_w16(c, a, (uint16_t)(int16_t)fto_int(c, ST(0), 16, 1)); fpop(c); return;
             case 2: m_w16(c, a, (uint16_t)(int16_t)fto_int(c, ST(0), 16, 0)); return;
             case 3: m_w16(c, a, (uint16_t)(int16_t)fto_int(c, ST(0), 16, 0)); fpop(c); return;
-            case 5: fpush(c, (double)(int64_t)m_r64(c, a)); return;
-            case 7: m_w64(c, a, (uint64_t)fto_int(c, ST(0), 64, 0)); fpop(c); return;
+            case 5: {
+                int64_t v = (int64_t)m_r64(c, a);
+                fpush(c, (double)v);
+                c->st_int[c->top] = v; c->st_was[c->top] = c->st[c->top]; c->st_exact[c->top] = 1;
+                return; }
+            case 7:
+                if (c->st_exact[c->top] && !memcmp(&c->st_was[c->top], &c->st[c->top], sizeof(double))) m_w64(c, a, (uint64_t)c->st_int[c->top]);
+                else m_w64(c, a, (uint64_t)fto_int(c, ST(0), 64, 0));
+                fpop(c);
+                return;
             }
             break;
         }
@@ -955,7 +964,17 @@ static void fpu_exec(x86cpu *c, const prefix_t *p, uint8_t op)
             return;
         case 0xD9:
             if (grp == 0) { double v = ST(i); fpush(c, v); return; }
-            if (grp == 1) { double t = ST(0); ST(0) = ST(i); ST(i) = t; return; }
+            if (grp == 1) {
+                double t = ST(0);
+                int p0 = c->top & 7, pi = (c->top + i) & 7;
+                int64_t si = c->st_int[p0];
+                double sw = c->st_was[p0];
+                uint8_t se = c->st_exact[p0];
+                ST(0) = ST(i); ST(i) = t;
+                c->st_int[p0] = c->st_int[pi]; c->st_was[p0] = c->st_was[pi]; c->st_exact[p0] = c->st_exact[pi];
+                c->st_int[pi] = si; c->st_was[pi] = sw; c->st_exact[pi] = se;
+                return;
+            }
             switch (sub) {
             case 0xD0: return;                                         /* FNOP */
             case 0xE0: ST(0) = -ST(0); return;

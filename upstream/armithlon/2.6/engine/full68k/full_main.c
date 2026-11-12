@@ -336,7 +336,7 @@ int main(int argc,char **argv){
           dp += seg;
           while (*dp == ',') dp++;
           if (sscanf(tmp, "%lx:%lx:%255s", &a, &n, f) == 3 && n > 0 &&
-              n < 16u*1024u*1024u && (uint64_t)a + n <= c.vm.ram.size) {
+              n <= 1024u*1024u*1024u && (uint64_t)a + n <= c.vm.ram.size) {
             FILE *o = fopen(f, "wb");
             if (o) { fwrite(c.ram_owned + a, 1, (size_t)n, o); fclose(o);
               fprintf(stderr, "[ARMITHLON] RAM %08lx+%lx -> %s\n", a, n, f); }

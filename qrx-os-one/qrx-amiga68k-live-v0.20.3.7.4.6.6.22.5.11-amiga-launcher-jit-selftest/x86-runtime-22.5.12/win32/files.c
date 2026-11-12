@@ -378,6 +378,14 @@ static uint32_t put_str(qwin *w, uint32_t dst, uint32_t max, const char *s, int 
     for (i = 0; i <= n; i++) { if (wide) x86_wr16(C, dst + i * 2, (uint8_t)s[i]); else x86_wr8(C, dst + i, (uint8_t)s[i]); }
     return n;
 }
+int qw_fs_cwd_host(qwin *w, char *out, size_t max)
+{
+    size_t L;
+    init_root(w);
+    if (!g_cwd[0]) return 0;                     /* the root is the program's folder */
+    L = strlen(g_root);
+    return snprintf(out, max, "%s%s%s", g_root, L && g_root[L - 1] != ':' && g_root[L - 1] != '/' ? "/" : "", g_cwd) < (int)max;
+}
 void qw_fs_cwd_win(qwin *w, char *out, int max) { init_root(w); full_of(g_cwd, out, max); }
 FN(f_GetCurrentDirectoryA) { char b[600]; init_root(w); full_of(g_cwd, b, sizeof(b)); return put_str(w, a[1], a[0], b, 0); }
 FN(f_GetCurrentDirectoryW) { char b[600]; init_root(w); full_of(g_cwd, b, sizeof(b)); return put_str(w, a[1], a[0], b, 1); }

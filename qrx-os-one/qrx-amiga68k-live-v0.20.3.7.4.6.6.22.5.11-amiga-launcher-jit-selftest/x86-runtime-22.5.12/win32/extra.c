@@ -231,17 +231,25 @@ FN(x_LoadKeyboardLayoutA) { UNUSED; return 0x04090409u; }
 FN(x_MsgWaitForMultipleObjects) {        /* (n, handles, waitall, ms, mask): single thread */
     qevent ev;
     uint32_t ms = a[3] == 0xFFFFFFFFu ? 100 : a[3];
-    int r, k = qw_dinput_ready(w, a[1], a[0]);
+    int r, k, procs;
     uint32_t i;
-    if (k >= 0) return (uint32_t)k;                          /* DirectInput device has data */
-    for (i = 0; i < a[0] && i < 64; i++) if (qw_proc_signalled(w, x86_rd32(&w->cpu, a[1] + i * 4)) > 0) return i;
-    memset(&ev, 0, sizeof(ev));
-    r = qw_be_wait(w, ms, &ev);
-    if (r > 0) {
-        user_input_event(w, &ev);
-        k = qw_dinput_ready(w, a[1], a[0]);
-        return k >= 0 ? (uint32_t)k : a[0];                  /* device data, else "window message" */
-    }
+    /* INFINITE on processes does not time out. Inno Setup waits so for the program it unpacked,
+       and deleted it while that was still starting when this said WAIT_TIMEOUT. */
+    do {
+        if ((k = qw_dinput_ready(w, a[1], a[0])) >= 0) return (uint32_t)k;   /* DirectInput device has data */
+        for (i = 0, procs = a[0] > 0; i < a[0] && i < 64; i++) {
+            int s = qw_proc_signalled(w, x86_rd32(&w->cpu, a[1] + i * 4));
+            if (s > 0) return i;
+            if (s < 0) procs = 0;
+        }
+        memset(&ev, 0, sizeof(ev));
+        r = qw_be_wait(w, ms, &ev);
+        if (r > 0) {
+            user_input_event(w, &ev);
+            k = qw_dinput_ready(w, a[1], a[0]);
+            return k >= 0 ? (uint32_t)k : a[0];              /* device data, else "window message" */
+        }
+    } while (a[3] == 0xFFFFFFFFu && procs && !w->exiting);
     return 0x102;
 }
 FN(x_ToUnicode) { const qhle *t = qw_find_hle("user32", "ToAsciiEx"); return t ? t->fn(w, a) : 0; }
@@ -258,7 +266,7 @@ FN(x_CreateDIBSection) {                 /* (hdc, BITMAPINFO*, usage, void **bit
     int bpp = x86_rd16(C, bi + 14);
     uint32_t stride, mem, h;
     qobj *o;
-    if (bw <= 0 || bw > 4096 || bh == 0 || bh > 4096 || bh < -4096) return 0;
+    if (bw <= 0 || bw > 4096 || bh == 0 || bh > 4096 || bh < -4096) { qw_log(w, "CreateDIBSection: refused %dx%d %d bits", (int)bw, (int)bh, bpp); return 0; }
     stride = (uint32_t)(((bw * bpp + 31) / 32) * 4);
     mem = qw_alloc(w, stride * (uint32_t)(bh < 0 ? -bh : bh));
     if (!mem) return 0;
@@ -408,10 +416,9 @@ const qhle qw_extra[] = {
     K("GetStringTypeW", x_GetStringTypeW, 4), K("LCMapStringA", x_LCMapStringA, 6), K("LCMapStringW", x_LCMapStringW, 6),
     K("CompareStringA", x_CompareStringA, 6), K("CompareStringW", x_ok0, 6), K("IsBadCodePtr", x_ok0, 1), K("IsBadWritePtr", x_ok0, 2),
     K("DebugBreak", x_ok0, 0), K("lstrcatA", x_lstrcatA, 2), K("FileTimeToSystemTime", x_FileTimeToSystemTime, 2),
-    K("RtlUnwind", x_ok0, 4), K("CreateThread", x_CreateThread, 6), K("ExitThread", x_ExitThread, 1),
+    K("CreateThread", x_CreateThread, 6), K("ExitThread", x_ExitThread, 1),
     ADV("GetUserNameA", x_GetUserNameA, 2), ADV("RegDeleteKeyA", x_ok0, 2), ADV("RegEnumKeyExA", x_RegNotFound, 8),
     U("WinHelpA", x_ok1, 4), U("PostThreadMessageA", x_ok1, 4), U("GetWindowPlacement", x_ok0, 2), U("SetWindowPlacement", x_ok1, 2),
-    U("CreateDialogIndirectParamA", x_ok0, 5),
     { "comdlg32", "GetOpenFileNameA", 1, x_ok0 }, { "comdlg32", "GetSaveFileNameA", 1, x_ok0 }, { "comdlg32", "CommDlgExtendedError", 0, x_ok0 },
     K("GetEnvironmentStrings", x_GetEnvironmentStrings, 0), K("SetStdHandle", x_ok1, 2), K("GetConsoleMode", x_ok0, 2),
     K("SetConsoleMode", x_ok1, 2), K("WriteConsoleA", x_WriteConsoleA, 5), K("ReadConsoleInputA", x_ok0, 4),

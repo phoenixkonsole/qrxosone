@@ -6,9 +6,16 @@
  *   x9      68k X flag (bit 0)
  *   x10-x17 D0-D7                      x19-x26 A0-A7
  *   x27     JitCtx                     x28/x29 read/write page map
+ *   d8-d15  FP0-FP7 inside a block     v0, v28-v31 FP scratch
  * Guest flags live in NZCV with the carry inverted against the 68k (host
  * C = !68k C), so SUBS/CMP need no fixup and every 68k condition maps onto one
  * AArch64 condition. ADDS and logic results flip it with CFINV when C is live.
+ *
+ * FPU: between blocks the guest registers are 80-bit values in REG_FP. A block keeps those it
+ * uses as IEEE single or double in d8-d15, which C helpers preserve, and which form each one
+ * has is known at translation time. The native path covers normal numbers and zero with
+ * round-to-nearest. Everything else leaves through a bail exit, which first writes the changed
+ * registers back, and Musashi runs that one instruction.
  */
 #include "qrx68100_jit.h"
 #include "m68kcpu.h"
@@ -34,7 +41,8 @@
 #define PAGE_ENTRIES (1u<<20)
 #define GRANULE_SHIFT 6u
 
-enum { F_N=1,F_Z=2,F_V=4,F_C=8,F_X=16,F_NZVC=15,F_ALL=31 };
+/* F_FPCC: the FPSR condition codes are not CCR flags, but share the liveness pass. */
+enum { F_N=1,F_Z=2,F_V=4,F_C=8,F_X=16,F_NZVC=15,F_ALL=31,F_FPCC=32 };
 enum { W0=0,W1=1,W2=2,W3=3,W4=4,W5=5,W6=6,RINSN=7,RCYC=8,RX=9,RD0=10,RA0=19,
        RCTX=27,RRPAGE=28,RWPAGE=29,RLR=30,RZR=31 };
 enum { C_EQ=0,C_NE=1,C_CS=2,C_CC=3,C_MI=4,C_PL=5,C_VS=6,C_VC=7,C_HI=8,C_LS=9,
@@ -73,17 +81,22 @@ typedef struct JitCtx {
     void *read_helper;   /* 80 */
     void *write_helper;  /* 88 */
     uint64_t force_exit; /* 96 */
+    void *cpu_core;      /* 104: m68ki_cpu */
+    void *fp_regs;       /* 112: REG_FP */
+    const void *fp_round_mode; /* 120: softfloat's rounding mode */
     /* Not touched by generated code from here on. */
     QRXFullCPU *cpu;
     uint32_t *code_base, *code_blocks, *code_next, *code_end;
     void (*enter)(struct JitCtx *, const void *);
     uint32_t *exit_stub, *read_stub[3], *write_stub[3], *indirect_stub;
+    uint32_t *fp_fill[2][8], *fp_spill[2][8];  /* index 0 single, 1 double */
     Block **hash;
     CodePage *pages;
     uint8_t *arena, *arena_next, *arena_end;
     uint64_t start_instructions;
     uint64_t blocks_made, native_insns, interp_insns, flushes, invalidations, slow_reads, slow_writes;
     uint64_t *opcode_misses;
+    uint64_t *fp_misses;  /* FPU instructions Musashi ran, by opcode class and second word */
     bool flush_pending, stats;
 } JitCtx;
 #define OFF_DAR 0
@@ -99,7 +112,17 @@ typedef struct JitCtx {
 #define OFF_READ 80
 #define OFF_WRITE 88
 #define OFF_FORCE 96
+#define OFF_CPU 104
+#define OFF_FPR 112
+#define OFF_RMODE 120
 _Static_assert(__builtin_offsetof(JitCtx,force_exit)==OFF_FORCE,"generated code offset");
+_Static_assert(__builtin_offsetof(JitCtx,fp_round_mode)==OFF_RMODE,"generated code offset");
+#define CPU_FPSR ((unsigned)__builtin_offsetof(m68ki_cpu_core,fpsr))
+#define CPU_FPCR ((unsigned)__builtin_offsetof(m68ki_cpu_core,fpcr))
+#define CPU_FPU_RESET ((unsigned)__builtin_offsetof(m68ki_cpu_core,fpu_just_reset))
+_Static_assert(__builtin_offsetof(m68ki_cpu_core,fpsr)<16000&&__builtin_offsetof(m68ki_cpu_core,fpcr)<16000&&
+               __builtin_offsetof(m68ki_cpu_core,fpu_just_reset)<16000,"short load offset");
+_Static_assert(sizeof(floatx80)==16&&__builtin_offsetof(floatx80,high)==0&&__builtin_offsetof(floatx80,low)==8,"floatx80 layout");
 
 /* ---------- AArch64 encoders ---------- */
 typedef struct Cold {
@@ -116,12 +139,19 @@ typedef struct Trans {
     uint16_t op;
     uint8_t uses, defs, live;
     uint8_t live_after[MAX_BLOCK_INSNS];
-    Cold cold[MAX_BLOCK_INSNS*20];
+    Cold cold[MAX_BLOCK_INSNS*40];  /* FMOVEM of eight 80-bit registers makes 32 accesses */
     unsigned cold_count;
     Exit exits[8];
     unsigned exit_count;
-    struct { uint32_t *branch; uint32_t pc; int reg; bool nonzero; } bail[MAX_BLOCK_INSNS];
+    struct { uint32_t *branch; uint32_t pc; int reg; bool nonzero, wide; uint8_t dirty, dirty_d; } bail[MAX_BLOCK_INSNS*8];
     unsigned bail_count;
+    /* A checked FP value with exponent field 0 or all ones: fine when it is zero. */
+    struct { uint32_t *branch, *resume; uint32_t pc; bool wide; uint8_t dirty, dirty_d; } fp_cold[MAX_BLOCK_INSNS*4];
+    unsigned fp_cold_count;
+    uint8_t fp_kind[8];       /* FK_*: what d8+n holds in this block */
+    uint8_t fp_dirty;         /* registers REG_FP does not have yet */
+    bool fp_touched, fp_round_ok;
+    unsigned extra_cycles;
     bool ended;
 } Trans;
 static inline void E(Trans *t,uint32_t ins){if(!t->dry)*t->p=ins;t->p++;}
@@ -182,6 +212,10 @@ static void andi31(Trans *t,int d,int n){E(t,0x12000000u|4u<<10|R5(n)<<5|R5(d));
 static void andi63(Trans *t,int d,int n){E(t,0x12000000u|5u<<10|R5(n)<<5|R5(d));}  /* and wd,wn,#63 */
 static void bfi64(Trans *t,int d,int n,unsigned lsb){E(t,0xB3400000u|((64u-lsb)&63u)<<16|R5(n)<<5|R5(d));} /* one bit */
 static void ldr_page(Trans *t,int d,int table,int idx){E(t,0xF8607800u|R5(idx)<<16|R5(table)<<5|R5(d));}
+static void ldrw(Trans *t,int d,int n,unsigned off){E(t,0xB9400000u|(off/4u)<<10|R5(n)<<5|R5(d));}
+static void strw(Trans *t,int d,int n,unsigned off){E(t,0xB9000000u|(off/4u)<<10|R5(n)<<5|R5(d));}
+static void ldrh(Trans *t,int d,int n,unsigned off){E(t,0x79400000u|(off/2u)<<10|R5(n)<<5|R5(d));}
+static void strh(Trans *t,int d,int n,unsigned off){E(t,0x79000000u|(off/2u)<<10|R5(n)<<5|R5(d));}
 static void ldrx(Trans *t,int d,int n,unsigned off){E(t,0xF9400000u|(off/8u)<<10|R5(n)<<5|R5(d));}
 static void strx(Trans *t,int d,int n,unsigned off){E(t,0xF9000000u|(off/8u)<<10|R5(n)<<5|R5(d));}
 static void stpw(Trans *t,int a,int b,int n,unsigned off){E(t,0x29000000u|(off/4u)<<15|R5(b)<<10|R5(n)<<5|R5(a));}
@@ -207,6 +241,30 @@ static void patch_tbz(Trans *t,uint32_t *site,const uint32_t *to,int r,unsigned 
     if(!t->dry)*site=(nz?0x37000000u:0x36000000u)|(bit&32u)<<26|(bit&31u)<<19|((uint32_t)(to-site)&0x3FFFu)<<5|R5(r);
 }
 static uint32_t *hole(Trans *t){uint32_t *s=t->p;E(t,0xD503201Fu);return s;}
+/* Floating point. `dbl` selects the double form, the single form is the base encoding. */
+#define FP_TYPE(dbl) ((dbl)?0x400000u:0u)
+static void fmov_to_fp(Trans *t,int fd,int r,bool dbl){E(t,(dbl?0x9E670000u:0x1E270000u)|R5(r)<<5|R5(fd));}
+static void fmov_from_fp(Trans *t,int r,int fn,bool dbl){E(t,(dbl?0x9E660000u:0x1E260000u)|R5(fn)<<5|R5(r));}
+static void fp_copy(Trans *t,int fd,int fn,bool dbl){E(t,0x1E204000u|FP_TYPE(dbl)|R5(fn)<<5|R5(fd));}
+static void fp2(Trans *t,uint32_t base,int fd,int fn,bool dbl){E(t,base|FP_TYPE(dbl)|R5(fn)<<5|R5(fd));}
+static void fp3(Trans *t,uint32_t base,int fd,int fn,int fm,bool dbl){E(t,base|FP_TYPE(dbl)|R5(fm)<<16|R5(fn)<<5|R5(fd));}
+enum { FOP_ADD=0x1E202800u,FOP_SUB=0x1E203800u,FOP_MUL=0x1E200800u,FOP_DIV=0x1E201800u,
+       FOP_SQRT=0x1E21C000u,FOP_ABS=0x1E20C000u,FOP_NEG=0x1E214000u };
+static void fcvt_s_to_d(Trans *t,int fd,int fn){E(t,0x1E22C000u|R5(fn)<<5|R5(fd));}
+static void fcvt_d_to_s(Trans *t,int fd,int fn){E(t,0x1E624000u|R5(fn)<<5|R5(fd));}
+static void scvtf_w(Trans *t,int fd,int r,bool dbl){E(t,0x1E220000u|FP_TYPE(dbl)|R5(r)<<5|R5(fd));}
+static void fcvtns_w(Trans *t,int r,int fn,bool dbl){E(t,0x1E200000u|FP_TYPE(dbl)|R5(fn)<<5|R5(r));}
+static void fcvtzs_w(Trans *t,int r,int fn,bool dbl){E(t,0x1E380000u|FP_TYPE(dbl)|R5(fn)<<5|R5(r));}
+static void add64(Trans *t,int d,int n,int m){E(t,0x8B000000u|R5(m)<<16|R5(n)<<5|R5(d));}
+static void eor64(Trans *t,int d,int n,int m){E(t,0xCA000000u|R5(m)<<16|R5(n)<<5|R5(d));}
+static void orr64_lsl(Trans *t,int d,int n,int m,unsigned s){E(t,0xAA000000u|R5(m)<<16|s<<10|R5(n)<<5|R5(d));}
+static void ubfm64(Trans *t,int d,int n,unsigned r,unsigned s){E(t,0xD3400000u|r<<16|s<<10|R5(n)<<5|R5(d));}
+static void ubfx64(Trans *t,int d,int n,unsigned l,unsigned w){ubfm64(t,d,n,l,l+w-1u);}
+static void lsr64(Trans *t,int d,int n,unsigned s){ubfm64(t,d,n,s,63u);}
+static void orr64_top(Trans *t,int d,int n){E(t,0xB2410000u|R5(n)<<5|R5(d));}  /* orr xd,xn,#1<<63 */
+static void eor64_top(Trans *t,int d,int n){E(t,0xD2410000u|R5(n)<<5|R5(d));}  /* eor xd,xn,#1<<63 */
+static void clz32(Trans *t,int d,int n){E(t,0x5AC01000u|R5(n)<<5|R5(d));}
+static void clz64(Trans *t,int d,int n){E(t,0xDAC01000u|R5(n)<<5|R5(d));}
 
 /* ---------- guest helpers called from translated code ---------- */
 static JitCtx *the_ctx;
@@ -251,6 +309,90 @@ static void write_helper(uint32_t addr,uint32_t width,uint32_t pc,uint32_t value
 }
 
 /* ---------- runtime stubs ---------- */
+/* REG_FP[n] -> d8+n, when the 80-bit value is exactly a normal number or zero of that format.
+ * Returns w0=0, or 1 with nothing changed. Uses x0-x3 only and leaves the flags alone. */
+static uint32_t *build_fp_fill(Trans *t,unsigned n,bool dbl){
+    uint32_t *entry=t->p;
+    unsigned off=n*16u;
+    ldrx(t,W3,RCTX,OFF_FPR);
+    ldrx(t,W0,W3,off+8u);
+    ldrh(t,W1,W3,off);
+    uint32_t *to_zero=hole(t);
+    /* Integer bit set, and nothing below the target format's mantissa. */
+    E(t,0x92410000u|(dbl?11u:40u)<<10|R5(W0)<<5|R5(W2));
+    eor64_top(t,W2,W2);
+    uint32_t *bad1=hole(t);
+    ubfx(t,W2,W1,0,15);
+    movz(t,W3,dbl?0x3C00u:0x3F80u,0);
+    sub3(t,W2,W2,W3);
+    /* Biased exponent in W2: 1..2046 or 1..254 are normal numbers. */
+    subi(t,W3,W2,1);
+    uint32_t *bad2=hole(t);
+    addi(t,W3,W3,2);
+    lsri(t,W3,W3,dbl?11u:8u);
+    uint32_t *bad3=hole(t);
+    lsri(t,W1,W1,15);
+    if(dbl){
+        ubfx64(t,W0,W0,11,52);
+        orr64_lsl(t,W0,W0,W2,52);
+        orr64_lsl(t,W0,W0,W1,63);
+    }else{
+        ubfx64(t,W0,W0,40,23);
+        bfi(t,W0,W2,23,8);
+        bfi(t,W0,W1,31,1);
+    }
+    fmov_to_fp(t,8+(int)n,W0,dbl);
+    movz(t,W0,0,0);
+    ret(t);
+    uint32_t *bad=t->p;
+    movz(t,W0,1,0);
+    ret(t);
+    patch_cbz(t,to_zero,t->p,W0,false,true);
+    ubfx(t,W2,W1,0,15);
+    uint32_t *bad4=hole(t);
+    lsri(t,W1,W1,15);
+    if(dbl)orr64_lsl(t,W0,RZR,W1,63);else lsli(t,W0,W1,31);
+    fmov_to_fp(t,8+(int)n,W0,dbl);
+    movz(t,W0,0,0);
+    ret(t);
+    patch_cbz(t,bad1,bad,W2,true,true);
+    patch_tbz(t,bad2,bad,W3,31,true);
+    patch_cbz(t,bad3,bad,W3,true,false);
+    patch_cbz(t,bad4,bad,W2,true,false);
+    return entry;
+}
+/* d8+n -> REG_FP[n]. The value is a normal number or zero by construction. */
+static uint32_t *build_fp_spill(Trans *t,unsigned n,bool dbl){
+    uint32_t *entry=t->p;
+    unsigned off=n*16u;
+    fmov_from_fp(t,W0,8+(int)n,dbl);
+    ldrx(t,W3,RCTX,OFF_FPR);
+    if(dbl)add64(t,W1,W0,W0);else add3(t,W1,W0,W0);
+    uint32_t *to_zero=hole(t);
+    if(dbl){
+        ubfx64(t,W1,W0,52,11);
+        lsr64(t,W2,W0,63);
+        ubfm64(t,W0,W0,53,51);                /* ubfiz x0,x0,#11,#52 */
+    }else{
+        ubfx(t,W1,W0,23,8);
+        lsri(t,W2,W0,31);
+        ubfm64(t,W0,W0,24,22);                /* ubfiz x0,x0,#40,#23 */
+    }
+    bfi(t,W1,W2,15,1);                        /* sign above the biased exponent ... */
+    movz(t,W2,dbl?0x3C00u:0x3F80u,0);
+    add3(t,W1,W1,W2);                         /* ... the bias never reaches bit 15 */
+    orr64_top(t,W0,W0);
+    strx(t,W0,W3,off+8u);
+    strh(t,W1,W3,off);
+    ret(t);
+    patch_cbz(t,to_zero,t->p,W1,false,dbl);
+    if(dbl)lsr64(t,W1,W0,63);else lsri(t,W1,W0,31);
+    lsli(t,W1,W1,15);
+    strx(t,RZR,W3,off+8u);
+    strh(t,W1,W3,off);
+    ret(t);
+    return entry;
+}
 static void emit_save_guest(Trans *t){
     ldrx(t,W0,RCTX,OFF_DAR);
     for(int i=0;i<8;i+=2)stpw(t,RD0+i,RD0+i+1,W0,(unsigned)(i*4));
@@ -261,9 +403,10 @@ static void build_stubs(JitCtx *j){
     t->j=j;t->p=j->code_base;
     /* enter(ctx,code) */
     j->enter=(void(*)(JitCtx*,const void*))(void*)t->p;
-    subsp(t,96);
+    subsp(t,160);
     stpx(t,19,20,31,0);stpx(t,21,22,31,16);stpx(t,23,24,31,32);
     stpx(t,25,26,31,48);stpx(t,27,28,31,64);stpx(t,29,30,31,80);
+    for(unsigned i=0;i<8;i+=2)E(t,0x6D000000u|(12u+i)<<15|(9u+i)<<10|31u<<5|(8u+i)); /* stp d8.. */
     movx(t,RCTX,0);
     ldrx(t,RRPAGE,RCTX,OFF_RPAGE);ldrx(t,RWPAGE,RCTX,OFF_WPAGE);
     ldrx(t,RINSN,RCTX,OFF_INSNS);ldrx(t,RCYC,RCTX,OFF_CYCLES);ldrx(t,RX,RCTX,OFF_X);
@@ -280,7 +423,8 @@ static void build_stubs(JitCtx *j){
     emit_save_guest(t);
     ldpx(t,19,20,31,0);ldpx(t,21,22,31,16);ldpx(t,23,24,31,32);
     ldpx(t,25,26,31,48);ldpx(t,27,28,31,64);ldpx(t,29,30,31,80);
-    addsp(t,96);ret(t);
+    for(unsigned i=0;i<8;i+=2)E(t,0x6D400000u|(12u+i)<<15|(9u+i)<<10|31u<<5|(8u+i)); /* ldp d8.. */
+    addsp(t,160);ret(t);
     /* indirect: w0=target pc. Touches no flags. */
     j->indirect_stub=t->p;
     ldrx(t,W1,RCTX,OFF_ICACHE);
@@ -327,6 +471,10 @@ static void build_stubs(JitCtx *j){
         ldrx(t,W1,RCTX,OFF_FORCE);
         {uint32_t *skip=hole(t);E(t,0x92800008u);patch_cbz(t,skip,t->p,W1,false,true);}
         ret(t);
+    }
+    for(unsigned d=0;d<2;d++)for(unsigned n=0;n<8;n++){
+        j->fp_fill[d][n]=build_fp_fill(t,n,d!=0);
+        j->fp_spill[d][n]=build_fp_spill(t,n,d!=0);
     }
     j->code_next=t->p;
     free(t);
@@ -559,16 +707,27 @@ static uint32_t *exit_to(Trans *t,uint32_t target){
 static void end_indirect(Trans *t){
     b_to(t,t->j->indirect_stub);
 }
-/* Leave the block at this instruction, nothing changed: Musashi takes it. */
-static void bail_if_reg(Trans *t,int reg,bool nonzero){
-    if(t->bail_count<MAX_BLOCK_INSNS){
-        t->bail[t->bail_count].branch=hole(t);
-        t->bail[t->bail_count].pc=t->pc;
-        t->bail[t->bail_count].reg=reg;
-        t->bail[t->bail_count].nonzero=nonzero;
-        t->bail_count++;
-    }
+/* Which of the changed FP registers are doubles right now, for a bail exit's write-back. */
+enum { FK_NONE=0,FK_S=1,FK_D=2 };
+static uint8_t fp_dirty_doubles(const Trans *t){
+    uint8_t m=0;
+    for(unsigned n=0;n<8;n++)if((t->fp_dirty>>n&1u)&&t->fp_kind[n]==FK_D)m|=(uint8_t)(1u<<n);
+    return m;
 }
+/* Leave the block at this instruction, nothing changed: Musashi takes it. */
+static void bail_add(Trans *t,int reg,bool nonzero,bool wide){
+    if(t->dry){(void)hole(t);return;}
+    unsigned n=t->bail_count++;
+    if(n>=sizeof(t->bail)/sizeof(t->bail[0])){fprintf(stderr,"[JIT] too many bail exits\n");abort();}
+    t->bail[n].branch=hole(t);
+    t->bail[n].pc=t->pc;
+    t->bail[n].reg=reg;
+    t->bail[n].nonzero=nonzero;
+    t->bail[n].wide=wide;
+    t->bail[n].dirty=t->fp_dirty;
+    t->bail[n].dirty_d=fp_dirty_doubles(t);
+}
+static void bail_if_reg(Trans *t,int reg,bool nonzero){bail_add(t,reg,nonzero,false);}
 #define USES(f) (t->uses|=(uint8_t)(f))
 #define DEFS(f) (t->defs|=(uint8_t)(f))
 
@@ -971,7 +1130,7 @@ static bool ea_no_side_effects(unsigned mode){return mode!=3&&mode!=4;}
 static bool tr_div_w(Trans *t,bool is_signed){
     unsigned mode=(t->op>>3)&7u,reg=t->op&7u,dst=(t->op>>9)&7u;
     if(mode==1||!ea_no_side_effects(mode))return false;
-    USES(F_ALL);   /* can leave the block with the instruction untouched */
+    USES(F_ALL|F_FPCC);   /* can leave the block with the instruction untouched, into a trap */
     DEFS(F_NZVC);
     bool ok=true;
     int s=src_operand(t,mode,reg,2,W4,&ok);
@@ -1355,6 +1514,564 @@ static bool tr_group4(Trans *t){
     if((op&0xFFC0u)==0x4C00)return tr_mull(t);
     return false;
 }
+/* ---------- FPU ---------- */
+#define FPV(n) (8+(int)(n))
+#define FT_RES 0   /* result until it has passed its check */
+#define FT_SRC 31  /* source operand from memory or an integer */
+#define FT_DST 30  /* destination operand, widened to double */
+#define FT_A 29    /* scratch of the exact conversions */
+#define FT_B 28
+static void fp_touch(Trans *t){
+    if(t->fp_touched)return;
+    t->fp_touched=true;
+    /* Musashi clears this on every FPU instruction; FSAVE writes a null frame while it is set. */
+    ldrx(t,W3,RCTX,OFF_CPU);
+    strw(t,RZR,W3,CPU_FPU_RESET);
+}
+static void fp_load_round_mode(Trans *t){
+    ldrx(t,W0,RCTX,OFF_RMODE);
+    if(sizeof(float_rounding_mode)==1)E(t,0x39400000u|R5(W0)<<5|R5(W0));  /* ldrb w0,[x0] */
+    else ldrw(t,W0,W0,0);
+}
+/* The native path rounds to nearest. One test is enough until the block itself writes FPCR. */
+static void fp_need_nearest(Trans *t){
+    if(t->fp_round_ok)return;
+    t->fp_round_ok=true;
+    fp_load_round_mode(t);
+    bail_if_reg(t,W0,true);
+}
+/* Value bits in w0/x0, out: w1/x1 = bits without sign. Normal numbers pass straight through; an
+ * exponent of 0 or all ones goes to a cold test that only lets a zero come back. Clobbers x2. */
+static void fp_check(Trans *t,bool dbl){
+    if(dbl){
+        add64(t,W1,W0,W0);
+        lsr64(t,W2,W1,53);
+        addi(t,W2,W2,1);
+        ubfx(t,W2,W2,1,10);
+    }else{
+        add3(t,W1,W0,W0);
+        ubfx(t,W2,W1,24,8);
+        addi(t,W2,W2,1);
+        ubfx(t,W2,W2,1,7);
+    }
+    uint32_t *site=hole(t);
+    if(t->dry)return;
+    unsigned n=t->fp_cold_count++;
+    if(n>=sizeof(t->fp_cold)/sizeof(t->fp_cold[0])){fprintf(stderr,"[JIT] too many FP checks\n");abort();}
+    t->fp_cold[n].branch=site;
+    t->fp_cold[n].resume=t->p;
+    t->fp_cold[n].pc=t->pc;
+    t->fp_cold[n].wide=dbl;
+    t->fp_cold[n].dirty=t->fp_dirty;
+    t->fp_cold[n].dirty_d=fp_dirty_doubles(t);
+}
+/* FPSR N and Z from bits in x0 and the same without sign in x1. I and NaN clear: the native path
+ * has neither. Clobbers x0-x3. */
+static void fp_set_cc(Trans *t,bool dbl){
+    if(!LIVE(F_FPCC))return;
+    ldrx(t,W3,RCTX,OFF_CPU);
+    ldrw(t,W2,W3,CPU_FPSR);
+    if(dbl){lsr64(t,W0,W0,63);clz64(t,W1,W1);lsri(t,W1,W1,6);}
+    else{lsri(t,W0,W0,31);clz32(t,W1,W1);lsri(t,W1,W1,5);}
+    bfi(t,W1,W0,1,1);                 /* w1: bit 0 Z, bit 1 N */
+    bfi(t,W2,W1,26,2);
+    bfi(t,W2,RZR,24,2);
+    strw(t,W2,W3,CPU_FPSR);
+}
+static void fp_fill(Trans *t,unsigned n,bool dbl){
+    bl_to(t,t->j->fp_fill[dbl?1:0][n]);
+    bail_if_reg(t,W0,true);
+    t->fp_kind[n]=dbl?FK_D:FK_S;
+}
+/* Single from a double that must be exact. Anything else goes to Musashi. Clobbers x0-x2, v28, v29. */
+static void fp_exact_single(Trans *t,int fd,int fn){
+    fcvt_d_to_s(t,FT_A,fn);
+    fcvt_s_to_d(t,FT_B,FT_A);
+    fmov_from_fp(t,W0,FT_B,true);
+    fmov_from_fp(t,W1,fn,true);
+    eor64(t,W0,W0,W1);
+    bail_add(t,W0,true,true);
+    fmov_from_fp(t,W0,FT_A,false);
+    fp_check(t,false);                /* an exact denormal single */
+    fp_copy(t,fd,FT_A,false);
+}
+/* Guest register as single in its own host register. */
+static int fp_use_single(Trans *t,unsigned n){
+    if(t->fp_kind[n]==FK_NONE)fp_fill(t,n,false);
+    else if(t->fp_kind[n]==FK_D){fp_exact_single(t,FPV(n),FPV(n));t->fp_kind[n]=FK_S;}
+    return FPV(n);
+}
+/* Guest register as double; widened into `tmp` when it holds a single. */
+static int fp_use_double(Trans *t,unsigned n,int tmp){
+    if(t->fp_kind[n]==FK_NONE)fp_fill(t,n,true);
+    if(t->fp_kind[n]==FK_D)return FPV(n);
+    fcvt_s_to_d(t,tmp,FPV(n));
+    return tmp;
+}
+static void fp_flush(Trans *t){
+    for(unsigned n=0;n<8;n++)if(t->fp_dirty>>n&1u)
+        bl_to(t,t->j->fp_spill[t->fp_kind[n]==FK_D?1:0][n]);
+    t->fp_dirty=0;
+}
+static void fp_set_result(Trans *t,unsigned n,int fn,bool dbl){
+    fp_copy(t,FPV(n),fn,dbl);
+    t->fp_kind[n]=dbl?FK_D:FK_S;
+    t->fp_dirty|=(uint8_t)(1u<<n);
+}
+/* Which effective addresses m68kfpu.c reads and writes; it stops the emulator on all others. */
+static bool fp_ea_ok(unsigned fmt,unsigned mode,unsigned reg,bool write){
+    if(mode==1)return false;
+    if(mode==0)return fmt!=5u;
+    if(mode<=6)return !(fmt==6u&&reg==7u&&(mode==3||mode==4)); /* byte on A7: Musashi steps by 1 */
+    if(reg==1)return true;
+    if(write)return false;
+    if(reg==0)return fmt!=5u;
+    if(reg==2)return fmt==1u||fmt==0u||fmt==5u;
+    return reg==4;
+}
+/* Source address in w1, without moving An: a bail exit has to find the register untouched. */
+static bool fp_src_addr(Trans *t,unsigned mode,unsigned reg,unsigned width,int *step){
+    *step=0;
+    if(mode==3){mov(t,W1,an(reg));*step=(int)width;return true;}
+    if(mode==4){subi(t,W1,an(reg),width);*step=-(int)width;return true;}
+    return ea_addr(t,mode,reg,width);
+}
+static void fp_commit_step(Trans *t,unsigned reg,int step){
+    if(step>0)addi(t,an(reg),an(reg),(unsigned)step);
+    else if(step<0)subi(t,an(reg),an(reg),(unsigned)-step);
+}
+/* Source operand from an effective address into v31. *dbl says which form it has there. */
+static bool fp_read_source(Trans *t,unsigned fmt,unsigned mode,unsigned reg,int *step,bool *dbl){
+    static const uint8_t widths[8]={4,4,0,0,2,8,1,0};
+    unsigned width=widths[fmt];
+    *step=0;
+    if(fmt==5u){
+        if(mode==7&&reg==4){
+            uint32_t hi=fetch32(t),lo=fetch32(t);
+            imm32(t,W4,hi);imm32(t,W0,lo);
+        }else{
+            if(!fp_src_addr(t,mode,reg,8,step))return false;
+            mov(t,W5,W1);
+            mem_read(t,4);
+            mov(t,W4,W0);
+            addi(t,W1,W5,4);
+            mem_read(t,4);
+        }
+        orr64_lsl(t,W0,W0,W4,32);
+        fp_check(t,true);
+        fmov_to_fp(t,FT_SRC,W0,true);
+        *dbl=true;
+        return true;
+    }
+    if(mode==0)mov(t,W0,dn(reg));
+    else if(mode==7&&reg==4){
+        uint32_t v=width==4?fetch32(t):fetch16(t);
+        imm32(t,W0,v);
+    }else{
+        if(!fp_src_addr(t,mode,reg,width,step))return false;
+        mem_read(t,width);
+    }
+    switch(fmt){
+    case 1:fp_check(t,false);fmov_to_fp(t,FT_SRC,W0,false);*dbl=false;break;
+    case 0:scvtf_w(t,FT_SRC,W0,true);*dbl=true;break;         /* every int32 is an exact double */
+    case 4:sxth(t,W0,W0);scvtf_w(t,FT_SRC,W0,false);*dbl=false;break;
+    default:sxtb(t,W0,W0);scvtf_w(t,FT_SRC,W0,false);*dbl=false;break;
+    }
+    return true;
+}
+static void fp_write_back(Trans *t,unsigned n){
+    if(t->fp_dirty>>n&1u){
+        bl_to(t,t->j->fp_spill[t->fp_kind[n]==FK_D?1:0][n]);
+        t->fp_dirty&=(uint8_t)~(1u<<n);
+    }
+}
+/* The register changes in REG_FP, so the host copy of it is out of date from here on. */
+static void fp_forget(Trans *t,unsigned n){
+    t->fp_kind[n]=FK_NONE;
+    t->fp_dirty&=(uint8_t)~(1u<<n);
+}
+/* REG_FP[n] to memory at w6, as store_extended_float80 does it. Keeps w6. */
+static void fp_store_extended(Trans *t,unsigned n){
+    ldrx(t,W3,RCTX,OFF_FPR);
+    ldrx(t,W4,W3,n*16u+8u);
+    ldrh(t,W5,W3,n*16u);
+    mov(t,W1,W6);mov(t,W0,W5);mem_write(t,2);
+    addi(t,W1,W6,2);mov(t,W0,RZR);mem_write(t,2);
+    addi(t,W1,W6,4);lsr64(t,W0,W4,32);mem_write(t,4);
+    addi(t,W1,W6,8);mov(t,W0,W4);mem_write(t,4);
+}
+/* The reverse, leaving the mantissa in x0 and the sign and exponent in w5. Keeps w6. */
+static void fp_load_extended(Trans *t,unsigned n){
+    mov(t,W1,W6);mem_read(t,2);mov(t,W5,W0);
+    addi(t,W1,W6,4);mem_read(t,4);mov(t,W4,W0);
+    addi(t,W1,W6,8);mem_read(t,4);
+    orr64_lsl(t,W0,W0,W4,32);
+    ldrx(t,W3,RCTX,OFF_FPR);
+    strx(t,W0,W3,n*16u+8u);
+    strh(t,W5,W3,n*16u);
+    fp_forget(t,n);
+}
+/* FMOVEM <list>,-(An) and d16(An); (An)+,<list> and d16(An),<list>. All other forms stay with
+ * Musashi, which has some of them wrong in ways a translation would have to copy. */
+static bool tr_fmovem(Trans *t,unsigned w2){
+    unsigned mode=(t->op>>3)&7u,reg=t->op&7u,list=w2&0xFFu;
+    bool to_mem=(w2>>13)&1u;
+    unsigned form=(w2>>11)&3u;
+    if(to_mem?(form!=0u||(mode!=4&&mode!=5)):(form!=2u||(mode!=3&&mode!=5)))return false;
+    t->extra_cycles=2u*(unsigned)__builtin_popcount(list);
+    fp_touch(t);
+    if(mode==5){
+        int32_t d=(int16_t)fetch16(t);
+        add_const(t,W6,an(reg),d);
+    }else mov(t,W6,an(reg));
+    for(unsigned i=0;i<8;i++){
+        if(!(list>>i&1u))continue;
+        if(to_mem){
+            fp_write_back(t,i);
+            if(mode==4)subi(t,W6,W6,12);
+            fp_store_extended(t,i);
+            if(mode==5)addi(t,W6,W6,12);
+        }else{
+            fp_load_extended(t,7u-i);
+            addi(t,W6,W6,12);
+        }
+    }
+    if(mode!=5)mov(t,an(reg),W6);
+    return true;
+}
+/* Condition codes of any 80-bit value, mantissa in x0, sign and exponent in w5. Clobbers x0-x4. */
+static void fp_cc_any(Trans *t){
+    if(!LIVE(F_FPCC))return;
+    add64(t,W1,W0,W0);                 /* x1: mantissa without its integer bit */
+    ubfx(t,W2,W5,0,15);                /* w2: exponent */
+    orr64_lsl(t,W3,W1,W2,0);
+    clz64(t,W3,W3);
+    lsri(t,W3,W3,6);                   /* w3: Z */
+    addi(t,W2,W2,1);
+    lsri(t,W2,W2,15);                  /* w2: exponent all ones */
+    clz64(t,W1,W1);
+    lsri(t,W1,W1,6);                   /* w1: mantissa zero */
+    and3(t,W4,W2,W1);                  /* w4: I */
+    E(t,0x0A200000u|R5(W1)<<16|R5(W2)<<5|R5(W2)); /* bic w2,w2,w1: NaN */
+    bfi(t,W2,W4,1,1);
+    bfi(t,W2,W3,2,1);
+    ubfx(t,W4,W5,15,1);
+    bfi(t,W2,W4,3,1);
+    ldrx(t,W3,RCTX,OFF_CPU);
+    ldrw(t,W0,W3,CPU_FPSR);
+    bfi(t,W0,W2,24,4);
+    strw(t,W0,W3,CPU_FPSR);
+}
+/* FMOVE.X <ea>,FPn: nothing to convert and nothing that can bail. */
+static bool tr_fp_load_x(Trans *t,unsigned w2){
+    unsigned n=(w2>>7)&7u,mode=(t->op>>3)&7u,reg=t->op&7u;
+    if(mode<2||mode==6||(mode==7&&reg!=1&&reg!=2))return false;
+    t->extra_cycles=4;
+    DEFS(F_FPCC);
+    fp_touch(t);
+    if(!ea_addr(t,mode,reg,12))return false;
+    mov(t,W6,W1);
+    fp_load_extended(t,n);
+    fp_cc_any(t);
+    return true;
+}
+static bool tr_fp_store_x(Trans *t,unsigned n){
+    unsigned mode=(t->op>>3)&7u,reg=t->op&7u;
+    if(mode<2||mode==6||(mode==7&&reg!=1))return false;
+    t->extra_cycles=12;
+    fp_touch(t);
+    fp_write_back(t,n);
+    if(!ea_addr(t,mode,reg,12))return false;
+    mov(t,W6,W1);
+    fp_store_extended(t,n);
+    return true;
+}
+/* FMOVE FPn,<ea> in long, word, byte, single, double and extended. Sets no condition codes. */
+static bool tr_fp_store(Trans *t,unsigned w2){
+    unsigned fmt=(w2>>10)&7u,n=(w2>>7)&7u,mode=(t->op>>3)&7u,reg=t->op&7u;
+    if(fmt==2u)return tr_fp_store_x(t,n);
+    if(fmt==3u||fmt==7u||!fp_ea_ok(fmt,mode,reg,true))return false;
+    /* Musashi replaces the whole data register on .W and .B, which a 68040 does not. */
+    if(mode==0&&(fmt==4u||fmt==6u))return false;
+    t->extra_cycles=12;
+    fp_touch(t);
+    bool to_int=fmt==0u||fmt==4u||fmt==6u;
+    if(fmt==1u&&t->fp_kind[n]!=FK_S)fp_need_nearest(t);
+    if(t->fp_kind[n]==FK_NONE)fp_fill(t,n,true);
+    bool isd=t->fp_kind[n]==FK_D;
+    int v=FPV(n);
+    if(to_int){
+        if(t->fp_round_ok)fcvtns_w(t,W4,v,isd);
+        else{
+            /* C casts wrap this in FPCR writes, so round-to-zero is as common as nearest here. */
+            fp_load_round_mode(t);
+            lsri(t,W1,W0,1);
+            bail_if_reg(t,W1,true);
+            uint32_t *near=hole(t);
+            fcvtzs_w(t,W4,v,isd);
+            uint32_t *done=hole(t);
+            patch_cbz(t,near,t->p,W0,false,false);
+            fcvtns_w(t,W4,v,isd);
+            if(!t->dry)*done=enc_b(done,t->p);
+        }
+    }else if(fmt==1u){
+        if(isd){fcvt_d_to_s(t,FT_RES,v);fmov_from_fp(t,W4,FT_RES,false);}
+        else fmov_from_fp(t,W4,v,false);
+    }else{
+        if(!isd){fcvt_s_to_d(t,FT_RES,v);v=FT_RES;}
+        fmov_from_fp(t,W4,v,true);
+    }
+    if(mode==0){mov(t,dn(reg),W4);return true;}
+    static const uint8_t widths[8]={4,4,0,0,2,8,1,0};
+    if(!ea_addr(t,mode,reg,widths[fmt]))return false;
+    if(fmt==5u){
+        mov(t,W5,W1);
+        lsr64(t,W0,W4,32);
+        mem_write(t,4);
+        addi(t,W1,W5,4);
+        mov(t,W0,W4);
+        mem_write(t,4);
+        return true;
+    }
+    mov(t,W0,W4);
+    mem_write(t,widths[fmt]);
+    return true;
+}
+/* FMOVE.L between a data register and one of FPCR and FPSR. */
+static bool tr_fp_control(Trans *t,unsigned w2){
+    unsigned which=(w2>>10)&7u,mode=(t->op>>3)&7u,reg=t->op&7u;
+    bool to_ea=(w2>>13)&1u;
+    if(mode!=0||(which!=4u&&which!=2u))return false;
+    t->extra_cycles=10;
+    fp_touch(t);
+    unsigned off=which==4u?CPU_FPCR:CPU_FPSR;
+    ldrx(t,W3,RCTX,OFF_CPU);
+    if(to_ea){
+        if(which==2u)USES(F_FPCC);
+        ldrw(t,dn(reg),W3,off);
+        return true;
+    }
+    strw(t,dn(reg),W3,off);
+    if(which==2u){DEFS(F_FPCC);return true;}
+    ubfx(t,W0,dn(reg),4,2);
+    ldrx(t,W1,RCTX,OFF_RMODE);
+    if(sizeof(float_rounding_mode)==1)E(t,0x39000000u|R5(W1)<<5|R5(W0));  /* strb w0,[x1] */
+    else strw(t,W0,W1,0);
+    t->fp_round_ok=false;
+    return true;
+}
+enum { FG_MOVE,FG_ABS,FG_NEG,FG_SQRT,FG_DIV,FG_ADD,FG_MUL,FG_SUB,FG_CMP,FG_TST };
+static bool fp_decode(unsigned opmode,unsigned *kind,unsigned *prec){
+    static const struct { uint8_t opmode,kind,prec; } table[]={
+        {0x00,FG_MOVE,0},{0x40,FG_MOVE,1},{0x44,FG_MOVE,2},
+        {0x18,FG_ABS,0},{0x58,FG_ABS,1},{0x5C,FG_ABS,2},
+        {0x1A,FG_NEG,0},{0x5A,FG_NEG,1},{0x5E,FG_NEG,2},
+        {0x41,FG_SQRT,1},{0x45,FG_SQRT,2},
+        {0x60,FG_DIV,1},{0x64,FG_DIV,2},
+        {0x62,FG_ADD,1},{0x66,FG_ADD,2},
+        {0x63,FG_MUL,1},{0x67,FG_MUL,2},
+        {0x68,FG_SUB,1},{0x6C,FG_SUB,2},
+        {0x38,FG_CMP,0},{0x3A,FG_TST,0},
+    };
+    for(unsigned i=0;i<sizeof(table)/sizeof(table[0]);i++)if(table[i].opmode==opmode){
+        *kind=table[i].kind;*prec=table[i].prec;
+        return true;
+    }
+    return false;
+}
+static bool tr_fp_general(Trans *t,unsigned w2){
+    static const uint8_t cycles[]={4,3,3,109,43,9,11,9,7,7};
+    unsigned rm=(w2>>14)&1u,src=(w2>>10)&7u,dst=(w2>>7)&7u,kind,prec;
+    unsigned mode=(t->op>>3)&7u,reg=t->op&7u;
+    if(rm&&src==2u&&(w2&0x7Fu)==0u)return tr_fp_load_x(t,w2);
+    if(!fp_decode(w2&0x7Fu,&kind,&prec))return false;
+    if(rm&&(src==2u||src==3u||src==7u||!fp_ea_ok(src,mode,reg,false)))return false;
+    t->extra_cycles=cycles[kind];
+    DEFS(F_FPCC);
+    fp_touch(t);
+    if(prec==1u||kind==FG_CMP||(kind>=FG_SQRT&&kind<=FG_SUB))fp_need_nearest(t);
+    /* Operand: register number and form, or v31. */
+    int step=0;
+    bool from_mem=rm!=0,src_dbl=false;
+    if(from_mem){
+        if(!fp_read_source(t,src,mode,reg,&step,&src_dbl))return false;
+    }
+    int sr=FT_SRC;
+    switch(kind){
+    case FG_MOVE:case FG_ABS:case FG_NEG:{
+        if(!from_mem){
+            if(t->fp_kind[src]==FK_NONE)fp_fill(t,src,true);
+            sr=FPV(src);
+            src_dbl=t->fp_kind[src]==FK_D;
+        }
+        /* Only FSxxx of a double rounds; the sign operations cannot leave the format. */
+        bool narrow=prec==1u&&src_dbl;
+        bool dbl=src_dbl&&!narrow;
+        if(narrow){fcvt_d_to_s(t,FT_RES,sr);sr=FT_RES;}
+        if(kind==FG_ABS)fp2(t,FOP_ABS,FT_RES,sr,dbl);
+        else if(kind==FG_NEG)fp2(t,FOP_NEG,FT_RES,sr,dbl);
+        else if(sr!=FT_RES)fp_copy(t,FT_RES,sr,dbl);
+        fmov_from_fp(t,W0,FT_RES,dbl);
+        if(narrow)fp_check(t,false);
+        else if(dbl)add64(t,W1,W0,W0);
+        else add3(t,W1,W0,W0);
+        fp_set_result(t,dst,FT_RES,dbl);
+        fp_commit_step(t,reg,step);
+        fp_set_cc(t,dbl);
+        return true;
+    }
+    case FG_TST:{
+        if(!from_mem){
+            if(t->fp_kind[src]==FK_NONE)fp_fill(t,src,true);
+            sr=FPV(src);
+            src_dbl=t->fp_kind[src]==FK_D;
+        }
+        fmov_from_fp(t,W0,sr,src_dbl);
+        if(src_dbl)add64(t,W1,W0,W0);else add3(t,W1,W0,W0);
+        fp_commit_step(t,reg,step);
+        fp_set_cc(t,src_dbl);
+        return true;
+    }
+    case FG_CMP:{
+        bool single=t->fp_kind[dst]==FK_S&&(from_mem?!src_dbl:t->fp_kind[src]==FK_S);
+        int dr;
+        if(single){sr=from_mem?FT_SRC:FPV(src);dr=FPV(dst);}
+        else{
+            if(!from_mem)sr=fp_use_double(t,src,FT_SRC);
+            else if(!src_dbl)fcvt_s_to_d(t,FT_SRC,FT_SRC);
+            dr=fp_use_double(t,dst,FT_DST);
+        }
+        fp_commit_step(t,reg,step);
+        if(LIVE(F_FPCC)){
+            /* Sign and zero of the difference survive either format exactly. */
+            fp3(t,FOP_SUB,FT_RES,dr,sr,!single);
+            fmov_from_fp(t,W0,FT_RES,!single);
+            if(single)add3(t,W1,W0,W0);else add64(t,W1,W0,W0);
+            fp_set_cc(t,!single);
+        }
+        return true;
+    }
+    default:break;
+    }
+    /* Arithmetic in the instruction's own precision, so the host rounds it exactly once. */
+    bool dbl=prec==2u;
+    if(dbl){
+        if(!from_mem)sr=fp_use_double(t,src,FT_SRC);
+        else if(!src_dbl)fcvt_s_to_d(t,FT_SRC,FT_SRC);
+    }else{
+        if(!from_mem)sr=fp_use_single(t,src);
+        else if(src_dbl)fp_exact_single(t,FT_SRC,FT_SRC);
+    }
+    if(kind==FG_SQRT)fp2(t,FOP_SQRT,FT_RES,sr,dbl);
+    else{
+        int dr=dbl?fp_use_double(t,dst,FT_DST):fp_use_single(t,dst);
+        static const uint32_t ops[]={FOP_DIV,FOP_ADD,FOP_MUL,FOP_SUB};
+        fp3(t,ops[kind-FG_DIV],FT_RES,dr,sr,dbl);
+    }
+    fmov_from_fp(t,W0,FT_RES,dbl);
+    fp_check(t,dbl);
+    fp_set_result(t,dst,FT_RES,dbl);
+    fp_commit_step(t,reg,step);
+    fp_set_cc(t,dbl);
+    return true;
+}
+/* Same truth table as Musashi's TEST_CONDITION, indexed by FPSR bits 27..24 (N Z I NaN). */
+static unsigned fp_condition_mask(unsigned cond){
+    unsigned mask=0;
+    for(unsigned i=0;i<16;i++){
+        bool nan=i&1u,z=i&4u,n=i&8u,r;
+        switch(cond&15u){
+        case 0:r=false;break;
+        case 1:r=z;break;
+        case 2:r=!(nan||z||n);break;
+        case 3:r=z||!(nan||n);break;
+        case 4:r=n&&!(nan||z);break;
+        case 5:r=z||(n&&!nan);break;
+        case 6:r=!nan&&!z;break;
+        case 7:r=!nan;break;
+        case 8:r=nan;break;
+        case 9:r=nan||z;break;
+        case 10:r=nan||!(n||z);break;
+        case 11:r=nan||z||!n;break;
+        case 12:r=nan||(n&&!z);break;
+        case 13:r=nan||z||n;break;
+        case 14:r=!z;break;
+        default:r=true;break;
+        }
+        if(r)mask|=1u<<i;
+    }
+    return mask;
+}
+/* Bit 0 of w1: is the FPSR condition true? Clobbers x0, x3. */
+static void fp_test_condition(Trans *t,unsigned cond){
+    ldrx(t,W3,RCTX,OFF_CPU);
+    ldrw(t,W0,W3,CPU_FPSR);
+    ubfx(t,W0,W0,24,4);
+    movz(t,W1,fp_condition_mask(cond),0);
+    lsrv(t,W1,W1,W0);
+}
+/* FScc Dn and FScc d16(An), the two forms m68kfpu.c has. */
+static bool tr_fscc(Trans *t){
+    unsigned mode=(t->op>>3)&7u,reg=t->op&7u;
+    unsigned w2=fetch16(t);
+    if(t->stop||(w2&0x3Fu)>=0x20u||(mode!=0&&mode!=5))return false;
+    t->extra_cycles=7;
+    USES(F_FPCC);
+    fp_touch(t);
+    fp_test_condition(t,w2&0x3Fu);
+    sbfm(t,W4,W1,0,0);
+    if(mode==0){bfi(t,dn(reg),W4,0,8);return true;}
+    if(!ea_addr(t,mode,reg,1))return false;
+    mov(t,W0,W4);
+    mem_write(t,1);
+    return true;
+}
+static bool tr_fbcc(Trans *t,bool wide){
+    unsigned cond=t->op&0x3Fu;
+    if(cond>=0x20u)return false;
+    uint32_t base=t->pc+2u;
+    int32_t disp;
+    if(wide)disp=(int32_t)fetch32(t);
+    else{
+        disp=(int16_t)fetch16(t);
+        /* Musashi's 16-bit branch wraps displacement-2 at the end of the range. */
+        if(disp<-32766)return false;
+    }
+    uint32_t target=base+(uint32_t)disp;
+    if(target&1u)return false;
+    t->extra_cycles=7;
+    USES(F_FPCC);
+    fp_touch(t);
+    fp_flush(t);
+    fp_test_condition(t,cond);
+    uint32_t *branch=hole(t);
+    exit_to(t,t->ip);
+    uint32_t *taken=t->p;
+    exit_to(t,target);
+    patch_tbz(t,branch,taken,W1,0,true);
+    t->ended=true;
+    return true;
+}
+static bool tr_fpu(Trans *t){
+    unsigned op=t->op;
+    if(t->j->cpu->cpu_type!=68040||(op&0xFF00u)!=0xF200u)return false;
+    switch((op>>6)&3u){
+    case 0:{
+        unsigned w2=fetch16(t);
+        if(t->stop)return false;
+        switch(w2>>13){
+        case 0:case 2:return tr_fp_general(t,w2);
+        case 3:return tr_fp_store(t,w2);
+        case 4:case 5:return tr_fp_control(t,w2);
+        default:return tr_fmovem(t,w2);
+        }
+    }
+    case 1:return tr_fscc(t);
+    case 2:return tr_fbcc(t,false);
+    case 3:return tr_fbcc(t,true);
+    default:return false;
+    }
+}
 static bool tr_insn(Trans *t){
     unsigned op=t->op;
     switch(op>>12){
@@ -1452,6 +2169,7 @@ static bool tr_insn(Trans *t){
         return tr_alu_to_ea(t,2,size_table[opm-4u]);
     }
     case 0xE:return tr_shift_family(t);
+    case 0xF:return tr_fpu(t);
     default:return false;
     }
 }
@@ -1517,7 +2235,7 @@ static void set_icache(JitCtx *j,uint32_t pc,const void *code){
 }
 /* Translate at most MAX_BLOCK_INSNS, stopping before a page boundary. */
 static Block *translate(JitCtx *j,uint32_t pc){
-    if((size_t)(j->code_end-j->code_next)<4096u*4u||
+    if((size_t)(j->code_end-j->code_next)<4096u*16u||
        (size_t)(j->arena_end-j->arena_next)<16384u){j->flush_pending=true;return NULL;}
     Trans *t=calloc(1,sizeof(*t));
     if(!t)return NULL;
@@ -1536,11 +2254,13 @@ static Block *translate(JitCtx *j,uint32_t pc){
     while(count<MAX_BLOCK_INSNS&&!ended){
         if((cur&1u)||!fetch_ok(t,cur,2))break;
         t->pc=cur;t->ip=cur;t->stop=false;t->uses=t->defs=0;t->ended=false;
-        t->live=F_ALL;t->cold_count=0;t->exit_count=0;t->bail_count=0;t->p=&scratch_probe;
+        t->live=F_ALL|F_FPCC;t->cold_count=0;t->exit_count=0;t->bail_count=0;t->p=&scratch_probe;
+        t->fp_cold_count=0;t->fp_dirty=0;t->fp_touched=t->fp_round_ok=false;t->extra_cycles=0;
+        memset(t->fp_kind,FK_NONE,sizeof t->fp_kind);
         t->op=(uint16_t)fetch16(t);
         bool ok=tr_insn(t);
         if(!ok||t->stop)break;
-        unsigned cyc=m68ki_cpu.cyc_instruction[t->op];
+        unsigned cyc=m68ki_cpu.cyc_instruction[t->op]+t->extra_cycles;
         if(cycles+cyc>MAX_BLOCK_CYCLES)break;
         cycles+=cyc;
         pcs[count]=cur;ops[count]=t->op;uses[count]=t->uses;defs[count]=t->defs;
@@ -1555,13 +2275,15 @@ static Block *translate(JitCtx *j,uint32_t pc){
         return b;
     }
     /* Backward liveness; all flags are live when a block ends. */
-    uint8_t live=F_ALL;
+    uint8_t live=F_ALL|F_FPCC;
     for(int i=(int)count-1;i>=0;i--){
         t->live_after[i]=live;
         live=(uint8_t)((live&~defs[i])|uses[i]);
     }
     /* Real pass. */
     t->dry=false;t->cold_count=0;t->exit_count=0;t->bail_count=0;t->stop=false;
+    t->fp_cold_count=0;t->fp_dirty=0;t->fp_touched=t->fp_round_ok=false;
+    memset(t->fp_kind,FK_NONE,sizeof t->fp_kind);
     t->p=j->code_next;
     write_enable(true);
     /* An expired budget exits before any guest effect. The stub sits in front
@@ -1579,9 +2301,11 @@ static Block *translate(JitCtx *j,uint32_t pc){
         t->pc=pcs[i];t->ip=pcs[i];t->op=ops[i];
         t->live=t->live_after[i];t->uses=t->defs=0;t->ended=false;
         (void)fetch16(t);
+        /* The block's last instruction may leave it, and every way out needs REG_FP current. */
+        if(i==count-1u&&(ops[i]>>12)!=0xFu)fp_flush(t);
         (void)tr_insn(t);
     }
-    if(!t->ended)exit_to(t,cur);
+    if(!t->ended){fp_flush(t);exit_to(t,cur);}
     /* Direct exits */
     for(unsigned i=0;i<t->exit_count;i++){
         uint32_t *site=t->exits[i].site;
@@ -1594,9 +2318,25 @@ static Block *translate(JitCtx *j,uint32_t pc){
         b_to(t,j->exit_stub);
         t->exits[i].stub=stub;
     }
+    /* FP values with an extreme exponent: zero rejoins the fast path, the rest bails. */
+    for(unsigned i=0;i<t->fp_cold_count;i++){
+        patch_cbz(t,t->fp_cold[i].branch,t->p,W2,false,false);
+        unsigned n=t->bail_count++;
+        if(n>=sizeof(t->bail)/sizeof(t->bail[0])){fprintf(stderr,"[JIT] too many bail exits\n");abort();}
+        t->bail[n].branch=hole(t);
+        t->bail[n].pc=t->fp_cold[i].pc;
+        t->bail[n].reg=W1;
+        t->bail[n].nonzero=true;
+        t->bail[n].wide=t->fp_cold[i].wide;
+        t->bail[n].dirty=t->fp_cold[i].dirty;
+        t->bail[n].dirty_d=t->fp_cold[i].dirty_d;
+        b_to(t,t->fp_cold[i].resume);
+    }
     /* Bail exits: state untouched, Musashi takes the instruction. */
     for(unsigned i=0;i<t->bail_count;i++){
-        patch_cbz(t,t->bail[i].branch,t->p,t->bail[i].reg,t->bail[i].nonzero,false);
+        patch_cbz(t,t->bail[i].branch,t->p,t->bail[i].reg,t->bail[i].nonzero,t->bail[i].wide);
+        for(unsigned n=0;n<8;n++)if(t->bail[i].dirty>>n&1u)
+            bl_to(t,j->fp_spill[(t->bail[i].dirty_d>>n&1u)?1:0][n]);
         imm32(t,W0,t->bail[i].pc);
         E(t,0xD2800021u);             /* mov x1,#1: LINK_BAIL */
         b_to(t,j->exit_stub);
@@ -1702,6 +2442,20 @@ static void flush_all(JitCtx *j){
 /* ---------- execution ---------- */
 /* link_site value from a bail exit: the very next instruction goes to Musashi. */
 #define LINK_BAIL ((uint32_t*)(uintptr_t)1)
+/* QRX_JIT_STATS: which FPU instruction is Musashi about to run? Key: the second word for
+ * general and move forms, and the first word for FBcc, FScc, FSAVE and FRESTORE. */
+static void count_interpreted(JitCtx *j,uint32_t pc){
+    if(!j->opcode_misses)return;
+    uintptr_t base=j->cpu->rpage[pc>>PAGE_SHIFT];
+    if(!base)return;
+    uint32_t op=__builtin_bswap16(*(const uint16_t*)(base+pc));
+    j->opcode_misses[op]++;
+    if((op&0xFE00u)!=0xF200u)return;
+    if((op&0xFFC0u)==0xF200u&&(pc&0xFFFu)<0xFFEu){
+        uint32_t w2=__builtin_bswap16(*(const uint16_t*)(base+pc+2u));
+        j->fp_misses[w2]++;
+    }else j->fp_misses[op]++;
+}
 static inline void flags_to_host(JitCtx *j){
     uint64_t n=(FLAG_N&0x80u)?UINT64_C(1)<<31:0;
     uint64_t z=(FLAG_Z==0)?UINT64_C(1)<<30:0;
@@ -1743,10 +2497,7 @@ static int jit_execute(QRXFullCPU *c,int slice){
             }
         }
         if(!b->code){
-            if(j->opcode_misses){
-                uintptr_t base=c->rpage[pc>>PAGE_SHIFT];
-                if(base)j->opcode_misses[__builtin_bswap16(*(const uint16_t*)(base+pc))]++;
-            }
+            count_interpreted(j,pc);
             m68ki_cpu.pref_addr=1;
             int used=m68k_execute(1);
             j->interp_insns++;
@@ -1767,6 +2518,7 @@ static int jit_execute(QRXFullCPU *c,int slice){
         j->native_insns+=j->insns;
         remaining=j->cycles;
         if(j->link_site==LINK_BAIL){
+            count_interpreted(j,REG_PC);
             m68ki_cpu.pref_addr=1;
             int used=m68k_execute(1);
             j->interp_insns++;
@@ -1819,10 +2571,11 @@ bool qrx_jit_init(QRXFullCPU *c,uint64_t start_instructions){
     j->code_end=j->code_base+CODE_BYTES/4u;
     memset(j->icache,0xFF,ICACHE_SIZE*sizeof(ICacheEntry));
     j->dar=m68ki_cpu.dar;j->rpage=c->rpage;j->wpage=c->wpage;
+    j->cpu_core=&m68ki_cpu;j->fp_regs=m68ki_cpu.fpr;j->fp_round_mode=&float_rounding_mode;
     j->read_helper=(void*)read_helper;j->write_helper=(void*)write_helper;
     j->start_instructions=start_instructions;
     j->stats=getenv("QRX_JIT_STATS")!=NULL;
-    if(j->stats)j->opcode_misses=calloc(65536,sizeof(uint64_t));
+    if(j->stats){j->opcode_misses=calloc(65536,sizeof(uint64_t));j->fp_misses=calloc(65536,sizeof(uint64_t));}
     write_enable(true);
     build_stubs(j);
     icache_sync(j->code_base,(size_t)((uint8_t*)j->code_next-(uint8_t*)j->code_base));
@@ -1843,7 +2596,7 @@ void qrx_jit_destroy(QRXFullCPU *c){
     munmap(j->code_base,CODE_BYTES);
     munmap(j->pages,PAGE_ENTRIES*sizeof(CodePage));
     munmap(j->arena,(size_t)(j->arena_end-j->arena));
-    free(j->hash);free(j->icache);free(j->opcode_misses);
+    free(j->hash);free(j->icache);free(j->opcode_misses);free(j->fp_misses);
     if(the_ctx==j)the_ctx=NULL;
     free(j);
     c->jit=NULL;c->jit_exec=NULL;c->jit_notify=NULL;c->jit_request_flush=NULL;
@@ -1872,6 +2625,16 @@ void qrx_jit_report(const QRXFullCPU *c){
         if(!v)break;
         fprintf(stderr," %04x:%llu",best,(unsigned long long)v);
         j->opcode_misses[best]=0;
+    }
+    fprintf(stderr,"\n");
+    if(!j->fp_misses)return;
+    fprintf(stderr,"[JIT] interpreted FPU words by count:");
+    for(int n=0;n<60;n++){
+        unsigned best=0;uint64_t v=0;
+        for(unsigned i=0;i<65536;i++)if(j->fp_misses[i]>v){v=j->fp_misses[i];best=i;}
+        if(!v)break;
+        fprintf(stderr," %04x:%llu",best,(unsigned long long)v);
+        j->fp_misses[best]=0;
     }
     fprintf(stderr,"\n");
 }

@@ -649,10 +649,37 @@ FN(k_HeapFree) { qw_free(w, a[2]); return 1; }
 FN(k_HeapReAlloc) { uint32_t b[2]; b[0] = a[2]; b[1] = a[3]; return m_realloc(w, b); }
 FN(k_HeapSize) { return qw_size(w, a[2]); }
 FN(k_VirtualAlloc) {
-    uint32_t n = (a[1] + 0xFFFu) & ~0xFFFu, r = qw_alloc(w, n + 0x1000);
+    uint32_t n = (a[1] + 0xFFFu) & ~0xFFFu, r;
+    /* Reserve first, commit page by page later: a commit inside memory the program already got
+       is that memory. The heap of Microsoft's C runtime works this way. */
+    if (a[0] && x86_is_mapped(C, a[0]) && (!n || x86_is_mapped(C, a[0] + n - 1u))) return a[0] & ~0xFFFu;
+    /* An address that is free is the program's to have, as under Windows: Sonic & Knuckles asks
+       for fixed ones and then uses them without looking at the answer. A reservation starts on
+       a 64 KB boundary. */
+    if (a[0] && a[0] < QW_HEAP_BASE && !x86_is_mapped(C, a[0])) {
+        uint32_t from = (a[2] & 0x2000u) ? a[0] & ~0xFFFFu : a[0] & ~0xFFFu, len = (a[0] + n - from + 0xFFFu) & ~0xFFFu;
+        if (x86_map(C, from, len, 1)) return from;
+    }
+    /* A reservation starts on a 64 KB boundary, as under Windows. Delphi's heap commits and
+       decommits 16 KB units counted from the address: from 10002000 it left 8 KB of old data
+       committed and later read it as a block header (the Inno Setup of islepro). */
+    if (!a[0] && (a[2] & 0x2000u)) {
+        r = qw_alloc(w, n + 0x10000);
+        return r ? (r + 0xFFFFu) & ~0xFFFFu : 0;
+    }
+    r = qw_alloc(w, n + 0x1000);
     return (r + 0xFFFu) & ~0xFFFu;
 }
-FN(k_VirtualFree) { UNUSED; return 1; }
+/* Decommitted pages come back zero when they are committed again, and Delphi's heap counts on it.
+   Nothing is unmapped: a later commit there is what VirtualAlloc above answers. */
+FN(k_VirtualFree) {
+    if (a[2] & 0x4000u) {               /* MEM_DECOMMIT */
+        uint32_t i, from = a[0] & ~0xFFFu, n = (a[1] + (a[0] & 0xFFFu) + 0xFFFu) & ~0xFFFu;
+        if (x86_is_mapped(C, from) && n && x86_is_mapped(C, from + n - 1u)) for (i = 0; i < n; i += 4u) WR32(from + i, 0);
+    }
+    UNUSED;
+    return 1;
+}
 FN(k_VirtualProtect) { if (a[3]) WR32(a[3], 0x04); UNUSED; return 1; }
 FN(k_VirtualQuery) {
     uint32_t p = a[0] & ~0xFFFu, i;
@@ -692,7 +719,12 @@ FN(k_WideCharToMultiByte) {
 FN(k_GetEnvironmentVariableA) { UNUSED; return 0; }
 FN(k_GetEnvironmentVariableW) { UNUSED; return 0; }
 FN(k_SetUnhandledExceptionFilter) { uint32_t o = w->unhandled_filter; w->unhandled_filter = a[0]; return o; }
-FN(k_UnhandledExceptionFilter) { UNUSED; return 1; }
+FN(k_UnhandledExceptionFilter) {
+    uint32_t rec = RD32(a[0]), r;
+    if (w->unhandled_filter && (r = qw_call(w, w->unhandled_filter, 1, a[0], 0, 0, 0)) != 0) return r;
+    qw_log(w, "unhandled exception %08x at %08x", RD32(rec), RD32(rec + 12));
+    return 1;
+}
 FN(k_TlsAlloc) { static uint32_t n; UNUSED; return n < 64 ? n++ : 0xFFFFFFFFu; }
 FN(k_TlsGetValue) { return a[0] < 64 ? RD32(QW_TEB + 0x1000 + a[0] * 4) : 0; }
 FN(k_TlsSetValue) { if (a[0] < 64) WR32(QW_TEB + 0x1000 + a[0] * 4, a[1]); return 1; }
@@ -713,7 +745,109 @@ FN(k_GetSystemInfo) {
     WR32(a[0] + 24, 586); WR32(a[0] + 28, 0x10000); x86_wr16(C, a[0] + 32, 6);
     return 0;
 }
-FN(k_RaiseException) { qw_log(w, "RaiseException(%08x): structured exceptions are not supported", a[0]); w->exit_code = a[0]; w->exiting = 1; return 0; }
+/* Structured exceptions, as far as software raises them. The record and the context lie on the
+ * guest stack below the raiser. A handler runs as plain guest code and returns to a thunk: it may
+ * also never return, as a C++ catch does, so nothing on the host side may wait for it. */
+#define SEH_CTX   0x50u                    /* the CONTEXT follows the EXCEPTION_RECORD */
+#define SEH_PTRS  (SEH_CTX + 0x2CCu)       /* EXCEPTION_POINTERS */
+#define SEH_BLOCK (SEH_PTRS + 8u)
+#define SEH_NONE  0xFFFFFFFFu
+#define SEH_RESERVE (SEH_BLOCK + 0x100u)   /* stays free below the raiser's stack pointer */
+void qw_api_jump(void);
+uint32_t qw_thread_current_teb(void);
+
+static const struct { uint8_t reg; uint8_t off; } seh_regs[] = {
+    { X86_EDI, 0x9C }, { X86_ESI, 0xA0 }, { X86_EBX, 0xA4 }, { X86_EDX, 0xA8 }, { X86_ECX, 0xAC }, { X86_EAX, 0xB0 }, { X86_EBP, 0xB4 }, { X86_ESP, 0xC4 }
+};
+
+static void seh_resume(qwin *w, uint32_t ctx)
+{
+    x86cpu *c = &w->cpu;
+    size_t i;
+    for (i = 0; i < sizeof(seh_regs) / sizeof(seh_regs[0]); i++) c->r[seh_regs[i].reg] = RD32(ctx + seh_regs[i].off);
+    c->eip = RD32(ctx + 0xB8);
+}
+
+static void seh_unhandled(qwin *w, uint32_t rec)
+{
+    x86cpu *c = &w->cpu;
+    uint32_t ptrs = rec + SEH_PTRS;
+    c->r[X86_ESP] = rec - 0x20u;
+    if (w->unhandled_filter && qw_call(w, w->unhandled_filter, 1, ptrs, 0, 0, 0) == SEH_NONE) { seh_resume(w, rec + SEH_CTX); return; }
+    qw_log(w, "unhandled exception %08x at %08x", RD32(rec), RD32(rec + 12));
+    w->exit_code = RD32(rec);
+    w->exiting = 1;
+}
+
+static void seh_dispatch(qwin *w, uint32_t rec, uint32_t frame)
+{
+    x86cpu *c = &w->cpu;
+    uint32_t guard = rec - 8u, sp = guard - 0x14u, teb = qw_thread_current_teb();
+    if (!frame || frame == SEH_NONE) { seh_unhandled(w, rec); return; }
+    /* As Windows does, a frame of its own is on the chain while the handler runs. The C++ runtime
+       counts on it: it takes the head of the chain, unwinds, and links that head in again. */
+    WR32(guard, RD32(teb)); WR32(guard + 4, qw_thunk(w, "kernel32", "QrxSehGuard")); WR32(teb, guard);
+    WR32(sp, qw_thunk(w, "kernel32", "QrxSehReturn"));
+    WR32(sp + 4, rec); WR32(sp + 8, frame); WR32(sp + 12, rec + SEH_CTX); WR32(sp + 16, 0);
+    c->r[X86_ESP] = sp;
+    c->eip = RD32(frame + 4);
+}
+
+FN(k_RaiseException) {
+    x86cpu *c = &w->cpu;
+    uint32_t sp = c->r[X86_ESP], rec = (sp - SEH_RESERVE) & ~3u, ctx = rec + SEH_CTX, n = a[2] > 15u ? 15u : a[2], i;
+    for (i = 0; i < SEH_BLOCK; i += 4) WR32(rec + i, 0);
+    WR32(rec, a[0]); WR32(rec + 4, a[1] & 1u); WR32(rec + 12, RD32(sp)); WR32(rec + 16, n);
+    for (i = 0; i < n; i++) WR32(rec + 20 + i * 4, RD32(a[3] + i * 4));
+    WR32(ctx, 0x10007u);
+    for (i = 0; i < sizeof(seh_regs) / sizeof(seh_regs[0]); i++) WR32(ctx + seh_regs[i].off, c->r[seh_regs[i].reg]);
+    WR32(ctx + 0xC4, sp + 20);          /* as after the return of this stdcall function */
+    WR32(ctx + 0xB8, RD32(sp));
+    WR32(ctx + 0xC0, c->eflags);
+    WR32(rec + SEH_PTRS, rec); WR32(rec + SEH_PTRS + 4, ctx);
+    seh_dispatch(w, rec, RD32(qw_thread_current_teb()));
+    qw_api_jump();
+    return 0;
+}
+
+/* A handler returned: [esp] is still its first argument. */
+FN(k_SehReturn) {
+    x86cpu *c = &w->cpu;
+    uint32_t rec = RD32(c->r[X86_ESP]), frame = RD32(c->r[X86_ESP] + 4);
+    UNUSED;
+    WR32(qw_thread_current_teb(), RD32(rec - 8u));
+    if (c->r[X86_EAX] == 0) {            /* ExceptionContinueExecution */
+        if (RD32(rec + 4) & 1u) seh_unhandled(w, rec);
+        else seh_resume(w, rec + SEH_CTX);
+    } else seh_dispatch(w, rec, RD32(frame));
+    qw_api_jump();
+    return c->r[X86_EAX];
+}
+
+FN(k_SehGuard) { UNUSED; return 1; }    /* ExceptionContinueSearch */
+
+/* (TargetFrame, TargetIp, ExceptionRecord, ReturnValue): the handlers run again, to clean up. */
+FN(k_RtlUnwind) {
+    x86cpu *c = &w->cpu;
+    uint32_t sp = c->r[X86_ESP], ret = RD32(sp), block = (sp - SEH_RESERVE) & ~3u, rec = a[2] ? a[2] : block, teb = qw_thread_current_teb(), frame, i;
+    uint32_t keep[4];
+    keep[0] = c->r[X86_EBX]; keep[1] = c->r[X86_ESI]; keep[2] = c->r[X86_EDI]; keep[3] = c->r[X86_EBP];
+    for (i = 0; i < SEH_BLOCK; i += 4) WR32(block + i, 0);
+    if (!a[2]) { WR32(rec, 0xC0000027u); WR32(rec + 12, ret); }      /* STATUS_UNWIND */
+    WR32(rec + 4, RD32(rec + 4) | 2u | (a[0] && a[0] != SEH_NONE ? 0u : 4u));   /* UNWINDING, EXIT_UNWIND */
+    c->r[X86_ESP] = block - 0x20u;
+    for (frame = RD32(teb); frame && frame != SEH_NONE && frame != a[0]; frame = RD32(teb)) {
+        qw_call(w, RD32(frame + 4), 4, rec, frame, block + SEH_CTX, 0);
+        if (c->fault || w->exiting) return 0;
+        WR32(teb, RD32(frame));
+    }
+    c->r[X86_EBX] = keep[0]; c->r[X86_ESI] = keep[1]; c->r[X86_EDI] = keep[2]; c->r[X86_EBP] = keep[3];
+    c->r[X86_ESP] = sp + 20;
+    c->r[X86_EAX] = a[3];
+    c->eip = a[1] ? a[1] : ret;
+    qw_api_jump();
+    return a[3];
+}
 FN(k_FreeLibrary) { qmod *m = pe_find_module(w, a[0]); if (m) pe_free_dll(w, m); return 1; }
 FN(k_IsBadReadPtr) { UNUSED; return !x86_is_mapped(C, a[0]); }
 FN(k_FindResourceW) { uint32_t d, s; if (!res_find_in(w, a[0], a[2], a[1], &d, &s)) return 0; { uint32_t h = qw_alloc(w, 8); WR32(h, d); WR32(h + 4, s); return h; } }
@@ -903,7 +1037,7 @@ const qhle qw_kernel32[] = {
     K("PulseEvent", k_PulseEvent, 1), K("WaitForSingleObject", k_WaitForSingleObject, 2), K("WaitForMultipleObjects", k_WaitForMultipleObjects, 4),
     K("GetStdHandle", k_GetStdHandle, 1), K("WriteFile", k_WriteFile, 5), K("CloseHandle", k_CloseHandle, 1),
     K("OutputDebugStringA", k_OutputDebugStringA, 1), K("OutputDebugStringW", k_OutputDebugStringW, 1), K("IsDebuggerPresent", k_IsDebuggerPresent, 0),
-    K("GetSystemInfo", k_GetSystemInfo, 1), K("RaiseException", k_RaiseException, 4), K("IsBadReadPtr", k_IsBadReadPtr, 2),
+    K("GetSystemInfo", k_GetSystemInfo, 1), K("RaiseException", k_RaiseException, 4), K("RtlUnwind", k_RtlUnwind, 4), K("QrxSehReturn", k_SehReturn, 0), { "kernel32", "QrxSehGuard", -1, k_SehGuard }, K("IsBadReadPtr", k_IsBadReadPtr, 2),
     K("QrxLauncherPlay", k_QrxLauncherPlay, 1),
     K("FindResourceW", k_FindResourceW, 3), K("LoadResource", k_LoadResource, 2), K("LockResource", k_LockResource, 1), K("SizeofResource", k_SizeofResource, 2),
     K("InterlockedIncrement", k_InterlockedIncrement, 1), K("InterlockedDecrement", k_InterlockedDecrement, 1),
@@ -995,7 +1129,7 @@ const qhle qw_misc[] = {
     { "comctl32", "CreateStatusWindowW", 4, c_CreateStatusWindowW }, { "comctl32", "CreateStatusWindowA", 4, c_CreateStatusWindowA },
     { "comctl32", "InitCommonControls", 0, c_InitCommonControls }, { "comctl32", "InitCommonControlsEx", 1, c_InitCommonControlsEx },
     { "shell32", "ShellAboutW", 4, s_ShellAboutW },
-    { "winmm", "PlaySoundW", 3, mm_PlaySound }, { "winmm", "PlaySoundA", 3, mm_PlaySound },
+    { "winmm", "PlaySoundW", 3, mm_PlaySound }, { "winmm", "#2", 3, mm_PlaySound }, { "winmm", "PlaySoundA", 3, mm_PlaySound },
     { "ntdll", "vDbgPrintExWithPrefix", -1, nt_DbgPrint }, { "ntdll", "DbgPrint", -1, nt_DbgPrint },
     { NULL, NULL, 0, NULL }
 };

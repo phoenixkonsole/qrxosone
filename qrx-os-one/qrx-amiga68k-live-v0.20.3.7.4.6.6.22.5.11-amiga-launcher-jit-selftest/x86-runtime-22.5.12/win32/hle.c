@@ -169,6 +169,10 @@ const qhle *qw_find_hle(const char *dll, const char *name)
 
 uint32_t qw_data_import(qwin *w, const char *dll, const char *name);
 
+/* The function has set the registers and eip itself: no return to the caller. */
+static int g_api_jumped;
+void qw_api_jump(void) { g_api_jumped = 1; }
+
 uint32_t qw_thunk(qwin *w, const char *dll, const char *name)
 {
     const qhle *e = qw_find_hle(dll, name);
@@ -265,7 +269,8 @@ static int hle_hook(x86cpu *c, uint32_t idx)
 #endif
     if (w->trace) qw_log(w, "<- %s = %08x", e->name, r);
     if (c->fault) return 1;
-    if (w->exiting) { c->stop = 1; return 1; }
+    if (w->exiting) { c->stop = 1; g_api_jumped = 0; return 1; }
+    if (g_api_jumped) { g_api_jumped = 0; return 1; }
     c->r[X86_ESP] = sp + 4 + (e->nargs > 0 ? 4u * (uint32_t)e->nargs : 0u);
     c->r[X86_EAX] = r;
     c->eip = ret;
@@ -305,6 +310,15 @@ int qw_load(qwin *w, const char *path, int argc, char **argv)
     b = (uint8_t *)malloc((size_t)n);
     if (!b || fread(b, 1, (size_t)n, f) != (size_t)n) { fclose(f); free(b); return 0; }
     fclose(f);
+    if (n > 64 && b[0] == 'M' && b[1] == 'Z') {     /* a 16-bit starter: run what it would start */
+        extern int qw_ne_redirect(qwin *w, const char *path, char *out, size_t max);
+        static char alt[1200];
+        uint32_t o = (uint32_t)b[60] | (uint32_t)b[61] << 8 | (uint32_t)b[62] << 16 | (uint32_t)b[63] << 24;
+        if (o + 2u < (uint32_t)n && b[o] == 'N' && b[o + 1] == 'E' && qw_ne_redirect(w, path, alt, sizeof(alt))) {
+            free(b);
+            return qw_load(w, alt, argc, argv);
+        }
+    }
     snprintf(w->exe_path, sizeof(w->exe_path), "%s", path);
     x86_init(c);
     c->user = w;
@@ -343,6 +357,7 @@ int qw_load(qwin *w, const char *path, int argc, char **argv)
     x86_wr32(c, QW_TEB + 0x20, 0x100);
     x86_wr32(c, QW_TEB + 0x24, 0x104);
     x86_wr32(c, QW_TEB + 0x2C, QW_TEB + 0x1000);
+    { extern void qw_tls_new_thread(qwin *w, uint32_t teb); qw_tls_new_thread(w, QW_TEB); }
     x86_wr32(c, QW_TEB + 0x30, QW_PEB);
     x86_wr32(c, QW_PEB + 0x08, w->image_base);
     x86_wr32(c, QW_PEB + 0x18, 0x00150000u);

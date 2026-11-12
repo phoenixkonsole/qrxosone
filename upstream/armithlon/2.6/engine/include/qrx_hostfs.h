@@ -8,7 +8,7 @@
 #include <stdint.h>
 #define QRX_HOSTFS_BASE (QRX_IO_BASE+0x800u)
 #define QRX_HOSTFS_MAGIC (QRX_HOSTFS_BASE+0x00u) /* 'QRXF' */
-#define QRX_HOSTFS_FEATURES (QRX_HOSTFS_BASE+0x04u) /* bit0=read bit1=write */
+#define QRX_HOSTFS_FEATURES (QRX_HOSTFS_BASE+0x04u) /* bit0=read bit1=write bit2=host sockets */
 #define QRX_HOSTFS_NAME_DMA (QRX_HOSTFS_BASE+0x08u)
 #define QRX_HOSTFS_DATA_DMA (QRX_HOSTFS_BASE+0x0cu)
 #define QRX_HOSTFS_OFFSET (QRX_HOSTFS_BASE+0x10u)
@@ -36,6 +36,11 @@
 #define QRX_HOSTFS_CMD_WRITE 4u
 #define QRX_HOSTFS_CMD_DELETE 5u
 #define QRX_HOSTFS_CMD_TRUNCATE 6u
+/* Host socket door: the data DMA points at a 16-word big-endian request.
+ * word 0 is the qrx_hostnet op, words 1..12 are a[0..11].  The host calls
+ * qrx_hostnet_call() and writes the updated words back. */
+#define QRX_HOSTFS_CMD_NET 0x200u
+#define QRX_HOSTFS_NET_WORDS 13u
 #define QRX_HOSTFS_OK 0u
 #define QRX_HOSTFS_INVALID 1u
 #define QRX_HOSTFS_NOENT 2u
@@ -43,7 +48,7 @@
 #define QRX_HOSTFS_RDONLY 4u
 #define QRX_HOSTFS_ACCESS 5u
 #define QRX_HOSTFS_MAX_TRANSFER 4096u
-#define QRX_HOSTFS_MAX_FILE (64u*1024u*1024u)
+#define QRX_HOSTFS_MAX_FILE 0x7FFFFFFFu /* positions in the guest are signed 32 bits */
 #define QRX_HOSTFS_MAX_NAME 96u
 struct QRXHostFS {
     int dirfd;

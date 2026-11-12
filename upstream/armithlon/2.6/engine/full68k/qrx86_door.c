@@ -2,6 +2,7 @@
 #include "qrx_hostmidi.h"
 void qrx_host_set_pointer(uint32_t index);
 #include "qrx_hostnet.h"
+#include "qrx_gl68k.h"
 /* The host build of the same interpreter the guest runs, with its internals in
  * reach: the door keeps a shadow page table of host pointers. */
 #define QRX86_HOST_JIT 1
@@ -131,6 +132,11 @@ static int door_hle_hook(x86cpu *h,uint32_t index){
     uint32_t ret=x86_rd32(h,sp);
     for(unsigned i=0;i<16;i++)a[i]=x86_rd32(h,sp+4u+i*4u);
     uint32_t result=f->fn(h,a);
+    /* QRX_D3D_LOG=1: the Direct3D methods a game wants and the host lacks. */
+    {extern uint32_t qrx_d3d_unimpl(x86cpu*,const uint32_t*);static int log_on=-1;
+     if(log_on<0)log_on=getenv("QRX_D3D_LOG")!=NULL;
+     if(log_on&&f->fn==qrx_d3d_unimpl)fprintf(stderr,"[D3D] %s is not implemented\n",f->name?f->name:"?");
+     else if(log_on&&(result>>28)==8u)fprintf(stderr,"[D3D] %s failed: %08x\n",f->name?f->name:"?",(unsigned)result);}
     /* Needs guest memory: leave eip on the thunk, the door runs this again. */
     if(qrx_hostapi_alloc_request){h->stop=1;return 1;}
     h->r[X86_EAX]=result;
@@ -372,6 +378,8 @@ static void service_call(QRXFullCPU *c,uint32_t block){
     if(svc==7){proc_begin(rd32(q+8));return;}
     /* TCP/IP for native 68k programs, which have no page directory to look at. */
     if(svc==4&&!rd32(q+8)){net_service(c,q);return;}
+    /* OpenGL for native 68k programs. */
+    if(svc==8){qrx_gl68k_service(c->ram_owned,c->vm.ram.size,q);return;}
     shadow_sync(c,rd32(q+8),rd32(q+4));
     if(svc==1)sound_service(c,q);
     else if(svc==2)api_service(c,q);
@@ -462,7 +470,7 @@ static void door_run(QRXFullCPU *c,uint32_t req){
 }
 static bool door_read(QRXFullCPU *c,uint32_t addr,unsigned n,uint32_t *out){
     if(addr==QRX86_DOOR_BASE&&n==4){*out=QRX86_DOOR_MAGIC;return true;}
-    if(addr==QRX86_DOOR_BASE+16u&&n==4){*out=QRX86_DOOR_FEATURE_NATIVE_NET;return true;}
+    if(addr==QRX86_DOOR_BASE+16u&&n==4){*out=QRX86_DOOR_FEATURE_NATIVE_NET|QRX86_DOOR_FEATURE_GL;return true;}
     /* Reading the size register opens the RAM above the boot-visible 32 MiB. */
     if(addr==QRX86_DOOR_BASE+8u&&n==4){*out=(uint32_t)qrx_full_show_high_ram(c);return true;}
     return false;
@@ -480,5 +488,6 @@ void qrx86_door_report(void){
 #ifdef QRX86_HOST_JIT_ACTIVE
     xj_report();
 #endif
+    qrx_gl68k_report();
     if(door_calls)fprintf(stderr,"[QRX86-DOOR] calls=%llu x86=%llu\n",(unsigned long long)door_calls,(unsigned long long)door_x86);
 }

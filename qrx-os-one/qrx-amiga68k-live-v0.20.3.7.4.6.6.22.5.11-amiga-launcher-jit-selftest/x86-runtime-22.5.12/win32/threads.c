@@ -35,6 +35,8 @@ typedef struct qthread {
     uint16_t sreg_fs, fsw, fcw, ftw;
     double st[8];
     jmp_buf *jb;
+    /* The last errors while switched out; the running thread's are in qwin. */
+    uint32_t last_error, net_error;
 } qthread;
 
 static qthread g_t[QT_MAX];
@@ -67,6 +69,32 @@ static void co_prepare(qctx *c, void *stack, size_t size, void (*entry)(void))
     memset(sp, 0, 11 * 4);
     sp -= 18;                         /* fp2-fp7, 12 bytes each */
     memset(sp, 0, 18 * 4);
+    c->sp = sp;
+}
+#elif defined(__m68k64__)
+/* 68100EC64 long mode (m68k64 clang): arguments in 8-byte stack slots, D2-D7/A2-A6
+ * callee-saved, soft float, so no FPU registers to keep. */
+void qw_co_switch(qctx *from, qctx *to);
+__asm__(
+    ".text\n"
+    ".globl qw_co_switch\n"
+    "qw_co_switch:\n"
+    "    move.q (8,%sp),%a0\n"
+    "    move.q (16,%sp),%a1\n"
+    "    lea (-88,%sp),%sp\n"
+    "    movem.q %d2-%d7/%a2-%a6,(0,%sp)\n"
+    "    move.q %sp,(0,%a0)\n"
+    "    move.q (0,%a1),%sp\n"
+    "    movem.q (0,%sp),%d2-%d7/%a2-%a6\n"
+    "    lea (88,%sp),%sp\n"
+    "    rts\n");
+static void co_prepare(qctx *c, void *stack, size_t size, void (*entry)(void))
+{
+    uint64_t *sp = (uint64_t *)(((uintptr_t)stack + size - 32u) & ~(uintptr_t)15u);
+    *--sp = 0;                        /* return address of entry: never used */
+    *--sp = (uint64_t)(uintptr_t)entry;
+    sp -= 11;                         /* d2-d7/a2-a6 */
+    memset(sp, 0, 11 * 8);
     c->sp = sp;
 }
 #else
@@ -118,6 +146,8 @@ static void switch_to(qwin *w, int n)
     if (n == g_cur) return;
     save_cpu(w, from);
     load_cpu(w, to);
+    from->last_error = w->last_error; from->net_error = w->net_error;
+    w->last_error = to->last_error; w->net_error = to->net_error;
     g_cur = n;
     g_slice_start = w->be->now(w);
     qw_co_switch(&from->ctx, &to->ctx);
@@ -260,6 +290,7 @@ static int thread_new(qwin *w, uint32_t start, uint32_t param, void (*cfn)(qwin 
     x86_wr32(C, teb + 0x20, 0x100);
     x86_wr32(C, teb + 0x24, 0x200u + (uint32_t)i * 4u);
     x86_wr32(C, teb + 0x2C, teb + 0x1000);
+    { extern void qw_tls_new_thread(qwin *w, uint32_t teb); qw_tls_new_thread(w, teb); }
     x86_wr32(C, teb + 0x30, QW_PEB);
     t->used = 1; t->done = 0; t->waiting = 0; t->suspended = suspended;
     t->id = 0x200u + (uint32_t)i * 4u;
@@ -271,6 +302,7 @@ static int thread_new(qwin *w, uint32_t start, uint32_t param, void (*cfn)(qwin 
     t->sbase_fs = teb;
     t->depth = 0; t->jb = NULL;
     t->top = 0; t->fsw = 0; t->ftw = 0xFFFF;
+    t->last_error = 0; t->net_error = 0;
     t->ctx.sp = NULL;
     co_prepare(&t->ctx, t->cstack, QT_CSTACK, thread_entry);
     g_live++;

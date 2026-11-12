@@ -191,7 +191,7 @@ typedef struct qhle {
 } qhle;
 
 /* a loaded PE image: the program (mod[0]) or a program-supplied DLL */
-#define QW_MAXMOD 16
+#define QW_MAXMOD 64
 #define QW_DLL_BASE  0x40000000u      /* relocated DLLs go here */
 #define QW_DLL_LIMIT 0x7C000000u
 typedef struct qmod {
@@ -235,7 +235,8 @@ typedef struct qwin {
     struct qblk *blocks;              /* allocation map */
     struct qblk *freel;
     /* kernel */
-    uint32_t last_error, exit_code;
+    uint32_t last_error, net_error;   /* of the running thread: threads.c swaps them on a switch */
+    uint32_t exit_code;
     int exiting;
     uint32_t unhandled_filter;
     uint32_t onexit[64];

@@ -22,7 +22,6 @@
 #define MAXSOCK 64
 
 static int g_nonblock[MAXSOCK];
-static uint32_t g_err;
 /* q[3]=op, q[4..11]=arguments, q[12]=result, q[13]=error, q[14]=ip out, q[15]=port out */
 static int net_call(qwin *w, uint32_t *q, uint32_t op)
 {
@@ -30,8 +29,8 @@ static int net_call(qwin *w, uint32_t *q, uint32_t op)
     q[3] = op;
     q[12] = SOCKET_ERROR;
     q[13] = WSAENETDOWN;
-    if (!C->door || !x86_door_call(C, q)) { g_err = WSAENETDOWN; return 0; }
-    if (q[12] == SOCKET_ERROR) { g_err = q[13]; return 0; }
+    if (!C->door || !x86_door_call(C, q)) { w->net_error = WSAENETDOWN; return 0; }
+    if (q[12] == SOCKET_ERROR) { w->net_error = q[13]; return 0; }
     return 1;
 }
 int qw_net_call(qwin *w, uint32_t *q, uint32_t op) { return net_call(w, q, op); }
@@ -65,8 +64,8 @@ FN(n_WSAStartup) {
     return 0;
 }
 FN(n_ok0) { UNUSED; return 0; }
-FN(n_WSAGetLastError) { UNUSED; return g_err; }
-FN(n_WSASetLastError) { (void)w; g_err = a[0]; return 0; }
+FN(n_WSAGetLastError) { UNUSED; return w->net_error; }
+FN(n_WSASetLastError) { w->net_error = a[0]; return 0; }
 FN(n_socket) {
     static uint32_t q[16];
     q[4] = a[1]; q[5] = a[2];
@@ -93,7 +92,7 @@ FN(n_accept) {
             if (q[12] < MAXSOCK) g_nonblock[q[12]] = 0;
             return q[12];
         }
-        if (g_err != WSAEWOULDBLOCK || !blocking(s) || w->exiting) return SOCKET_ERROR;
+        if (w->net_error != WSAEWOULDBLOCK || !blocking(s) || w->exiting) return SOCKET_ERROR;
         qw_thread_block(w, 2);
     }
 }
@@ -103,30 +102,32 @@ FN(n_connect) {
     rd_addr(w, a[1], &ip, &port);
     q[4] = s; q[5] = ip; q[6] = port;
     if (net_call(w, q, NET_CONNECT)) return 0;
-    if (g_err != 10036u && g_err != WSAEWOULDBLOCK) return SOCKET_ERROR;   /* in progress */
-    if (!blocking(s)) { g_err = WSAEWOULDBLOCK; return SOCKET_ERROR; }
+    if (w->net_error != 10036u && w->net_error != WSAEWOULDBLOCK) return SOCKET_ERROR;   /* in progress */
+    if (!blocking(s)) { w->net_error = WSAEWOULDBLOCK; return SOCKET_ERROR; }
     for (;;) {
         q[4] = s; q[5] = 2;       /* writable means finished; q[12] holds the ready mask, q[13] SO_ERROR */
         if (!net_call(w, q, NET_POLL)) return SOCKET_ERROR;
         if (q[12] & 2u) {
-            if (q[13]) { g_err = q[13]; return SOCKET_ERROR; }
+            if (q[13]) { w->net_error = q[13]; return SOCKET_ERROR; }
             return 0;
         }
         if (w->exiting) return SOCKET_ERROR;
         qw_thread_block(w, 2);
     }
 }
-/* One chunk through a buffer in 68k RAM that the host can reach without x86 page walks. */
+/* One chunk through a buffer in 68k RAM that the host can reach without x86 page walks.
+ * All threads share it and it is valid only until the next switch: qw_thread_block lets others
+ * run, so fill it right before the door call and empty it right after, as q is refilled too. */
 #define NET_CHUNK 16384u
 static uint8_t g_buf[NET_CHUNK];
 FN(n_send) {
     static uint32_t q[16];
     uint32_t s = a[0], n = a[2] < NET_CHUNK ? a[2] : NET_CHUNK;
-    x86_read_mem(C, a[1], g_buf, n);
     for (;;) {
+        x86_read_mem(C, a[1], g_buf, n);
         q[4] = s; q[5] = (uint32_t)(uintptr_t)g_buf; q[6] = n; q[7] = a[3];
         if (net_call(w, q, NET_SEND)) return q[12];
-        if (g_err != WSAEWOULDBLOCK || !blocking(s) || w->exiting) return SOCKET_ERROR;
+        if (w->net_error != WSAEWOULDBLOCK || !blocking(s) || w->exiting) return SOCKET_ERROR;
         qw_thread_block(w, 2);
     }
 }
@@ -136,7 +137,7 @@ FN(n_recv) {
     for (;;) {
         q[4] = s; q[5] = (uint32_t)(uintptr_t)g_buf; q[6] = n; q[7] = a[3];
         if (net_call(w, q, NET_RECV)) { x86_write_mem(C, a[1], g_buf, q[12]); return q[12]; }
-        if (g_err != WSAEWOULDBLOCK || !blocking(s) || w->exiting) return SOCKET_ERROR;
+        if (w->net_error != WSAEWOULDBLOCK || !blocking(s) || w->exiting) return SOCKET_ERROR;
         qw_thread_block(w, 2);
     }
 }
@@ -158,7 +159,7 @@ FN(n_recvfrom) {
             wr_addr(w, a[4], a[5], q[14], q[15]);
             return q[12];
         }
-        if (g_err != WSAEWOULDBLOCK || !blocking(s) || w->exiting) return SOCKET_ERROR;
+        if (w->net_error != WSAEWOULDBLOCK || !blocking(s) || w->exiting) return SOCKET_ERROR;
         qw_thread_block(w, 2);
     }
 }
@@ -216,7 +217,7 @@ FN(n_ioctlsocket) {
         WR32(a[2], q[14]);
         return 0;
     }
-    g_err = 10045;
+    w->net_error = 10045;
     return SOCKET_ERROR;
 }
 FN(n_setsockopt) {
@@ -281,7 +282,7 @@ FN(n_gethostbyname) {
     WR8(he + 64 + (uint32_t)i, 0);
     return he;
 }
-FN(n_null) { (void)a; g_err = 11004; (void)w; return 0; }
+FN(n_null) { (void)a; w->net_error = 11004; return 0; }
 
 #define N(name, ord, fn, args) { "wsock32", name, args, fn }, { "wsock32", "#" #ord, args, fn }, { "ws2_32", name, args, fn }, { "ws2_32", "#" #ord, args, fn }
 const qhle qw_net[] = {
@@ -293,6 +294,8 @@ const qhle qw_net[] = {
     N("sendto", 20, n_sendto, 6), N("setsockopt", 21, n_setsockopt, 5), N("shutdown", 22, n_shutdown, 2), N("socket", 23, n_socket, 3),
     N("gethostbyaddr", 51, n_null, 3), N("gethostbyname", 52, n_gethostbyname, 1), N("getprotobyname", 53, n_null, 1),
     N("getservbyname", 55, n_null, 2), N("gethostname", 57, n_gethostname, 2),
+    /* Asynchronous notification is accepted but delivers no events yet: programs start, network play would wait. */
+    N("WSAAsyncSelect", 101, n_ok0, 4), N("WSAAsyncGetHostByName", 103, n_null, 5), N("WSACancelAsyncRequest", 108, n_ok0, 1),
     N("WSAGetLastError", 111, n_WSAGetLastError, 0), N("WSASetLastError", 112, n_WSASetLastError, 1), N("WSACancelBlockingCall", 113, n_ok0, 0),
     N("WSAIsBlocking", 114, n_ok0, 0), N("WSAStartup", 115, n_WSAStartup, 2), N("WSACleanup", 116, n_ok0, 0), N("__WSAFDIsSet", 151, n_WSAFDIsSet, 2),
     { NULL, NULL, 0, NULL }

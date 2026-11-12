@@ -23,5 +23,23 @@ ARMithlon 1.1 cumulative source and native host integration:
 
 ARMithlon on Apple Silicon (68k JIT, Metal RTG, HostFS, AHI, QRX86 host door):
 [measurements, changes and open work](docs/armithlon/performance-2026-11-03.md).
+FPU in the 68k JIT and two FPU faults fixed: [docs/armithlon/fpu-jit-2026-11-07.md](docs/armithlon/fpu-jit-2026-11-07.md).
 
 Linux i386 GUI work: [embedded X11 subset and AROS windows](docs/QRX_X11.md).
+
+Blender 2.79b as a 68k AROS program, headless stage with the second 68100 core:
+[plan, state and measurements](docs/BLENDER_AROS68K.md), [build](tools/blender/README.md).
+
+QRXPPC PPC32 integer/FPU reference interpreter, Tier-1 PPC→68k-JIT with
+lazy CR0, CR0…CR7 compare forms, block chaining for direct, conditional and
+indirect branches, byte/halfword JIT accesses, guarded boundary checks,
+deterministic differential fuzzing
+(valid and fault paths, full 32-bit and boundary addresses), guest tests and a
+byte/halfword-check [mutation test](tools/qrxppc/mutation_test.sh):
+[specification](docs/QRXPPC_SPEC.md), [build](tools/qrxppc/build.sh).
+
+IPFS client with a complete guest-side CLI (`QRXIPFSPub`: add, ls, get,
+pin/unpin, version, repo), native local 68K node (`QRXIPFSD`), native
+libp2p peer (`QRXIPFSP2P`: Noise, Yamux, Bitswap 1.2, Kademlia), public
+`IPFS:` drive (assign) with revisions, and encrypted volume images for
+QRX Drive: [docs/QRX_IPFS.md](docs/QRX_IPFS.md).

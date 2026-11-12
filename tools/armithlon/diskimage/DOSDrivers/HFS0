@@ -1,0 +1,16 @@
+FileSystem     = L:ODFileSystem
+Stacksize      = 16384
+Priority       = 5
+GlobVec        = -1
+DosType        = 0x43443031
+ForceLoad      = 1
+Device         = diskimage.device
+Unit           = 0
+Control        = "HFSFIRST IMAGE=SYS:Storage/TestImages/DropStuff-disk1of2.dsk"
+BlockSize      = 2048
+Surfaces       = 1
+BlocksPerTrack = 1
+LowCyl         = 0
+HighCyl        = 0
+Reserved       = 0
+Activate       = 0

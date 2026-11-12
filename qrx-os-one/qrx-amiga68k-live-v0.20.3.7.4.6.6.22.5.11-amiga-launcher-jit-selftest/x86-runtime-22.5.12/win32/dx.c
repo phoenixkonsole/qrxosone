@@ -39,6 +39,7 @@ typedef struct dxobj {
     /* DirectDraw */
     uint32_t hwnd;
     int mw, mh, mbpp, exclusive;
+    uint32_t clipper;                /* a surface's clipper, as the guest knows it */
     int drawn[4];                       /* surface: where the last Blt on it went */
     /* surface */
     int sw, sh, bpp, pitch, primary, back, offscreen;
@@ -70,9 +71,11 @@ typedef struct dxobj {
     uint8_t prevbtn[3];
 } dxobj;
 #define DX_MAX 1024
+int qw_dd_mode_bpp;                 /* the mode the program last set: GDI answers for it too */
 static dxobj g_o[DX_MAX];
 static uint32_t g_vt[24];           /* guest vtables per interface */
 enum { VT_DD, VT_DD2, VT_SURF, VT_PAL, VT_CLIP, VT_DS, VT_DSB, VT_DI, VT_DID };
+#define VT_B3D 20
 
 static int obj_new(qwin *w, int type, int vt)
 {
@@ -516,7 +519,15 @@ FN(dd_CreateSurface) {                  /* (this, desc, pp, outer) */
     return DD_OK;
 }
 FN(dd_EnumDisplayModes) {               /* (this, flags, desc, ctx, callback) */
-    static const int modes[][3] = { { 320, 200, 8 }, { 320, 240, 8 }, { 640, 400, 8 }, { 640, 480, 8 }, { 640, 480, 16 }, { 800, 600, 8 }, { 800, 600, 16 } };
+    /* The modes of a Windows graphics card, ascending. Programs index into what they get here:
+     * GTA 1 builds a table of its 15, 16 and 32 bit modes and starts its levels in entry 6,
+     * so it needs at least seven of them. */
+    static const int modes[][3] = {
+        { 320, 200, 8 }, { 320, 200, 16 }, { 320, 240, 8 }, { 320, 240, 16 },
+        { 400, 300, 8 }, { 400, 300, 16 }, { 512, 384, 8 }, { 512, 384, 16 },
+        { 640, 400, 8 }, { 640, 400, 16 }, { 640, 480, 8 }, { 640, 480, 16 },
+        { 800, 600, 8 }, { 800, 600, 16 }
+    };
     uint32_t d = qw_alloc(w, 108);
     dxobj tmp;
     unsigned k;
@@ -612,6 +623,7 @@ static uint32_t set_mode(qwin *w, uint32_t self, uint32_t mw, uint32_t mh, uint3
         return 0x8876024Eu;                         /* DDERR_UNSUPPORTEDMODE */
     }
     dd->mw = (int)mw; dd->mh = (int)mh; dd->mbpp = (int)bpp;
+    qw_dd_mode_bpp = (int)bpp;
     if (w->verbose) qw_log(w, "DirectDraw: display mode %ux%ux%u", mw, mh, bpp);
     fullscreen(w, dd, 1);
     return DD_OK;
@@ -747,12 +759,24 @@ static void fill(qwin *w, dxobj *d, int *r, uint32_t color)
     for (y = y0; y < y1; y++) x86_write_mem(C, d->mem + (uint32_t)(y * d->pitch + x0 * bpp), row, (uint32_t)n);
 }
 static void after_draw(qwin *w, dxobj *d) { publish(w, d); if (d->primary) present(w, d); }
+FN(s_SetClipper) { dxobj *d = sf(w, a[0]); if (d) d->clipper = a[1]; return DD_OK; }
 FN(s_Blt) {                              /* (this, destrect, src, srcrect, flags, fx) */
     dxobj *d = sf(w, a[0]), *s = a[2] ? sf(w, a[2]) : NULL;
     uint32_t fl = a[4], fx = a[5];
     int dr[4], sr[4];
     if (!d) return DDERR_INVALIDPARAMS;
-    if (!rect_of(w, a[1], dr, d->sw, d->sh)) return DD_OK;
+    /* A primary with a clipper is drawn on in screen coordinates. Ours shows only the window. */
+    {
+        dxobj *cl = d->primary && d->clipper && d->sw < 1024 ? ob(w, d->clipper, OB_CLIP) : NULL;
+        if (cl && cl->hwnd && a[1]) {
+            extern void qw_client_origin(qwin *w, uint32_t h, int *x, int *y);
+            int ox = 0, oy = 0;
+            qw_client_origin(w, cl->hwnd, &ox, &oy);
+            dr[0] = (int32_t)RD32(a[1]) - ox; dr[1] = (int32_t)RD32(a[1] + 4) - oy;
+            dr[2] = (int32_t)RD32(a[1] + 8) - ox; dr[3] = (int32_t)RD32(a[1] + 12) - oy;
+            if (dr[2] <= dr[0] || dr[3] <= dr[1]) return DD_OK;
+        } else if (!rect_of(w, a[1], dr, d->sw, d->sh)) return DD_OK;
+    }
     if (fl & 0x400) {                                                  /* COLORFILL */
         fill(w, d, dr, fx ? RD32(fx + 80) : 0);
         after_draw(w, d);
@@ -1078,7 +1102,9 @@ FN(ds_CreateSoundBuffer) {               /* (this, desc, pp, outer) */
     if (w->verbose) qw_log(w, "DirectSound: buffer %u bytes %u Hz%s", b->size, b->rate, b->primbuf ? " primary" : "");
     return DD_OK;
 }
-FN(ds_GetCaps) { uint32_t sz = RD32(a[1]), k; UNUSED; for (k = 4; k < sz && k < 200; k += 4) WR32(a[1] + k, 0); WR32(a[1] + 4, 0x1F00); return DD_OK; }
+FN(ds_GetCaps) { uint32_t sz = RD32(a[1]), k; UNUSED; for (k = 4; k < sz && k < 200; k += 4) WR32(a[1] + k, 0); WR32(a[1] + 4, 0x0F1Fu);   /* mono, stereo, 8 and 16 bit on both buffer kinds, any rate */
+    WR32(a[1] + 8, 100u); WR32(a[1] + 12, 100000u); WR32(a[1] + 16, 1u);   /* secondary rates, one primary buffer */
+    return DD_OK; }
 FN(ds_DuplicateSoundBuffer) {
     dxobj *s = ob(w, a[1], OB_DSB);
     int i;
@@ -1091,6 +1117,21 @@ FN(ds_DuplicateSoundBuffer) {
     return DD_OK;
 }
 FN(ds_GetSpeakerConfig) { UNUSED; WR32(a[1], 4); return DD_OK; }
+/* IDirectSound3DBuffer: a second vtable on the buffer. It accepts everything and the buffer
+   plays as it is, without positioning: SimCity 3000 asks for it and does not check the answer. */
+FN(b_QueryInterface) {
+    dxobj *o = ob(w, a[0], OB_DSB);
+    if (o && guid_is(w, a[1], 0x279AFA86u)) {
+        uint32_t g = qw_alloc(w, 8);
+        WR32(g, g_vt[VT_B3D]); WR32(g + 4, (uint32_t)idx_of(o));
+        o->refs++;
+        WR32(a[2], g);
+        return DD_OK;
+    }
+    WR32(a[2], 0);
+    return E_NOINTERFACE;
+}
+FN(b3d_Get) { UNUSED; WR32(a[1], 0); return DD_OK; }
 FN(b_AddRef) { return addref(ob(w, a[0], OB_DSB)); }
 FN(b_Release) { dxobj *o = ob(w, a[0], OB_DSB); if (!o) return 0; if (--o->refs > 0) return (uint32_t)o->refs; ds_host(w, o, DS_FREE, 0); obj_free(w, o); return 0; }
 FN(b_GetCaps) { dxobj *b = ob(w, a[0], OB_DSB); if (!b) return DDERR_INVALIDPARAMS; WR32(a[1] + 4, b->primbuf ? 1u : 0x20u); WR32(a[1] + 8, b->size); WR32(a[1] + 12, 0); WR32(a[1] + 16, 0); return DD_OK; }
@@ -1604,7 +1645,7 @@ static const vslot vt_surf[] = {           /* IDirectDrawSurface + Surface2 + Su
     V("GetClipper", NULL, 2), V("GetColorKey", s_GetColorKey, 3), V("GetDC", s_GetDC, 2), V("GetFlipStatus", dd_ok, 2),
     V("GetOverlayPosition", NULL, 3), V("GetPalette", s_GetPalette, 2), V("GetPixelFormat", s_GetPixelFormat, 2),
     V("GetSurfaceDesc", s_GetSurfaceDesc, 2), V("Initialize", dd_ok, 3), V("IsLost", s_IsLost, 1), V("Lock", s_Lock, 5),
-    V("ReleaseDC", s_ReleaseDC, 2), V("Restore", dd_ok, 1), V("SetClipper", dd_ok, 2), V("SetColorKey", s_SetColorKey, 3),
+    V("ReleaseDC", s_ReleaseDC, 2), V("Restore", dd_ok, 1), V("SetClipper", s_SetClipper, 2), V("SetColorKey", s_SetColorKey, 3),
     V("SetOverlayPosition", dd_ok, 3), V("SetPalette", s_SetPalette, 2), V("Unlock", s_Unlock, 2), V("UpdateOverlay", dd_ok, 6),
     V("UpdateOverlayDisplay", dd_ok, 2), V("UpdateOverlayZOrder", dd_ok, 3),
     V("GetDDInterface", s_GetDDInterface, 2), V("PageLock", dd_ok, 2), V("PageUnlock", dd_ok, 2), V("SetSurfaceDesc", s_SetSurfaceDesc, 3),
@@ -1628,8 +1669,16 @@ static const vslot vt_ds[] = {
     V("SetCooperativeLevel", dd_ok, 3), V("Compact", dd_ok, 1), V("GetSpeakerConfig", ds_GetSpeakerConfig, 2),
     V("SetSpeakerConfig", dd_ok, 2), V("Initialize", dd_ok, 2), { NULL, NULL, 0, NULL }
 };
+static const vslot vt_b3d[] = {
+    V("QueryInterface", ds_QueryInterface, 3), V("AddRef", b_AddRef, 1), V("Release", b_Release, 1), V("GetAllParameters", dd_ok, 2),
+    V("GetConeAngles", dd_ok, 3), V("GetConeOrientation", dd_ok, 2), V("GetConeOutsideVolume", b3d_Get, 2), V("GetMaxDistance", b3d_Get, 2),
+    V("GetMinDistance", b3d_Get, 2), V("GetMode", b3d_Get, 2), V("GetPosition", dd_ok, 2), V("GetVelocity", dd_ok, 2),
+    V("SetAllParameters", dd_ok, 3), V("SetConeAngles", dd_ok, 4), V("SetConeOrientation", dd_ok, 5), V("SetConeOutsideVolume", dd_ok, 3),
+    V("SetMaxDistance", dd_ok, 3), V("SetMinDistance", dd_ok, 3), V("SetMode", dd_ok, 3), V("SetPosition", dd_ok, 5), V("SetVelocity", dd_ok, 5),
+    { NULL, NULL, 0, NULL }
+};
 static const vslot vt_dsb[] = {
-    V("QueryInterface", ds_QueryInterface, 3), V("AddRef", b_AddRef, 1), V("Release", b_Release, 1), V("GetCaps", b_GetCaps, 2),
+    V("QueryInterface", b_QueryInterface, 3), V("AddRef", b_AddRef, 1), V("Release", b_Release, 1), V("GetCaps", b_GetCaps, 2),
     V("GetCurrentPosition", b_GetCurrentPosition, 3), V("GetFormat", b_GetFormat, 4), V("GetVolume", b_GetVolume, 2),
     V("GetPan", b_GetPan, 2), V("GetFrequency", b_GetFrequency, 2), V("GetStatus", b_GetStatus, 2), V("Initialize", dd_ok, 3),
     V("Lock", b_Lock, 8), V("Play", b_Play, 4), V("SetCurrentPosition", b_SetCurrentPosition, 2), V("SetFormat", b_SetFormat, 2),
@@ -1695,7 +1744,7 @@ static const vslot vt_tex2[] = { LG_COM, VG("GetHandle", lg_Tex_GetHandle, 3), V
 static const vslot vt_vb7[] = { LG_COM, VG("Lock", lg_VB_Lock, 4), VD("Unlock", 1), VD("ProcessVertices", 8), VG("GetVertexBufferDesc", lg_VB_GetDesc, 2), VD("Optimize", 3), VD("ProcessVerticesStrided", 8), { NULL, NULL, 0, NULL } };
 static const vslot vt_light[] = { LG_COM, VD("Initialize", 2), VD("SetLight", 2), VD("GetLight", 2), { NULL, NULL, 0, NULL } };
 #define VMAX 60
-#define NIFACES 20
+#define NIFACES 21
 static qhle g_slots[NIFACES][VMAX];
 static const struct { const vslot *t; const char *dll, *iface; } g_ifaces[NIFACES] = {
     { vt_dd, "ddraw", "IDirectDraw" }, { vt_dd2, "ddraw", "IDirectDraw2" }, { vt_surf, "ddraw", "IDirectDrawSurface" },
@@ -1704,7 +1753,8 @@ static const struct { const vslot *t; const char *dll, *iface; } g_ifaces[NIFACE
     { vt_d3d2, "ddraw", "IDirect3D2" }, { vt_d3d3, "ddraw", "IDirect3D3" }, { vt_d3d7, "ddraw", "IDirect3D7" },
     { vt_dev2, "ddraw", "IDirect3DDevice2" }, { vt_dev3, "ddraw", "IDirect3DDevice3" }, { vt_dev7, "ddraw", "IDirect3DDevice7" },
     { vt_vp3, "ddraw", "IDirect3DViewport3" }, { vt_mat3, "ddraw", "IDirect3DMaterial3" }, { vt_tex2, "ddraw", "IDirect3DTexture2" },
-    { vt_vb7, "ddraw", "IDirect3DVertexBuffer7" }, { vt_light, "ddraw", "IDirect3DLight" }
+    { vt_vb7, "ddraw", "IDirect3DVertexBuffer7" }, { vt_light, "ddraw", "IDirect3DLight" },
+    { vt_b3d, "dsound", "IDirectSound3DBuffer" }                     /* index VT_B3D */
 };
 static char g_names[NIFACES][VMAX][64];
 static uint32_t dx_unimpl(qwin *w, uint32_t *a) { (void)a; qw_log(w, "DirectX method not implemented"); return E_FAIL_; }

@@ -133,7 +133,14 @@ FN(a_SendDlgItemMessageA) {
     b[0] = h; b[1] = a[2]; b[2] = a[3]; b[3] = a[4];
     return text_msg(w, "SendMessageW", b, 0);
 }
-FN(a_CallWindowProcA) { return callw(w, "user32", "CallWindowProcW", a); }
+/* A program that subclasses one of our controls (Delphi's VCL does) hands its ANSI messages on
+ * to our window procedure, which works in UTF-16: text messages need the same bridge as
+ * SendMessageA. Its own procedures get them as they are. Inno Setup's wizard overran an
+ * 8-byte buffer with UTF-16 here and broke its heap. */
+FN(a_CallWindowProcA) {
+    if (a[0] - QW_THUNK_BASE < (uint32_t)w->nthunk) return text_msg(w, "CallWindowProcW", a, 1);
+    return callw(w, "user32", "CallWindowProcW", a);
+}
 FN(a_SetWindowTextA) { uint32_t r, outer = g_wide_buf; COPYARGS; b[1] = g_wide_buf = tw(w, &t, a[1], -1); r = CALL("user32", "SetWindowTextW"); g_wide_buf = outer; tfree(w, &t); return r; }
 FN(a_GetWindowTextA) {
     uint32_t g, r;

@@ -108,7 +108,7 @@ static int run_main(int argc, char **argv)
         snprintf(w->bench_marker_dir,sizeof w->bench_marker_dir,"%s",getenv("QRX_WIN_FRAME_MARKERS"));
     }
 
-#ifdef __AROS__
+#if defined(__AROS__) && !defined(QRX_NO_AROS_BACKEND)
     w->be = script ? &qw_headless : &qw_aros;
 #else
     w->be = &qw_headless;
