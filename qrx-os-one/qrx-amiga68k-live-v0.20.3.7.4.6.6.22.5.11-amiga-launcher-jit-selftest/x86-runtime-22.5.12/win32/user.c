@@ -21,6 +21,7 @@ enum { B_NONE = 0, B_BUTTON, B_STATIC, B_EDIT, B_DIALOG, B_LISTBOX, B_SCROLLBAR,
 static uint32_t def_window_proc(qwin *w, uint32_t h, uint32_t msg, uint32_t wp, uint32_t lp);
 static void win_destroy(qwin *w, qwnd *x);
 static void set_focus(qwin *w, uint32_t h);
+static void activate_top(qwin *w, uint32_t h);
 static qwnd *find_ctl(qwin *w, qwnd *p, uint32_t id);
 struct qsheet;
 static int sheet_proc(qwin *w, struct qsheet *s, uint32_t *a, uint32_t *ret);
@@ -273,8 +274,21 @@ static void win_destroy(qwin *w, qwnd *x)
     if (w->focus == h) w->focus = 0;
     if (w->capture == h) w->capture = 0;
     if (w->active == h) {
+        /* Windows activates the owner (else the next top-level window) and tells it: games
+         * such as Freddi Fish pause their sound while a dialog is active and resume it on
+         * WM_ACTIVATE. */
+        qwnd *n = W(w, x->owner);
+        uint32_t old_focus = w->focus;
         w->active = 0;
-        for (i = QW_MAXWND - 1; i > 0; i--) { qwnd *t = &w->wnd[i]; if (t->used && !t->destroyed && !(t->style & WS_CHILD) && t->visible) { w->active = t->h; break; } }
+        if (!n || n->destroyed || (n->style & WS_CHILD) || !n->visible) {
+            n = NULL;
+            for (i = QW_MAXWND - 1; i > 0; i--) { qwnd *t = &w->wnd[i]; if (t->used && !t->destroyed && !(t->style & WS_CHILD) && t->visible) { n = t; break; } }
+        }
+        if (n && !w->exiting) {
+            qwnd *f = W(w, old_focus);
+            while (f && (f->style & WS_CHILD) && W(w, f->parent)) f = W(w, f->parent);
+            if (f == n) activate_top(w, n->h); else set_focus(w, n->h);
+        } else if (n) w->active = n->h;
     }
     if (w->main_wnd == h) w->main_wnd = 0;
     {   /* parent must repaint the uncovered area */

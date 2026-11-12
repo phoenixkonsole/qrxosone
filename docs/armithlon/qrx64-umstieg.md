@@ -38,7 +38,23 @@ Gebaut wurde mit dem Host-Clang auf arm64 (LP64, Little Endian) aus `core/qrx86c
 | Übersetzen mit `-Wall -Wpointer-to-int-cast -Wint-to-pointer-cast` | Keine Fehler. 12 Warnungen, keine davon betrifft Zeigerbreiten |
 | `-Wshorten-64-to-32` | Keine Kürzung von 64 auf 32 Bit. Nur 3 Hinweise auf veraltete `ucontext`-Funktionen |
 | Fflush.exe (MS Puzzle Collection), 16 s | Fenster, Menü und Grafik richtig |
-| Freddemo.w32 | Läuft und ruft StretchBlt rund 2.500-mal auf, das Bild bleibt aber schwarz. Im 32-Bit-Gast zeichnet es. Die Ursache ist nicht geklärt, möglich ist auch eine Eigenheit des Headless-Backends |
+| Freddemo.w32 | Richtig, nach der Korrektur unten. Vorher schwarz, und das war kein 64-Bit-Fehler |
+
+### Freddi beim ersten Start (2026-11-12)
+
+Freddi blieb im 64-Bit-Build schwarz, im Gast dagegen nicht. Der Grund lag nicht an 64 Bit, sondern am Zustand:
+
+- Der Gast hatte aus früheren Läufen eine `SYS:WINDOWS/hegames.ini`, der Mac-Lauf nicht.
+- Ohne diese INI misst Freddi zuerst Ton, Laufwerk und Grafik und zeigt dazu einen Dialog.
+- Wenn der Dialog aktiv wird, pausiert das Spiel den Ton mit `waveOutPause`.
+- Unter Windows aktiviert das Schließen des Dialogs wieder das Hauptfenster. Das Hauptfenster bekommt dann `WM_ACTIVATE`, und das Spiel setzt den Ton mit `waveOutRestart` fort.
+- `win_destroy` hatte dafür zwar ein neues aktives Fenster gewählt, ihm aber keine Nachricht geschickt. Der Ton blieb pausiert, und weil das Spiel seine Bilder am Ton ausrichtet, kam nie ein Bild.
+
+Dasselbe galt im 32-Bit-Gast für jeden ersten Start, also für jede frische Installation. Jetzt aktiviert `win_destroy` den Besitzer, sonst das nächste sichtbare Hauptfenster, und schickt `WM_ACTIVATE` und `WM_SETFOCUS`. Danach zeigt Freddi beim ersten Start sowohl im 64-Bit-Build als auch im Gast die erste Szene.
+
+Survey im Gast (67 Einträge, gegen den vorigen Lauf): keine Regression. Die Bildraten sind gleich oder etwas höher, das liegt im Rahmen der üblichen Schwankung. Freddi zeigt jetzt Bilder.
+
+Für Tests mit dem Mac-Build heißt das: Den Zustand des Gastes, etwa INI-Dateien in `SYS:WINDOWS`, gleich herstellen, bevor man Unterschiede auf 64 Bit schiebt.
 
 Grenzen: Der Mac-Build ist Little Endian, der m68k64 Big Endian. Ein Test, der beides zusammen prüft, braucht `m68k64-clang` und eine C-Bibliothek für das 64-Bit-AROS, und die gibt es noch nicht.
 
