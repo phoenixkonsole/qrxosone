@@ -78,7 +78,10 @@ def main():
         if a == '-o':
             output = args[i + 1]; i += 2; continue
         if a.endswith(('/libGL.a', '/libGLU.a')):
-            pass  # first stage: no GL at all, see tools/blender/gen_missing.py
+            # GL and GLU come from the ARMithlon GL door's guest library, tools/qrxgl68k.
+            gl = str(ROOT / '.build/blender-2.79b/port/libqrxgl.a')
+            if gl not in inputs:
+                inputs.append(gl)
         elif a.endswith(('.o', '.a', '.obj')) or a.startswith('-L') or (a.startswith('-l') and a not in DROP_LIBS):
             inputs.append(a)
         elif a == '-Wl,--start-group' or a == '-Wl,--end-group':

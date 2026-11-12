@@ -201,40 +201,51 @@ void qgl_glShaderSourceARB(unsigned int obj, int count, const char **string, con
     shader_source(obj, 1, count, (const char *const *)string, length);
 }
 
-/* ---- mapped buffers: a copy in guest memory, written back on unmap. */
-static struct { unsigned target; void *p; unsigned size; unsigned access; } maps[4];
+/* ---- mapped buffers: a copy in guest memory, written back on unmap. GL maps per buffer object, so the
+ * engine names the buffer bound to the target. */
+static struct { unsigned name; void *p; unsigned size; unsigned access; } maps[16];
+
+static unsigned bound_buffer(unsigned target, unsigned *size)
+{
+    uint32_t *q = op(QGL_OP_BUFSIZE, 1);
+    q[0] = target;
+    unsigned long long r = qgl_sync();
+    *size = (unsigned)r;
+    return (unsigned)(r >> 32);
+}
 
 static void *map_buffer(unsigned target, unsigned access)
 {
-    unsigned i;
-    for (i = 0; i < 4 && maps[i].p; i++)
-        if (maps[i].target == target)
-            return NULL; /* already mapped: GL_INVALID_OPERATION */
-    if (i == 4)
+    unsigned size, name = bound_buffer(target, &size), i, free_slot = 16;
+    if (!name || !size)
         return NULL;
-    uint32_t *q = op(QGL_OP_BUFSIZE, 1);
-    q[0] = target;
-    unsigned size = (unsigned)qgl_sync();
-    if (!size)
+    for (i = 0; i < 16; i++) {
+        if (maps[i].p && maps[i].name == name)
+            return NULL; /* already mapped: GL_INVALID_OPERATION */
+        if (!maps[i].p && free_slot == 16)
+            free_slot = i;
+    }
+    if (free_slot == 16)
         return NULL;
     void *p = malloc(size);
     if (!p)
         return NULL;
     if (access != 0x88B9) { /* not GL_WRITE_ONLY: the program will read it */
-        q = op(QGL_OP_BUFREAD, 7);
+        uint32_t *q = op(QGL_OP_BUFREAD, 7);
         q[0] = target;
         q = qgl_64(q + 1, 0);
         q = qgl_64(q, size);
         qgl_ptr(q, p);
         qgl_sync();
     }
-    maps[i].target = target; maps[i].p = p; maps[i].size = size; maps[i].access = access;
+    maps[free_slot].name = name; maps[free_slot].p = p; maps[free_slot].size = size; maps[free_slot].access = access;
     return p;
 }
 static unsigned char unmap_buffer(unsigned target)
 {
-    for (unsigned i = 0; i < 4; i++)
-        if (maps[i].p && maps[i].target == target) {
+    unsigned size, name = bound_buffer(target, &size);
+    for (unsigned i = 0; i < 16; i++)
+        if (maps[i].p && maps[i].name == name) {
             if (maps[i].access != 0x88B8) /* not GL_READ_ONLY */
                 qgl_glBufferSubData(target, 0, (long)maps[i].size, maps[i].p);
             free(maps[i].p);
@@ -251,10 +262,12 @@ unsigned char qgl_glUnmapBufferARB(unsigned int target) { return unmap_buffer(ta
 static void buffer_pointer(unsigned target, unsigned pname, void **params)
 {
     *params = NULL;
-    if (pname == 0x88BD) /* GL_BUFFER_MAP_POINTER */
-        for (unsigned i = 0; i < 4; i++)
-            if (maps[i].p && maps[i].target == target)
-                *params = maps[i].p;
+    if (pname != 0x88BD) /* GL_BUFFER_MAP_POINTER */
+        return;
+    unsigned size, name = bound_buffer(target, &size);
+    for (unsigned i = 0; i < 16; i++)
+        if (maps[i].p && maps[i].name == name)
+            *params = maps[i].p;
 }
 void qgl_glGetBufferPointerv(unsigned int target, unsigned int pname, void **params) { buffer_pointer(target, pname, params); }
 void qgl_glGetBufferPointervARB(unsigned int target, unsigned int pname, void **params) { buffer_pointer(target, pname, params); }

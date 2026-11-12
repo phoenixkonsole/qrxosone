@@ -221,6 +221,84 @@ int scene_draw(int w, int h)
     glEnd();
     glDisable(GL_TEXTURE_2D);
 
+    /* Blender 2.79's mesh path: positions and GL_SHORT normals in buffers filled through glMapBuffer, GL_UNSIGNED_INT
+     * indices in an element buffer, fixed-function lighting, depth test, a perspective projection. */
+    {
+        static const GLfloat cube[8][3] = {{1, 1, -1}, {1, -1, -1}, {-1, -1, -1}, {-1, 1, -1}, {1, 1, 1}, {1, -1, 1}, {-1, -1, 1}, {-1, 1, 1}};
+        static const GLuint quads[6][4] = {{0, 1, 2, 3}, {4, 7, 6, 5}, {0, 4, 5, 1}, {1, 5, 6, 2}, {2, 6, 7, 3}, {4, 0, 3, 7}};
+        static const GLshort nrm[6][3] = {{0, 0, -32767}, {0, 0, 32767}, {32767, 0, 0}, {0, -32767, 0}, {-32767, 0, 0}, {0, 32767, 0}};
+        GLuint b[3];
+        glGenBuffers(3, b);
+        glBindBuffer(GL_ARRAY_BUFFER, b[0]);
+        glBufferData(GL_ARRAY_BUFFER, 24 * 12, NULL, GL_STATIC_DRAW);
+        GLfloat *pv = glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+        glBindBuffer(GL_ARRAY_BUFFER, b[1]);
+        glBufferData(GL_ARRAY_BUFFER, 24 * 8, NULL, GL_STATIC_DRAW);
+        GLshort *pn = glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+        for (int f = 0; f < 6; f++)
+            for (int k = 0; k < 4; k++) {
+                memcpy(pv + (f * 4 + k) * 3, cube[quads[f][k]], 12);
+                memcpy(pn + (f * 4 + k) * 4, nrm[f], 6);
+                pn[(f * 4 + k) * 4 + 3] = 0;
+            }
+        glUnmapBuffer(GL_ARRAY_BUFFER);
+        glBindBuffer(GL_ARRAY_BUFFER, b[0]);
+        glUnmapBuffer(GL_ARRAY_BUFFER);
+        GLuint tri[36];
+        for (int f = 0; f < 6; f++) {
+            GLuint q = (GLuint)f * 4;
+            GLuint t[6] = {q, q + 1, q + 2, q, q + 2, q + 3};
+            memcpy(tri + f * 6, t, sizeof t);
+        }
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, b[2]);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof tri, tri, GL_STATIC_DRAW);
+        glViewport(400, 200, 200, 180);
+        glScissor(400, 200, 200, 180);
+        glEnable(GL_SCISSOR_TEST);
+        glClear(GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LEQUAL);
+        glMatrixMode(GL_PROJECTION);
+        glPushMatrix();
+        glLoadIdentity();
+        glFrustum(-0.1, 0.1, -0.09, 0.09, 0.1, 100);
+        glMatrixMode(GL_MODELVIEW);
+        glPushMatrix();
+        glLoadIdentity();
+        glTranslatef(0, 0, -6);
+        glRotatef(30, 1, 0, 0);
+        glRotatef(40, 0, 1, 0);
+        GLfloat lpos[4] = {1, 1, 1, 0}, diff[4] = {0.8f, 0.8f, 0.8f, 1};
+        glLightfv(GL_LIGHT0, GL_POSITION, lpos);
+        glEnable(GL_LIGHT0);
+        glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, diff);
+        glEnable(GL_LIGHTING);
+        glEnable(GL_NORMALIZE);
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glEnableClientState(GL_NORMAL_ARRAY);
+        glBindBuffer(GL_ARRAY_BUFFER, b[0]);
+        glVertexPointer(3, GL_FLOAT, 0, (const void *)0);
+        glBindBuffer(GL_ARRAY_BUFFER, b[1]);
+        glNormalPointer(GL_SHORT, 8, (const void *)0);
+        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, (const void *)0);
+        glDisable(GL_LIGHTING);
+        glColor3f(1, 0.6f, 0);
+        glDepthMask(GL_FALSE);
+        glDisableClientState(GL_NORMAL_ARRAY);
+        glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, (const void *)0);
+        glDepthMask(GL_TRUE);
+        glDisableClientState(GL_VERTEX_ARRAY);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_SCISSOR_TEST);
+        glPopMatrix();
+        glMatrixMode(GL_PROJECTION);
+        glPopMatrix();
+        glMatrixMode(GL_MODELVIEW);
+        glViewport(0, 0, w, h);
+    }
+
     /* Reading back: one pixel as bytes, one as floats, and the matrix stack. */
     glFinish();
     GLubyte px[4] = {0};

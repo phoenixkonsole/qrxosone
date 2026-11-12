@@ -15,7 +15,7 @@ enum {
     QGL_OP_SWAP = 4,        /* dst (64), bytes per row, width, height: the frame as ARGB, top row first */
     QGL_OP_GETSTRING = 5,   /* name, dst (64), size -> length */
     QGL_OP_SHADERSOURCE = 6, /* shader, ARB flag, inline text */
-    QGL_OP_BUFSIZE = 7,     /* target -> size of the bound buffer */
+    QGL_OP_BUFSIZE = 7,     /* target -> name of the bound buffer << 32 | its size */
     QGL_OP_BUFREAD = 8,     /* target, offset (64), size (64), dst (64) */
     QGL_OP_GETPTR = 9,      /* kind, index, pname -> guest address (64) */
 };

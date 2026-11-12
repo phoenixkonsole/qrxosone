@@ -1,5 +1,6 @@
 #!/bin/bash
-# Configures the first stage: headless, no Python, Blender Internal only.
+# Configures Blender with its interface: GHOST for AROS (tools/blender/ghost) and GL through the ARMithlon
+# door (tools/qrxgl68k), Python 3.5, Blender Internal only.
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 W=${QRX_BLENDER_WORK:-/Users/pascalpapara/Documents/GitHub/qrxosone/.build/blender-2.79b}
@@ -18,4 +19,4 @@ export PATH=/opt/homebrew/bin:$PATH
 exec cmake -S "$SRC" -B "$W/build" -G Ninja -DCMAKE_TOOLCHAIN_FILE="$HERE/toolchain.cmake" \
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
   -DCMAKE_C_FLAGS_RELEASE="-O2 -DNDEBUG" -DCMAKE_CXX_FLAGS_RELEASE="-O2 -DNDEBUG" \
-  -DFREETYPE_LIBRARY=$ROOT_SDK/lib/libfreetype2.static.a -DWITH_PYTHON=ON -DPYTHON_VERSION=3.5 -DPYTHON_INCLUDE_DIR=$W/py/Python-3.5.10/Include -DPYTHON_INCLUDE_CONFIG_DIR=$W/py/build -DPYTHON_LIBRARY=$W/py/build/libpython3.5m.a -DPYTHON_LIBPATH=$W/py/build -DPYTHON_LINKFLAGS= -DWITH_PYTHON_SAFETY=OFF -DWITH_HEADLESS=ON -DWITH_LEGACY_DEPSGRAPH=ON "${A[@]}" "$@"
+  -DFREETYPE_LIBRARY=$ROOT_SDK/lib/libfreetype2.static.a -DWITH_PYTHON=ON -DPYTHON_VERSION=3.5 -DPYTHON_INCLUDE_DIR=$W/py/Python-3.5.10/Include -DPYTHON_INCLUDE_CONFIG_DIR=$W/py/build -DPYTHON_LIBRARY=$W/py/build/libpython3.5m.a -DPYTHON_LIBPATH=$W/py/build -DPYTHON_LINKFLAGS= -DWITH_PYTHON_SAFETY=OFF -DWITH_HEADLESS=OFF -DWITH_GHOST_AROS=ON -DQRX_GHOST_DIR="$HERE/ghost" -DQRX_GL_DIR="$HERE/../qrxgl68k/guest" -DWITH_LEGACY_DEPSGRAPH=ON "${A[@]}" "$@"

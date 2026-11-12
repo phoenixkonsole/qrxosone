@@ -929,6 +929,29 @@ static void op_destroy(QGL *g, uint32_t id)
     memset(c, 0, sizeof *c);
 }
 
+/* QRX_GL68K_CAPTURE=path: every presented frame as path.NNNN (PPM), up to QRX_GL68K_CAPTURE_MAX (50).
+ * Shows what a 68k program drew, independent of the guest's screen. */
+static void capture_frame(QGL *g, uint64_t src, uint32_t bpr, int w, int h)
+{
+    static unsigned n;
+    const char *path = getenv("QRX_GL68K_CAPTURE");
+    const char *mx = getenv("QRX_GL68K_CAPTURE_MAX");
+    if (!path || n >= (mx ? (unsigned)atoi(mx) : 50u))
+        return;
+    char name[1024];
+    snprintf(name, sizeof name, "%s.%04u", path, n++);
+    FILE *f = fopen(name, "wb");
+    if (!f)
+        return;
+    fprintf(f, "P6\n%d %d\n255\n", w, h);
+    for (int y = 0; y < h; y++) {
+        const uint8_t *row = g->ram + src + (uint64_t)y * bpr;
+        for (int x = 0; x < w; x++)
+            fwrite(row + x * 4 + 1, 1, 3, f);
+    }
+    fclose(f);
+}
+
 /* The window's frame into guest memory as A R G B bytes, top row first. */
 static void op_swap(QGL *g, uint64_t dst, uint32_t bpr, int w, int h)
 {
@@ -960,6 +983,7 @@ static void op_swap(QGL *g, uint64_t dst, uint32_t bpr, int w, int h)
         glReadPixels(0, c->h - h, w, h, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8, tmp);
         for (int y = 0; y < h; y++)
             memcpy(g->ram + dst + (uint64_t)y * bpr, tmp + (size_t)(h - 1 - y) * (size_t)w * 4, (size_t)w * 4);
+        capture_frame(g, dst, bpr, w, h);
     }
     glBindFramebufferEXT(GL_READ_FRAMEBUFFER_EXT, (GLuint)read_fb);
     glReadBuffer((GLenum)read_buf);
@@ -1026,7 +1050,7 @@ static void run_op(QGL *g, unsigned id, const uint8_t *a, const uint8_t *end)
             }
         }
         break;
-    case OP_BUFSIZE: if (n >= 4) { Buf *b = bound(g, R32(a)); g->ret = b ? b->size : 0; } break;
+    case OP_BUFSIZE: if (n >= 4) { Buf *b = bound(g, R32(a)); g->ret = b ? ((uint64_t)b->name << 32) | (uint32_t)b->size : 0; } break;
     case OP_BUFREAD:
         if (n >= 28) {
             Buf *b = bound(g, R32(a));
@@ -1060,6 +1084,15 @@ void qrx_gl68k_service(uint8_t *ram, uint64_t ram_size, uint8_t *q)
             break;
         g->arena_used = 0;
         g->calls++;
+        /* QRX_GL68K_TRACE=n: the first n calls with their argument words on stderr. */
+        static long trace = -1;
+        if (trace < 0) { const char *t = getenv("QRX_GL68K_TRACE"); trace = t ? atol(t) : 0; }
+        if (trace > 0) {
+            trace--;
+            fprintf(stderr, "[GL] %s", id >= 16 && id < QGL_NFUNCS && qgl_id_names[id] ? qgl_id_names[id] : "op");
+            for (unsigned i = 0; i < nw && i < 8; i++) fprintf(stderr, " %x", R32(a + i * 4));
+            fprintf(stderr, "\n");
+        }
         if (id < 16)
             run_op(g, id, a, e);
         else if (g->cur)

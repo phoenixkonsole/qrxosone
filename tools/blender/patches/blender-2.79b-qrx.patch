@@ -1,3 +1,16 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index bfea2dd..facf66b 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -683,7 +683,7 @@ if(WITH_INSTALL_PORTABLE)
+ 	set(CMAKE_SKIP_BUILD_RPATH TRUE)
+ endif()
+ 
+-if(WITH_GHOST_SDL OR WITH_HEADLESS)
++if(WITH_GHOST_SDL OR WITH_HEADLESS OR WITH_GHOST_AROS)
+ 	set(WITH_X11           OFF)
+ 	set(WITH_X11_XINPUT    OFF)
+ 	set(WITH_X11_XF86VMODE OFF)
 diff --git a/build_files/cmake/macros.cmake b/build_files/cmake/macros.cmake
 index 6303119..b9ccaaf 100644
 --- a/build_files/cmake/macros.cmake
@@ -41,36 +54,84 @@ index 6303119..b9ccaaf 100644
  
  	set_source_files_properties(${_file_to} PROPERTIES GENERATED TRUE)
 diff --git a/extern/glew/CMakeLists.txt b/extern/glew/CMakeLists.txt
-index f264b39..5ca947e 100644
+index f264b39..4319eb1 100644
 --- a/extern/glew/CMakeLists.txt
 +++ b/extern/glew/CMakeLists.txt
-@@ -38,7 +38,7 @@ if(UNIX)
- endif()
+@@ -31,7 +31,7 @@ set(INC_SYS
  
- set(SRC
--	src/glew.c
-+	src/qrx_glew_stub.c
+ )
  
- 	include/GL/glew.h
- 	include/GL/glxew.h
-diff --git a/extern/glew/src/qrx_glew_stub.c b/extern/glew/src/qrx_glew_stub.c
-new file mode 100644
-index 0000000..f72b44e
---- /dev/null
-+++ b/extern/glew/src/qrx_glew_stub.c
-@@ -0,0 +1 @@
-+/* QRX OS One: filled by tools/blender/gen_missing.py */
+-if(UNIX)
++if(UNIX AND NOT WITH_GHOST_AROS)
+ 	list(APPEND INC_SYS
+ 		${X11_X11_INCLUDE_PATH}
+ 	)
+diff --git a/extern/glew/src/glew.c b/extern/glew/src/glew.c
+index 0ed5520..2f850fa 100644
+--- a/extern/glew/src/glew.c
++++ b/extern/glew/src/glew.c
+@@ -34,7 +34,7 @@
+ 
+ #if defined(_WIN32)
+ #  include <GL/wglew.h>
+-#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
++#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(__AROS__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
+ #  include <GL/glxew.h>
+ #endif
+ 
+@@ -179,6 +179,10 @@ void* NSGLGetProcAddress (const GLubyte *name)
+ #  define glewGetProcAddress(name) dlGetProcAddress(name)
+ #elif defined(__ANDROID__)
+ #  define glewGetProcAddress(name) NULL /* TODO */
++#elif defined(__AROS__)
++/* QRX OS One: the GL door's guest library, tools/qrxgl68k in the QRX OS One repository. */
++extern void *qgl_GetProcAddress(const char *name);
++#  define glewGetProcAddress(name) qgl_GetProcAddress((const char *)(name))
+ #elif defined(__native_client__)
+ #  define glewGetProcAddress(name) NULL /* TODO */
+ #else /* __linux */
+@@ -12305,7 +12309,7 @@ GLenum GLEWAPIENTRY wglewInit (WGLEW_CONTEXT_ARG_DEF_LIST)
+   return GLEW_OK;
+ }
+ 
+-#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
++#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(__AROS__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
+ 
+ PFNGLXGETCURRENTDISPLAYPROC __glewXGetCurrentDisplay = NULL;
+ 
+@@ -13373,7 +13377,7 @@ GLenum glxewInit (GLXEW_CONTEXT_ARG_DEF_LIST)
+   return GLEW_OK;
+ }
+ 
+-#endif /* !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) */
++#endif /* !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(__AROS__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) */
+ 
+ /* ------------------------------------------------------------------------ */
+ 
+@@ -13418,7 +13422,7 @@ GLenum GLEWAPIENTRY glewInit (void)
+   if ( r != 0 ) return r;
+ #if defined(_WIN32)
+   return wglewInit();
+-#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) /* _UNIX */
++#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(__AROS__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) /* _UNIX */
+   return glxewInit();
+ #else
+   return r;
+@@ -18065,7 +18069,7 @@ GLboolean GLEWAPIENTRY wglewIsSupported (const char* name)
+   return ret;
+ }
+ 
+-#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(__APPLE__) || defined(GLEW_APPLE_GLX)
++#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(__AROS__) && !defined(__APPLE__) || defined(GLEW_APPLE_GLX)
+ 
+ #if defined(GLEW_MX)
+ GLboolean glxewContextIsSupported (const GLXEWContext* ctx, const char* name)
 diff --git a/intern/CMakeLists.txt b/intern/CMakeLists.txt
-index bfe2302..2d0e340 100644
+index bfe2302..b9c25e7 100644
 --- a/intern/CMakeLists.txt
 +++ b/intern/CMakeLists.txt
-@@ -24,12 +24,11 @@
- # ***** END GPL LICENSE BLOCK *****
- 
- # add_subdirectory(atomic)  # header only
--add_subdirectory(string)
--add_subdirectory(ghost)
-+add_subdirectory(qrx)
+@@ -28,8 +28,8 @@ add_subdirectory(string)
+ add_subdirectory(ghost)
  add_subdirectory(guardedalloc)
  add_subdirectory(libmv)
 -add_subdirectory(memutil)
@@ -79,727 +140,103 @@ index bfe2302..2d0e340 100644
  add_subdirectory(mikktspace)
  add_subdirectory(glew-mx)
  add_subdirectory(eigen)
-diff --git a/intern/qrx/CMakeLists.txt b/intern/qrx/CMakeLists.txt
-new file mode 100644
-index 0000000..8d92783
---- /dev/null
-+++ b/intern/qrx/CMakeLists.txt
-@@ -0,0 +1,4 @@
-+# QRX OS One: the window layer until GHOST has an AROS system.
-+# See docs/BLENDER_AROS68K.md in the QRX OS One repository.
-+set(INC ../guardedalloc ../ghost ../memutil ../eigen)
-+blender_add_lib(bf_intern_ghost "qrx_ghost_stub.c;qrx_ghost_paths.c" "${INC}" "")
-diff --git a/intern/qrx/qrx_ghost_paths.c b/intern/qrx/qrx_ghost_paths.c
-new file mode 100644
-index 0000000..e3a6f43
---- /dev/null
-+++ b/intern/qrx/qrx_ghost_paths.c
-@@ -0,0 +1,21 @@
-+/* The few GHOST calls `blender -b` makes on QRX OS One: where Blender keeps its files.
-+ * The rest of GHOST (windows, events) waits for the GUI stage, see docs/BLENDER_AROS68K.md. */
-+#include "GHOST_Path-api.h"
+diff --git a/intern/ghost/CMakeLists.txt b/intern/ghost/CMakeLists.txt
+index 2541e5e..2138678 100644
+--- a/intern/ghost/CMakeLists.txt
++++ b/intern/ghost/CMakeLists.txt
+@@ -112,7 +112,18 @@ if(WITH_INPUT_NDOF)
+ 	)
+ endif()
+ 
+-if(WITH_HEADLESS OR WITH_GHOST_SDL)
++if(WITH_GHOST_AROS)
++	# QRX OS One: Intuition windows, GL through the ARMithlon door. The sources live in the QRX OS One
++	# repository (tools/blender/ghost, tools/qrxgl68k/guest), see docs/BLENDER_AROS68K.md there.
++	list(APPEND SRC
++		${QRX_GHOST_DIR}/GHOST_SystemAROS.cpp
++		${QRX_GHOST_DIR}/GHOST_WindowAROS.cpp
++		${QRX_GHOST_DIR}/GHOST_ContextAROS.cpp
++		${QRX_GHOST_DIR}/ghost_aros_native.c
++	)
++	list(APPEND INC ${QRX_GHOST_DIR} ${QRX_GL_DIR} intern)
++	add_definitions(-DWITH_GHOST_AROS)
++elseif(WITH_HEADLESS OR WITH_GHOST_SDL)
+ 	if(WITH_HEADLESS)
+ 		list(APPEND SRC
+ 			intern/GHOST_DisplayManagerNULL.h
+@@ -305,7 +316,7 @@ elseif(WIN32)
+ 	endif()
+ endif()
+ 
+-if(WITH_GL_EGL AND NOT (WITH_HEADLESS OR WITH_GHOST_SDL))
++if(WITH_GL_EGL AND NOT (WITH_HEADLESS OR WITH_GHOST_SDL OR WITH_GHOST_AROS))
+ 	list(APPEND SRC
+ 		intern/GHOST_ContextEGL.cpp
+ 			
+@@ -313,7 +324,10 @@ if(WITH_GL_EGL AND NOT (WITH_HEADLESS OR WITH_GHOST_SDL))
+ 	)
+ endif()
+ 
+-if(APPLE)
++if(WITH_GHOST_AROS)
++	# GHOST_SystemPathsAROS.h only
 +
-+GHOST_TSuccess GHOST_CreateSystemPaths(void) { return GHOST_kSuccess; }
-+GHOST_TSuccess GHOST_DisposeSystemPaths(void) { return GHOST_kSuccess; }
-+const GHOST_TUns8 *GHOST_getSystemDir(int version, const char *versionstr)
-+{
-+	(void)version; (void)versionstr;
-+	return (const GHOST_TUns8 *)"PROGDIR:";
-+}
-+const GHOST_TUns8 *GHOST_getUserDir(int version, const char *versionstr)
-+{
-+	(void)version; (void)versionstr;
-+	return (const GHOST_TUns8 *)"PROGDIR:user";
-+}
-+const GHOST_TUns8 *GHOST_getBinaryDir(void)
-+{
-+	return (const GHOST_TUns8 *)"PROGDIR:";
-+}
-+void GHOST_addToSystemRecentFiles(const char *filename) { (void)filename; }
-diff --git a/intern/qrx/qrx_ghost_stub.c b/intern/qrx/qrx_ghost_stub.c
-new file mode 100644
-index 0000000..80fc1cc
---- /dev/null
-+++ b/intern/qrx/qrx_ghost_stub.c
-@@ -0,0 +1,678 @@
-+/* Generated by tools/blender/gen_missing.py. */
-+extern void qrx_missing(const char *name);
-+long GHOST_ActivateWindowDrawingContext(void) { qrx_missing("GHOST_ActivateWindowDrawingContext"); return 0; }
-+long GHOST_AddEventConsumer(void) { qrx_missing("GHOST_AddEventConsumer"); return 0; }
-+long GHOST_ClientToScreen(void) { qrx_missing("GHOST_ClientToScreen"); return 0; }
-+long GHOST_CreateEventConsumer(void) { qrx_missing("GHOST_CreateEventConsumer"); return 0; }
-+long GHOST_CreateSystem(void) { qrx_missing("GHOST_CreateSystem"); return 0; }
-+long GHOST_CreateWindow(void) { qrx_missing("GHOST_CreateWindow"); return 0; }
-+long GHOST_DispatchEvents(void) { qrx_missing("GHOST_DispatchEvents"); return 0; }
-+long GHOST_DisposeRectangle(void) { qrx_missing("GHOST_DisposeRectangle"); return 0; }
-+long GHOST_DisposeSystem(void) { qrx_missing("GHOST_DisposeSystem"); return 0; }
-+long GHOST_DisposeWindow(void) { qrx_missing("GHOST_DisposeWindow"); return 0; }
-+long GHOST_EndProgressBar(void) { qrx_missing("GHOST_EndProgressBar"); return 0; }
-+long GHOST_GetAllDisplayDimensions(void) { qrx_missing("GHOST_GetAllDisplayDimensions"); return 0; }
-+long GHOST_GetClientBounds(void) { qrx_missing("GHOST_GetClientBounds"); return 0; }
-+long GHOST_GetCursorPosition(void) { qrx_missing("GHOST_GetCursorPosition"); return 0; }
-+long GHOST_GetDPIHint(void) { qrx_missing("GHOST_GetDPIHint"); return 0; }
-+long GHOST_GetEventData(void) { qrx_missing("GHOST_GetEventData"); return 0; }
-+long GHOST_GetEventTime(void) { qrx_missing("GHOST_GetEventTime"); return 0; }
-+long GHOST_GetEventType(void) { qrx_missing("GHOST_GetEventType"); return 0; }
-+long GHOST_GetEventWindow(void) { qrx_missing("GHOST_GetEventWindow"); return 0; }
-+long GHOST_GetHeightRectangle(void) { qrx_missing("GHOST_GetHeightRectangle"); return 0; }
-+long GHOST_GetMainDisplayDimensions(void) { qrx_missing("GHOST_GetMainDisplayDimensions"); return 0; }
-+long GHOST_GetModifierKeyState(void) { qrx_missing("GHOST_GetModifierKeyState"); return 0; }
-+long GHOST_GetNativePixelSize(void) { qrx_missing("GHOST_GetNativePixelSize"); return 0; }
-+long GHOST_GetRectangle(void) { qrx_missing("GHOST_GetRectangle"); return 0; }
-+long GHOST_GetSwapInterval(void) { qrx_missing("GHOST_GetSwapInterval"); return 0; }
-+long GHOST_GetTabletData(void) { qrx_missing("GHOST_GetTabletData"); return 0; }
-+long GHOST_GetWidthRectangle(void) { qrx_missing("GHOST_GetWidthRectangle"); return 0; }
-+long GHOST_GetWindowState(void) { qrx_missing("GHOST_GetWindowState"); return 0; }
-+long GHOST_GetWindowUserData(void) { qrx_missing("GHOST_GetWindowUserData"); return 0; }
-+long GHOST_ProcessEvents(void) { qrx_missing("GHOST_ProcessEvents"); return 0; }
-+long GHOST_ScreenToClient(void) { qrx_missing("GHOST_ScreenToClient"); return 0; }
-+long GHOST_SetClientSize(void) { qrx_missing("GHOST_SetClientSize"); return 0; }
-+long GHOST_SetCursorGrab(void) { qrx_missing("GHOST_SetCursorGrab"); return 0; }
-+long GHOST_SetCursorPosition(void) { qrx_missing("GHOST_SetCursorPosition"); return 0; }
-+long GHOST_SetCursorShape(void) { qrx_missing("GHOST_SetCursorShape"); return 0; }
-+long GHOST_SetCursorVisibility(void) { qrx_missing("GHOST_SetCursorVisibility"); return 0; }
-+long GHOST_SetCustomCursorShape(void) { qrx_missing("GHOST_SetCustomCursorShape"); return 0; }
-+long GHOST_SetCustomCursorShapeEx(void) { qrx_missing("GHOST_SetCustomCursorShapeEx"); return 0; }
-+long GHOST_SetProgressBar(void) { qrx_missing("GHOST_SetProgressBar"); return 0; }
-+long GHOST_SetSwapInterval(void) { qrx_missing("GHOST_SetSwapInterval"); return 0; }
-+long GHOST_SetTitle(void) { qrx_missing("GHOST_SetTitle"); return 0; }
-+long GHOST_SetWindowModifiedState(void) { qrx_missing("GHOST_SetWindowModifiedState"); return 0; }
-+long GHOST_SetWindowOrder(void) { qrx_missing("GHOST_SetWindowOrder"); return 0; }
-+long GHOST_SetWindowState(void) { qrx_missing("GHOST_SetWindowState"); return 0; }
-+long GHOST_SetWindowUserData(void) { qrx_missing("GHOST_SetWindowUserData"); return 0; }
-+long GHOST_SwapWindowBuffers(void) { qrx_missing("GHOST_SwapWindowBuffers"); return 0; }
-+long GHOST_UseNativePixels(void) { qrx_missing("GHOST_UseNativePixels"); return 0; }
-+long GHOST_ValidWindow(void) { qrx_missing("GHOST_ValidWindow"); return 0; }
-+long GHOST_confirmQuit(void) { qrx_missing("GHOST_confirmQuit"); return 0; }
-+long GHOST_getClipboard(void) { qrx_missing("GHOST_getClipboard"); return 0; }
-+long GHOST_putClipboard(void) { qrx_missing("GHOST_putClipboard"); return 0; }
-+long GHOST_toggleConsole(void) { qrx_missing("GHOST_toggleConsole"); return 0; }
-+unsigned char __GLEW_AMD_debug_output = 0;
-+unsigned char __GLEW_ARB_compatibility = 0;
-+unsigned char __GLEW_ARB_debug_output = 0;
-+unsigned char __GLEW_ARB_draw_elements_base_vertex = 0;
-+unsigned char __GLEW_ARB_draw_instanced = 0;
-+unsigned char __GLEW_ARB_framebuffer_object = 0;
-+unsigned char __GLEW_ARB_texture_float = 0;
-+unsigned char __GLEW_ARB_texture_multisample = 0;
-+unsigned char __GLEW_ARB_texture_query_lod = 0;
-+unsigned char __GLEW_ARB_texture_rectangle = 0;
-+unsigned char __GLEW_ARB_texture_swizzle = 0;
-+unsigned char __GLEW_ATI_meminfo = 0;
-+unsigned char __GLEW_EXT_framebuffer_blit = 0;
-+unsigned char __GLEW_EXT_framebuffer_multisample = 0;
-+unsigned char __GLEW_EXT_framebuffer_multisample_blit_scaled = 0;
-+unsigned char __GLEW_EXT_framebuffer_object = 0;
-+unsigned char __GLEW_EXT_geometry_shader4 = 0;
-+unsigned char __GLEW_EXT_gpu_shader4 = 0;
-+unsigned char __GLEW_EXT_texture_filter_anisotropic = 0;
-+unsigned char __GLEW_EXT_texture_rectangle = 0;
-+unsigned char __GLEW_GREMEDY_string_marker = 0;
-+unsigned char __GLEW_KHR_debug = 0;
-+unsigned char __GLEW_NVX_gpu_memory_info = 0;
-+unsigned char __GLEW_NV_texture_rectangle = 0;
-+unsigned char __GLEW_VERSION_3_0 = 0;
-+unsigned char __GLEW_VERSION_3_1 = 0;
-+unsigned char __GLEW_VERSION_3_2 = 0;
-+unsigned char __GLEW_VERSION_4_0 = 0;
-+unsigned char __GLEW_VERSION_4_3 = 0;
-+void *__glewActiveTexture = 0;
-+void *__glewAttachShader = 0;
-+void *__glewBeginQuery = 0;
-+void *__glewBindAttribLocation = 0;
-+void *__glewBindBuffer = 0;
-+void *__glewBindBufferBase = 0;
-+void *__glewBindBufferRange = 0;
-+void *__glewBindFramebufferEXT = 0;
-+void *__glewBindVertexArray = 0;
-+void *__glewBlendColor = 0;
-+void *__glewBlendEquation = 0;
-+void *__glewBlendEquationSeparate = 0;
-+void *__glewBlendFuncSeparate = 0;
-+void *__glewBlitFramebufferEXT = 0;
-+void *__glewBufferData = 0;
-+void *__glewBufferSubData = 0;
-+void *__glewCheckFramebufferStatusEXT = 0;
-+void *__glewClientActiveTexture = 0;
-+void *__glewColorP3ui = 0;
-+void *__glewColorP3uiv = 0;
-+void *__glewColorP4ui = 0;
-+void *__glewColorP4uiv = 0;
-+void *__glewCompileShader = 0;
-+void *__glewCompressedTexImage1D = 0;
-+void *__glewCompressedTexImage2D = 0;
-+void *__glewCompressedTexImage3D = 0;
-+void *__glewCompressedTexSubImage1D = 0;
-+void *__glewCompressedTexSubImage2D = 0;
-+void *__glewCompressedTexSubImage3D = 0;
-+void *__glewCopyTexSubImage3D = 0;
-+void *__glewCreateProgram = 0;
-+void *__glewCreateShader = 0;
-+void *__glewDebugMessageCallback = 0;
-+void *__glewDebugMessageCallbackAMD = 0;
-+void *__glewDebugMessageCallbackARB = 0;
-+void *__glewDebugMessageControl = 0;
-+void *__glewDebugMessageControlARB = 0;
-+void *__glewDebugMessageEnableAMD = 0;
-+void *__glewDebugMessageInsert = 0;
-+void *__glewDebugMessageInsertAMD = 0;
-+void *__glewDebugMessageInsertARB = 0;
-+void *__glewDeleteBuffers = 0;
-+void *__glewDeleteFramebuffersEXT = 0;
-+void *__glewDeleteProgram = 0;
-+void *__glewDeleteQueries = 0;
-+void *__glewDeleteShader = 0;
-+void *__glewDeleteVertexArrays = 0;
-+void *__glewDetachShader = 0;
-+void *__glewDisableVertexAttribArray = 0;
-+void *__glewDrawArraysInstancedARB = 0;
-+void *__glewDrawBuffers = 0;
-+void *__glewDrawRangeElements = 0;
-+void *__glewEnableVertexAttribArray = 0;
-+void *__glewEndQuery = 0;
-+void *__glewFramebufferTexture = 0;
-+void *__glewFramebufferTexture2DEXT = 0;
-+void *__glewGenBuffers = 0;
-+void *__glewGenFramebuffersEXT = 0;
-+void *__glewGenQueries = 0;
-+void *__glewGenVertexArrays = 0;
-+void *__glewGenerateMipmap = 0;
-+void *__glewGenerateMipmapEXT = 0;
-+void *__glewGetActiveAttrib = 0;
-+void *__glewGetActiveUniform = 0;
-+void *__glewGetActiveUniformBlockName = 0;
-+void *__glewGetActiveUniformBlockiv = 0;
-+void *__glewGetActiveUniformName = 0;
-+void *__glewGetActiveUniformsiv = 0;
-+void *__glewGetAttachedShaders = 0;
-+void *__glewGetAttribLocation = 0;
-+void *__glewGetBufferParameteri64v = 0;
-+void *__glewGetBufferParameteriv = 0;
-+void *__glewGetBufferPointerv = 0;
-+void *__glewGetBufferSubData = 0;
-+void *__glewGetCompressedTexImage = 0;
-+void *__glewGetInteger64i_v = 0;
-+void *__glewGetIntegeri_v = 0;
-+void *__glewGetMultisamplefv = 0;
-+void *__glewGetProgramInfoLog = 0;
-+void *__glewGetProgramiv = 0;
-+void *__glewGetQueryObjectiv = 0;
-+void *__glewGetQueryObjectuiv = 0;
-+void *__glewGetQueryiv = 0;
-+void *__glewGetShaderInfoLog = 0;
-+void *__glewGetShaderSource = 0;
-+void *__glewGetShaderiv = 0;
-+void *__glewGetUniformBlockIndex = 0;
-+void *__glewGetUniformIndices = 0;
-+void *__glewGetUniformLocation = 0;
-+void *__glewGetUniformfv = 0;
-+void *__glewGetUniformiv = 0;
-+void *__glewGetVertexAttribPointerv = 0;
-+void *__glewGetVertexAttribdv = 0;
-+void *__glewGetVertexAttribfv = 0;
-+void *__glewGetVertexAttribiv = 0;
-+void *__glewIsBuffer = 0;
-+void *__glewIsProgram = 0;
-+void *__glewIsQuery = 0;
-+void *__glewIsShader = 0;
-+void *__glewIsVertexArray = 0;
-+void *__glewLinkProgram = 0;
-+void *__glewLoadTransposeMatrixd = 0;
-+void *__glewLoadTransposeMatrixf = 0;
-+void *__glewMapBuffer = 0;
-+void *__glewMultTransposeMatrixd = 0;
-+void *__glewMultTransposeMatrixf = 0;
-+void *__glewMultiDrawElementsBaseVertex = 0;
-+void *__glewMultiTexCoord1d = 0;
-+void *__glewMultiTexCoord1dv = 0;
-+void *__glewMultiTexCoord1f = 0;
-+void *__glewMultiTexCoord1fv = 0;
-+void *__glewMultiTexCoord1i = 0;
-+void *__glewMultiTexCoord1iv = 0;
-+void *__glewMultiTexCoord1s = 0;
-+void *__glewMultiTexCoord1sv = 0;
-+void *__glewMultiTexCoord2d = 0;
-+void *__glewMultiTexCoord2dv = 0;
-+void *__glewMultiTexCoord2f = 0;
-+void *__glewMultiTexCoord2fv = 0;
-+void *__glewMultiTexCoord2i = 0;
-+void *__glewMultiTexCoord2iv = 0;
-+void *__glewMultiTexCoord2s = 0;
-+void *__glewMultiTexCoord2sv = 0;
-+void *__glewMultiTexCoord3d = 0;
-+void *__glewMultiTexCoord3dv = 0;
-+void *__glewMultiTexCoord3f = 0;
-+void *__glewMultiTexCoord3fv = 0;
-+void *__glewMultiTexCoord3i = 0;
-+void *__glewMultiTexCoord3iv = 0;
-+void *__glewMultiTexCoord3s = 0;
-+void *__glewMultiTexCoord3sv = 0;
-+void *__glewMultiTexCoord4d = 0;
-+void *__glewMultiTexCoord4dv = 0;
-+void *__glewMultiTexCoord4f = 0;
-+void *__glewMultiTexCoord4fv = 0;
-+void *__glewMultiTexCoord4i = 0;
-+void *__glewMultiTexCoord4iv = 0;
-+void *__glewMultiTexCoord4s = 0;
-+void *__glewMultiTexCoord4sv = 0;
-+void *__glewMultiTexCoordP1ui = 0;
-+void *__glewMultiTexCoordP1uiv = 0;
-+void *__glewMultiTexCoordP2ui = 0;
-+void *__glewMultiTexCoordP2uiv = 0;
-+void *__glewMultiTexCoordP3ui = 0;
-+void *__glewMultiTexCoordP3uiv = 0;
-+void *__glewMultiTexCoordP4ui = 0;
-+void *__glewMultiTexCoordP4uiv = 0;
-+void *__glewNormalP3ui = 0;
-+void *__glewNormalP3uiv = 0;
-+void *__glewProgramParameteriEXT = 0;
-+void *__glewSampleCoverage = 0;
-+void *__glewSampleMaski = 0;
-+void *__glewSecondaryColorP3ui = 0;
-+void *__glewSecondaryColorP3uiv = 0;
-+void *__glewShaderSource = 0;
-+void *__glewStencilFuncSeparate = 0;
-+void *__glewStencilMaskSeparate = 0;
-+void *__glewStencilOpSeparate = 0;
-+void *__glewStringMarkerGREMEDY = 0;
-+void *__glewTexCoordP1ui = 0;
-+void *__glewTexCoordP1uiv = 0;
-+void *__glewTexCoordP2ui = 0;
-+void *__glewTexCoordP2uiv = 0;
-+void *__glewTexCoordP3ui = 0;
-+void *__glewTexCoordP3uiv = 0;
-+void *__glewTexCoordP4ui = 0;
-+void *__glewTexCoordP4uiv = 0;
-+void *__glewTexImage2DMultisample = 0;
-+void *__glewTexImage3D = 0;
-+void *__glewTexImage3DMultisample = 0;
-+void *__glewTexSubImage3D = 0;
-+void *__glewUniform1f = 0;
-+void *__glewUniform1fv = 0;
-+void *__glewUniform1i = 0;
-+void *__glewUniform1iv = 0;
-+void *__glewUniform2f = 0;
-+void *__glewUniform2fv = 0;
-+void *__glewUniform2i = 0;
-+void *__glewUniform2iv = 0;
-+void *__glewUniform3f = 0;
-+void *__glewUniform3fv = 0;
-+void *__glewUniform3i = 0;
-+void *__glewUniform3iv = 0;
-+void *__glewUniform4f = 0;
-+void *__glewUniform4fv = 0;
-+void *__glewUniform4i = 0;
-+void *__glewUniform4iv = 0;
-+void *__glewUniformBlockBinding = 0;
-+void *__glewUniformMatrix2fv = 0;
-+void *__glewUniformMatrix2x3fv = 0;
-+void *__glewUniformMatrix2x4fv = 0;
-+void *__glewUniformMatrix3fv = 0;
-+void *__glewUniformMatrix3x2fv = 0;
-+void *__glewUniformMatrix3x4fv = 0;
-+void *__glewUniformMatrix4fv = 0;
-+void *__glewUniformMatrix4x2fv = 0;
-+void *__glewUniformMatrix4x3fv = 0;
-+void *__glewUnmapBuffer = 0;
-+void *__glewUseProgram = 0;
-+void *__glewValidateProgram = 0;
-+void *__glewVertexAttrib1d = 0;
-+void *__glewVertexAttrib1dv = 0;
-+void *__glewVertexAttrib1f = 0;
-+void *__glewVertexAttrib1fv = 0;
-+void *__glewVertexAttrib1s = 0;
-+void *__glewVertexAttrib1sv = 0;
-+void *__glewVertexAttrib2d = 0;
-+void *__glewVertexAttrib2dv = 0;
-+void *__glewVertexAttrib2f = 0;
-+void *__glewVertexAttrib2fv = 0;
-+void *__glewVertexAttrib2s = 0;
-+void *__glewVertexAttrib2sv = 0;
-+void *__glewVertexAttrib3d = 0;
-+void *__glewVertexAttrib3dv = 0;
-+void *__glewVertexAttrib3f = 0;
-+void *__glewVertexAttrib3fv = 0;
-+void *__glewVertexAttrib3s = 0;
-+void *__glewVertexAttrib3sv = 0;
-+void *__glewVertexAttrib4Nbv = 0;
-+void *__glewVertexAttrib4Niv = 0;
-+void *__glewVertexAttrib4Nsv = 0;
-+void *__glewVertexAttrib4Nub = 0;
-+void *__glewVertexAttrib4Nubv = 0;
-+void *__glewVertexAttrib4Nuiv = 0;
-+void *__glewVertexAttrib4Nusv = 0;
-+void *__glewVertexAttrib4bv = 0;
-+void *__glewVertexAttrib4d = 0;
-+void *__glewVertexAttrib4dv = 0;
-+void *__glewVertexAttrib4f = 0;
-+void *__glewVertexAttrib4fv = 0;
-+void *__glewVertexAttrib4iv = 0;
-+void *__glewVertexAttrib4s = 0;
-+void *__glewVertexAttrib4sv = 0;
-+void *__glewVertexAttrib4ubv = 0;
-+void *__glewVertexAttrib4uiv = 0;
-+void *__glewVertexAttrib4usv = 0;
-+void *__glewVertexAttribPointer = 0;
-+void *__glewVertexP2ui = 0;
-+void *__glewVertexP2uiv = 0;
-+void *__glewVertexP3ui = 0;
-+void *__glewVertexP3uiv = 0;
-+void *__glewVertexP4ui = 0;
-+void *__glewVertexP4uiv = 0;
-+long glAccum(void) { qrx_missing("glAccum"); return 0; }
-+long glAlphaFunc(void) { qrx_missing("glAlphaFunc"); return 0; }
-+long glAreTexturesResident(void) { qrx_missing("glAreTexturesResident"); return 0; }
-+long glArrayElement(void) { qrx_missing("glArrayElement"); return 0; }
-+long glBegin(void) { qrx_missing("glBegin"); return 0; }
-+long glBindTexture(void) { qrx_missing("glBindTexture"); return 0; }
-+long glBitmap(void) { qrx_missing("glBitmap"); return 0; }
-+long glBlendFunc(void) { qrx_missing("glBlendFunc"); return 0; }
-+long glCallList(void) { qrx_missing("glCallList"); return 0; }
-+long glCallLists(void) { qrx_missing("glCallLists"); return 0; }
-+long glClear(void) { qrx_missing("glClear"); return 0; }
-+long glClearAccum(void) { qrx_missing("glClearAccum"); return 0; }
-+long glClearColor(void) { qrx_missing("glClearColor"); return 0; }
-+long glClearDepth(void) { qrx_missing("glClearDepth"); return 0; }
-+long glClearIndex(void) { qrx_missing("glClearIndex"); return 0; }
-+long glClearStencil(void) { qrx_missing("glClearStencil"); return 0; }
-+long glClipPlane(void) { qrx_missing("glClipPlane"); return 0; }
-+long glColor3b(void) { qrx_missing("glColor3b"); return 0; }
-+long glColor3bv(void) { qrx_missing("glColor3bv"); return 0; }
-+long glColor3d(void) { qrx_missing("glColor3d"); return 0; }
-+long glColor3dv(void) { qrx_missing("glColor3dv"); return 0; }
-+long glColor3f(void) { qrx_missing("glColor3f"); return 0; }
-+long glColor3fv(void) { qrx_missing("glColor3fv"); return 0; }
-+long glColor3i(void) { qrx_missing("glColor3i"); return 0; }
-+long glColor3iv(void) { qrx_missing("glColor3iv"); return 0; }
-+long glColor3s(void) { qrx_missing("glColor3s"); return 0; }
-+long glColor3sv(void) { qrx_missing("glColor3sv"); return 0; }
-+long glColor3ub(void) { qrx_missing("glColor3ub"); return 0; }
-+long glColor3ubv(void) { qrx_missing("glColor3ubv"); return 0; }
-+long glColor3ui(void) { qrx_missing("glColor3ui"); return 0; }
-+long glColor3uiv(void) { qrx_missing("glColor3uiv"); return 0; }
-+long glColor3us(void) { qrx_missing("glColor3us"); return 0; }
-+long glColor3usv(void) { qrx_missing("glColor3usv"); return 0; }
-+long glColor4b(void) { qrx_missing("glColor4b"); return 0; }
-+long glColor4bv(void) { qrx_missing("glColor4bv"); return 0; }
-+long glColor4d(void) { qrx_missing("glColor4d"); return 0; }
-+long glColor4dv(void) { qrx_missing("glColor4dv"); return 0; }
-+long glColor4f(void) { qrx_missing("glColor4f"); return 0; }
-+long glColor4fv(void) { qrx_missing("glColor4fv"); return 0; }
-+long glColor4i(void) { qrx_missing("glColor4i"); return 0; }
-+long glColor4iv(void) { qrx_missing("glColor4iv"); return 0; }
-+long glColor4s(void) { qrx_missing("glColor4s"); return 0; }
-+long glColor4sv(void) { qrx_missing("glColor4sv"); return 0; }
-+long glColor4ub(void) { qrx_missing("glColor4ub"); return 0; }
-+long glColor4ubv(void) { qrx_missing("glColor4ubv"); return 0; }
-+long glColor4ui(void) { qrx_missing("glColor4ui"); return 0; }
-+long glColor4uiv(void) { qrx_missing("glColor4uiv"); return 0; }
-+long glColor4us(void) { qrx_missing("glColor4us"); return 0; }
-+long glColor4usv(void) { qrx_missing("glColor4usv"); return 0; }
-+long glColorMask(void) { qrx_missing("glColorMask"); return 0; }
-+long glColorMaterial(void) { qrx_missing("glColorMaterial"); return 0; }
-+long glColorPointer(void) { qrx_missing("glColorPointer"); return 0; }
-+long glCopyPixels(void) { qrx_missing("glCopyPixels"); return 0; }
-+long glCopyTexImage1D(void) { qrx_missing("glCopyTexImage1D"); return 0; }
-+long glCopyTexImage2D(void) { qrx_missing("glCopyTexImage2D"); return 0; }
-+long glCopyTexSubImage1D(void) { qrx_missing("glCopyTexSubImage1D"); return 0; }
-+long glCopyTexSubImage2D(void) { qrx_missing("glCopyTexSubImage2D"); return 0; }
-+long glCullFace(void) { qrx_missing("glCullFace"); return 0; }
-+long glDeleteLists(void) { qrx_missing("glDeleteLists"); return 0; }
-+long glDeleteTextures(void) { qrx_missing("glDeleteTextures"); return 0; }
-+long glDepthFunc(void) { qrx_missing("glDepthFunc"); return 0; }
-+long glDepthMask(void) { qrx_missing("glDepthMask"); return 0; }
-+long glDepthRange(void) { qrx_missing("glDepthRange"); return 0; }
-+long glDisable(void) { qrx_missing("glDisable"); return 0; }
-+long glDisableClientState(void) { qrx_missing("glDisableClientState"); return 0; }
-+long glDrawArrays(void) { qrx_missing("glDrawArrays"); return 0; }
-+long glDrawBuffer(void) { qrx_missing("glDrawBuffer"); return 0; }
-+long glDrawElements(void) { qrx_missing("glDrawElements"); return 0; }
-+long glDrawPixels(void) { qrx_missing("glDrawPixels"); return 0; }
-+long glEdgeFlag(void) { qrx_missing("glEdgeFlag"); return 0; }
-+long glEdgeFlagPointer(void) { qrx_missing("glEdgeFlagPointer"); return 0; }
-+long glEdgeFlagv(void) { qrx_missing("glEdgeFlagv"); return 0; }
-+long glEnable(void) { qrx_missing("glEnable"); return 0; }
-+long glEnableClientState(void) { qrx_missing("glEnableClientState"); return 0; }
-+long glEnd(void) { qrx_missing("glEnd"); return 0; }
-+long glEndList(void) { qrx_missing("glEndList"); return 0; }
-+long glEvalCoord1d(void) { qrx_missing("glEvalCoord1d"); return 0; }
-+long glEvalCoord1dv(void) { qrx_missing("glEvalCoord1dv"); return 0; }
-+long glEvalCoord1f(void) { qrx_missing("glEvalCoord1f"); return 0; }
-+long glEvalCoord1fv(void) { qrx_missing("glEvalCoord1fv"); return 0; }
-+long glEvalCoord2d(void) { qrx_missing("glEvalCoord2d"); return 0; }
-+long glEvalCoord2dv(void) { qrx_missing("glEvalCoord2dv"); return 0; }
-+long glEvalCoord2f(void) { qrx_missing("glEvalCoord2f"); return 0; }
-+long glEvalCoord2fv(void) { qrx_missing("glEvalCoord2fv"); return 0; }
-+long glEvalMesh1(void) { qrx_missing("glEvalMesh1"); return 0; }
-+long glEvalMesh2(void) { qrx_missing("glEvalMesh2"); return 0; }
-+long glEvalPoint1(void) { qrx_missing("glEvalPoint1"); return 0; }
-+long glEvalPoint2(void) { qrx_missing("glEvalPoint2"); return 0; }
-+long glFeedbackBuffer(void) { qrx_missing("glFeedbackBuffer"); return 0; }
-+long glFinish(void) { qrx_missing("glFinish"); return 0; }
-+long glFlush(void) { qrx_missing("glFlush"); return 0; }
-+long glFogf(void) { qrx_missing("glFogf"); return 0; }
-+long glFogfv(void) { qrx_missing("glFogfv"); return 0; }
-+long glFogi(void) { qrx_missing("glFogi"); return 0; }
-+long glFogiv(void) { qrx_missing("glFogiv"); return 0; }
-+long glFrontFace(void) { qrx_missing("glFrontFace"); return 0; }
-+long glFrustum(void) { qrx_missing("glFrustum"); return 0; }
-+long glGenLists(void) { qrx_missing("glGenLists"); return 0; }
-+long glGenTextures(void) { qrx_missing("glGenTextures"); return 0; }
-+long glGetBooleanv(void) { qrx_missing("glGetBooleanv"); return 0; }
-+long glGetClipPlane(void) { qrx_missing("glGetClipPlane"); return 0; }
-+long glGetDoublev(void) { qrx_missing("glGetDoublev"); return 0; }
-+long glGetError(void) { qrx_missing("glGetError"); return 0; }
-+long glGetFloatv(void) { qrx_missing("glGetFloatv"); return 0; }
-+long glGetIntegerv(void) { qrx_missing("glGetIntegerv"); return 0; }
-+long glGetLightfv(void) { qrx_missing("glGetLightfv"); return 0; }
-+long glGetLightiv(void) { qrx_missing("glGetLightiv"); return 0; }
-+long glGetMapdv(void) { qrx_missing("glGetMapdv"); return 0; }
-+long glGetMapfv(void) { qrx_missing("glGetMapfv"); return 0; }
-+long glGetMapiv(void) { qrx_missing("glGetMapiv"); return 0; }
-+long glGetMaterialfv(void) { qrx_missing("glGetMaterialfv"); return 0; }
-+long glGetMaterialiv(void) { qrx_missing("glGetMaterialiv"); return 0; }
-+long glGetPixelMapfv(void) { qrx_missing("glGetPixelMapfv"); return 0; }
-+long glGetPixelMapuiv(void) { qrx_missing("glGetPixelMapuiv"); return 0; }
-+long glGetPixelMapusv(void) { qrx_missing("glGetPixelMapusv"); return 0; }
-+long glGetPointerv(void) { qrx_missing("glGetPointerv"); return 0; }
-+long glGetPolygonStipple(void) { qrx_missing("glGetPolygonStipple"); return 0; }
-+long glGetString(void) { qrx_missing("glGetString"); return 0; }
-+long glGetTexEnvfv(void) { qrx_missing("glGetTexEnvfv"); return 0; }
-+long glGetTexEnviv(void) { qrx_missing("glGetTexEnviv"); return 0; }
-+long glGetTexGendv(void) { qrx_missing("glGetTexGendv"); return 0; }
-+long glGetTexGenfv(void) { qrx_missing("glGetTexGenfv"); return 0; }
-+long glGetTexGeniv(void) { qrx_missing("glGetTexGeniv"); return 0; }
-+long glGetTexImage(void) { qrx_missing("glGetTexImage"); return 0; }
-+long glGetTexLevelParameterfv(void) { qrx_missing("glGetTexLevelParameterfv"); return 0; }
-+long glGetTexLevelParameteriv(void) { qrx_missing("glGetTexLevelParameteriv"); return 0; }
-+long glGetTexParameterfv(void) { qrx_missing("glGetTexParameterfv"); return 0; }
-+long glGetTexParameteriv(void) { qrx_missing("glGetTexParameteriv"); return 0; }
-+long glHint(void) { qrx_missing("glHint"); return 0; }
-+long glIndexMask(void) { qrx_missing("glIndexMask"); return 0; }
-+long glIndexPointer(void) { qrx_missing("glIndexPointer"); return 0; }
-+long glIndexd(void) { qrx_missing("glIndexd"); return 0; }
-+long glIndexdv(void) { qrx_missing("glIndexdv"); return 0; }
-+long glIndexf(void) { qrx_missing("glIndexf"); return 0; }
-+long glIndexfv(void) { qrx_missing("glIndexfv"); return 0; }
-+long glIndexi(void) { qrx_missing("glIndexi"); return 0; }
-+long glIndexiv(void) { qrx_missing("glIndexiv"); return 0; }
-+long glIndexs(void) { qrx_missing("glIndexs"); return 0; }
-+long glIndexsv(void) { qrx_missing("glIndexsv"); return 0; }
-+long glIndexub(void) { qrx_missing("glIndexub"); return 0; }
-+long glIndexubv(void) { qrx_missing("glIndexubv"); return 0; }
-+long glInitNames(void) { qrx_missing("glInitNames"); return 0; }
-+long glInterleavedArrays(void) { qrx_missing("glInterleavedArrays"); return 0; }
-+long glIsEnabled(void) { qrx_missing("glIsEnabled"); return 0; }
-+long glIsList(void) { qrx_missing("glIsList"); return 0; }
-+long glIsTexture(void) { qrx_missing("glIsTexture"); return 0; }
-+long glLightModelf(void) { qrx_missing("glLightModelf"); return 0; }
-+long glLightModelfv(void) { qrx_missing("glLightModelfv"); return 0; }
-+long glLightModeli(void) { qrx_missing("glLightModeli"); return 0; }
-+long glLightModeliv(void) { qrx_missing("glLightModeliv"); return 0; }
-+long glLightf(void) { qrx_missing("glLightf"); return 0; }
-+long glLightfv(void) { qrx_missing("glLightfv"); return 0; }
-+long glLighti(void) { qrx_missing("glLighti"); return 0; }
-+long glLightiv(void) { qrx_missing("glLightiv"); return 0; }
-+long glLineStipple(void) { qrx_missing("glLineStipple"); return 0; }
-+long glLineWidth(void) { qrx_missing("glLineWidth"); return 0; }
-+long glListBase(void) { qrx_missing("glListBase"); return 0; }
-+long glLoadIdentity(void) { qrx_missing("glLoadIdentity"); return 0; }
-+long glLoadMatrixd(void) { qrx_missing("glLoadMatrixd"); return 0; }
-+long glLoadMatrixf(void) { qrx_missing("glLoadMatrixf"); return 0; }
-+long glLoadName(void) { qrx_missing("glLoadName"); return 0; }
-+long glLogicOp(void) { qrx_missing("glLogicOp"); return 0; }
-+long glMap1d(void) { qrx_missing("glMap1d"); return 0; }
-+long glMap1f(void) { qrx_missing("glMap1f"); return 0; }
-+long glMap2d(void) { qrx_missing("glMap2d"); return 0; }
-+long glMap2f(void) { qrx_missing("glMap2f"); return 0; }
-+long glMapGrid1d(void) { qrx_missing("glMapGrid1d"); return 0; }
-+long glMapGrid1f(void) { qrx_missing("glMapGrid1f"); return 0; }
-+long glMapGrid2d(void) { qrx_missing("glMapGrid2d"); return 0; }
-+long glMapGrid2f(void) { qrx_missing("glMapGrid2f"); return 0; }
-+long glMaterialf(void) { qrx_missing("glMaterialf"); return 0; }
-+long glMaterialfv(void) { qrx_missing("glMaterialfv"); return 0; }
-+long glMateriali(void) { qrx_missing("glMateriali"); return 0; }
-+long glMaterialiv(void) { qrx_missing("glMaterialiv"); return 0; }
-+long glMatrixMode(void) { qrx_missing("glMatrixMode"); return 0; }
-+long glMultMatrixd(void) { qrx_missing("glMultMatrixd"); return 0; }
-+long glMultMatrixf(void) { qrx_missing("glMultMatrixf"); return 0; }
-+long glNewList(void) { qrx_missing("glNewList"); return 0; }
-+long glNormal3b(void) { qrx_missing("glNormal3b"); return 0; }
-+long glNormal3bv(void) { qrx_missing("glNormal3bv"); return 0; }
-+long glNormal3d(void) { qrx_missing("glNormal3d"); return 0; }
-+long glNormal3dv(void) { qrx_missing("glNormal3dv"); return 0; }
-+long glNormal3f(void) { qrx_missing("glNormal3f"); return 0; }
-+long glNormal3fv(void) { qrx_missing("glNormal3fv"); return 0; }
-+long glNormal3i(void) { qrx_missing("glNormal3i"); return 0; }
-+long glNormal3iv(void) { qrx_missing("glNormal3iv"); return 0; }
-+long glNormal3s(void) { qrx_missing("glNormal3s"); return 0; }
-+long glNormal3sv(void) { qrx_missing("glNormal3sv"); return 0; }
-+long glNormalPointer(void) { qrx_missing("glNormalPointer"); return 0; }
-+long glOrtho(void) { qrx_missing("glOrtho"); return 0; }
-+long glPassThrough(void) { qrx_missing("glPassThrough"); return 0; }
-+long glPixelMapfv(void) { qrx_missing("glPixelMapfv"); return 0; }
-+long glPixelMapuiv(void) { qrx_missing("glPixelMapuiv"); return 0; }
-+long glPixelMapusv(void) { qrx_missing("glPixelMapusv"); return 0; }
-+long glPixelStoref(void) { qrx_missing("glPixelStoref"); return 0; }
-+long glPixelStorei(void) { qrx_missing("glPixelStorei"); return 0; }
-+long glPixelTransferf(void) { qrx_missing("glPixelTransferf"); return 0; }
-+long glPixelTransferi(void) { qrx_missing("glPixelTransferi"); return 0; }
-+long glPixelZoom(void) { qrx_missing("glPixelZoom"); return 0; }
-+long glPointSize(void) { qrx_missing("glPointSize"); return 0; }
-+long glPolygonMode(void) { qrx_missing("glPolygonMode"); return 0; }
-+long glPolygonOffset(void) { qrx_missing("glPolygonOffset"); return 0; }
-+long glPolygonStipple(void) { qrx_missing("glPolygonStipple"); return 0; }
-+long glPopAttrib(void) { qrx_missing("glPopAttrib"); return 0; }
-+long glPopClientAttrib(void) { qrx_missing("glPopClientAttrib"); return 0; }
-+long glPopMatrix(void) { qrx_missing("glPopMatrix"); return 0; }
-+long glPopName(void) { qrx_missing("glPopName"); return 0; }
-+long glPrioritizeTextures(void) { qrx_missing("glPrioritizeTextures"); return 0; }
-+long glPushAttrib(void) { qrx_missing("glPushAttrib"); return 0; }
-+long glPushClientAttrib(void) { qrx_missing("glPushClientAttrib"); return 0; }
-+long glPushMatrix(void) { qrx_missing("glPushMatrix"); return 0; }
-+long glPushName(void) { qrx_missing("glPushName"); return 0; }
-+long glRasterPos2d(void) { qrx_missing("glRasterPos2d"); return 0; }
-+long glRasterPos2dv(void) { qrx_missing("glRasterPos2dv"); return 0; }
-+long glRasterPos2f(void) { qrx_missing("glRasterPos2f"); return 0; }
-+long glRasterPos2fv(void) { qrx_missing("glRasterPos2fv"); return 0; }
-+long glRasterPos2i(void) { qrx_missing("glRasterPos2i"); return 0; }
-+long glRasterPos2iv(void) { qrx_missing("glRasterPos2iv"); return 0; }
-+long glRasterPos2s(void) { qrx_missing("glRasterPos2s"); return 0; }
-+long glRasterPos2sv(void) { qrx_missing("glRasterPos2sv"); return 0; }
-+long glRasterPos3d(void) { qrx_missing("glRasterPos3d"); return 0; }
-+long glRasterPos3dv(void) { qrx_missing("glRasterPos3dv"); return 0; }
-+long glRasterPos3f(void) { qrx_missing("glRasterPos3f"); return 0; }
-+long glRasterPos3fv(void) { qrx_missing("glRasterPos3fv"); return 0; }
-+long glRasterPos3i(void) { qrx_missing("glRasterPos3i"); return 0; }
-+long glRasterPos3iv(void) { qrx_missing("glRasterPos3iv"); return 0; }
-+long glRasterPos3s(void) { qrx_missing("glRasterPos3s"); return 0; }
-+long glRasterPos3sv(void) { qrx_missing("glRasterPos3sv"); return 0; }
-+long glRasterPos4d(void) { qrx_missing("glRasterPos4d"); return 0; }
-+long glRasterPos4dv(void) { qrx_missing("glRasterPos4dv"); return 0; }
-+long glRasterPos4f(void) { qrx_missing("glRasterPos4f"); return 0; }
-+long glRasterPos4fv(void) { qrx_missing("glRasterPos4fv"); return 0; }
-+long glRasterPos4i(void) { qrx_missing("glRasterPos4i"); return 0; }
-+long glRasterPos4iv(void) { qrx_missing("glRasterPos4iv"); return 0; }
-+long glRasterPos4s(void) { qrx_missing("glRasterPos4s"); return 0; }
-+long glRasterPos4sv(void) { qrx_missing("glRasterPos4sv"); return 0; }
-+long glReadBuffer(void) { qrx_missing("glReadBuffer"); return 0; }
-+long glReadPixels(void) { qrx_missing("glReadPixels"); return 0; }
-+long glRectd(void) { qrx_missing("glRectd"); return 0; }
-+long glRectdv(void) { qrx_missing("glRectdv"); return 0; }
-+long glRectf(void) { qrx_missing("glRectf"); return 0; }
-+long glRectfv(void) { qrx_missing("glRectfv"); return 0; }
-+long glRecti(void) { qrx_missing("glRecti"); return 0; }
-+long glRectiv(void) { qrx_missing("glRectiv"); return 0; }
-+long glRects(void) { qrx_missing("glRects"); return 0; }
-+long glRectsv(void) { qrx_missing("glRectsv"); return 0; }
-+long glRenderMode(void) { qrx_missing("glRenderMode"); return 0; }
-+long glRotated(void) { qrx_missing("glRotated"); return 0; }
-+long glRotatef(void) { qrx_missing("glRotatef"); return 0; }
-+long glScaled(void) { qrx_missing("glScaled"); return 0; }
-+long glScalef(void) { qrx_missing("glScalef"); return 0; }
-+long glScissor(void) { qrx_missing("glScissor"); return 0; }
-+long glSelectBuffer(void) { qrx_missing("glSelectBuffer"); return 0; }
-+long glShadeModel(void) { qrx_missing("glShadeModel"); return 0; }
-+long glStencilFunc(void) { qrx_missing("glStencilFunc"); return 0; }
-+long glStencilMask(void) { qrx_missing("glStencilMask"); return 0; }
-+long glStencilOp(void) { qrx_missing("glStencilOp"); return 0; }
-+long glTexCoord1d(void) { qrx_missing("glTexCoord1d"); return 0; }
-+long glTexCoord1dv(void) { qrx_missing("glTexCoord1dv"); return 0; }
-+long glTexCoord1f(void) { qrx_missing("glTexCoord1f"); return 0; }
-+long glTexCoord1fv(void) { qrx_missing("glTexCoord1fv"); return 0; }
-+long glTexCoord1i(void) { qrx_missing("glTexCoord1i"); return 0; }
-+long glTexCoord1iv(void) { qrx_missing("glTexCoord1iv"); return 0; }
-+long glTexCoord1s(void) { qrx_missing("glTexCoord1s"); return 0; }
-+long glTexCoord1sv(void) { qrx_missing("glTexCoord1sv"); return 0; }
-+long glTexCoord2d(void) { qrx_missing("glTexCoord2d"); return 0; }
-+long glTexCoord2dv(void) { qrx_missing("glTexCoord2dv"); return 0; }
-+long glTexCoord2f(void) { qrx_missing("glTexCoord2f"); return 0; }
-+long glTexCoord2fv(void) { qrx_missing("glTexCoord2fv"); return 0; }
-+long glTexCoord2i(void) { qrx_missing("glTexCoord2i"); return 0; }
-+long glTexCoord2iv(void) { qrx_missing("glTexCoord2iv"); return 0; }
-+long glTexCoord2s(void) { qrx_missing("glTexCoord2s"); return 0; }
-+long glTexCoord2sv(void) { qrx_missing("glTexCoord2sv"); return 0; }
-+long glTexCoord3d(void) { qrx_missing("glTexCoord3d"); return 0; }
-+long glTexCoord3dv(void) { qrx_missing("glTexCoord3dv"); return 0; }
-+long glTexCoord3f(void) { qrx_missing("glTexCoord3f"); return 0; }
-+long glTexCoord3fv(void) { qrx_missing("glTexCoord3fv"); return 0; }
-+long glTexCoord3i(void) { qrx_missing("glTexCoord3i"); return 0; }
-+long glTexCoord3iv(void) { qrx_missing("glTexCoord3iv"); return 0; }
-+long glTexCoord3s(void) { qrx_missing("glTexCoord3s"); return 0; }
-+long glTexCoord3sv(void) { qrx_missing("glTexCoord3sv"); return 0; }
-+long glTexCoord4d(void) { qrx_missing("glTexCoord4d"); return 0; }
-+long glTexCoord4dv(void) { qrx_missing("glTexCoord4dv"); return 0; }
-+long glTexCoord4f(void) { qrx_missing("glTexCoord4f"); return 0; }
-+long glTexCoord4fv(void) { qrx_missing("glTexCoord4fv"); return 0; }
-+long glTexCoord4i(void) { qrx_missing("glTexCoord4i"); return 0; }
-+long glTexCoord4iv(void) { qrx_missing("glTexCoord4iv"); return 0; }
-+long glTexCoord4s(void) { qrx_missing("glTexCoord4s"); return 0; }
-+long glTexCoord4sv(void) { qrx_missing("glTexCoord4sv"); return 0; }
-+long glTexCoordPointer(void) { qrx_missing("glTexCoordPointer"); return 0; }
-+long glTexEnvf(void) { qrx_missing("glTexEnvf"); return 0; }
-+long glTexEnvfv(void) { qrx_missing("glTexEnvfv"); return 0; }
-+long glTexEnvi(void) { qrx_missing("glTexEnvi"); return 0; }
-+long glTexEnviv(void) { qrx_missing("glTexEnviv"); return 0; }
-+long glTexGend(void) { qrx_missing("glTexGend"); return 0; }
-+long glTexGendv(void) { qrx_missing("glTexGendv"); return 0; }
-+long glTexGenf(void) { qrx_missing("glTexGenf"); return 0; }
-+long glTexGenfv(void) { qrx_missing("glTexGenfv"); return 0; }
-+long glTexGeni(void) { qrx_missing("glTexGeni"); return 0; }
-+long glTexGeniv(void) { qrx_missing("glTexGeniv"); return 0; }
-+long glTexImage1D(void) { qrx_missing("glTexImage1D"); return 0; }
-+long glTexImage2D(void) { qrx_missing("glTexImage2D"); return 0; }
-+long glTexParameterf(void) { qrx_missing("glTexParameterf"); return 0; }
-+long glTexParameterfv(void) { qrx_missing("glTexParameterfv"); return 0; }
-+long glTexParameteri(void) { qrx_missing("glTexParameteri"); return 0; }
-+long glTexParameteriv(void) { qrx_missing("glTexParameteriv"); return 0; }
-+long glTexSubImage1D(void) { qrx_missing("glTexSubImage1D"); return 0; }
-+long glTexSubImage2D(void) { qrx_missing("glTexSubImage2D"); return 0; }
-+long glTranslated(void) { qrx_missing("glTranslated"); return 0; }
-+long glTranslatef(void) { qrx_missing("glTranslatef"); return 0; }
-+long glVertex2d(void) { qrx_missing("glVertex2d"); return 0; }
-+long glVertex2dv(void) { qrx_missing("glVertex2dv"); return 0; }
-+long glVertex2f(void) { qrx_missing("glVertex2f"); return 0; }
-+long glVertex2fv(void) { qrx_missing("glVertex2fv"); return 0; }
-+long glVertex2i(void) { qrx_missing("glVertex2i"); return 0; }
-+long glVertex2iv(void) { qrx_missing("glVertex2iv"); return 0; }
-+long glVertex2s(void) { qrx_missing("glVertex2s"); return 0; }
-+long glVertex2sv(void) { qrx_missing("glVertex2sv"); return 0; }
-+long glVertex3d(void) { qrx_missing("glVertex3d"); return 0; }
-+long glVertex3dv(void) { qrx_missing("glVertex3dv"); return 0; }
-+long glVertex3f(void) { qrx_missing("glVertex3f"); return 0; }
-+long glVertex3fv(void) { qrx_missing("glVertex3fv"); return 0; }
-+long glVertex3i(void) { qrx_missing("glVertex3i"); return 0; }
-+long glVertex3iv(void) { qrx_missing("glVertex3iv"); return 0; }
-+long glVertex3s(void) { qrx_missing("glVertex3s"); return 0; }
-+long glVertex3sv(void) { qrx_missing("glVertex3sv"); return 0; }
-+long glVertex4d(void) { qrx_missing("glVertex4d"); return 0; }
-+long glVertex4dv(void) { qrx_missing("glVertex4dv"); return 0; }
-+long glVertex4f(void) { qrx_missing("glVertex4f"); return 0; }
-+long glVertex4fv(void) { qrx_missing("glVertex4fv"); return 0; }
-+long glVertex4i(void) { qrx_missing("glVertex4i"); return 0; }
-+long glVertex4iv(void) { qrx_missing("glVertex4iv"); return 0; }
-+long glVertex4s(void) { qrx_missing("glVertex4s"); return 0; }
-+long glVertex4sv(void) { qrx_missing("glVertex4sv"); return 0; }
-+long glVertexPointer(void) { qrx_missing("glVertexPointer"); return 0; }
-+long glViewport(void) { qrx_missing("glViewport"); return 0; }
-+long glewGetErrorString(void) { qrx_missing("glewGetErrorString"); return 0; }
-+long glewInit(void) { qrx_missing("glewInit"); return 0; }
-+long gluCylinder(void) { qrx_missing("gluCylinder"); return 0; }
-+long gluDeleteQuadric(void) { qrx_missing("gluDeleteQuadric"); return 0; }
-+long gluDisk(void) { qrx_missing("gluDisk"); return 0; }
-+long gluLookAt(void) { qrx_missing("gluLookAt"); return 0; }
-+long gluNewQuadric(void) { qrx_missing("gluNewQuadric"); return 0; }
-+long gluOrtho2D(void) { qrx_missing("gluOrtho2D"); return 0; }
-+long gluPerspective(void) { qrx_missing("gluPerspective"); return 0; }
-+long gluPickMatrix(void) { qrx_missing("gluPickMatrix"); return 0; }
-+long gluProject(void) { qrx_missing("gluProject"); return 0; }
-+long gluQuadricDrawStyle(void) { qrx_missing("gluQuadricDrawStyle"); return 0; }
-+long gluQuadricNormals(void) { qrx_missing("gluQuadricNormals"); return 0; }
-+long gluQuadricOrientation(void) { qrx_missing("gluQuadricOrientation"); return 0; }
-+long gluSphere(void) { qrx_missing("gluSphere"); return 0; }
-+long gluUnProject(void) { qrx_missing("gluUnProject"); return 0; }
++elseif(APPLE)
+ 	list(APPEND SRC
+ 		intern/GHOST_SystemPathsCocoa.mm
+ 		intern/GHOST_SystemPathsCocoa.h
+diff --git a/intern/ghost/intern/GHOST_ISystem.cpp b/intern/ghost/intern/GHOST_ISystem.cpp
+index 37d5926..f113c8a 100644
+--- a/intern/ghost/intern/GHOST_ISystem.cpp
++++ b/intern/ghost/intern/GHOST_ISystem.cpp
+@@ -41,7 +41,9 @@
+ #ifdef WITH_X11
+ #  include "GHOST_SystemX11.h"
+ #else
+-#  ifdef WITH_HEADLESS
++#  if defined(WITH_GHOST_AROS)
++#    include "GHOST_SystemAROS.h"
++#  elif defined(WITH_HEADLESS)
+ #    include "GHOST_SystemNULL.h"
+ #  elif defined(WITH_GHOST_SDL)
+ #    include "GHOST_SystemSDL.h"
+@@ -64,7 +66,9 @@ GHOST_TSuccess GHOST_ISystem::createSystem()
+ #ifdef WITH_X11
+ 		m_system = new GHOST_SystemX11();
+ #else
+-#  ifdef WITH_HEADLESS
++#  if defined(WITH_GHOST_AROS)
++		m_system = new GHOST_SystemAROS();
++#  elif defined(WITH_HEADLESS)
+ 		m_system = new GHOST_SystemNULL();
+ #  elif defined(WITH_GHOST_SDL)
+ 		m_system = new GHOST_SystemSDL();
+diff --git a/intern/ghost/intern/GHOST_ISystemPaths.cpp b/intern/ghost/intern/GHOST_ISystemPaths.cpp
+index 93ca0bc..631df8a 100644
+--- a/intern/ghost/intern/GHOST_ISystemPaths.cpp
++++ b/intern/ghost/intern/GHOST_ISystemPaths.cpp
+@@ -41,7 +41,9 @@
+ 
+ #include "GHOST_ISystemPaths.h"
+ 
+-#ifdef WIN32
++#if defined(WITH_GHOST_AROS)
++#  include "GHOST_SystemPathsAROS.h"
++#elif defined(WIN32)
+ #  include "GHOST_SystemPathsWin32.h"
+ #else
+ #  ifdef __APPLE__
+@@ -59,7 +61,9 @@ GHOST_TSuccess GHOST_ISystemPaths::create()
+ {
+ 	GHOST_TSuccess success;
+ 	if (!m_systemPaths) {
+-#ifdef WIN32
++#if defined(WITH_GHOST_AROS)
++		m_systemPaths = new GHOST_SystemPathsAROS();
++#elif defined(WIN32)
+ 		m_systemPaths = new GHOST_SystemPathsWin32();
+ #else
+ #  ifdef __APPLE__
 diff --git a/source/blender/blenkernel/intern/DerivedMesh.c b/source/blender/blenkernel/intern/DerivedMesh.c
 index 9b60066..57f6698 100644
 --- a/source/blender/blenkernel/intern/DerivedMesh.c
