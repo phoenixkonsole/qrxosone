@@ -4642,6 +4642,79 @@ index 00000000..c162f949
 +    } while(0);
 +
 +#endif
+diff --git a/arch/m68k64-native/qrx/battclock/battclock_intern.h b/arch/m68k64-native/qrx/battclock/battclock_intern.h
+new file mode 100644
+index 00000000..adb051c4
+--- /dev/null
++++ b/arch/m68k64-native/qrx/battclock/battclock_intern.h
+@@ -0,0 +1,18 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    Desc: battclock.resource on the 68100EC64: no HIDD, the board's clock is read directly
++*/
++
++#ifndef BATTCLOCK_INTERN_H
++#define BATTCLOCK_INTERN_H
++
++#include <exec/libraries.h>
++#include <exec/types.h>
++
++struct BattClockBase
++{
++    struct Library bb_LibNode;
++};
++
++#endif //BATTCLOCK_INTERN_H
+diff --git a/arch/m68k64-native/qrx/battclock/mmakefile.src b/arch/m68k64-native/qrx/battclock/mmakefile.src
+new file mode 100644
+index 00000000..d63e4ee4
+--- /dev/null
++++ b/arch/m68k64-native/qrx/battclock/mmakefile.src
+@@ -0,0 +1,9 @@
++include $(SRCDIR)/config/aros.cfg
++
++
++%build_archspecific \
++  mainmmake=kernel-battclock modname=battclock maindir=rom/battclock \
++  arch=native-m68k64-qrx \
++  files="readbattclock"
++
++%common
+diff --git a/arch/m68k64-native/qrx/battclock/readbattclock.c b/arch/m68k64-native/qrx/battclock/readbattclock.c
+new file mode 100644
+index 00000000..f9075513
+--- /dev/null
++++ b/arch/m68k64-native/qrx/battclock/readbattclock.c
+@@ -0,0 +1,28 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    Desc: ReadBattClock() for the 68100EC64: the ARMithlon board's host clock (seconds since 1970,
++          UTC) in its device window, see docs/armithlon/68100ec64.md. There is no MMU, so the
++          resource reads the register directly.
++*/
++
++#include <aros/libcall.h>
++#include <exec/types.h>
++#include <proto/battclock.h>
++
++#include "battclock_intern.h"
++
++#define QEC64_CLOCK_UNIX    (0xFFFFFFFF00000000UL + 0x0308)
++#define AMIGA_EPOCH         252460800UL     /* 1978-01-01 in Unix time */
++
++AROS_LH0(ULONG, ReadBattClock,
++         struct BattClockBase *, BattClockBase, 2, Battclock)
++{
++    AROS_LIBFUNC_INIT
++
++    UQUAD t = *(volatile UQUAD *)QEC64_CLOCK_UNIX;
++
++    return t > AMIGA_EPOCH ? (ULONG)(t - AMIGA_EPOCH) : 0;
++
++    AROS_LIBFUNC_EXIT
++}
 diff --git a/arch/m68k64-native/qrx/boot/boot.c b/arch/m68k64-native/qrx/boot/boot.c
 new file mode 100644
 index 00000000..a59a71a6
@@ -6319,6 +6392,20 @@ index ecfba952..bbb25f8f 100644
  fi
  
  # Host compiler support scripts and spec
+diff --git a/rom/dos/boot.c b/rom/dos/boot.c
+index adf0a368..cb3dad27 100644
+--- a/rom/dos/boot.c
++++ b/rom/dos/boot.c
+@@ -134,7 +134,8 @@ void __dos_Boot(struct DosLibrary *DOSBase, ULONG BootFlags, UBYTE Flags)
+ 
+     if (BootFlags & BF_EMERGENCY_CONSOLE) {
+         D(bug("[DOS] %s:     (emergency console)\n", __func__);)
+-        BootFlags |= BF_NO_STARTUP_SEQUENCE;
++        if (!(BootFlags & BF_ECONSOLE_STARTUP))
++            BootFlags |= BF_NO_STARTUP_SEQUENCE;
+         cis = Open("ECON:", MODE_OLDFILE);
+     }
+ 
 diff --git a/rom/dos/internalloadseg_elf.c b/rom/dos/internalloadseg_elf.c
 index e806ceb0..ae76ff22 100644
 --- a/rom/dos/internalloadseg_elf.c
@@ -6396,6 +6483,33 @@ index aa280e8a..2ba7b935 100644
  
      if (!archsuitable)
      {
+diff --git a/rom/dosboot/bootflags.h b/rom/dosboot/bootflags.h
+index e7d58051..e49748f9 100644
+--- a/rom/dosboot/bootflags.h
++++ b/rom/dosboot/bootflags.h
+@@ -14,5 +14,6 @@
+ #define BF_NO_DISPLAY_DRIVERS  0x0002
+ #define BF_NO_COMPOSITION      0x0004
+ #define BF_EMERGENCY_CONSOLE   0x0008    /* Use emergency console */
++#define BF_ECONSOLE_STARTUP    0x0010    /* ... and still run S:Startup-Sequence on it */
+ 
+ #endif /* DOSBOOT_BOOTFLAGS_H */
+diff --git a/rom/dosboot/dosboot_init.c b/rom/dosboot/dosboot_init.c
+index 65834b14..963b8a03 100644
+--- a/rom/dosboot/dosboot_init.c
++++ b/rom/dosboot/dosboot_init.c
+@@ -192,6 +192,11 @@ int dosboot_Init(LIBBASETYPEPTR LIBBASE)
+                 {
+                     bootDeviceName = &node->ln_Name[11];
+                 }
++                else if (0 == stricmp(node->ln_Name, "econsole-startup"))
++                {
++                    /* The emergency console, with S:Startup-Sequence (there is no CON: without intuition) */
++                    LIBBASE->db_BootFlags |= BF_EMERGENCY_CONSOLE | BF_ECONSOLE_STARTUP;
++                }
+                 else if (0 == stricmp(node->ln_Name, "econsole"))
+                 {
+                     LIBBASE->db_BootFlags |= BF_EMERGENCY_CONSOLE;
 diff --git a/rom/exec/exec_locks.c b/rom/exec/exec_locks.c
 index cad0d0ba..f4f9102f 100644
 --- a/rom/exec/exec_locks.c

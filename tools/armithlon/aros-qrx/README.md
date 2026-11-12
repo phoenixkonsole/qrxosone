@@ -21,6 +21,9 @@ gmake kernel-aros-quick kernel-lddemon-quick kernel-filesystem-quick kernel-fs-a
 gmake compiler-m-m68k64 compiler-m-quick compiler-stdlib-m68k64 compiler-stdlib-quick \
       compiler-crt-m68k64 compiler-crt-quick                # m.library, stdlib.library, crt.library
 cp ../tc/lib/generic/libclang_rt.builtins-m68k64.a bin/native-m68k64/AROS/Development/lib/
+gmake kernel-battclock-native-m68k64-qrx kernel-battclock-quick       # the board's host clock
+gmake workbench-libs-uuid-quick workbench-libs-iffparse-quick workbench-libs-locale-quick
+gmake workbench-c-quick workbench-c-sh-quick workbench-c-private-quick  # AROS/C: 107 commands
 ```
 
 Programs build with the SDK: `clang --sysroot bin/native-m68k64/AROS/Development -O2 -o hello hello.c`,
@@ -41,7 +44,7 @@ it takes the next input character.
 ```sh
 E=upstream/armithlon/2.6/engine
 cc -std=gnu11 -O2 -I$E/include tools/armithlon/aros-qrx/boot/qrxboot.c $E/full68k/qrx68100ec64.c \
-   $E/full68k/qrx68100ec64_machine.c -lpthread -o qrxboot
+   $E/full68k/qrx68100ec64_machine.c $E/full68k/qrx_ec64_board.c -lpthread -o qrxboot
 ./qrxboot core.elf <seconds> <cores> <RAM MB> <module>...
 ```
 
@@ -63,14 +66,21 @@ Command line words:
   code of in-memory segments. It ends the machine with 0 when it all passed. With `reboottest` it calls
   `ColdReboot()` first, with `crashtest` a task faults without a trap handler first.
 - `econsole`: dosboot boots from the emergency console `ECON:`, dos.library starts the AROS shell on
-  the machine's console.
+  the machine's console. `econsole-startup` does the same and runs `S:Startup-Sequence` first.
 - `idledump`: when core 0 has run only its idle task for 5 seconds, the kernel prints every task with
   its state, signals and PC.
 
 `boot/mkffsimg.py <directory> <image> [MB] [name]` makes an FFS (`DOS\1`) image from a host directory.
 For booting from it, the directory needs a file `AROS.boot` that contains `m68k64`.
 
-To the shell from disk: the modules utility.library, aros.library, timer.device, expansion.library,
+A system disk for the boot below: `C/` with the commands from `bin/native-m68k64/AROS/C`, `Libs/` with
+crt, stdlib, m, locale, iffparse and uuid.library from `AROS/Libs`, `AROS.boot` (`m68k64`), and
+`S/Startup-Sequence` (`SetClock LOAD` first sets the clock from the host). With the kernel command
+line `econsole-startup` instead of `econsole` the Startup-Sequence runs on the emergency console;
+`Shutdown` ends the run.
+
+To the shell from disk: the modules utility.library, aros.library, battclock.resource
+(`AROS/boot/native/Devs`), timer.device, expansion.library,
 bootloader.resource, dos.library, lddemon.resource, econsole-handler, FileSystem.resource,
 afs-handler, qrxdisk.device, shell.resource, shellcommands.resource and dosboot.resource, the image
 in `$QRXBOOT_DISK`, and `QRXBOOT_CMDLINE=econsole` (the console is the emergency console, there is
@@ -170,6 +180,9 @@ Two `bench` at once take as long on 4 cores as on 1: a new task stays on the cor
     68k hunk segments are still refused.
   - `ECON:` did not know the name `*`, the current console, so the shell could not open its error stream.
   - econsole and shellcommands link `stdc.static`, as the other ROM modules do.
+  - New boot argument `econsole-startup` (dosboot, dos.library's boot): the emergency console skipped
+    the Startup-Sequence always; there is no `CON:` without intuition.
+- `battclock.resource` for the board (`arch/m68k64-native/qrx/battclock`): the host's UTC time.
   - `vfwprintf.c` passed a `wchar_t` callback where an `int` one is declared; clang 22 makes that an
     error.
   - The FAT handler does not convert all its little-endian fields (it writes cluster numbers and
@@ -193,8 +206,10 @@ Two `bench` at once take as long on 4 cores as on 1: a new task stays on the cor
   AROS work for later.
 - No FPU context: the 68100EC64 has no FPU, floating point is soft float and keeps no state (`fenv` has
   no flags and one rounding mode). There is nothing to save until the core gets an FPU.
-- Missing: `CON:` and so the Startup-Sequence (it needs console.device and intuition), the C:
-  commands of the workbench (only the shell's built-in ones exist), graphics, intuition and the
+- The C: commands of `workbench/c` build (107 files) and the common ones are tested from the shell:
+  Dir, List, Type, Info, Avail, Version, Assign, MakeDir, Copy, Rename, Delete, Wait, Date, Which,
+  SetClock, Shutdown.
+- Missing: `CON:` (console.device and intuition), time zones (the clock is UTC), graphics, intuition and the
   drivers for them (the reference machine has no display); C++ is untested;
   the rest of the workbench libraries (libpng and zlib do not build yet); D8-D15 and A9-A15 are not saved
   in the task context, since the compiler does not use them yet; the idle task spins in user state; the
