@@ -57,8 +57,16 @@ static uint8_t *mem_at(ctx *x, uint64_t a, unsigned n)
     if (a >= c->ram_size || n > c->ram_size - a) { c->fault_addr = a; stop_with(x, QEC64_BUS_FAULT); }
     return c->ram + a;
 }
+/* The device window: the machine's devices, see QEC64_MMIO_BASE */
+static bool mmio(ctx *x, uint64_t a, unsigned n, bool write, uint64_t *v)
+{
+    qec64_cpu *c = x->c;
+    if (!c->on_mmio || !c->on_mmio(c, a, n, write, v)) { c->fault_addr = a; stop_with(x, QEC64_BUS_FAULT); }
+    return true;
+}
 static uint64_t rd(ctx *x, uint64_t a, unsigned n)
 {
+    if (__builtin_expect(a >= QEC64_MMIO_BASE, 0)) { uint64_t v = 0; mmio(x, a, n, false, &v); return v & size_mask(n); }
     uint8_t *p = mem_at(x, a, n);
     switch (n) {
     case 1: return __atomic_load_n(p, __ATOMIC_ACQUIRE);
@@ -72,6 +80,7 @@ static uint64_t rd(ctx *x, uint64_t a, unsigned n)
 }
 static void wr(ctx *x, uint64_t a, unsigned n, uint64_t v)
 {
+    if (__builtin_expect(a >= QEC64_MMIO_BASE, 0)) { v &= size_mask(n); mmio(x, a, n, true, &v); return; }
     uint8_t *p = mem_at(x, a, n);
     switch (n) {
     case 1: __atomic_store_n(p, (uint8_t)v, __ATOMIC_RELEASE); return;

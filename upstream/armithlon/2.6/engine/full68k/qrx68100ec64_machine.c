@@ -24,6 +24,11 @@ struct qec64_machine {
     size_t cap, used;
     const char *in;
     size_t in_len, in_pos;
+    void (*sink)(void *ctx, unsigned ch);      /* console output as it comes */
+    void *sink_ctx;
+    unsigned char queue[4096];                 /* console input pushed while running */
+    unsigned q_head, q_tail;
+    void *user;
 };
 static uint64_t now_us(void)
 {
@@ -66,6 +71,7 @@ static void on_console(qec64_cpu *self, unsigned ch)
     qec64_machine *m = self->machine;
     pthread_mutex_lock(&m->lock);
     if (m->out && m->used < m->cap) m->out[m->used++] = (char)ch;
+    if (m->sink) m->sink(m->sink_ctx, ch);
     pthread_mutex_unlock(&m->lock);
 }
 static int on_console_in(qec64_cpu *self)
@@ -74,6 +80,7 @@ static int on_console_in(qec64_cpu *self)
     int ch = -1;
     pthread_mutex_lock(&m->lock);
     if (m->in && m->in_pos < m->in_len) ch = (unsigned char)m->in[m->in_pos++];
+    else if (m->q_head != m->q_tail) { ch = m->queue[m->q_head]; m->q_head = (m->q_head + 1) % sizeof m->queue; }
     pthread_mutex_unlock(&m->lock);
     return ch;
 }
@@ -153,6 +160,39 @@ qec64_cpu *qec64_machine_core(qec64_machine *m, unsigned i) { return i < m->core
 void qec64_machine_console(qec64_machine *m, char *out, size_t cap) { m->out = out; m->cap = cap; m->used = 0; }
 size_t qec64_machine_console_used(const qec64_machine *m) { return m->used; }
 void qec64_machine_console_input(qec64_machine *m, const char *in, size_t len) { m->in = in; m->in_len = len; m->in_pos = 0; }
+void qec64_machine_console_sink(qec64_machine *m, void (*fn)(void *ctx, unsigned ch), void *ctx)
+{
+    pthread_mutex_lock(&m->lock);
+    m->sink = fn;
+    m->sink_ctx = ctx;
+    pthread_mutex_unlock(&m->lock);
+}
+size_t qec64_machine_console_push(qec64_machine *m, const char *s, size_t n)
+{
+    size_t done = 0;
+    pthread_mutex_lock(&m->lock);
+    for (; done < n; done++) {
+        unsigned next = (m->q_tail + 1) % sizeof m->queue;
+        if (next == m->q_head) break;
+        m->queue[m->q_tail] = (unsigned char)s[done];
+        m->q_tail = next;
+    }
+    pthread_mutex_unlock(&m->lock);
+    return done;
+}
+void qec64_machine_set_mmio(qec64_machine *m, bool (*fn)(qec64_cpu *, uint64_t, unsigned, bool, uint64_t *), void *user)
+{
+    m->user = user;
+    for (unsigned i = 0; i < m->cores; i++) m->cpu[i].on_mmio = fn;
+}
+void *qec64_machine_user(const qec64_cpu *c) { return ((const qec64_machine *)c->machine)->user; }
+void qec64_machine_stop(qec64_machine *m)
+{
+    pthread_mutex_lock(&m->lock);
+    m->stopping = true;
+    pthread_cond_broadcast(&m->wake);
+    pthread_mutex_unlock(&m->lock);
+}
 enum qec64_status qec64_machine_run(qec64_machine *m, uint64_t pc, uint64_t sp, double seconds, unsigned *which)
 {
     m->stopping = false;

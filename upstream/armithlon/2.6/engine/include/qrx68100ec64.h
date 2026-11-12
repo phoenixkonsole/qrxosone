@@ -25,6 +25,9 @@ enum qec64_status {
 /* Every status except RUNNING, WAITING, HALTED and DOUBLE_FAULT becomes an exception once the
  * program has written VBR in long mode. Until then the core stops and reports it. */
 
+/* The device window: the top 4 GB of the 64-bit address space */
+#define QEC64_MMIO_BASE UINT64_C(0xFFFFFFFF00000000)
+
 typedef struct qec64_cpu qec64_cpu;
 struct qec64_cpu {
     uint64_t d[16], a[16];   /* a[7] is the stack pointer */
@@ -56,6 +59,9 @@ struct qec64_cpu {
     void (*on_timer)(qec64_cpu *self);
     void (*on_console)(qec64_cpu *self, unsigned ch);
     int (*on_console_in)(qec64_cpu *self);   /* the next input character, or -1 */
+    /* Accesses at QEC64_MMIO_BASE and above, the machine's devices: true when handled, else a
+     * bus fault. In long mode only. */
+    bool (*on_mmio)(qec64_cpu *self, uint64_t addr, unsigned size, bool write, uint64_t *value);
     void *machine;
 };
 
@@ -76,6 +82,15 @@ void qec64_machine_console(qec64_machine *m, char *out, size_t cap);
 size_t qec64_machine_console_used(const qec64_machine *m);
 /* Console input: reads of MOVEC $8F0 return these bytes in turn, then -1. */
 void qec64_machine_console_input(qec64_machine *m, const char *in, size_t len);
+/* Console output to fn as it comes, from the core's thread under the machine's lock. */
+void qec64_machine_console_sink(qec64_machine *m, void (*fn)(void *ctx, unsigned ch), void *ctx);
+/* More console input while the machine runs (after the bytes given above); returns how many fit. */
+size_t qec64_machine_console_push(qec64_machine *m, const char *s, size_t n);
+/* The devices at QEC64_MMIO_BASE for every core; qec64_machine_user() gives back user. */
+void qec64_machine_set_mmio(qec64_machine *m, bool (*fn)(qec64_cpu *, uint64_t, unsigned, bool, uint64_t *), void *user);
+void *qec64_machine_user(const qec64_cpu *c);
+/* Ends qec64_machine_run() from another thread, as the time limit would. */
+void qec64_machine_stop(qec64_machine *m);
 /* Starts core 0 at pc, in 32-bit mode as after reset, and waits for the end: a halt, or a failure on
  * any core, or the time limit. Returns the status of the core that ended it, or QEC64_RUNNING. */
 enum qec64_status qec64_machine_run(qec64_machine *m, uint64_t pc, uint64_t sp, double seconds, unsigned *which);

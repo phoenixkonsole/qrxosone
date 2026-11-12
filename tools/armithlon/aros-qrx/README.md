@@ -89,6 +89,42 @@ back on the disk.
 The host needs gawk, netpbm and Python's mako. The AROS build downloads third-party source archives
 (zlib, libpng, freetype and others) by itself, without checksums.
 
+## In the emulator
+
+The engine has the machine as its own program, `qrx_ec64_run` (built with the engine, see
+`upstream/armithlon/2.6/engine`). The 32-bit QRX OS One (`qrx68100_full_run`) does not link any of it;
+its binaries are byte for byte the same as before. The loader is the engine's `full68k/qrx_ec64_boot.c`,
+the devices are `full68k/qrx_ec64_board.c` (see "ARMithlon board" in
+[docs/armithlon/68100ec64.md](../../../docs/armithlon/68100ec64.md)).
+
+```sh
+qrx_ec64_run [--cores N] [--ram MB] [--disk disk.img [--disk-write]] [--cmdline "econsole"]
+             [--window | --stdin] [--input TEXT] [--seconds S] [--stats] [--capture fb.ppm] \
+             core.elf <the modules of the disk boot above>
+```
+
+- Without `--window` the console is stdout, with `--stdin` the shell reads stdin.
+- `--window` opens a Mac window: the console, and the board's framebuffer once a program turns it on.
+  Typed text goes to the console.
+- `--capture` writes the framebuffer at the end as a PPM.
+- `boot/tests/fbtest.c` draws into the framebuffer, `boot/tests/bench.c` measures with the board's clock
+  and instruction count.
+- `include/qrx_instance.h` is the interface for a second instance, Classic (the 32-bit system), in
+  the same machine. Classic does not use it yet.
+
+Measured on the M1 (2026-11-12), `bench` (an integer hash, a sort, a prime sieve), the same results as
+the Mac build:
+
+| | Time | |
+| --- | --- | --- |
+| Native on the M1, `cc -O2` | 14 ms | |
+| AROS 64 on the EC64 interpreter in the engine | 1103 ms | 82 million instructions a second, 79 times slower |
+| For comparison: the 32-bit 68100, `bench68k` (docs/armithlon/performance-2026-11-03.md) | | interpreter 128, JIT about 2900 million a second |
+
+Two `bench` at once take as long on 4 cores as on 1: a new task stays on the core that creates it
+(`EXECF_CPUAffinity`), so the shell's programs share one core. Spreading them needs an SMP-safe
+`Forbid()` and semaphores first (see State). A long-mode JIT is the next large step for speed.
+
 ## What is in the patch
 
 - `configure.in`: the `qrx*` target, the integrated assembler (there is no GNU assembler for this CPU), and
