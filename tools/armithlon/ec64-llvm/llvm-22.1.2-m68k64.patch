@@ -338,7 +338,7 @@
        TII(*STI.getInstrInfo()), TRI(STI.getRegisterInfo()) {
    SlotSize = STI.getSlotSize();
    StackPtr = TRI->getStackRegister();
-@@ -201,13 +201,13 @@
+@@ -201,13 +201,52 @@
                                             const DebugLoc &DL, unsigned Reg,
                                             uint64_t MaxAlign) const {
    uint64_t Val = -MaxAlign;
@@ -349,13 +349,65 @@
  
    // This function is normally used with SP which is Address Register, but AND,
    // or any other logical instructions in M68k64 do not support ARs so we need
-   // to use a temp Data Register to perform the op.
+-  // to use a temp Data Register to perform the op.
 -  unsigned Tmp = M68k64::D0;
-+  unsigned Tmp = M68k64::QD0;
++  // to use a temp Data Register to perform the op. It must not hold an argument:
++  // functions with internal linkage get theirs in registers. A caller-saved one
++  // that is not live in, else a callee-saved one the prologue has already saved,
++  // else D0 itself, kept in a free address register meanwhile.
++  const MachineFunction &MF = *MBB.getParent();
++  const TargetRegisterInfo *RI = MF.getSubtarget().getRegisterInfo();
++  auto LiveIn = [&](unsigned R) {
++    for (const auto &LI : MBB.liveins())
++      if (RI->regsOverlap(LI.PhysReg, R))
++        return true;
++    return false;
++  };
++  auto Saved = [&](unsigned R) {
++    for (const CalleeSavedInfo &CSI : MF.getFrameInfo().getCalleeSavedInfo())
++      if (RI->regsOverlap(CSI.getReg(), R))
++        return true;
++    return false;
++  };
++  static const unsigned DataRegs[] = {M68k64::QD0, M68k64::QD1, M68k64::QD2,
++                                      M68k64::QD3, M68k64::QD4, M68k64::QD5,
++                                      M68k64::QD6, M68k64::QD7};
++  static const unsigned AddrRegs[] = {M68k64::QA0, M68k64::QA1, M68k64::QA2,
++                                      M68k64::QA3, M68k64::QA4, M68k64::QA5};
++  unsigned Tmp = 0, Keep = 0;
++  for (unsigned R : DataRegs)
++    if (!LiveIn(R) && (R == M68k64::QD0 || R == M68k64::QD1 || Saved(R))) {
++      Tmp = R;
++      break;
++    }
++  if (!Tmp) {
++    Tmp = M68k64::QD0;
++    for (unsigned R : AddrRegs)
++      if (!LiveIn(R) && (R == M68k64::QA0 || R == M68k64::QA1 || Saved(R))) {
++        Keep = R;
++        break;
++      }
++    assert(Keep && "no register free for the stack realignment");
++    BuildMI(MBB, MBBI, DL, TII.get(MovOp), Keep)
++        .addReg(Tmp)
++        .setMIFlag(MachineInstr::FrameSetup);
++  }
  
    BuildMI(MBB, MBBI, DL, TII.get(MovOp), Tmp)
        .addReg(Reg)
-@@ -349,15 +349,15 @@
+@@ -224,6 +263,11 @@
+   BuildMI(MBB, MBBI, DL, TII.get(MovOp), Reg)
+       .addReg(Tmp)
+       .setMIFlag(MachineInstr::FrameSetup);
++
++  if (Keep)
++    BuildMI(MBB, MBBI, DL, TII.get(MovOp), Tmp)
++        .addReg(Keep)
++        .setMIFlag(MachineInstr::FrameSetup);
+ }
+ 
+ MachineBasicBlock::iterator M68k64FrameLowering::eliminateCallFramePseudoInstr(
+@@ -349,15 +393,15 @@
        // load the offset into a register and do one sub/add
        Register Reg;
  
@@ -375,7 +427,7 @@
          MachineInstr *MI = BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr)
                                 .addReg(StackPtr)
                                 .addReg(Reg);
-@@ -400,13 +400,13 @@
+@@ -400,13 +444,13 @@
      return Offset;
    }
  
@@ -391,7 +443,7 @@
      assert(PI->getOperand(1).getReg() == StackPtr);
      Offset -= PI->getOperand(2).getImm();
      MBB.erase(PI);
-@@ -426,7 +426,7 @@
+@@ -426,7 +470,7 @@
  
    bool IsSub = Offset < 0;
    uint64_t AbsOffset = IsSub ? -Offset : Offset;
@@ -400,7 +452,7 @@
  
    MachineInstrBuilder MI = BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr)
                                 .addReg(StackPtr)
-@@ -544,7 +544,7 @@
+@@ -544,7 +588,7 @@
      MFI.setOffsetAdjustment(-NumBytes);
  
      BuildMI(MBB, MBBI, DL, TII.get(M68k64::LINK16))
@@ -409,7 +461,7 @@
          .addImm(-NumBytes)
          .setMIFlag(MachineInstr::FrameSetup);
  
-@@ -584,7 +584,7 @@
+@@ -584,7 +628,7 @@
    int StackOffset = 2 * stackGrowth;
  
    while (MBBI != MBB.end() && MBBI->getFlag(MachineInstr::FrameSetup) &&
@@ -418,7 +470,7 @@
      PushedRegs = true;
      ++MBBI;
  
-@@ -622,13 +622,13 @@
+@@ -622,13 +666,13 @@
    // to reference locals.
    if (TRI->hasBasePointer(MF)) {
      // Update the base pointer with the current stack pointer.
@@ -434,7 +486,7 @@
        M68k64::addRegIndirectWithDisp(BuildMI(MBB, MBBI, DL, TII.get(Opm)),
                                     FramePtr, true,
                                     MMFI->getRestoreBasePointerOffset())
-@@ -704,7 +704,7 @@
+@@ -704,7 +748,7 @@
      MachineBasicBlock::iterator PI = std::prev(MBBI);
      unsigned Opc = PI->getOpcode();
  
@@ -443,7 +495,7 @@
          Opc != M68k64::DBG_VALUE && !PI->isTerminator())
        break;
  
-@@ -733,7 +733,7 @@
+@@ -733,7 +777,7 @@
      // However, we may use this sequence if we have a frame pointer because the
      // effects of the prologue can safely be undone.
      if (LEAAmount != 0) {
@@ -452,7 +504,7 @@
        M68k64::addRegIndirectWithDisp(
            BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr), FramePtr, false,
            LEAAmount);
-@@ -843,7 +843,7 @@
+@@ -843,7 +887,7 @@
    }
  
    auto I =
@@ -461,7 +513,7 @@
            .addImm(Mask)
            .setMIFlag(MachineInstr::FrameSetup);
  
-@@ -878,7 +878,7 @@
+@@ -878,7 +922,7 @@
    }
  
    auto I = M68k64::addFrameReference(

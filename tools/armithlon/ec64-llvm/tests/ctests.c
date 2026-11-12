@@ -183,10 +183,21 @@ i64 test_bswap(void) {
     r += (u64)le16(raw) << 16 | le16(raw + 2);
     return (i64)r;
 }
+/* A local with 16-byte alignment makes the prologue realign the stack. Static functions get their
+ * arguments in registers, so the realignment must not use one of them as its scratch register. */
+struct al16 { u64 v[4]; } __attribute__((aligned(16)));
+__attribute__((noinline)) static u32 realign1(u32 a) {
+    volatile struct al16 b; b.v[0] = a; return (u32)b.v[0] + (u32)(((u64)&b & 15) != 0);
+}
+__attribute__((noinline)) static u64 realign2(u64 a, u32 b, u64 c) {
+    volatile struct al16 t; t.v[1] = a ^ c; return t.v[1] + b + (((u64)&t & 15) != 0);
+}
+static volatile u64 ra_in[3] = { 0xFFFFFFF0u, 0x123456789ULL, 0xF0F0F0F0F0ULL };
+i64 test_realign(void) { return (i64)realign1((u32)ra_in[0]) * 3 + (i64)realign2(ra_in[1], (u32)ra_in[0] >> 20, ra_in[2]); }
 /* floating point in single and double precision goes through the library calls that do not exist yet
  * or through the FPU, which this core does not have: not tested here. */
 #ifdef HOST_TEST
 #include <stdio.h>
 #define T(n) printf(#n " %016llx\n", (unsigned long long)test_##n());
-int main(void) { T(sizes) T(globals) T(calls) T(bittest) T(frames) T(structs) T(varargs) T(widths) T(sha256) T(sort) T(list) T(memory) T(bswap) return 0; }
+int main(void) { T(sizes) T(globals) T(calls) T(bittest) T(frames) T(structs) T(varargs) T(widths) T(sha256) T(sort) T(list) T(memory) T(bswap) T(realign) return 0; }
 #endif
