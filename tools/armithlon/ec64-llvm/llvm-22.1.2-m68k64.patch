@@ -1146,7 +1146,7 @@
      ),
      0b000,
      // REGISTER
-@@ -557,9 +565,11 @@
+@@ -557,9 +565,17 @@
  
  def EXT16 : MxExt<MxType16d, MxType8d>;
  def EXT32 : MxExt<MxType32d, MxType16d>;
@@ -1155,10 +1155,16 @@
  def : Pat<(sext_inreg i16:$src, i8),  (EXT16 $src)>;
  def : Pat<(sext_inreg i32:$src, i16), (EXT32 $src)>;
 +def : Pat<(sext_inreg i64:$src, i32), (EXT64 $src)>;
++def : Pat<(sext_inreg i64:$src, i16),
++          (EXT64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
++                                (MOVSXd32d16 (EXTRACT_SUBREG $src, MxSubRegIndex16Lo)), MxSubRegIndex32Lo))>;
++def : Pat<(sext_inreg i64:$src, i8),
++          (EXT64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
++                                (MOVSXd32d8 (EXTRACT_SUBREG $src, MxSubRegIndex8Lo)), MxSubRegIndex32Lo))>;
  def : Pat<(sext_inreg i32:$src, i8),
            (EXT32 (MOVXd32d16 (EXT16 (EXTRACT_SUBREG $src, MxSubRegIndex16Lo))))>;
  
-@@ -601,8 +611,8 @@
+@@ -601,8 +617,8 @@
        (operand "$dst", 3),
        !if(SIGNED, 0b1, 0b0),
        /*SIZE*/0b0, 0b0000000,
@@ -1169,7 +1175,7 @@
    );
  }
  
-@@ -729,6 +739,21 @@
+@@ -729,6 +745,21 @@
  
  defm MUL : MxDiMuOp<"mul", 0xC>;
  
@@ -1191,7 +1197,7 @@
  def SMULd32d32 : MxDiMuOp_DD_Long<"muls.l", MxSMul, 0x130, /*SIGNED*/true>;
  def UMULd32d32 : MxDiMuOp_DD_Long<"mulu.l", MxUMul, 0x130, /*SIGNED*/false>;
  
-@@ -749,6 +774,7 @@
+@@ -749,6 +780,7 @@
               MxSubRegIndex16Lo)>;
  
  def : Pat<(mul i32:$dst, i32:$opd), (SMULd32d32 $dst, $opd)>;
@@ -1199,7 +1205,7 @@
  
  
  // RI
-@@ -825,7 +851,7 @@
+@@ -825,7 +857,7 @@
  } // let Constraints
  } // let Defs = [CCR]
  
@@ -1208,7 +1214,7 @@
    def NEG#S#d  : MxNeg_D<!cast<MxType>("MxType"#S#"d")>;
    def NEGX#S#d : MxNegX_D<!cast<MxType>("MxType"#S#"d")>;
    def NOT#S#d  : MxNot_D<!cast<MxType>("MxType"#S#"d")>;
-@@ -834,12 +860,14 @@
+@@ -834,12 +866,14 @@
  def : Pat<(MxSub 0, i8 :$src), (NEG8d  MxDRD8 :$src)>;
  def : Pat<(MxSub 0, i16:$src), (NEG16d MxDRD16:$src)>;
  def : Pat<(MxSub 0, i32:$src), (NEG32d MxDRD32:$src)>;
@@ -1223,7 +1229,7 @@
  
  //===----------------------------------------------------------------------===//
  // no-CCR Patterns
-@@ -861,6 +889,8 @@
+@@ -861,6 +895,8 @@
              (ADD16dr MxXRD16:$src, MxDRD16:$opd)>;
    def : Pat<(!cast<SDNode>(N) i32:$src, i32:$opd),
              (ADD32dr MxXRD32:$src, MxDRD32:$opd)>;
@@ -1232,7 +1238,7 @@
  
    // add (An), reg
    def : Pat<(!cast<SDNode>(N) MxType8.VT:$src, (Mxloadi8 MxType8.JPat:$opd)),
-@@ -869,6 +899,8 @@
+@@ -869,6 +905,8 @@
              (ADD16dj MxDRD16:$src, MxType16.JOp:$opd)>;
    def : Pat<(!cast<SDNode>(N) MxType32.VT:$src, (Mxloadi32 MxType32.JPat:$opd)),
              (ADD32dj MxDRD32:$src, MxType32.JOp:$opd)>;
@@ -1241,7 +1247,7 @@
  
    // add (i,An), reg
    def : Pat<(!cast<SDNode>(N) MxType8.VT:$src, (Mxloadi8 MxType8.PPat:$opd)),
-@@ -877,6 +909,8 @@
+@@ -877,6 +915,8 @@
              (ADD16dp MxDRD16:$src, MxType16.POp:$opd)>;
    def : Pat<(!cast<SDNode>(N) MxType32.VT:$src, (Mxloadi32 MxType32.PPat:$opd)),
              (ADD32dp MxDRD32:$src, MxType32.POp:$opd)>;
@@ -1250,7 +1256,7 @@
  
    // add (i,An,Xn), reg
    def : Pat<(!cast<SDNode>(N) MxType8.VT:$src, (Mxloadi8 MxType8.FPat:$opd)),
-@@ -885,6 +919,8 @@
+@@ -885,6 +925,8 @@
              (ADD16df MxDRD16:$src, MxType16.FOp:$opd)>;
    def : Pat<(!cast<SDNode>(N) MxType32.VT:$src, (Mxloadi32 MxType32.FPat:$opd)),
              (ADD32df MxDRD32:$src, MxType32.FOp:$opd)>;
@@ -1259,7 +1265,7 @@
  
    // add reg, imm
    def : Pat<(!cast<SDNode>(N) i8: $src, Mxi8immSExt8:$opd),
-@@ -898,6 +934,8 @@
+@@ -898,6 +940,8 @@
    let AddedComplexity = 15 in {
    def : Pat<(!cast<SDNode>(N) i32:$src, Mxi32immSExt32:$opd),
              (ADD32di MxDRD32:$src, imm:$opd)>;
@@ -1268,7 +1274,7 @@
    } // AddedComplexity = 15
  
    // add imm, (An)
-@@ -910,12 +948,16 @@
+@@ -910,12 +954,16 @@
    def : Pat<(store (!cast<SDNode>(N) (load MxType32.JPat:$dst), MxType32.IPat:$opd),
                     MxType32.JPat:$dst),
              (ADD32ji MxType32.JOp:$dst, imm:$opd)>;
@@ -1285,7 +1291,7 @@
  
  
  
-@@ -928,6 +970,8 @@
+@@ -928,6 +976,8 @@
              (SUB16dd MxDRD16:$src, MxDRD16:$opd)>;
    def : Pat<(!cast<SDNode>(N) i32:$src, i32:$opd),
              (SUB32dd MxDRD32:$src, MxDRD32:$opd)>;
@@ -1294,7 +1300,7 @@
  
  
    // sub (An), reg
-@@ -937,6 +981,8 @@
+@@ -937,6 +987,8 @@
              (SUB16dj MxDRD16:$src, MxType16.JOp:$opd)>;
    def : Pat<(!cast<SDNode>(N) MxType32.VT:$src, (Mxloadi32 MxType32.JPat:$opd)),
              (SUB32dj MxDRD32:$src, MxType32.JOp:$opd)>;
@@ -1303,7 +1309,7 @@
  
    // sub (i,An), reg
    def : Pat<(!cast<SDNode>(N) MxType8.VT:$src, (Mxloadi8 MxType8.PPat:$opd)),
-@@ -945,6 +991,8 @@
+@@ -945,6 +997,8 @@
              (SUB16dp MxDRD16:$src, MxType16.POp:$opd)>;
    def : Pat<(!cast<SDNode>(N) MxType32.VT:$src, (Mxloadi32 MxType32.PPat:$opd)),
              (SUB32dp MxDRD32:$src, MxType32.POp:$opd)>;
@@ -1312,7 +1318,7 @@
  
    // sub (i,An,Xn), reg
    def : Pat<(!cast<SDNode>(N) MxType8.VT:$src, (Mxloadi8 MxType8.FPat:$opd)),
-@@ -953,6 +1001,8 @@
+@@ -953,6 +1007,8 @@
              (SUB16df MxDRD16:$src, MxType16.FOp:$opd)>;
    def : Pat<(!cast<SDNode>(N) MxType32.VT:$src, (Mxloadi32 MxType32.FPat:$opd)),
              (SUB32df MxDRD32:$src, MxType32.FOp:$opd)>;
@@ -1321,7 +1327,7 @@
  
    // sub reg, imm
    def : Pat<(!cast<SDNode>(N) i8 :$src, Mxi8immSExt8 :$opd),
-@@ -961,6 +1011,8 @@
+@@ -961,6 +1017,8 @@
              (SUB16di MxDRD16:$src, imm:$opd)>;
    def : Pat<(!cast<SDNode>(N) i32:$src, Mxi32immSExt32:$opd),
              (SUB32di MxDRD32:$src, imm:$opd)>;
@@ -1330,7 +1336,7 @@
  
    // sub imm, (An)
    def : Pat<(store (!cast<SDNode>(N) (load MxType8.JPat:$dst), MxType8.IPat:$opd),
-@@ -972,12 +1024,16 @@
+@@ -972,12 +1030,16 @@
    def : Pat<(store (!cast<SDNode>(N) (load MxType32.JPat:$dst), MxType32.IPat:$opd),
                     MxType32.JPat:$dst),
              (SUB32ji MxType32.JOp:$dst, imm:$opd)>;
@@ -1347,7 +1353,7 @@
  
  multiclass BitwisePat<string INST, SDNode OP> {
    // op reg, reg
-@@ -987,6 +1043,8 @@
+@@ -987,6 +1049,8 @@
              (!cast<MxInst>(INST#"16dd") MxDRD16:$src, MxDRD16:$opd)>;
    def : Pat<(OP i32:$src, i32:$opd),
              (!cast<MxInst>(INST#"32dd") MxDRD32:$src, MxDRD32:$opd)>;
@@ -1356,7 +1362,7 @@
    // op reg, imm
    def : Pat<(OP i8: $src, Mxi8immSExt8 :$opd),
              (!cast<MxInst>(INST#"8di")  MxDRD8 :$src, imm:$opd)>;
-@@ -994,6 +1052,8 @@
+@@ -994,6 +1058,8 @@
              (!cast<MxInst>(INST#"16di") MxDRD16:$src, imm:$opd)>;
    def : Pat<(OP i32:$src, Mxi32immSExt32:$opd),
              (!cast<MxInst>(INST#"32di") MxDRD32:$src, imm:$opd)>;
@@ -1658,6 +1664,24 @@
  } // isCodeGenOnly = 1
  
  //===----------------------------------------------------------------------===//
+@@ -364,6 +364,8 @@
+                           [(set MxDRD16:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
+ def SETCS_C32d : MxPseudo<(outs MxXRD32:$dst), (ins),
+                           [(set MxXRD32:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
++def SETCS_C64d : MxPseudo<(outs MxDRD64:$dst), (ins),
++                          [(set MxDRD64:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
+ } // Uses = [CCR], Defs = [CCR], isPseudo = 1
+ 
+ 
+@@ -372,6 +374,8 @@
+ 
+ def : Pat<(i16 (sext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C16d)>;
+ def : Pat<(i32 (sext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C32d)>;
++def : Pat<(i64 (anyext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C64d)>;
++def : Pat<(i64 (sext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C64d)>;
+ 
+ // We canonicalize 'scs' to "(and (subx reg,reg), 1)" on the hope that the and
+ // will be eliminated and that the subx can be extended up to a wider type.  When
 --- a/llvm/lib/Target/M68k64/M68k64InstrData.td
 +++ b/llvm/lib/Target/M68k64/M68k64InstrData.td
 @@ -50,6 +50,7 @@
@@ -2028,7 +2052,16 @@
    case M68k64::PUSH32r:
      return ExpandPUSH_POP(MIB, get(M68k64::MOV32er), true);
  
-@@ -694,12 +698,20 @@
+@@ -656,6 +660,8 @@
+     return Expand2AddrUndef(MIB, get(M68k64::SUBX16dd));
+   case M68k64::SETCS_C32d:
+     return Expand2AddrUndef(MIB, get(M68k64::SUBX32dd));
++  case M68k64::SETCS_C64d:
++    return Expand2AddrUndef(MIB, get(M68k64::SUBX64dd));
+   }
+   return false;
+ }
+@@ -694,12 +700,20 @@
    unsigned Opc = 0;
  
    // First deal with the normal symmetric copies.
@@ -2053,7 +2086,7 @@
  
    if (Opc) {
      BuildMI(MBB, MI, DL, get(Opc), DstReg)
-@@ -786,8 +798,8 @@
+@@ -786,8 +800,8 @@
    case 2:
      if (M68k64::XR16RegClass.hasSubClassEq(RC))
        return load ? M68k64::MOVM16mp_P : M68k64::MOVM16pm_P;
@@ -2064,7 +2097,7 @@
      if (M68k64::CCRCRegClass.hasSubClassEq(RC))
        return load ? M68k64::MOVM16mp_P : M68k64::MOVM16pm_P;
      llvm_unreachable("Unknown 2-byte regclass");
-@@ -795,6 +807,10 @@
+@@ -795,6 +809,10 @@
      if (M68k64::XR32RegClass.hasSubClassEq(RC))
        return load ? M68k64::MOVM32mp_P : M68k64::MOVM32pm_P;
      llvm_unreachable("Unknown 4-byte regclass");
@@ -2075,7 +2108,7 @@
    }
  }
  
-@@ -874,7 +890,7 @@
+@@ -874,7 +892,7 @@
    // lucky get one, otherwise it does not really matter which callee-save to
    // use.
    MachineRegisterInfo &RegInfo = MF->getRegInfo();
@@ -2084,7 +2117,7 @@
    MxFI->setGlobalBaseReg(GlobalBaseReg);
    return GlobalBaseReg;
  }
-@@ -930,7 +946,7 @@
+@@ -930,7 +948,7 @@
      const M68k64InstrInfo *TII = STI.getInstrInfo();
  
      // Generate lea (__GLOBAL_OFFSET_TABLE_,%PC), %A5
