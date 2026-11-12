@@ -169,10 +169,24 @@ i64 test_memory(void) {
     t = s;
     return (i64)(strlen(a) * 1000 + strlen(b) + (u64)memcmp(a, b, 50) + t.v[8]);
 }
+/* byte swaps, as little-endian file systems read their fields: rol.w, ror.l and the shifts */
+static u16 le16(const u8 *p) { return (u16)(p[0] | p[1] << 8); }
+static volatile u16 sw16[3] = { 0x1234, 0xFF00, 0x00A5 };
+static volatile u32 sw32[2] = { 0x12345678u, 0xDEADBEEFu };
+static volatile u64 sw64 = 0x0123456789ABCDEFull;
+i64 test_bswap(void) {
+    u8 raw[4] = { 0x34, 0x12, 0xEF, 0xBE };
+    u64 r = 0;
+    for (int i = 0; i < 3; i++) r = r * 65537 + __builtin_bswap16(sw16[i]);
+    for (int i = 0; i < 2; i++) r = r * 31 + __builtin_bswap32(sw32[i]);
+    r ^= __builtin_bswap64(sw64);
+    r += (u64)le16(raw) << 16 | le16(raw + 2);
+    return (i64)r;
+}
 /* floating point in single and double precision goes through the library calls that do not exist yet
  * or through the FPU, which this core does not have: not tested here. */
 #ifdef HOST_TEST
 #include <stdio.h>
 #define T(n) printf(#n " %016llx\n", (unsigned long long)test_##n());
-int main(void) { T(sizes) T(globals) T(calls) T(bittest) T(frames) T(structs) T(varargs) T(widths) T(sha256) T(sort) T(list) T(memory) return 0; }
+int main(void) { T(sizes) T(globals) T(calls) T(bittest) T(frames) T(structs) T(varargs) T(widths) T(sha256) T(sort) T(list) T(memory) T(bswap) return 0; }
 #endif

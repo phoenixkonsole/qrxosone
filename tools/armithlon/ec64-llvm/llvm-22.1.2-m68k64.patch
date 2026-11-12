@@ -1586,16 +1586,26 @@
 +def : Pat<(i8  (trunc i64:$s)), (EXTRACT_SUBREG (i32 (EXTRACT_SUBREG MxXRD64:$s, MxSubRegIndex32Lo)), MxSubRegIndex8Lo)>;
 --- a/llvm/lib/Target/M68k64/M68k64InstrControl.td
 +++ b/llvm/lib/Target/M68k64/M68k64InstrControl.td
-@@ -138,7 +138,7 @@
+@@ -138,7 +138,17 @@
      );
  }
  
 -def JMP32j : MxJMP<MxARI32, MxEncAddrMode_j<"dst">>;
 +def JMP32j : MxJMP<MxARI64, MxEncAddrMode_j<"dst">>;
++
++// jmp (sym,%pc): only for the assembler, the code generator jumps through registers
++let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in
++def JMP32q : MxInst<(outs), (ins MxPCD64:$dst), "jmp	$dst", []> {
++  let Inst =
++    (ascend
++      (descend 0b0100, 0b1110, 0b11, MxEncAddrMode_q<"dst">.EA),
++      MxEncAddrMode_q<"dst">.Supplement
++    );
++}
  
  
  // FIXME Support 16 bit indirect jump.
-@@ -275,7 +275,7 @@
+@@ -275,7 +285,7 @@
  // a use to prevent stack-pointer assignments that appear immediately
  // before calls from potentially appearing dead. Uses for argument
  // registers are added manually.
@@ -1604,7 +1614,7 @@
  let isCall = 1 in
  ///------------------------------+---------+---------
  /// F  E  D  C  B  A  9  8  7  6 | 5  4  3 | 2  1  0
-@@ -291,43 +291,43 @@
+@@ -291,43 +301,43 @@
      );
  }
  
@@ -1664,7 +1674,7 @@
  } // isCodeGenOnly = 1
  
  //===----------------------------------------------------------------------===//
-@@ -364,6 +364,8 @@
+@@ -364,6 +374,8 @@
                            [(set MxDRD16:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
  def SETCS_C32d : MxPseudo<(outs MxXRD32:$dst), (ins),
                            [(set MxXRD32:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
@@ -1673,7 +1683,7 @@
  } // Uses = [CCR], Defs = [CCR], isPseudo = 1
  
  
-@@ -372,6 +374,8 @@
+@@ -372,6 +384,8 @@
  
  def : Pat<(i16 (sext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C16d)>;
  def : Pat<(i32 (sext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C32d)>;

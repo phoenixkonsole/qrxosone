@@ -703,7 +703,7 @@
        break;
 --- a/clang/lib/Driver/ToolChains/AROS.cpp
 +++ b/clang/lib/Driver/ToolChains/AROS.cpp
-@@ -0,0 +1,400 @@
+@@ -0,0 +1,404 @@
 +//===--- AROS.cpp - AROS Tool Chain -------------===//
 +//
 +//                     The LLVM Compiler Infrastructure
@@ -909,6 +909,10 @@
 +        CmdArgs.push_back("-lautoinit");
 +        CmdArgs.push_back("-llibinit");
 +        CmdArgs.push_back("--end-group");
++        // The 68100EC64 has no FPU: float and double, and the 128-bit integer helpers, come from
++        // compiler-rt's builtins, which the SDK keeps as libclang_rt.builtins-m68k64.a
++        if (Target.getArch() == llvm::Triple::m68k64)
++            CmdArgs.push_back("-lclang_rt.builtins-m68k64");
 +    }
 +
 +    C.addCommand(std::make_unique<Command>(
