@@ -337,7 +337,9 @@ static void smp(void)
     v = two_cores(W(0xA008, 0x2010, 0xA008, 0x5280, 0xA008, 0x2080, 0x5387, 0x66F0, 0x4AFC), st);
     printf("two cores, plain add as control: counter %" PRIu64 " of %u\n", v, 2u * ROUNDS);
     CHECK(st[0] == QEC64_STOPPED && st[1] == QEC64_STOPPED, "control program did not finish: %d %d", st[0], st[1]);
-    CHECK(v >= ROUNDS && v < 2u * ROUNDS, "the control lost no counts, so the test proves nothing");
+    /* No lower bound: a core that writes back a stale value can undo many of the other core's
+     * increments at once, so a racy count may end below ROUNDS. */
+    CHECK(v > 0 && v < 2u * ROUNDS, "the control lost no counts, so the test proves nothing");
 }
 int main(void)
 {
