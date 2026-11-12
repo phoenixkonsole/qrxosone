@@ -24,7 +24,7 @@
  * in r0 instead of an import index, the bridge resolves its 68k record and
  * reports that entry point in qrx_mix_args_t.proc.  An import registered
  * without a signature takes its placement from the descriptor's ProcInfo on
- * every call.  The other direction uses
+ * every call; QRX_MIX_RAW instead keeps the legacy raw register path.  The other direction uses
  * the same descriptors: 68k code that holds a UniversalProcPtr calls
  * qrx_mix_rd_invoke(), which selects the descriptor's PPC record, so a 68k
  * callback can re-enter PPC code.
@@ -42,6 +42,7 @@
 #define QRX_MIX_DEPTH_MAX 16u    /* recursion guard for nested calls */
 #define QRX_MIX_SIG_MAX 16u      /* parameters per signature */
 #define QRX_MIX_STACK_WORDS 32u  /* words the bridge will read or write */
+#define QRX_MIX_RAW 0xFFFFFFFFu  /* `descriptor` value: raw register path */
 
 /*
  * Routine descriptors (Universal Interfaces / MixedMode.h, 2-byte packed).
@@ -110,6 +111,16 @@ typedef struct {
     char ret;                       /* 'v', 'i', 'l' or 'f' */
 } qrx_mix_sig_t;
 
+/* `sig` value for qrx_mix_call() that asks for the legacy raw register path.
+ * The pointer is only compared, never dereferenced; a NULL signature is an
+ * argument error, so the raw path cannot be reached by leaving it out. */
+#define QRX_MIX_RAW_SIG ((const qrx_mix_sig_t *)(uintptr_t)0xFFFFFFFFu)
+
+/* `sig` value for qrx_mix_register_proc() that asks for the placement to be
+ * derived from the record's ProcInfo.  A NULL signature is QRX_MIX_ERR_ARG, so
+ * neither placement is a silent fallback. */
+#define QRX_MIX_PROCINFO ((const qrx_mix_sig_t *)(uintptr_t)0xFFFFFFFEu)
+
 typedef struct {
     uint32_t rtoc;                  /* r2, PowerOpen RTOC */
     uint32_t gpr[QRX_MIX_ARGS];     /* integer-class arguments in order */
@@ -166,16 +177,19 @@ qrx_mix_status_t qrx_mix_sig_parse(qrx_mix_sig_t *sig, const char *params,
 qrx_mix_status_t qrx_mix_init(qrx_mix_t *mix, qrx_ppc_t *ppc,
                               uint32_t glue_addr, uint32_t sp_top,
                               uint32_t sp_limit);
-/* Register an import reached by index.  With a signature the signature
- * decides the placement and `descriptor` is ignored, so pass 0.  Without a
- * signature but with a descriptor, the placement is derived from that
- * descriptor's ProcInfo exactly as qrx_mix_register_proc() does (the PPC
- * record's when it has one, otherwise the 68k record's) and re-derived on every
- * call; an undecodable ProcInfo fails the registration with QRX_MIX_ERR_RD, and
- * a descriptor below QRX_MIX_IMPORTS would be mistaken for an index and is
- * rejected.  Without either the import receives the raw register state (legacy
- * behaviour).  PPC code always puts the index in r0 before `sc`, so args->proc
- * stays 0. */
+/* Register an import reached by index.  The placement has to be asked for:
+ * pass a signature, which then decides it (and pass 0 as descriptor), or pass a
+ * descriptor whose ProcInfo supplies it exactly as qrx_mix_register_proc()
+ * does (the PPC record's when it has one, otherwise the 68k record's); that
+ * ProcInfo is re-derived on every call, an undecodable one fails the
+ * registration with QRX_MIX_ERR_RD, and a descriptor below QRX_MIX_IMPORTS
+ * would be mistaken for an index and is rejected.  Pass QRX_MIX_RAW to keep the
+ * raw register path on purpose, where the callback receives r3..r10 and f1..f8
+ * verbatim; that path is legacy and no longer implicit.  A NULL signature with
+ * descriptor 0, and a signature together with a descriptor, are
+ * QRX_MIX_ERR_ARG: no argument is silently ignored, and a rejected
+ * registration leaves the previous binding untouched.  PPC code always puts the
+ * index in r0 before `sc`, so args->proc stays 0. */
 qrx_mix_status_t qrx_mix_register(qrx_mix_t *mix, unsigned index,
                                   uint32_t descriptor,
                                   qrx_mix_import_fn fn, void *ctx,
@@ -185,17 +199,22 @@ qrx_mix_status_t qrx_mix_register(qrx_mix_t *mix, unsigned index,
  * bridge resolves the descriptor's 68k record, calls fn and passes that record's
  * entry point as args->proc.  The descriptor must be valid and lie at or above
  * QRX_MIX_IMPORTS; descriptor imports are limited to QRX_MIX_PROCS.
- * sig may be NULL: the placement is then derived from the record's ProcInfo
- * (the PPC record's when the descriptor has one, otherwise the 68k record's)
- * and re-derived on every call.  A ProcInfo that cannot describe the placement
- * makes the registration fail with QRX_MIX_ERR_RD.  An explicit signature wins
- * over ProcInfo. */
+ * The placement is explicit here as well: pass a signature, which then decides
+ * it, or QRX_MIX_PROCINFO to derive it from the record's ProcInfo (the PPC
+ * record's when the descriptor has one, otherwise the 68k record's) and have it
+ * re-derived on every call.  A ProcInfo that cannot describe the placement
+ * makes the registration fail with QRX_MIX_ERR_RD.  A NULL signature is
+ * QRX_MIX_ERR_ARG before the descriptor is read, so no placement is a silent
+ * fallback and a rejected registration takes no slot. */
 qrx_mix_status_t qrx_mix_register_proc(qrx_mix_t *mix, uint32_t descriptor,
                                        qrx_mix_import_fn fn, void *ctx,
                                        const qrx_mix_sig_t *sig);
 /* With a signature, args->gpr/fpr/stack must hold exactly the arguments the
- * signature places in registers and in the parameter area; with a NULL
- * signature the register counts are loaded verbatim (legacy behaviour). */
+ * signature places in registers and in the parameter area.  QRX_MIX_RAW_SIG
+ * instead selects the legacy raw register path and loads args->gpr/fpr/stack
+ * verbatim; a NULL signature is QRX_MIX_ERR_ARG and leaves the guest
+ * untouched, so the raw path has to be requested like in
+ * qrx_mix_register(). */
 qrx_mix_status_t qrx_mix_call(qrx_mix_t *mix, uint32_t entry,
                               const qrx_mix_sig_t *sig,
                               const qrx_mix_args_t *args,

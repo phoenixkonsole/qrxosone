@@ -174,6 +174,27 @@ MUTATIONS = {
         "if (mix->import_desc_used[index]) {",
         "if (mix->import_desc_used[index] && 0) {",
     ),
+    "call_raw_gate": (
+        "qrx_mix_status_t qrx_mix_call(qrx_mix_t *mix, uint32_t entry,",
+        "    } else if (!sig) {\n"
+        "        return QRX_MIX_ERR_ARG;",
+        "    } else if (0) {\n"
+        "        return QRX_MIX_ERR_ARG;",
+    ),
+    "proc_raw_gate": (
+        "qrx_mix_status_t qrx_mix_register_proc(qrx_mix_t *mix, uint32_t descriptor,",
+        "    if (!sig)\n"
+        "        return QRX_MIX_ERR_ARG;",
+        "    if (!sig && 0)\n"
+        "        return QRX_MIX_ERR_ARG;",
+    ),
+    "register_raw_gate": (
+        "qrx_mix_status_t qrx_mix_register(qrx_mix_t *mix, unsigned index,",
+        "            return QRX_MIX_ERR_SIG;\n"
+        "    } else if (descriptor != QRX_MIX_RAW) {",
+        "            return QRX_MIX_ERR_SIG;\n"
+        "    } else if (1) {",
+    ),
 }
 
 
@@ -272,6 +293,7 @@ python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_invoke_pi_err.c" 
 python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_rdcall_pi.c" test_mixed_rd_call_procinfo
 python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_rdcall_pi_err.c" test_mixed_rd_call_procinfo_errors
 python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_idxpi.c" test_mixed_import_procinfo
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_rawcall.c" test_mixed_errors
 
 build_variant()
 {
@@ -570,6 +592,51 @@ else
     survivors=$((survivors + 1))
 fi
 
+raw_mutant=register_raw_gate
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$raw_mutant.c" "$raw_mutant"
+build_variant "$raw_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_idxpi.c" "$TMP/$raw_mutant.c"
+run_variant "$raw_mutant"
+if grep -q '^mixed_import_procinfo: FAIL$' "$TMP/$raw_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$raw_mutant"
+elif grep -q '^mixed_import_procinfo: PASS$' "$TMP/$raw_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$raw_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_import_procinfo result)\n' "$raw_mutant"
+    tail -20 "$TMP/$raw_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+procmutant=proc_raw_gate
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$procmutant.c" "$procmutant"
+build_variant "$procmutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_piproc_err.c" "$TMP/$procmutant.c"
+run_variant "$procmutant"
+if grep -q '^mixed_proc_procinfo_errors: FAIL$' "$TMP/$procmutant.guest.log"; then
+    printf 'KILLED   %s\n' "$procmutant"
+elif grep -q '^mixed_proc_procinfo_errors: PASS$' "$TMP/$procmutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$procmutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_proc_procinfo_errors result)\n' "$procmutant"
+    tail -20 "$TMP/$procmutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+rawcall_mutant=call_raw_gate
+python3 "$TMP/mutate.py" "$SRC/qrx_mix.c" "$TMP/$rawcall_mutant.c" "$rawcall_mutant"
+build_variant "$rawcall_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_rawcall.c" "$TMP/$rawcall_mutant.c"
+run_variant "$rawcall_mutant"
+if grep -q '^mixed_errors: FAIL$' "$TMP/$rawcall_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$rawcall_mutant"
+elif grep -q '^mixed_errors: PASS$' "$TMP/$rawcall_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$rawcall_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no mixed_errors result)\n' "$rawcall_mutant"
+    tail -20 "$TMP/$rawcall_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
 cp -p "$BACKUP_QRXPPC" "$TREE/C/QRXPPC"
 cp -p "$BACKUP_STARTUP" "$STARTUP"
 rm -f "$GUEST_LOG"
@@ -581,7 +648,7 @@ if [ "$survivors" -ne 0 ]; then
 fi
 
 # The array holds the mutants that share the jit_widths_limit driver; the
-# thirteen single-mutant blocks below build their own driver.
-echo "mutation test PASS: $(( ${#mutants[@]} + 14 )) mutants killed"
+# seventeen single-mutant blocks below build their own driver.
+echo "mutation test PASS: $(( ${#mutants[@]} + 17 )) mutants killed"
 shasum -a 256 "$STARTUP" "$TREE/C/QRXPPC"
 rm -rf "$TMP"

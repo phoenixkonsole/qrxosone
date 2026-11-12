@@ -322,9 +322,19 @@ durchgängigen Glue-Fall (PPC → Import → 68k-Callback mit UniversalProcPtr �
 PPC ohne Signatur) samt verschachteltem Rahmen und abgelehntem `ProcInfo`.
 Dieser Fall hängt an derselben Funktion wie die drei `qrx_mix_rd_invoke()`-
 Mutanten und braucht deshalb keine eigene Mutation. `mixed_import_procinfo`
-prüft Index-Importe, denen ein Deskriptor für die `ProcInfo`-Ableitung
-zugeordnet ist; eine zwanzigste Mutation schaltet genau diese Ableitung in
-`mix_run()` ab und wird von diesem Fall erkannt.
+prüft Index-Importe, denen `qrx_mix_register()` einen Deskriptor für die
+`ProcInfo`-Ableitung mitgibt, und dass die Rohregister nur noch über
+`QRX_MIX_RAW` erreichbar sind: Signatur und Deskriptor schließen sich aus, fehlt
+beides, bleibt die vorherige Bindung samt Import-Slot unangetastet. Eine
+zwanzigste Mutation schaltet die Ableitung in `mix_run()` ab, eine
+einundzwanzigste die Prüfung, die den Rohregisterpfad an `QRX_MIX_RAW` bindet;
+dieser Fall erkennt beide. Eine zweiundzwanzigste lässt `qrx_mix_call()` eine
+fehlende Signatur wieder als Rohregisterpfad durchgehen; `mixed_errors` erkennt
+sie, weil es die Ablehnung samt unverändertem PC prüft. Eine dreiundzwanzigste
+lässt `qrx_mix_register_proc()` eine fehlende Signatur wieder aus dem `ProcInfo`
+ableiten; `mixed_proc_procinfo_errors` erkennt sie an der erwarteten
+`QRX_MIX_ERR_ARG` und daran, dass der abgelehnte Deskriptor unregistriert
+bleibt.
 `QRXPPC: 0 failure(s)`.
 Die bestehenden Fälle laufen zusätzlich per JIT auf einer separaten
 Speicherkopie und vergleichen den vollständigen CPU-/Speicherzustand. Der

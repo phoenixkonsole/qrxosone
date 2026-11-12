@@ -230,6 +230,11 @@ ausgerichtet, hohes Wort zuerst). Ein `l` mit ungeradem Registerzähler wird
 verworfen, weil PowerOpen kein Paar teilt. `qrx_mix_call()` prüft die
 Argumentzahlen gegen die Signatur und maskiert das Ergebnis auf den
 Rückgabetyp (`v` löscht es, `i` liefert nur `r3`, `l` `r3:r4`, `f` nur `f1`).
+Eine fehlende Signatur ist `QRX_MIX_ERR_ARG`: den Rohregisterpfad gibt es,
+anders als in der ersten Fassung, nur noch auf ausdrückliche Anforderung mit
+`QRX_MIX_RAW_SIG` als Signaturwert, und der abgelehnte Aufruf schreibt weder
+Rahmen noch Register des Gasts. Damit ist er dieselbe Altlast wie der rohe
+Deskriptor in `qrx_mix_register()`.
 
 PPC-Code ruft 68k-Code über `sc` mit dem Import-Index in `r0` auf. Die Brücke
 übergibt die von der Import-Signatur benannten Argumente als
@@ -282,12 +287,14 @@ weist Duplikate ab; jeder Aufruf löst den Deskriptor erneut auf, damit
 Änderungen im Gastspeicher nicht unbemerkt bleiben. Ein Deskriptor ohne
 68k-Record oder ein nach der Registrierung ungültig gewordener Deskriptor
 endet als `QRX_MIX_ERR_RD`, ein nicht registrierter Deskriptor als
-`QRX_MIX_ERR_IMPORT`. Ohne eigene Signatur leitet die Brücke die Platzierung
-bei jedem Aufruf aus dem `ProcInfo` ab — vorzugsweise aus dem PPC-Record, bei
-einem reinen 68k-Deskriptor aus dem Record, den der Import aufruft. Ein
-`ProcInfo`, das die Platzierung nicht beschreibt, wird schon bei der
-Registrierung mit `QRX_MIX_ERR_RD` abgelehnt; eine ausdrückliche Signatur hat
-Vorrang.
+`QRX_MIX_ERR_IMPORT`. Auch hier ist die Platzierung explizit: `QRX_MIX_PROCINFO`
+an Stelle der Signatur verlangt die Ableitung aus dem `ProcInfo` — vorzugsweise
+aus dem PPC-Record, bei einem reinen 68k-Deskriptor aus dem Record, den der
+Import aufruft — und liest sie bei jedem Aufruf neu; eine Signatur entscheidet
+allein. Ein `ProcInfo`, das die Platzierung nicht beschreibt, wird schon bei der
+Registrierung mit `QRX_MIX_ERR_RD` abgelehnt. Eine fehlende Signatur ist
+`QRX_MIX_ERR_ARG` und wird vor dem Deskriptorzugriff abgewiesen, sodass eine
+abgelehnte Registrierung keinen Slot belegt.
 
 Der Test `mixed_call` prüft Argumente, Ergebnis, Glue-Wort, Back-Chain und das
 gespeicherte LR im Callee-Rahmen, `mixed_stack` die ersten acht Register- plus
@@ -356,9 +363,33 @@ das `ProcInfo` des PPC-Records in PPC-Code, der seine beiden Registerargumente
 im Gastspeicher ablegt; geprüft werden Platzierung, Rückgabewert, Back-Chain des
 verschachtelten Rahmens, unveränderter CPU-Zustand und die Ablehnung eines
 zweiten Deskriptors, dessen `ProcInfo` keine Platzierung beschreibt. Ein Index-Import trägt selbst kein `ProcInfo`;
-`qrx_mix_register_procinfo()` bindet ihm deshalb einen Deskriptor, aus dem die
-Platzierung wie beim Deskriptor-Import abgeleitet und bei jedem Aufruf neu
-gelesen wird (`mixed_import_procinfo`). Beim Bau
+`qrx_mix_register()` verlangt deshalb eine ausdrückliche Platzierung: entweder
+eine Signatur, die dann allein entscheidet (ein Deskriptor daneben ist
+`QRX_MIX_ERR_ARG`), oder einen Deskriptor, aus dem die Platzierung wie beim
+Deskriptor-Import abgeleitet und bei jedem Aufruf neu gelesen wird
+(`mixed_import_procinfo`). Der frühere Rohregisterpfad ist eine Altlast und nur
+noch über `QRX_MIX_RAW` als Deskriptorwert erreichbar; ohne Signatur und ohne
+Deskriptor ist die Registrierung `QRX_MIX_ERR_ARG` und lässt die vorherige
+Bindung unverändert.
+
+Welche Variante welche Platzierungsquelle wählt und was eine Mischform kostet:
+
+| Variante | Platzierungsquelle | Mischform / Fehlgebrauch |
+| --- | --- | --- |
+| `qrx_mix_register(mix, i, 0, fn, ctx, &sig)` | Signatur | Deskriptor ungleich 0 daneben: `QRX_MIX_ERR_ARG` |
+| `qrx_mix_register(mix, i, rd, fn, ctx, NULL)` | `ProcInfo` des Deskriptors (PPC-Record, sonst 68k-Record) | `rd` unter `QRX_MIX_IMPORTS`: `ERR_ARG`; unlesbarer Deskriptor oder `ProcInfo`: `ERR_RD` |
+| `qrx_mix_register(mix, i, QRX_MIX_RAW, fn, ctx, NULL)` | Rohregister | `QRX_MIX_RAW` zusammen mit Signatur: `ERR_ARG` |
+| `qrx_mix_register(mix, i, 0, fn, ctx, NULL)` | keine | `ERR_ARG`, vorherige Bindung samt Import-Slot bleibt |
+| `qrx_mix_register_proc(mix, rd, fn, ctx, &sig)` | Signatur | `rd` unter `QRX_MIX_IMPORTS`, doppelt registriert oder kein Slot frei: `ERR_ARG` |
+| `qrx_mix_register_proc(mix, rd, fn, ctx, QRX_MIX_PROCINFO)` | `ProcInfo` des Records | `ERR_RD`, wenn das `ProcInfo` keine Platzierung beschreibt |
+| `qrx_mix_register_proc(mix, rd, fn, ctx, NULL)` | keine | `ERR_ARG` vor dem Deskriptorzugriff, kein Slot belegt |
+| `qrx_mix_call(mix, entry, &sig, args, …)` | Signatur | `args` passt nicht zur Signatur oder `entry` ist 0: `ERR_ARG` |
+| `qrx_mix_call(mix, entry, QRX_MIX_RAW_SIG, args, …)` | Rohregister, Zähler wörtlich | Zähler über `QRX_MIX_ARGS`/`QRX_MIX_STACK_WORDS`: `ERR_ARG` |
+| `qrx_mix_call(mix, entry, NULL, args, …)` | keine | `ERR_ARG`, weder Rahmen noch Register geschrieben |
+
+Eine ungültige Signatur selbst endet als `QRX_MIX_ERR_SIG`. `qrx_mix_rd_call()`
+und `qrx_mix_rd_invoke()` leiten bei NULL weiterhin eine Signatur aus dem
+`ProcInfo` des Records ab; das ist der verbliebene implizite Pfad. Beim Bau
 dieser Tests
 fiel auf, dass `addi`/`addis`/`addic` mit `RA=0` fälschlich `r0` statt des
 Literals 0 addierten; der Kern folgt jetzt der ISA.
