@@ -55,6 +55,7 @@ struct qec64_cpu {
     void (*on_ipi)(qec64_cpu *self, uint64_t core_mask);
     void (*on_timer)(qec64_cpu *self);
     void (*on_console)(qec64_cpu *self, unsigned ch);
+    int (*on_console_in)(qec64_cpu *self);   /* the next input character, or -1 */
     void *machine;
 };
 
@@ -73,6 +74,8 @@ qec64_cpu *qec64_machine_core(qec64_machine *m, unsigned i);
 /* Console output goes to out, up to cap bytes. */
 void qec64_machine_console(qec64_machine *m, char *out, size_t cap);
 size_t qec64_machine_console_used(const qec64_machine *m);
+/* Console input: reads of MOVEC $8F0 return these bytes in turn, then -1. */
+void qec64_machine_console_input(qec64_machine *m, const char *in, size_t len);
 /* Starts core 0 at pc, in 32-bit mode as after reset, and waits for the end: a halt, or a failure on
  * any core, or the time limit. Returns the status of the core that ended it, or QEC64_RUNNING. */
 enum qec64_status qec64_machine_run(qec64_machine *m, uint64_t pc, uint64_t sp, double seconds, unsigned *which);

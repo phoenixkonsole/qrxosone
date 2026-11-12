@@ -807,6 +807,7 @@ static void op_line4(ctx *x)
         case CR_USP: *rp = c->other_sp; return;
         case CR_TIMER: *rp = c->timer_us; return;
         case CR_NCORES: *rp = c->num_cores ? c->num_cores : 1; return;
+        case CR_CONSOLE: *rp = c->on_console_in ? (uint64_t)(int64_t)c->on_console_in(c) : ~UINT64_C(0); return;
         default: unimpl(x);
         }
     }

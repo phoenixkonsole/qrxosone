@@ -22,6 +22,8 @@ struct qec64_machine {
     unsigned end_core;
     char *out;
     size_t cap, used;
+    const char *in;
+    size_t in_len, in_pos;
 };
 static uint64_t now_us(void)
 {
@@ -65,6 +67,15 @@ static void on_console(qec64_cpu *self, unsigned ch)
     pthread_mutex_lock(&m->lock);
     if (m->out && m->used < m->cap) m->out[m->used++] = (char)ch;
     pthread_mutex_unlock(&m->lock);
+}
+static int on_console_in(qec64_cpu *self)
+{
+    qec64_machine *m = self->machine;
+    int ch = -1;
+    pthread_mutex_lock(&m->lock);
+    if (m->in && m->in_pos < m->in_len) ch = (unsigned char)m->in[m->in_pos++];
+    pthread_mutex_unlock(&m->lock);
+    return ch;
 }
 static void *core_thread(void *arg)
 {
@@ -128,6 +139,7 @@ qec64_machine *qec64_machine_new(uint8_t *ram, uint64_t ram_size, unsigned cores
         c->on_ipi = on_ipi;
         c->on_timer = on_timer;
         c->on_console = on_console;
+        c->on_console_in = on_console_in;
     }
     return m;
 }
@@ -140,6 +152,7 @@ void qec64_machine_free(qec64_machine *m)
 qec64_cpu *qec64_machine_core(qec64_machine *m, unsigned i) { return i < m->cores ? &m->cpu[i] : NULL; }
 void qec64_machine_console(qec64_machine *m, char *out, size_t cap) { m->out = out; m->cap = cap; m->used = 0; }
 size_t qec64_machine_console_used(const qec64_machine *m) { return m->used; }
+void qec64_machine_console_input(qec64_machine *m, const char *in, size_t len) { m->in = in; m->in_len = len; m->in_pos = 0; }
 enum qec64_status qec64_machine_run(qec64_machine *m, uint64_t pc, uint64_t sp, double seconds, unsigned *which)
 {
     m->stopping = false;

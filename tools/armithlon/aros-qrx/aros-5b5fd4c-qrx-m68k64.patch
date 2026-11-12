@@ -1,3 +1,30 @@
+diff --git a/arch/all-native/econsole/econsole.c b/arch/all-native/econsole/econsole.c
+index 21e84100..9579e980 100644
+--- a/arch/all-native/econsole/econsole.c
++++ b/arch/all-native/econsole/econsole.c
+@@ -183,6 +183,10 @@ const struct econsole_file *econsole_file_of(BSTR bname, SIPTR *errcode)
+     else
+         file++;
+ 
++    /* "*" is the current console, as dos.library's Open("*") passes it on */
++    if (strcmp(file, "*") == 0)
++        file = name + blen;
++
+     D(bug("%s: bname=%b, name=%s, file=%s\n", __func__, bname, name, file));
+     for (i = 0; i < ARRAY_SIZE(econsole_files); i++) {
+         if (strcmp(econsole_files[i].ef_Name, file) == 0) {
+diff --git a/arch/all-native/econsole/mmakefile.src b/arch/all-native/econsole/mmakefile.src
+index de479bdc..817f9c5a 100644
+--- a/arch/all-native/econsole/mmakefile.src
++++ b/arch/all-native/econsole/mmakefile.src
+@@ -14,6 +14,6 @@ USER_CPPFLAGS += -DAROS_CPU="\"$(AROS_TARGET_CPU)\""
+ 
+ %build_module mmake=kernel-econsole \
+   modname=econsole modtype=handler \
+-  files="$(FILES)"
++  files="$(FILES)" uselibs="stdc.static"
+ 
+ %common
 diff --git a/arch/m68k64-all/crt/posixc/.gitignore b/arch/m68k64-all/crt/posixc/.gitignore
 new file mode 100644
 index 00000000..0d77ed2f
@@ -186,10 +213,10 @@ index 00000000..38e42588
 +	jmp (%a1)
 diff --git a/arch/m68k64-all/crt/stdc/mmakefile.src b/arch/m68k64-all/crt/stdc/mmakefile.src
 new file mode 100644
-index 00000000..1206e40e
+index 00000000..3172a97f
 --- /dev/null
 +++ b/arch/m68k64-all/crt/stdc/mmakefile.src
-@@ -0,0 +1,13 @@
+@@ -0,0 +1,18 @@
 +#
 +
 +include $(SRCDIR)/config/aros.cfg
@@ -203,6 +230,11 @@ index 00000000..1206e40e
 +  files="fenv" asmfiles="longjmp setjmp"
 +
 +#MM compiler-stdc-m68k64 : compiler-stdc-includes includes-asm_h-m68k64
++
++# dos.library links setjmp()/longjmp() from here, see linklibs-romhack in compiler/crt
++#MM linklibs-romhack-m68k64 : includes-asm_h-m68k64
++
++%build_linklib mmake=linklibs-romhack-m68k64 libname=romhack asmfiles="longjmp setjmp" sdk="private"
 diff --git a/arch/m68k64-all/crt/stdc/setjmp.s b/arch/m68k64-all/crt/stdc/setjmp.s
 new file mode 100644
 index 00000000..2f62f96d
@@ -658,7 +690,7 @@ index 00000000..43397306
 +#endif /* AROS_M68K64_ATOMIC_H */
 diff --git a/arch/m68k64-all/include/aros/cpu.h b/arch/m68k64-all/include/aros/cpu.h
 new file mode 100644
-index 00000000..790d0891
+index 00000000..89a8f506
 --- /dev/null
 +++ b/arch/m68k64-all/include/aros/cpu.h
 @@ -0,0 +1,168 @@
@@ -750,7 +782,7 @@ index 00000000..790d0891
 +    struct FullJumpVec *_v = (v); \
 +    _v->prefix = 0xA008;        \
 +    _v->movea  = 0x207C;        \
-+    _v->vec    = (a);           \
++    _v->vec    = (void *)(a);   \
 +    _v->jmp    = 0x4ED0;        \
 +} while (0)
 +
@@ -1629,10 +1661,10 @@ index 00000000..e8066a41
 +} /* CachePreDMA() */
 diff --git a/arch/m68k64-native/exec/coldreboot.c b/arch/m68k64-native/exec/coldreboot.c
 new file mode 100644
-index 00000000..ced2028e
+index 00000000..ce40b7ef
 --- /dev/null
 +++ b/arch/m68k64-native/exec/coldreboot.c
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,41 @@
 +/*
 +    Copyright (C) 2023, The AROS Development Team. All rights reserved.
 +
@@ -1646,6 +1678,7 @@ index 00000000..ced2028e
 +#include <exec/types.h>
 +#include <exec/execbase.h>
 +#include <exec/tasks.h>
++#include <exec/pm.h>
 +
 +#include "exec_intern.h"
 +#include "exec_util.h"
@@ -1658,6 +1691,18 @@ index 00000000..ced2028e
 +    AROS_LIBFUNC_INIT
 +
 +    Exec_DoResetCallbacks((struct IntExecBase *)SysBase, SD_ACTION_WARMREBOOT);
++
++    /*
++        In user state the callbacks run in tasks of their own at priority 127, and the last one ends
++        the run. They did not get to run if the caller had Disable()d, as Alert() does for a dead
++        end: then this ends it, see SC_REBOOT in the kernel. A dead end must not come back.
++    */
++    {
++        register unsigned long sc asm("d0") = 0x100;        /* SC_REBOOT */
++        register unsigned long action asm("d1") = SD_ACTION_WARMREBOOT;
++
++        asm volatile ("trap #0" : "+d"(sc) : "d"(action) : "a0", "a1", "memory", "cc");
++    }
 +
 +    AROS_LIBFUNC_EXIT
 +}
@@ -1697,10 +1742,10 @@ index 00000000..0dc7c4ea
 +}
 diff --git a/arch/m68k64-native/exec/exec_platform.h b/arch/m68k64-native/exec/exec_platform.h
 new file mode 100644
-index 00000000..1b6bbfea
+index 00000000..80ea0a2a
 --- /dev/null
 +++ b/arch/m68k64-native/exec/exec_platform.h
-@@ -0,0 +1,208 @@
+@@ -0,0 +1,215 @@
 +/*
 +    Copyright (C) 2023, The AROS Development Team. All rights reserved.
 +*/
@@ -1734,6 +1779,13 @@ index 00000000..1b6bbfea
 +#define TS_UNSPIN 0x10
 +extern void Exec_M68K64ReschedTask(struct Task *task, ULONG state);
 +#define krnSysCallReschedTask(task, state) Exec_M68K64ReschedTask((task), (state))
++/*
++    As on x86: a task that removes itself first leaves the TaskRunning list (RemTask's
++    krnSysCallSwitch), so that the housekeeper does not free it while it is still linked there.
++*/
++#define EXEC_REMTASK_NEEDSSWITCH
++#define krnSysCallSwitch() Exec_M68K64DetachTask()
++extern void Exec_M68K64DetachTask(void);
 +
 +#include "etask.h"
 +#endif
@@ -1963,10 +2015,10 @@ index 00000000..7c1983d9
 +TARGETDIR = $(BD_OBJDIR$(BDID))
 diff --git a/arch/m68k64-native/exec/platform_init.c b/arch/m68k64-native/exec/platform_init.c
 new file mode 100644
-index 00000000..710fb256
+index 00000000..beb02adb
 --- /dev/null
 +++ b/arch/m68k64-native/exec/platform_init.c
-@@ -0,0 +1,213 @@
+@@ -0,0 +1,252 @@
 +/*
 +    Copyright (C) 2023, The AROS Development Team. All rights reserved.
 +*/
@@ -1981,6 +2033,8 @@ index 00000000..710fb256
 +#include <exec/tasks.h>
 +#include <exec/alerts.h>
 +#include <exec/execbase.h>
++#include <exec/pm.h>
++#include <exec/interrupts.h>
 +
 +#include <proto/exec.h>
 +#include <proto/kernel.h>
@@ -1998,6 +2052,24 @@ index 00000000..710fb256
 +
 +extern void IdleTask(struct ExecBase *);
 +
++/*
++    The end of exec's reset callbacks for every action (ShutdownA, ColdReboot): the kernel ends the
++    run on the reference machine, see SC_REBOOT in the kernel's intr.c.
++*/
++AROS_INTH1(Exec_M68K64ShutdownHandler, struct Interrupt *, handler)
++{
++    AROS_INTFUNC_INIT
++
++    register unsigned long sc asm("d0") = 0x100;        /* SC_REBOOT */
++    register unsigned long action asm("d1") = handler->is_Node.ln_Type & SD_ACTION_MASK;
++
++    asm volatile ("trap #0" : "+d"(sc) : "d"(action) : "a0", "a1", "memory", "cc");
++
++    return FALSE;
++
++    AROS_INTFUNC_EXIT
++}
++
 +int Exec_M68K64CPUInit(struct ExecBase *SysBase)
 +{
 +    struct Task *BootTask, *CPUIdleTask;
@@ -2007,6 +2079,12 @@ index 00000000..710fb256
 +    D(bug("[Exec] %s()\n", __PRETTY_FUNCTION__));
 +
 +    BootTask = GET_THIS_TASK;
++
++    PrivExecBase(SysBase)->ShutdownHandler.is_Node.ln_Pri = -128;
++    PrivExecBase(SysBase)->ShutdownHandler.is_Node.ln_Name = "System Shutdown";
++    PrivExecBase(SysBase)->ShutdownHandler.is_Code = (VOID_FUNC)Exec_M68K64ShutdownHandler;
++    PrivExecBase(SysBase)->ShutdownHandler.is_Data = &PrivExecBase(SysBase)->ShutdownHandler;
++    AddResetCallback(&PrivExecBase(SysBase)->ShutdownHandler);
 +
 +    D(bug("[Exec] %s: launched from %s @ 0x%p, %d cores\n", __PRETTY_FUNCTION__, BootTask->tc_Node.ln_Name, BootTask, cpunum));
 +
@@ -2162,6 +2240,19 @@ index 00000000..710fb256
 +        }
 +    }
 +
++    Enable();
++}
++
++/* krnSysCallSwitch() in RemTask(NULL), inside its Forbid(): this core keeps running the task */
++void Exec_M68K64DetachTask(void)
++{
++    struct Task *task = GET_THIS_TASK;
++
++    Disable();
++    EXEC_SPINLOCK_LOCK(&PrivExecBase(SysBase)->TaskRunningSpinLock, NULL, SPINLOCK_MODE_WRITE);
++    Remove(&task->tc_Node);
++    EXEC_SPINLOCK_UNLOCK(&PrivExecBase(SysBase)->TaskRunningSpinLock);
++    task->tc_State = TS_TOMBSTONED;
 +    Enable();
 +}
 +
@@ -2474,10 +2565,10 @@ index 00000000..9a7f1247
 +}
 diff --git a/arch/m68k64-native/kernel/intr.c b/arch/m68k64-native/kernel/intr.c
 new file mode 100644
-index 00000000..44d19363
+index 00000000..5a5f2097
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/intr.c
-@@ -0,0 +1,297 @@
+@@ -0,0 +1,405 @@
 +/*
 +    Copyright (C) 2026, The AROS Development Team. All rights reserved.
 +
@@ -2507,6 +2598,8 @@ index 00000000..44d19363
 +#include "kernel_syscall.h"
 +#include "kernel_scheduler.h"
 +#include "kernel_smp.h"
++
++#define DTRAP(x)
 +
 +extern void cpu_Trap3(regs_t *regs);
 +
@@ -2679,9 +2772,21 @@ index 00000000..44d19363
 +        break;
 +
 +    case SC_CACHECLEARE:
-+    case SC_REBOOT:
-+        /* No caches to clear on the reference core; a reboot is not there yet */
++        /* No caches to clear on the reference core */
 +        break;
++
++    case SC_REBOOT:
++        /*
++            The end of exec's reset callbacks, D1 is the SD_ACTION. The reference machine has no reset
++            line: the run ends with M68K64_END_POWEROFF + action and the boot loader starts the
++            system again for a reboot (movec d0,$8F1 ends all cores).
++        */
++        bug("[Kernel:%02u] %s\n", GetCPUNumber(),
++            regs->d[1] == 0 ? "power off" : regs->d[1] == 1 ? "cold reboot" : "warm reboot");
++        asm volatile ("   move.q %0, %%d0\n   .short 0x4E7B, 0x08F1"
++                      : : "d"(M68K64_END_POWEROFF + (regs->d[1] & 3)) : "d0");
++        for (;;)
++            asm volatile (".short 0x4E72, 0x2700");
 +
 +    default:
 +        /* Task switches happen only on the way back to a task in user state */
@@ -2689,6 +2794,105 @@ index 00000000..44d19363
 +            core_SysCall(sc, regs);
 +        break;
 +    }
++}
++
++/*
++    A fault: the kernel's exception handlers first (KrnAddExceptionHandler), then, for a task in user
++    state, its tc_TrapCode, or exec's, which turns the fault into an alert for the task. Vector numbers
++    are the 68000's and so the Amiga trap numbers. A fault in supervisor state, or with no exec yet,
++    stops the core with a register dump.
++*/
++static void cpu_Dump(regs_t *regs, unsigned long vector)
++{
++    int i;
++    UQUAD *sp = (UQUAD *)regs->a[7];
++
++    bug("[Kernel:%02u] exception %lu at pc 0x%016lx, sr 0x%04x\n", GetCPUNumber(), vector,
++        (unsigned long)regs->pc, regs->sr);
++    for (i = 0; i < 8; i++)
++        bug("[Kernel] d%d %016lx  a%d %016lx\n", i, (unsigned long)regs->d[i],
++            i, (unsigned long)regs->a[i]);
++    bug("[Kernel] stack:");
++    for (i = 0; i < 8; i++)
++        bug(" %016lx", (unsigned long)sp[i]);
++    bug("\n[Kernel] task 0x%p '%s'\n", GET_THIS_TASK,
++        GET_THIS_TASK ? GET_THIS_TASK->tc_Node.ln_Name : "");
++}
++
++static void cpu_Fault(regs_t *regs, unsigned long vector)
++{
++    struct KernelBase *KernelBase = (struct KernelBase *)TLS_GET(KernelBase);
++    struct Task *task = GET_THIS_TASK;
++
++    if (KernelBase && krnRunExceptionHandlers(KernelBase, vector, regs))
++        return;
++
++    if (SysBase && task && !(regs->sr & SR_SUPERVISOR))
++    {
++        void (*trap)(ULONG, struct ExceptionContext *) = task->tc_TrapCode;
++
++        if (!trap)
++            trap = SysBase->TaskTrapCode;
++        if (trap)
++        {
++            DTRAP(bug("[Kernel:%02u] exception %lu in '%s', trap code 0x%p\n", GetCPUNumber(), vector,
++                task->tc_Node.ln_Name, trap));
++            /* It may change the context (exec's sends the task to its crash handler) or not return */
++            trap(vector, regs);
++            core_ExitInterrupt(regs);
++            return;
++        }
++    }
++
++    cpu_Dump(regs, vector);
++    for (;;)
++        asm volatile (".short 0x4E72, 0x2700");     /* stop #$2700 */
++}
++
++/*
++    "idledump" on the command line: when core 0 has only run its idle task for 5 seconds, print
++    every task with its state, signals and PC once. A help for finding tasks that wait forever.
++*/
++int m68k64_IdleDump;
++
++static void dump_tasklist(struct KernelBase *KernelBase, const char *name, struct List *l)
++{
++    struct Node *n;
++    int k = 0;
++
++    bug("[Kernel] %s:\n", name);
++    ForeachNode(l, n)
++    {
++        struct Task *t = (struct Task *)n;
++        struct ExceptionContext *ctx = (t->tc_Flags & TF_ETASK) && t->tc_UnionETask.tc_ETask ?
++                                       t->tc_UnionETask.tc_ETask->et_RegFrame : NULL;
++
++        bug("[Kernel]   0x%p '%s' type %d state %d pri %d wait %08lx recvd %08lx pc 0x%lx\n", t,
++            n->ln_Name ? n->ln_Name : "", n->ln_Type, t->tc_State, n->ln_Pri, (unsigned long)t->tc_SigWait,
++            (unsigned long)t->tc_SigRecvd, ctx ? (unsigned long)ctx->pc : 0UL);
++        if (++k > 60)
++            break;
++    }
++}
++
++static void idle_watch(struct KernelBase *KernelBase)
++{
++    static unsigned int idle_ticks;
++    static int done;
++    struct Task *t = GET_THIS_TASK;
++
++    if (done || !SysBase)
++        return;
++    if (t && t->tc_Node.ln_Pri == -127)
++        idle_ticks++;
++    else
++        idle_ticks = 0;
++    if (idle_ticks < 250)
++        return;
++    done = 1;
++    bug("[Kernel] core 0 idle for 5 s, the tasks:\n");
++    dump_tasklist(KernelBase, "ready", &SysBase->TaskReady);
++    dump_tasklist(KernelBase, "waiting", &SysBase->TaskWait);
 +}
 +
 +void cpu_Exception(regs_t *regs, unsigned long vector)
@@ -2704,6 +2908,8 @@ index 00000000..44d19363
 +            /* Core 0 runs the VBlank servers, which also count its quantum */
 +            if (KernelBase)
 +                krnRunIRQHandlers(KernelBase, IRQ_TIMER);
++            if (m68k64_IdleDump && KernelBase)
++                idle_watch(KernelBase);
 +            if (SysBase && (IDNESTCOUNT_GET < 0))
 +                core_Cause(INTB_VERTB, 1L << INTB_VERTB);
 +        }
@@ -2740,6 +2946,15 @@ index 00000000..44d19363
 +        asm volatile ("   move.q %0, %%d0\n   .short 0x4E7B, 0x08F1" : : "d"(regs->d[0]) : "d0");
 +        break;
 +
++    case M68K64_VEC_TRAP(4):
++        /* KrnMayGetChar: the next console input character or -1 in D0, movec $8F0,d0 */
++        {
++            long ch;
++            asm volatile ("   .short 0x4E7A, 0x08F0\n   move.q %%d0, %0" : "=d"(ch) : : "d0");
++            regs->d[0] = ch;
++        }
++        break;
++
 +    case M68K64_VEC_TRAP(1):
 +        /* krnPutC: the character in D0 to the console, movec d0,$8F0 */
 +        asm volatile ("   move.q %0, %%d0\n   .short 0x4E7B, 0x08F0" : : "d"(regs->d[0]) : "d0");
@@ -2755,24 +2970,8 @@ index 00000000..44d19363
 +            break;
 +        }
 +
-+        /* A fault. There is no exception handler mechanism for traps yet. */
-+        bug("[Kernel] exception %lu at pc 0x%016lx, sr 0x%04x\n", vector,
-+            (unsigned long)regs->pc, regs->sr);
-+        {
-+            int i;
-+            UQUAD *sp = (UQUAD *)regs->a[7];
-+
-+            for (i = 0; i < 8; i++)
-+                bug("[Kernel] d%d %016lx  a%d %016lx\n", i, (unsigned long)regs->d[i],
-+                    i, (unsigned long)regs->a[i]);
-+            bug("[Kernel] stack:");
-+            for (i = 0; i < 8; i++)
-+                bug(" %016lx", (unsigned long)sp[i]);
-+            bug("\n[Kernel] task 0x%p '%s'\n", GET_THIS_TASK,
-+                GET_THIS_TASK ? GET_THIS_TASK->tc_Node.ln_Name : "");
-+        }
-+        for (;;)
-+            asm volatile (".short 0x4E72, 0x2700");     /* stop #$2700 */
++        cpu_Fault(regs, vector);
++        break;
 +    }
 +}
 diff --git a/arch/m68k64-native/kernel/issuper.c b/arch/m68k64-native/kernel/issuper.c
@@ -2817,10 +3016,10 @@ index 00000000..71205bd5
 +}
 diff --git a/arch/m68k64-native/kernel/kernel_arch.h b/arch/m68k64-native/kernel/kernel_arch.h
 new file mode 100644
-index 00000000..e1735115
+index 00000000..41e5fd00
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_arch.h
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,27 @@
 +/*
 + * Machine-specific definitions.
 + *
@@ -2838,6 +3037,10 @@ index 00000000..e1735115
 +#define IRQ_TIMER   5
 +#define IRQ_IPI     6
 +
++/* Test machine: the value the run ends with for exec's shutdown, plus the SD_ACTION (0 power off,
++   1 cold reboot, 2 warm reboot). The boot loader starts the system again for a reboot. */
++#define M68K64_END_POWEROFF 0x100
++
 +/*
 + * Interrupt controller functions.
 + */
@@ -2846,10 +3049,10 @@ index 00000000..e1735115
 +extern void ictl_disable_irq(uint8_t irq, struct KernelBase *KernelBase);
 diff --git a/arch/m68k64-native/kernel/kernel_cpu.c b/arch/m68k64-native/kernel/kernel_cpu.c
 new file mode 100644
-index 00000000..175e9d18
+index 00000000..d1820ae6
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_cpu.c
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,179 @@
 +/*
 +    Copyright (C) 2023, The AROS Development Team. All rights reserved.
 +*/
@@ -2857,6 +3060,7 @@ index 00000000..175e9d18
 +#include <aros/types/timespec_s.h>
 +#include <aros/kernel.h>
 +#include <aros/libcall.h>
++#include <aros/symbolsets.h>
 +#include <exec/execbase.h>
 +#include <hardware/intbits.h>
 +#include <aros/m68k64/cpucontext.h>
@@ -3016,6 +3220,18 @@ index 00000000..175e9d18
 +    }
 +    /* Leave interrupt and jump to the new task */
 +}
++
++/*
++    The boot core's TLS gets KernelBase once kernel.resource exists. Interrupts and faults find it
++    there, and cpu_StartSecondaries() copies it to the other cores.
++*/
++static int cpu_TLSInit(struct KernelBase *KernelBase)
++{
++    TLS_SET(KernelBase, (void **)KernelBase);
++    return TRUE;
++}
++
++ADD2INITLIB(cpu_TLSInit, 0);
 diff --git a/arch/m68k64-native/kernel/kernel_cpu.h b/arch/m68k64-native/kernel/kernel_cpu.h
 new file mode 100644
 index 00000000..f77202f8
@@ -3942,9 +4158,39 @@ index 00000000..f9afad4d
 +int core_DoCallIPI(struct Hook *hook, void *cpu_mask, int async, int nargs, IPTR *args, void *_KB);
 +
 +#endif
+diff --git a/arch/m68k64-native/kernel/maygetchar.c b/arch/m68k64-native/kernel/maygetchar.c
+new file mode 100644
+index 00000000..f64c7244
+--- /dev/null
++++ b/arch/m68k64-native/kernel/maygetchar.c
+@@ -0,0 +1,24 @@
++/*
++    Copyright (C) 2026, The AROS Development Team. All rights reserved.
++
++    Desc: KrnMayGetChar() for the 68100EC64: the test machine's console input is a read of
++          MOVEC $8F0, which is privileged, so it goes through TRAP #4 (intr.c).
++*/
++
++#include <aros/kernel.h>
++#include <aros/libcall.h>
++
++#include <kernel_base.h>
++
++AROS_LH0(int, KrnMayGetChar,
++         struct KernelBase *, KernelBase, 26, Kernel)
++{
++    AROS_LIBFUNC_INIT
++
++    register long c asm("d0");
++
++    asm volatile ("trap #4" : "=d"(c) : : "memory", "cc");
++    return (int)c;
++
++    AROS_LIBFUNC_EXIT
++}
 diff --git a/arch/m68k64-native/kernel/mmakefile.src b/arch/m68k64-native/kernel/mmakefile.src
 new file mode 100644
-index 00000000..b1148412
+index 00000000..e8184fe5
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/mmakefile.src
 @@ -0,0 +1,38 @@
@@ -3952,7 +4198,7 @@ index 00000000..b1148412
 +include $(SRCDIR)/config/aros.cfg
 +
 +CFILES := \
-+        cli intr issuper kernel_cpu kernel_debug kernel_scheduler kernel_smp sti tags \
++        cli intr issuper kernel_cpu kernel_debug kernel_scheduler kernel_smp maygetchar sti tags \
 +        spininit spinislocked spinlock spintrylock spinunlock \
 +        alloccpumask freecpumask clearcpumask getcpumask cpuinmask getcpucount schedulecpu
 +
@@ -4642,10 +4888,10 @@ index 00000000..2595e9b1
 +%common
 diff --git a/arch/m68k64-native/qrx/kernel/kernel_startup.c b/arch/m68k64-native/qrx/kernel/kernel_startup.c
 new file mode 100644
-index 00000000..24bc6a05
+index 00000000..f84569c5
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/kernel/kernel_startup.c
-@@ -0,0 +1,266 @@
+@@ -0,0 +1,271 @@
 +/*
 +    Copyright (C) 2013-2026, The AROS Development Team. All rights reserved.
 +*/
@@ -4693,7 +4939,7 @@ index 00000000..24bc6a05
 +void __attribute__((used)) kernel_cstart(struct TagItem *msg);
 +
 +extern void cpu_SetupVectors(void);
-+extern void qrx_selftest(void);
++extern void qrx_selftest(const char *cmdline);
 +extern void cpu_StartTimer(void);
 +
 +/* AROS_STACKSIZE is in bytes here */
@@ -4834,6 +5080,11 @@ index 00000000..24bc6a05
 +
 +    mh = (struct MemHeader *)memlower;
 +
++    {
++        extern int m68k64_IdleDump;
++        if (cmdline && strstr(cmdline, "idledump"))
++            m68k64_IdleDump = 1;
++    }
 +    if (cmdline && strstr(cmdline, "notlsf"))
 +    {
 +#if (0)
@@ -4901,7 +5152,7 @@ index 00000000..24bc6a05
 +
 +    /* Nothing else in the kickstart yet: the test of exec can run here */
 +    if (cmdline && strstr(cmdline, "selftest"))
-+        qrx_selftest();
++        qrx_selftest(cmdline);
 +
 +    /* The above should not return */
 +    krnPanic(KernelBase, "System Boot Failed!");
@@ -5019,10 +5270,10 @@ index 00000000..32d11655
 +%common
 diff --git a/arch/m68k64-native/qrx/kernel/selftest.c b/arch/m68k64-native/qrx/kernel/selftest.c
 new file mode 100644
-index 00000000..295e0e23
+index 00000000..410cb866
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/kernel/selftest.c
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,295 @@
 +/*
 +    Copyright (C) 2026, The AROS Development Team. All rights reserved.
 +
@@ -5037,6 +5288,9 @@ index 00000000..295e0e23
 +#include <exec/execbase.h>
 +#include <proto/exec.h>
 +#include <exec/memory.h>
++
++#include <aros/m68k64/cpucontext.h>
++#include <string.h>
 +
 +#include "kernel_intern.h"
 +#include "kernel_smp.h"
@@ -5127,8 +5381,50 @@ index 00000000..295e0e23
 +    report_done();
 +}
 +
-+static void busy0(void) { busy(0); }
-+static void busy1(void) { busy(1); }
++/*
++    Faults in user state go to the task's tc_TrapCode: each fault task has a handler that notes the
++    vector and sends the task on to fault_resume, which ends it.
++*/
++#define FAULTS 4
++static const ULONG fault_want[FAULTS] = { 5, 8, 4, 2 };   /* divide by zero, privilege, illegal, bus */
++static volatile ULONG fault_got[FAULTS];
++
++static void fault_resume(void)
++{
++    report_done();
++    RemTask(NULL);
++}
++
++static void fault_trap(ULONG trap, struct ExceptionContext *ctx)
++{
++    IPTR n = (IPTR)FindTask(NULL)->tc_UserData;
++
++    if (n < FAULTS)
++        fault_got[n] = trap;
++    ctx->pc = (IPTR)fault_resume;
++}
++
++static void fault_task(void)
++{
++    struct Task *me = FindTask(NULL);
++
++    me->tc_TrapCode = (APTR)fault_trap;
++    switch ((IPTR)me->tc_UserData)
++    {
++    case 0: asm volatile ("   .short 0x7200, 0x80C1" : : : "d0", "d1", "cc"); break;   /* moveq #0,d1; divu.w d1,d0 */
++    case 1: asm volatile ("   .short 0x4E72, 0x2700"); break;     /* stop: privileged */
++    case 2: asm volatile ("   .short 0x4AFC"); break;             /* illegal */
++    case 3: (void)*(volatile UQUAD *)0x7000000000UL; break;       /* far outside RAM */
++    }
++    /* not reached when the fault was taken; fault_got stays 0 */
++    fault_resume();
++}
++
++/* No tc_TrapCode: exec's trap handler turns the fault into an alert for the task, a dead end */
++static void crash_task(void)
++{
++    (void)*(volatile UQUAD *)0x7000000000UL;
++}
 +
 +static void end_machine(unsigned long code)
 +{
@@ -5137,7 +5433,51 @@ index 00000000..295e0e23
 +        asm volatile ("trap #2" : : "d"(c));
 +}
 +
-+void qrx_selftest(void)
++static void dump_list(struct KernelBase *KernelBase, const char *name, struct List *l)
++{
++    struct Node *n;
++    bug("[watchdog] %s:\n", name);
++    ForeachNode(l, n)
++    {
++        struct Task *t = (struct Task *)n;
++        bug("[watchdog]   0x%p '%s' state %d pri %d sigwait %08lx sigrecvd %08lx\n", t, n->ln_Name,
++            t->tc_State, n->ln_Pri, (unsigned long)t->tc_SigWait, (unsigned long)t->tc_SigRecvd);
++    }
++}
++
++static void watchdog(void)
++{
++    struct KernelBase *KernelBase = (struct KernelBase *)TLS_GET(KernelBase);
++    UQUAD i;
++    for (i = 0; i < 40000000UL; i++)
++        asm volatile ("" ::: "memory");
++    bug("[watchdog] passes %lu\n", (unsigned long)st.passes);
++    Disable();
++    dump_list(KernelBase, "ready", &SysBase->TaskReady);
++    dump_list(KernelBase, "wait", &SysBase->TaskWait);
++    end_machine(7);
++}
++
++/* The jump code that LoadSeg() and CreateSegList() put in front of a segment */
++static volatile int jmp_hit;
++static void jmp_target(void) { jmp_hit = 1; }
++
++static int jumpvec_test(void)
++{
++    struct FullJumpVec *v = AllocMem(sizeof(*v), MEMF_PUBLIC);
++    if (!v)
++        return 0;
++    __AROS_SET_FULLJMP(v, jmp_target);
++    ((void (*)(void))v)();
++    FreeMem(v, sizeof(*v));
++    return jmp_hit;
++}
++
++static void busy0(void) { busy(0); }
++static void busy1(void) { busy(1); }
++
++
++void qrx_selftest(const char *cmdline)
 +{
 +    struct KernelBase *KernelBase = (struct KernelBase *)TLS_GET(KernelBase);
 +    ULONG got = 0;
@@ -5145,6 +5485,12 @@ index 00000000..295e0e23
 +    st.boot = FindTask(NULL);
 +    st.done_sig = AllocSignal(-1);
 +    bug("[selftest] boot task 0x%p, done signal %d\n", st.boot, st.done_sig);
++    /* Nothing may be left in Forbid() or Disable() after the boot */
++    if (TLS_GET(TDNestCnt) != -1 || TLS_GET(IDNestCnt) != -1)
++    {
++        bug("[selftest] FAIL: TDNestCnt %d, IDNestCnt %d after the boot\n", (int)TLS_GET(TDNestCnt), (int)TLS_GET(IDNestCnt));
++        end_machine(1);
++    }
 +
 +    /* The busy tasks share the boot task's priority, ping and pong are above it */
 +    st.pong = NewCreateTask(TASKTAG_NAME, "selftest pong", TASKTAG_PRI, 1, TASKTAG_PC, pong_task, TAG_DONE);
@@ -5155,6 +5501,30 @@ index 00000000..295e0e23
 +    NewCreateTask(TASKTAG_NAME, "selftest busy 1", TASKTAG_PRI, 0, TASKTAG_PC, busy1,
 +                  TASKTAG_AFFINITY, core_mask(m68k64_CoreCount > 2 ? 2 : 0), TAG_DONE);
 +
++    if (strstr(cmdline, "crashtest") && !strstr(cmdline, "rebooted"))
++    {
++        bug("[selftest] crash test: a task faults without a trap handler\n");
++        NewCreateTask(TASKTAG_NAME, "selftest crash", TASKTAG_PRI, 2, TASKTAG_PC, crash_task, TAG_DONE);
++        Wait(0);
++    }
++    if (strstr(cmdline, "reboottest") && !strstr(cmdline, "rebooted"))
++    {
++        bug("[selftest] reboot test: ColdReboot()\n");
++        ColdReboot();
++        bug("[selftest] FAIL: ColdReboot() returned\n");
++        end_machine(1);
++    }
++
++    if (strstr(cmdline, "watchdog"))
++        NewCreateTask(TASKTAG_NAME, "selftest watchdog", TASKTAG_PRI, -100, TASKTAG_PC, watchdog,
++                      TASKTAG_AFFINITY, core_mask(0), TAG_DONE);
++    {
++        int f;
++        for (f = 0; f < FAULTS; f++)
++            NewCreateTask(TASKTAG_NAME, "selftest fault", TASKTAG_PRI, 0, TASKTAG_PC, fault_task,
++                          TASKTAG_AFFINITY, core_mask(f), TASKTAG_USERDATA, (IPTR)f, TAG_DONE);
++    }
++
 +    {
 +        int w;
 +        for (w = 0; w < WORKERS; w++)
@@ -5162,7 +5532,7 @@ index 00000000..295e0e23
 +                          TASKTAG_AFFINITY, core_mask(w), TAG_DONE);
 +    }
 +
-+    while (st.passes < 4 + WORKERS)
++    while (st.passes < 4 + WORKERS + FAULTS)
 +        got |= Wait(1UL << st.done_sig);
 +
 +    bug("[selftest] ping/pong: %d rounds done\n", ROUNDS);
@@ -5175,10 +5545,27 @@ index 00000000..295e0e23
 +        (unsigned long)st.shared, (unsigned long)WORKERS * WORKER_STEPS, (unsigned long)st.cores_seen, m68k64_CoreCount);
 +
 +    {
-+        int ok = st.count[0] == BUSY_STEPS && st.count[1] == BUSY_STEPS &&
++        int f;
++        for (f = 0; f < FAULTS; f++)
++            bug("[selftest] fault %d: vector %lu, wanted %lu\n", f, (unsigned long)fault_got[f],
++                (unsigned long)fault_want[f]);
++    }
++
++    {
++        if (!jumpvec_test())
++        {
++            bug("[selftest] FAIL: jump vector\n");
++            end_machine(1);
++        }
++    }
++
++    {
++        int ok = fault_got[0] == fault_want[0] && fault_got[1] == fault_want[1] &&
++                 fault_got[2] == fault_want[2] && fault_got[3] == fault_want[3] &&
++                 st.count[0] == BUSY_STEPS && st.count[1] == BUSY_STEPS &&
 +                 st.seen_other[0] > 0 && st.seen_other[1] > 0 &&
 +                 st.shared == (UQUAD)WORKERS * WORKER_STEPS;
-+        bug("[selftest] %s\n", ok ? "PASS: tasks switch, the timer preempts, cores signal each other" : "FAIL");
++        bug("[selftest] %s\n", ok ? "PASS: tasks switch, the timer preempts, cores signal each other, faults reach trap handlers" : "FAIL");
 +        end_machine(ok ? 0 : 1);
 +    }
 +}
@@ -5396,10 +5783,18 @@ index 7d8dec88..9de087d5 100644
  #define DEFINE(sym, val) \
      asm volatile("\n.asciz \"#define " #sym " %0 \"": : "i" (val))
 diff --git a/compiler/include/dos/elf.h b/compiler/include/dos/elf.h
-index 8f02aa1a..b85083b6 100644
+index 8f02aa1a..dee70530 100644
 --- a/compiler/include/dos/elf.h
 +++ b/compiler/include/dos/elf.h
-@@ -360,7 +360,7 @@ struct attrs_subsection
+@@ -87,6 +87,7 @@
+ #define R_68K_PC32              4
+ #define R_68K_PC16              5
+ #define R_68K_PC8               6
++#define R_68K64_64              240     /* 68100EC64: 64-bit absolute */
+ 
+ #define R_PPC_NONE              0
+ #define R_PPC_ADDR32            1
+@@ -360,7 +361,7 @@ struct attrs_subsection
  #define relo                    rel
  #endif
  #endif
@@ -5504,6 +5899,111 @@ index ecfba952..bbb25f8f 100644
  fi
  
  # Host compiler support scripts and spec
+diff --git a/rom/dos/internalloadseg_elf.c b/rom/dos/internalloadseg_elf.c
+index e806ceb0..ae76ff22 100644
+--- a/rom/dos/internalloadseg_elf.c
++++ b/rom/dos/internalloadseg_elf.c
+@@ -478,6 +478,39 @@ static int relocate
+             case R_68K_NONE:
+                 break;
+ 
++            #elif defined(__m68k64__)
++
++            case R_68K64_64:    /* 64-bit absolute, the 68100EC64's own */
++                *(UQUAD *)p = s + rel->addend;
++                break;
++
++            case R_68K_32:
++                *(ULONG *)p = s + rel->addend;
++                break;
++
++            case R_68K_16:
++                *(UWORD *)p = s + rel->addend;
++                break;
++
++            case R_68K_8:
++                *(UBYTE *)p = s + rel->addend;
++                break;
++
++            case R_68K_PC32:
++                *(ULONG *)p = s + rel->addend - (IPTR)p;
++                break;
++
++            case R_68K_PC16:
++                *(UWORD *)p = s + rel->addend - (IPTR)p;
++                break;
++
++            case R_68K_PC8:
++                *(UBYTE *)p = s + rel->addend - (IPTR)p;
++                break;
++
++            case R_68K_NONE:
++                break;
++
+             #elif defined(__ppc__) || defined(__powerpc__)
+ 
+             case R_PPC_ADDR32:
+diff --git a/rom/dos/runcommand.c b/rom/dos/runcommand.c
+index aa280e8a..2ba7b935 100644
+--- a/rom/dos/runcommand.c
++++ b/rom/dos/runcommand.c
+@@ -98,10 +98,11 @@ static inline void __inline_Exec_RestoreTaskStorage(APTR __arg1, APTR __SysBase)
+     UBYTE *stack;
+     LONG ret;
+ #if !(AROS_FLAVOUR & AROS_FLAVOUR_BINCOMPAT)
+-    IPTR elfinfo = 0;
+-    struct TagItem segtags[2] =
++    IPTR elfinfo = 0, hunkinfo = 0;
++    struct TagItem segtags[3] =
+     {
+         { GSLI_ElfHandle,       (IPTR)&elfinfo  },
++        { GSLI_68KHUNK,         (IPTR)&hunkinfo },
+         { TAG_DONE,             0               }
+     };
+     BOOL archsuitable = FALSE;
+@@ -118,6 +119,14 @@ static inline void __inline_Exec_RestoreTaskStorage(APTR __arg1, APTR __SysBase)
+         if (elfinfo)
+             archsuitable = TRUE;
+     }
++    else
++    {
++        /*
++            Not loaded by LoadSeg(): a segment made in memory, as CreateSegList() and the shell's
++            built-in commands make them. It is native code.
++        */
++        archsuitable = TRUE;
++    }
+ 
+     if (!archsuitable)
+     {
+diff --git a/rom/exec/exec_locks.c b/rom/exec/exec_locks.c
+index cad0d0ba..f4f9102f 100644
+--- a/rom/exec/exec_locks.c
++++ b/rom/exec/exec_locks.c
+@@ -83,9 +83,9 @@ int ExecLock__InternObtainSystemLock(struct List *systemList, ULONG mode, ULONG
+     D(bug("[Exec:Lock] %s(), List='%s' (%p), mode=%s, flags=%d\n", __func__, name, systemList, mode == SPINLOCK_MODE_WRITE ? "write":"read", flags));
+     if (sysListLock)
+     {
+-        if (flags && LOCKF_DISABLE)
++        if (flags & LOCKF_DISABLE)
+             Disable();
+-        if (flags && LOCKF_FORBID)
++        if (flags & LOCKF_FORBID)
+             Forbid();
+ 
+         EXEC_SPINLOCK_LOCK(sysListLock, NULL, mode);
+@@ -179,9 +179,9 @@ int ExecLock__ObtainLock(void * lock, ULONG mode, ULONG flags)
+ 
+     if (lock)
+     {
+-        if (flags && LOCKF_DISABLE)
++        if (flags & LOCKF_DISABLE)
+             Disable();
+-        if (flags && LOCKF_FORBID)
++        if (flags & LOCKF_FORBID)
+             Forbid();
+ 
+         EXEC_SPINLOCK_LOCK(lock, NULL, mode);
 diff --git a/rom/exec/exec_util.h b/rom/exec/exec_util.h
 index 6d7149c3..10fb551e 100644
 --- a/rom/exec/exec_util.h
@@ -5614,3 +6114,15 @@ index c74931fb..82b5c48b 100644
  #ifdef TARGET_CPU_m68k
  #define OBJECT_FORMAT "-mm68kelf"
  #endif
+diff --git a/workbench/c/shellcommands/mmakefile.src b/workbench/c/shellcommands/mmakefile.src
+index c4f70888..2183751c 100644
+--- a/workbench/c/shellcommands/mmakefile.src
++++ b/workbench/c/shellcommands/mmakefile.src
+@@ -105,6 +105,6 @@ FILES := \
+ 
+ %build_module mmake=kernel-shellcommands \
+   modname=shellcommands modtype=resource \
+-  files="shellcommands_init $(FILES)"
++  files="shellcommands_init $(FILES)" uselibs="stdc.static"
+ 
+ %common
