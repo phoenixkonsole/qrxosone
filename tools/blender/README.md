@@ -23,6 +23,7 @@ ungetrackte `.build/blender-2.79b`. Der Bau startet die Engine im Hintergrund, d
 | `run_tool.py` | führt `datatoc` auf dem Mac, `makesdna` und `makesrna` im Gast aus |
 | `ghost/` | GHOST für AROS: Intuition-Fenster, Ereignisse, GL-Kontext über die Tür (`ghost_aros_native.c` ist der Intuition-Teil) |
 | `../qrxgl68k/` | die GL-Tür für 68k-Programme: Generator, Gastbibliothek `libqrxgl.a`, Testszene |
+| `configure-host-gui.sh`, `build-hostdeps.sh`, `hostref/` | Mac-Referenz für die Oberfläche: derselbe Code nativ, GL direkt; `QRX_REF_EVENTS`, `QRX_REF_CAPTURE` in `hostref/ghost_host_native.c` |
 | `run-gui.sh` | Blender mit Oberfläche im Engine-Fenster starten, Bilder vom Gast-Bildschirm und aus der GL-Tür aufnehmen |
 | `gen_missing.py` | Stubs aus der Liste undefinierter Symbole (aus der kopflosen Stufe, für GHOST und GL nicht mehr nötig) |
 | `elf2hunk-pc32.diff` | `elf2hunk` für große Programme |

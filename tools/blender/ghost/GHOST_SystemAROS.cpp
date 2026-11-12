@@ -58,6 +58,12 @@ GHOST_IWindow *GHOST_SystemAROS::createWindow(const STR_String &title, GHOST_TIn
 		delete window;
 		return NULL;
 	}
+	if (getenv("QRX_GHOST_TRACE")) {
+		GHOST_Rect r;
+		window->getClientBounds(r);
+		fprintf(stderr, "ghost: window drawable %dx%d+%d+%d\n", r.getWidth(), r.getHeight(), r.m_l, r.m_t);
+		fflush(stderr);
+	}
 	m_windowManager->addWindow(window);
 	m_windowManager->setActiveWindow(window);
 	pushEvent(new GHOST_Event(getMilliSeconds(), GHOST_kEventWindowSize, window));

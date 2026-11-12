@@ -13,7 +13,10 @@ HERE = Path(__file__).resolve().parent
 ROOT = Path(os.environ.get('QRX_ROOT', '/Users/pascalpapara/Documents/GitHub/qrxosone'))
 CFG = json.loads((ROOT / '.build/qrx-sdk/bin/toolchain.json').read_text())
 BASE = CFG['sdk']
-CPU = ['-m68040', '-fno-pic', '-fomit-frame-pointer', '-mlong-jump-table-offsets']
+# -fno-caller-saves: GCC 16 saves a call-clobbered FPU register around a call as 96-bit extended and can
+# read it back as a 32-bit float 8 bytes further on, the low mantissa bytes (both with reload and LRA). In
+# Blender this lost the outliner's text offset; see docs/BLENDER_AROS68K.md.
+CPU = ['-m68040', '-fno-pic', '-fomit-frame-pointer', '-mlong-jump-table-offsets', '-fno-caller-saves']
 DEFS = ['-D__AROS__', '-DAMIGA', '-D_AMIGA', '-D__BIG_ENDIAN__=1', '-U__linux__', '-U__linux', '-Ulinux',
         '-U__gnu_linux__', '-U_TIME_BITS', '-U_FILE_OFFSET_BITS', '-D__unix__', '-Dunix']
 STDCXX = ROOT / '.build/blender-2.79b/gcc/build'

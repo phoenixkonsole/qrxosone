@@ -67,62 +67,70 @@ index f264b39..4319eb1 100644
  		${X11_X11_INCLUDE_PATH}
  	)
 diff --git a/extern/glew/src/glew.c b/extern/glew/src/glew.c
-index 0ed5520..2f850fa 100644
+index 0ed5520..df44894 100644
 --- a/extern/glew/src/glew.c
 +++ b/extern/glew/src/glew.c
-@@ -34,7 +34,7 @@
+@@ -30,11 +30,15 @@
+ ** THE POSSIBILITY OF SUCH DAMAGE.
+ */
+ 
++/* QRX OS One: GL comes from the ARMithlon door on AROS (and from its native stand-in in the Mac reference). */
++#if defined(__AROS__) && !defined(QRX_GL_DOOR)
++#  define QRX_GL_DOOR
++#endif
+ #include <GL/glew.h>
  
  #if defined(_WIN32)
  #  include <GL/wglew.h>
 -#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
-+#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(__AROS__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
++#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(QRX_GL_DOOR) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
  #  include <GL/glxew.h>
  #endif
  
-@@ -179,6 +179,10 @@ void* NSGLGetProcAddress (const GLubyte *name)
+@@ -179,6 +183,10 @@ void* NSGLGetProcAddress (const GLubyte *name)
  #  define glewGetProcAddress(name) dlGetProcAddress(name)
  #elif defined(__ANDROID__)
  #  define glewGetProcAddress(name) NULL /* TODO */
-+#elif defined(__AROS__)
++#elif defined(QRX_GL_DOOR)
 +/* QRX OS One: the GL door's guest library, tools/qrxgl68k in the QRX OS One repository. */
 +extern void *qgl_GetProcAddress(const char *name);
 +#  define glewGetProcAddress(name) qgl_GetProcAddress((const char *)(name))
  #elif defined(__native_client__)
  #  define glewGetProcAddress(name) NULL /* TODO */
  #else /* __linux */
-@@ -12305,7 +12309,7 @@ GLenum GLEWAPIENTRY wglewInit (WGLEW_CONTEXT_ARG_DEF_LIST)
+@@ -12305,7 +12313,7 @@ GLenum GLEWAPIENTRY wglewInit (WGLEW_CONTEXT_ARG_DEF_LIST)
    return GLEW_OK;
  }
  
 -#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
-+#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(__AROS__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
++#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(QRX_GL_DOOR) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
  
  PFNGLXGETCURRENTDISPLAYPROC __glewXGetCurrentDisplay = NULL;
  
-@@ -13373,7 +13377,7 @@ GLenum glxewInit (GLXEW_CONTEXT_ARG_DEF_LIST)
+@@ -13373,7 +13381,7 @@ GLenum glxewInit (GLXEW_CONTEXT_ARG_DEF_LIST)
    return GLEW_OK;
  }
  
 -#endif /* !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) */
-+#endif /* !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(__AROS__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) */
++#endif /* !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(QRX_GL_DOOR) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) */
  
  /* ------------------------------------------------------------------------ */
  
-@@ -13418,7 +13422,7 @@ GLenum GLEWAPIENTRY glewInit (void)
+@@ -13418,7 +13426,7 @@ GLenum GLEWAPIENTRY glewInit (void)
    if ( r != 0 ) return r;
  #if defined(_WIN32)
    return wglewInit();
 -#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) /* _UNIX */
-+#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(__AROS__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) /* _UNIX */
++#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(QRX_GL_DOOR) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) /* _UNIX */
    return glxewInit();
  #else
    return r;
-@@ -18065,7 +18069,7 @@ GLboolean GLEWAPIENTRY wglewIsSupported (const char* name)
+@@ -18065,7 +18073,7 @@ GLboolean GLEWAPIENTRY wglewIsSupported (const char* name)
    return ret;
  }
  
 -#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(__APPLE__) || defined(GLEW_APPLE_GLX)
-+#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(__AROS__) && !defined(__APPLE__) || defined(GLEW_APPLE_GLX)
++#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(QRX_GL_DOOR) && !defined(__APPLE__) || defined(GLEW_APPLE_GLX)
  
  #if defined(GLEW_MX)
  GLboolean glxewContextIsSupported (const GLXEWContext* ctx, const char* name)
