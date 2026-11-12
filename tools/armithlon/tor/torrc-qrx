@@ -1,0 +1,7 @@
+# tor on QRX OS One. Keeps its state on HostFS, so guards survive a reboot.
+DataDirectory SYS:QRX/Tor/data
+Log notice file SYS:QRX/Tor/notices.log
+SocksPort 127.0.0.1:9050
+# The door offers 64 sockets, tor keeps 32 in reserve.
+ConnLimit 32
+MaxMemInQueues 256 MB

@@ -1,0 +1,2974 @@
+--- a/llvm/lib/Target/M68k64/AsmParser/M68k64AsmParser.cpp
++++ b/llvm/lib/Target/M68k64/AsmParser/M68k64AsmParser.cpp
+@@ -575,7 +575,6 @@
+   M68k64Operand &Operand = (M68k64Operand &)Op;
+ 
+   switch (Kind) {
+-  case MCK_XR16:
+   case MCK_SPILL:
+     if (Operand.isReg() &&
+         checkRegisterClass(Operand.getReg(), true, true, true)) {
+@@ -585,6 +584,7 @@
+ 
+   case MCK_AR16:
+   case MCK_AR32:
++  case MCK_AR64:
+     if (Operand.isReg() &&
+         checkRegisterClass(Operand.getReg(), false, true, true)) {
+       return Match_Success;
+@@ -592,6 +592,7 @@
+     break;
+ 
+   case MCK_AR32_NOSP:
++  case MCK_AR64_NOSP:
+     if (Operand.isReg() &&
+         checkRegisterClass(Operand.getReg(), false, true, false)) {
+       return Match_Success;
+@@ -601,6 +602,7 @@
+   case MCK_DR8:
+   case MCK_DR16:
+   case MCK_DR32:
++  case MCK_DR64:
+     if (Operand.isReg() &&
+         checkRegisterClass(Operand.getReg(), true, false, false)) {
+       return Match_Success;
+@@ -608,6 +610,7 @@
+     break;
+ 
+   case MCK_AR16_TC:
++  case MCK_AR64_TC:
+     if (Operand.isReg() &&
+         ((Operand.getReg() == M68k64::A0) || (Operand.getReg() == M68k64::A1))) {
+       return Match_Success;
+@@ -615,13 +618,14 @@
+     break;
+ 
+   case MCK_DR16_TC:
++  case MCK_DR64_TC:
+     if (Operand.isReg() &&
+         ((Operand.getReg() == M68k64::D0) || (Operand.getReg() == M68k64::D1))) {
+       return Match_Success;
+     }
+     break;
+ 
+-  case MCK_XR16_TC:
++  case MCK_XR64_TC:
+     if (Operand.isReg() &&
+         ((Operand.getReg() == M68k64::D0) || (Operand.getReg() == M68k64::D1) ||
+          (Operand.getReg() == M68k64::A0) || (Operand.getReg() == M68k64::A1))) {
+--- a/llvm/lib/Target/M68k64/CMakeLists.txt
++++ b/llvm/lib/Target/M68k64/CMakeLists.txt
+@@ -2,9 +2,7 @@
+ 
+ set(LLVM_TARGET_DEFINITIONS M68k64.td)
+ 
+-tablegen(LLVM M68k64GenGlobalISel.inc       -gen-global-isel)
+ tablegen(LLVM M68k64GenRegisterInfo.inc     -gen-register-info)
+-tablegen(LLVM M68k64GenRegisterBank.inc     -gen-register-bank)
+ tablegen(LLVM M68k64GenInstrInfo.inc        -gen-instr-info)
+ tablegen(LLVM M68k64GenSDNodeInfo.inc       -gen-sd-node-info)
+ tablegen(LLVM M68k64GenSubtargetInfo.inc    -gen-subtarget)
+@@ -14,15 +12,10 @@
+ tablegen(LLVM M68k64GenCallingConv.inc      -gen-callingconv)
+ tablegen(LLVM M68k64GenAsmWriter.inc        -gen-asm-writer)
+ tablegen(LLVM M68k64GenAsmMatcher.inc       -gen-asm-matcher)
+-tablegen(LLVM M68k64GenDisassemblerTables.inc -gen-disassembler)
+ 
+ add_public_tablegen_target(M68k64CommonTableGen)
+ 
+ add_llvm_target(M68k64CodeGen
+-  GISel/M68k64CallLowering.cpp
+-  GISel/M68k64InstructionSelector.cpp
+-  GISel/M68k64LegalizerInfo.cpp
+-  GISel/M68k64RegisterBankInfo.cpp
+   M68k64AsmPrinter.cpp
+   M68k64CollapseMOVEMPass.cpp
+   M68k64ExpandPseudo.cpp
+@@ -44,7 +37,6 @@
+   CodeGen
+   CodeGenTypes
+   Core
+-  GlobalISel
+   M68k64Desc
+   M68k64Info
+   MC
+@@ -60,4 +52,3 @@
+ add_subdirectory(TargetInfo)
+ add_subdirectory(MCTargetDesc)
+ add_subdirectory(AsmParser)
+-add_subdirectory(Disassembler)
+--- a/llvm/lib/Target/M68k64/M68k64.h
++++ b/llvm/lib/Target/M68k64/M68k64.h
+@@ -42,9 +42,6 @@
+ /// emission so that all possible MOVEM are already in place.
+ FunctionPass *createM68k64CollapseMOVEMPass();
+ 
+-InstructionSelector *
+-createM68k64InstructionSelector(const M68k64TargetMachine &, const M68k64Subtarget &,
+-                              const M68k64RegisterBankInfo &);
+ 
+ void initializeM68k64AsmPrinterPass(PassRegistry &);
+ void initializeM68k64DAGToDAGISelLegacyPass(PassRegistry &);
+--- a/llvm/lib/Target/M68k64/M68k64.td
++++ b/llvm/lib/Target/M68k64/M68k64.td
+@@ -74,7 +74,7 @@
+ class Proc<string Name, list<SubtargetFeature> Features>
+     : ProcessorModel<Name, GenericM68k64Model, Features>;
+ 
+-def : Proc<"generic", [ FeatureISA00 ]>;
++def : Proc<"generic", [ FeatureISA40 ]>;
+ def : Proc<"M68000",  [ FeatureISA00 ]>;
+ def : Proc<"M68010",  [ FeatureISA10 ]>;
+ def : Proc<"M68020",  [ FeatureISA20 ]>;
+@@ -87,7 +87,6 @@
+ //===----------------------------------------------------------------------===//
+ 
+ include "M68k64RegisterInfo.td"
+-include "GISel/M68k64RegisterBanks.td"
+ 
+ //===----------------------------------------------------------------------===//
+ // Instruction Descriptions
+@@ -118,6 +117,11 @@
+ // Assembly Parsers
+ //===---------------------------------------------------------------------===//
+ 
++
++//===----------------------------------------------------------------------===//
++// Target
++//===----------------------------------------------------------------------===//
++
+ def M68k64AsmParser : AsmParser {
+   let ShouldEmitMatchRegisterName = 0;
+   let ShouldEmitMatchRegisterAltName = 0;
+@@ -127,10 +131,6 @@
+   int Variant = 0;
+ }
+ 
+-//===----------------------------------------------------------------------===//
+-// Target
+-//===----------------------------------------------------------------------===//
+-
+ def M68k64 : Target {
+   let InstructionSet = M68k64InstrInfo;
+   let AssemblyParsers = [M68k64AsmParser];
+--- a/llvm/lib/Target/M68k64/M68k64CallingConv.h
++++ b/llvm/lib/Target/M68k64/M68k64CallingConv.h
+@@ -40,15 +40,15 @@
+                                     ISD::ArgFlagsTy &ArgFlags, CCState &State) {
+   const M68k64CCState &CCInfo = static_cast<M68k64CCState &>(State);
+ 
+-  static const MCPhysReg DataRegList[] = {M68k64::D0, M68k64::D1, M68k64::A0,
+-                                          M68k64::A1};
++  static const MCPhysReg DataRegList[] = {M68k64::QD0, M68k64::QD1, M68k64::QA0,
++                                          M68k64::QA1};
+ 
+   // Address registers have %a register priority
+   static const MCPhysReg AddrRegList[] = {
+-      M68k64::A0,
+-      M68k64::A1,
+-      M68k64::D0,
+-      M68k64::D1,
++      M68k64::QA0,
++      M68k64::QA1,
++      M68k64::QD0,
++      M68k64::QD1,
+   };
+ 
+   const auto &ArgTypes = CCInfo.ArgTypeList;
+--- a/llvm/lib/Target/M68k64/M68k64CallingConv.td
++++ b/llvm/lib/Target/M68k64/M68k64CallingConv.td
+@@ -24,11 +24,12 @@
+ 
+ /// M68k64 C return convention.
+ def RetCC_M68k64_C : CallingConv<[
+-  CCIfPtr<CCAssignToReg<[A0]>>,
++  CCIfPtr<CCAssignToReg<[QA0]>>,
+   CCIfType<[i1],   CCPromoteToType<i8>>,
+   CCIfType<[i8],   CCAssignToReg<[BD0, BD1]>>,
+   CCIfType<[i16],  CCAssignToReg<[WD0, WD1]>>,
+   CCIfType<[i32],  CCAssignToReg<[D0, D1]>>,
++  CCIfType<[i64],  CCAssignToReg<[QD0, QD1]>>,
+ ]>;
+ 
+ /// M68k64 fastcc return convention.
+@@ -36,11 +37,12 @@
+ /// split among 16 1-byte values or used for a single 16-byte value.
+ /// TODO: Verify its functionality and write tests
+ def RetCC_M68k64_Fast : CallingConv<[
+-  CCIfPtr<CCAssignToReg<[A0]>>,
++  CCIfPtr<CCAssignToReg<[QA0]>>,
+   CCIfType<[i1],   CCPromoteToType<i8>>,
+   CCIfType<[i8],   CCAssignToReg<[BD0, BD1]>>,
+   CCIfType<[i16],  CCAssignToReg<[WD0, WD1, WA0, WA1]>>,
+-  CCIfType<[i32],  CCAssignToReg<[D0, D1, A0, A1]>>,
++  CCIfType<[i32],  CCAssignToReg<[D0, D1]>>,
++  CCIfType<[i64],  CCAssignToReg<[QD0, QD1, QA0, QA1]>>,
+ ]>;
+ 
+ /// This is the root return-value convention for the M68k64 backend.
+@@ -57,23 +59,22 @@
+ /// values are spilled on the stack.
+ def CC_M68k64_Common : CallingConv<[
+   /// Handles byval parameters.
+-  CCIfByVal<CCPassByVal<4, 4>>,
++  CCIfByVal<CCPassByVal<8, 8>>,
+ 
+-  /// Integer values get stored in stack slots that are 4 bytes in
+-  /// size and 4-byte aligned.
+-  CCIfType<[i32],  CCAssignToStack<4, 4>>
++  /// All integers and pointers take a stack slot of 8 bytes.
++  CCIfType<[i64],  CCAssignToStack<8, 8>>
+ ]>;
+ 
+ def CC_M68k64_Fast : CallingConv<[
+   /// Promote i1/i8/i16 arguments to i32.
+-  CCIfType<[i1, i8, i16], CCPromoteToType<i32>>,
++  CCIfType<[i1, i8, i16, i32], CCPromoteToType<i64>>,
+ 
+   /// The 'nest' parameter, if any, is passed in A1.
+-  CCIfNest<CCAssignToReg<[A1]>>, // FIXME verify if this is correct
++  CCIfNest<CCAssignToReg<[QA1]>>, // FIXME verify if this is correct
+ 
+   /// Since M68k64 uses %An for pointers and we want them be passed in regs
+   /// too we have to use custom function.
+-  CCIfType<[i32], CCCustom<"CC_M68k64_Any_AssignToReg">>,
++  CCIfType<[i64], CCCustom<"CC_M68k64_Any_AssignToReg">>,
+ 
+   /// Otherwise, same as everything else.
+   CCDelegateTo<CC_M68k64_Common>
+@@ -81,13 +82,13 @@
+ 
+ def CC_M68k64_C : CallingConv<[
+   /// Promote i1/i8/i16 arguments to i32.
+-  CCIfType<[i1, i8, i16], CCPromoteToType<i32>>,
++  CCIfType<[i1, i8, i16, i32], CCPromoteToType<i64>>,
+ 
+   /// The 'nest' parameter, if any, is passed in A1.
+-  CCIfNest<CCAssignToReg<[A1]>>, // FIXME verify if this is correct
++  CCIfNest<CCAssignToReg<[QA1]>>, // FIXME verify if this is correct
+ 
+   /// Use registers only if 'inreg' used and the call is not vararg
+-  CCIfNotVarArg<CCIfInReg<CCIfType<[i32], CCAssignToReg<[D0, D1]>>>>,
++  CCIfNotVarArg<CCIfInReg<CCIfType<[i64], CCAssignToReg<[QD0, QD1]>>>>,
+ 
+   // TODO: Support for 'sret'
+ 
+@@ -109,6 +110,6 @@
+ 
+ // A5 - BP
+ // A6 - FP
+-def CSR_STD : CalleeSavedRegs<(add D2, D3, D4, D5, D6, D7,
+-                                   A2, A3, A4, A5, A6)>;
++def CSR_STD : CalleeSavedRegs<(add QD2, QD3, QD4, QD5, QD6, QD7,
++                                   QA2, QA3, QA4, QA5, QA6)>;
+ 
+--- a/llvm/lib/Target/M68k64/M68k64ExpandPseudo.cpp
++++ b/llvm/lib/Target/M68k64/M68k64ExpandPseudo.cpp
+@@ -83,6 +83,8 @@
+     return TII->ExpandMOVI(MIB, MVT::i8);
+   case M68k64::MOVI16ri:
+     return TII->ExpandMOVI(MIB, MVT::i16);
++  case M68k64::MOVI64ri:
++    return TII->ExpandMOVI(MIB, MVT::i64);
+   case M68k64::MOVI32ri:
+     return TII->ExpandMOVI(MIB, MVT::i32);
+ 
+@@ -189,6 +191,23 @@
+ 
+   case M68k64::MOVM16jm_P:
+     return TII->ExpandMOVEM(MIB, TII->get(M68k64::MOVM16jm), /*IsRM=*/false);
++  case M68k64::MOVM8pm_P:
++  case M68k64::MOVM8mp_P: {
++    bool Load = MI.getOpcode() == M68k64::MOVM8mp_P;
++    MachineOperand &RegOp = MI.getOperand(Load ? 0 : 2);
++    RegOp.setReg(TRI->getMatchingSuperReg(RegOp.getReg(), M68k64::MxSubRegIndex8Lo,
++                                          &M68k64::DR16RegClass));
++    return Load ? TII->ExpandMOVEM(MIB, TII->get(M68k64::MOVM16mp), true)
++                : TII->ExpandMOVEM(MIB, TII->get(M68k64::MOVM16pm), false);
++  }
++  case M68k64::MOVM64jm_P:
++    return TII->ExpandMOVEM(MIB, TII->get(M68k64::MOVM64jm), /*IsRM=*/false);
++  case M68k64::MOVM64pm_P:
++    return TII->ExpandMOVEM(MIB, TII->get(M68k64::MOVM64pm), /*IsRM=*/false);
++  case M68k64::MOVM64mj_P:
++    return TII->ExpandMOVEM(MIB, TII->get(M68k64::MOVM64mj), /*IsRM=*/true);
++  case M68k64::MOVM64mp_P:
++    return TII->ExpandMOVEM(MIB, TII->get(M68k64::MOVM64mp), /*IsRM=*/true);
+   case M68k64::MOVM32jm_P:
+     return TII->ExpandMOVEM(MIB, TII->get(M68k64::MOVM32jm), /*IsRM=*/false);
+ 
+@@ -256,23 +275,23 @@
+   }
+   case M68k64::RET: {
+     if (MBB.getParent()->getFunction().getCallingConv() ==
+-        CallingConv::M68k64_INTR) {
++        CallingConv::M68k_INTR) {
+       BuildMI(MBB, MBBI, DL, TII->get(M68k64::RTE));
+     } else if (int64_t StackAdj = MBBI->getOperand(0).getImm(); StackAdj == 0) {
+       BuildMI(MBB, MBBI, DL, TII->get(M68k64::RTS));
+     } else {
+       // Copy return address from stack to a free address(A0 or A1) register
+       // TODO check if pseudo expand uses free address register
+-      BuildMI(MBB, MBBI, DL, TII->get(M68k64::MOV32aj), M68k64::A1)
+-          .addReg(M68k64::SP);
++      BuildMI(MBB, MBBI, DL, TII->get(M68k64::MOV64aj), M68k64::QA1)
++          .addReg(M68k64::QSP);
+ 
+       // Adjust SP
+       FL->emitSPUpdate(MBB, MBBI, StackAdj, /*InEpilogue=*/true);
+ 
+       // Put the return address on stack
+-      BuildMI(MBB, MBBI, DL, TII->get(M68k64::MOV32ja))
+-          .addReg(M68k64::SP)
+-          .addReg(M68k64::A1);
++      BuildMI(MBB, MBBI, DL, TII->get(M68k64::MOV64ja))
++          .addReg(M68k64::QSP)
++          .addReg(M68k64::QA1);
+ 
+       // RTS
+       BuildMI(MBB, MBBI, DL, TII->get(M68k64::RTS));
+--- a/llvm/lib/Target/M68k64/M68k64FrameLowering.cpp
++++ b/llvm/lib/Target/M68k64/M68k64FrameLowering.cpp
+@@ -36,7 +36,7 @@
+ #define DEBUG_TYPE "m68k-frame"
+ 
+ M68k64FrameLowering::M68k64FrameLowering(const M68k64Subtarget &STI, Align Alignment)
+-    : TargetFrameLowering(StackGrowsDown, Alignment, -4), STI(STI),
++    : TargetFrameLowering(StackGrowsDown, Alignment, -8), STI(STI),
+       TII(*STI.getInstrInfo()), TRI(STI.getRegisterInfo()) {
+   SlotSize = STI.getSlotSize();
+   StackPtr = TRI->getStackRegister();
+@@ -201,13 +201,52 @@
+                                            const DebugLoc &DL, unsigned Reg,
+                                            uint64_t MaxAlign) const {
+   uint64_t Val = -MaxAlign;
+-  unsigned AndOp = M68k64::AND32di;
+-  unsigned MovOp = M68k64::MOV32rr;
++  unsigned AndOp = M68k64::AND64di;
++  unsigned MovOp = M68k64::MOV64rr;
+ 
+   // This function is normally used with SP which is Address Register, but AND,
+   // or any other logical instructions in M68k64 do not support ARs so we need
+-  // to use a temp Data Register to perform the op.
+-  unsigned Tmp = M68k64::D0;
++  // to use a temp Data Register to perform the op. It must not hold an argument:
++  // functions with internal linkage get theirs in registers. A caller-saved one
++  // that is not live in, else a callee-saved one the prologue has already saved,
++  // else D0 itself, kept in a free address register meanwhile.
++  const MachineFunction &MF = *MBB.getParent();
++  const TargetRegisterInfo *RI = MF.getSubtarget().getRegisterInfo();
++  auto LiveIn = [&](unsigned R) {
++    for (const auto &LI : MBB.liveins())
++      if (RI->regsOverlap(LI.PhysReg, R))
++        return true;
++    return false;
++  };
++  auto Saved = [&](unsigned R) {
++    for (const CalleeSavedInfo &CSI : MF.getFrameInfo().getCalleeSavedInfo())
++      if (RI->regsOverlap(CSI.getReg(), R))
++        return true;
++    return false;
++  };
++  static const unsigned DataRegs[] = {M68k64::QD0, M68k64::QD1, M68k64::QD2,
++                                      M68k64::QD3, M68k64::QD4, M68k64::QD5,
++                                      M68k64::QD6, M68k64::QD7};
++  static const unsigned AddrRegs[] = {M68k64::QA0, M68k64::QA1, M68k64::QA2,
++                                      M68k64::QA3, M68k64::QA4, M68k64::QA5};
++  unsigned Tmp = 0, Keep = 0;
++  for (unsigned R : DataRegs)
++    if (!LiveIn(R) && (R == M68k64::QD0 || R == M68k64::QD1 || Saved(R))) {
++      Tmp = R;
++      break;
++    }
++  if (!Tmp) {
++    Tmp = M68k64::QD0;
++    for (unsigned R : AddrRegs)
++      if (!LiveIn(R) && (R == M68k64::QA0 || R == M68k64::QA1 || Saved(R))) {
++        Keep = R;
++        break;
++      }
++    assert(Keep && "no register free for the stack realignment");
++    BuildMI(MBB, MBBI, DL, TII.get(MovOp), Keep)
++        .addReg(Tmp)
++        .setMIFlag(MachineInstr::FrameSetup);
++  }
+ 
+   BuildMI(MBB, MBBI, DL, TII.get(MovOp), Tmp)
+       .addReg(Reg)
+@@ -224,6 +263,11 @@
+   BuildMI(MBB, MBBI, DL, TII.get(MovOp), Reg)
+       .addReg(Tmp)
+       .setMIFlag(MachineInstr::FrameSetup);
++
++  if (Keep)
++    BuildMI(MBB, MBBI, DL, TII.get(MovOp), Tmp)
++        .addReg(Keep)
++        .setMIFlag(MachineInstr::FrameSetup);
+ }
+ 
+ MachineBasicBlock::iterator M68k64FrameLowering::eliminateCallFramePseudoInstr(
+@@ -349,15 +393,15 @@
+       // load the offset into a register and do one sub/add
+       Register Reg;
+ 
+-      if (IsSub && !isRegLiveIn(MBB, M68k64::D0))
+-        Reg = M68k64::D0;
++      if (IsSub && !isRegLiveIn(MBB, M68k64::QD0))
++        Reg = M68k64::QD0;
+       else
+         Reg = findDeadCallerSavedReg(MBB, MBBI, TRI);
+ 
+       if (Reg) {
+-        unsigned Opc = M68k64::MOV32ri;
++        unsigned Opc = M68k64::MOV64ri;
+         BuildMI(MBB, MBBI, DL, TII.get(Opc), Reg).addImm(Offset);
+-        Opc = IsSub ? M68k64::SUB32ar : M68k64::ADD32ar;
++        Opc = IsSub ? M68k64::SUB64ar : M68k64::ADD64ar;
+         MachineInstr *MI = BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr)
+                                .addReg(StackPtr)
+                                .addReg(Reg);
+@@ -400,13 +444,13 @@
+     return Offset;
+   }
+ 
+-  if (Opc == M68k64::ADD32ai && PI->getOperand(0).getReg() == StackPtr) {
++  if (Opc == M68k64::ADD64ai && PI->getOperand(0).getReg() == StackPtr) {
+     assert(PI->getOperand(1).getReg() == StackPtr);
+     Offset += PI->getOperand(2).getImm();
+     MBB.erase(PI);
+     if (!MergeWithPrevious)
+       MBBI = NI;
+-  } else if (Opc == M68k64::SUB32ai && PI->getOperand(0).getReg() == StackPtr) {
++  } else if (Opc == M68k64::SUB64ai && PI->getOperand(0).getReg() == StackPtr) {
+     assert(PI->getOperand(1).getReg() == StackPtr);
+     Offset -= PI->getOperand(2).getImm();
+     MBB.erase(PI);
+@@ -426,7 +470,7 @@
+ 
+   bool IsSub = Offset < 0;
+   uint64_t AbsOffset = IsSub ? -Offset : Offset;
+-  unsigned Opc = IsSub ? M68k64::SUB32ai : M68k64::ADD32ai;
++  unsigned Opc = IsSub ? M68k64::SUB64ai : M68k64::ADD64ai;
+ 
+   MachineInstrBuilder MI = BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr)
+                                .addReg(StackPtr)
+@@ -544,7 +588,7 @@
+     MFI.setOffsetAdjustment(-NumBytes);
+ 
+     BuildMI(MBB, MBBI, DL, TII.get(M68k64::LINK16))
+-        .addReg(M68k64::WA6, RegState::Kill)
++        .addReg(M68k64::QA6, RegState::Kill)
+         .addImm(-NumBytes)
+         .setMIFlag(MachineInstr::FrameSetup);
+ 
+@@ -584,7 +628,7 @@
+   int StackOffset = 2 * stackGrowth;
+ 
+   while (MBBI != MBB.end() && MBBI->getFlag(MachineInstr::FrameSetup) &&
+-         MBBI->getOpcode() == M68k64::PUSH32r) {
++         MBBI->getOpcode() == M68k64::PUSH64r) {
+     PushedRegs = true;
+     ++MBBI;
+ 
+@@ -622,13 +666,13 @@
+   // to reference locals.
+   if (TRI->hasBasePointer(MF)) {
+     // Update the base pointer with the current stack pointer.
+-    BuildMI(MBB, MBBI, DL, TII.get(M68k64::MOV32aa), BasePtr)
++    BuildMI(MBB, MBBI, DL, TII.get(M68k64::MOV64aa), BasePtr)
+         .addReg(SPOrEstablisher)
+         .setMIFlag(MachineInstr::FrameSetup);
+     if (MMFI->getRestoreBasePointer()) {
+       // Stash value of base pointer.  Saving SP instead of FP shortens
+       // dependence chain. Used by SjLj EH.
+-      unsigned Opm = M68k64::MOV32ja;
++      unsigned Opm = M68k64::MOV64ja;
+       M68k64::addRegIndirectWithDisp(BuildMI(MBB, MBBI, DL, TII.get(Opm)),
+                                    FramePtr, true,
+                                    MMFI->getRestoreBasePointerOffset())
+@@ -704,7 +748,7 @@
+     MachineBasicBlock::iterator PI = std::prev(MBBI);
+     unsigned Opc = PI->getOpcode();
+ 
+-    if ((Opc != M68k64::POP32r || !PI->getFlag(MachineInstr::FrameDestroy)) &&
++    if ((Opc != M68k64::POP64r || !PI->getFlag(MachineInstr::FrameDestroy)) &&
+         Opc != M68k64::DBG_VALUE && !PI->isTerminator())
+       break;
+ 
+@@ -733,7 +777,7 @@
+     // However, we may use this sequence if we have a frame pointer because the
+     // effects of the prologue can safely be undone.
+     if (LEAAmount != 0) {
+-      unsigned Opc = M68k64::LEA32p;
++      unsigned Opc = M68k64::LEA64p;
+       M68k64::addRegIndirectWithDisp(
+           BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr), FramePtr, false,
+           LEAAmount);
+@@ -843,7 +887,7 @@
+   }
+ 
+   auto I =
+-      M68k64::addFrameReference(BuildMI(MBB, MI, DL, TII.get(M68k64::MOVM32pm)), FI)
++      M68k64::addFrameReference(BuildMI(MBB, MI, DL, TII.get(M68k64::MOVM64pm)), FI)
+           .addImm(Mask)
+           .setMIFlag(MachineInstr::FrameSetup);
+ 
+@@ -878,7 +922,7 @@
+   }
+ 
+   auto I = M68k64::addFrameReference(
+-               BuildMI(MBB, MI, DL, TII.get(M68k64::MOVM32mp)).addImm(Mask), FI)
++               BuildMI(MBB, MI, DL, TII.get(M68k64::MOVM64mp)).addImm(Mask), FI)
+                .setMIFlag(MachineInstr::FrameDestroy);
+ 
+   // Append implicit registers and mem locations
+--- a/llvm/lib/Target/M68k64/M68k64ISelDAGToDAG.cpp
++++ b/llvm/lib/Target/M68k64/M68k64ISelDAGToDAG.cpp
+@@ -101,7 +101,8 @@
+   }
+ 
+   bool hasIndexReg() const {
+-    return BaseType == Base::RegBase && IndexReg.getNode() != nullptr;
++    // Also with a frame index as the base: it must not get lost in that case.
++    return IndexReg.getNode() != nullptr;
+   }
+ 
+   /// True if address mode type supports displacement
+@@ -248,38 +249,38 @@
+   inline bool getSymbolicDisplacement(M68k64ISelAddressMode &AM, const SDLoc &DL,
+                                       SDValue &Sym) {
+     if (AM.GV) {
+-      Sym = CurDAG->getTargetGlobalAddress(AM.GV, SDLoc(), MVT::i32, AM.Disp,
++      Sym = CurDAG->getTargetGlobalAddress(AM.GV, SDLoc(), MVT::i64, AM.Disp,
+                                            AM.SymbolFlags);
+       return true;
+     }
+ 
+     if (AM.CP) {
+-      Sym = CurDAG->getTargetConstantPool(AM.CP, MVT::i32, AM.Alignment,
++      Sym = CurDAG->getTargetConstantPool(AM.CP, MVT::i64, AM.Alignment,
+                                           AM.Disp, AM.SymbolFlags);
+       return true;
+     }
+ 
+     if (AM.ES) {
+       assert(!AM.Disp && "Non-zero displacement is ignored with ES.");
+-      Sym = CurDAG->getTargetExternalSymbol(AM.ES, MVT::i32, AM.SymbolFlags);
++      Sym = CurDAG->getTargetExternalSymbol(AM.ES, MVT::i64, AM.SymbolFlags);
+       return true;
+     }
+ 
+     if (AM.MCSym) {
+       assert(!AM.Disp && "Non-zero displacement is ignored with MCSym.");
+       assert(AM.SymbolFlags == 0 && "oo");
+-      Sym = CurDAG->getMCSymbol(AM.MCSym, MVT::i32);
++      Sym = CurDAG->getMCSymbol(AM.MCSym, MVT::i64);
+       return true;
+     }
+ 
+     if (AM.JT != -1) {
+       assert(!AM.Disp && "Non-zero displacement is ignored with JT.");
+-      Sym = CurDAG->getTargetJumpTable(AM.JT, MVT::i32, AM.SymbolFlags);
++      Sym = CurDAG->getTargetJumpTable(AM.JT, MVT::i64, AM.SymbolFlags);
+       return true;
+     }
+ 
+     if (AM.BlockAddr) {
+-      Sym = CurDAG->getTargetBlockAddress(AM.BlockAddr, MVT::i32, AM.Disp,
++      Sym = CurDAG->getTargetBlockAddress(AM.BlockAddr, MVT::i64, AM.Disp,
+                                           AM.SymbolFlags);
+       return true;
+     }
+@@ -331,6 +332,17 @@
+                                           SDNode *Root) const {
+   if (OptLevel == CodeGenOptLevel::None)
+     return false;
++
++  // A memory-to-memory MOVE joins the load's chain with the store's. When they
++  // differ, as for an outgoing argument (stored on the call sequence's chain)
++  // loaded from memory on the main chain, this ties two call sequences together
++  // and the list scheduler cannot order them (it crashes on nested sequences).
++  if (auto *Ld = dyn_cast<LoadSDNode>(N.getNode()))
++    if (auto *St = dyn_cast<StoreSDNode>(U)) {
++      SDValue StChain = St->getChain();
++      if (StChain != SDValue(Ld, 1) && StChain != Ld->getChain())
++        return false;
++    }
+ 
+   if (U == Root) {
+     switch (U->getOpcode()) {
+@@ -620,7 +632,7 @@
+     } else
+       llvm_unreachable("Unhandled symbol reference node.");
+ 
+-    AM.setBaseReg(CurDAG->getRegister(M68k64::PC, MVT::i32));
++    AM.setBaseReg(CurDAG->getRegister(M68k64::PC, MVT::i64));
+     return true;
+   }
+ 
+@@ -681,9 +693,9 @@
+ 
+   case ISD::GLOBAL_OFFSET_TABLE: {
+     SDValue GOT = CurDAG->getTargetExternalSymbol(
+-        "_GLOBAL_OFFSET_TABLE_", MVT::i32, M68k64II::MO_GOTPCREL);
++        "_GLOBAL_OFFSET_TABLE_", MVT::i64, M68k64II::MO_GOTPCREL);
+     MachineSDNode *Res =
+-        CurDAG->getMachineNode(M68k64::LEA32q, DL, MVT::i32, GOT);
++        CurDAG->getMachineNode(M68k64::LEA64q, DL, MVT::i64, GOT);
+     ReplaceNode(Node, Res);
+     return;
+   }
+@@ -736,7 +748,7 @@
+   }
+ 
+   // If this is a frame index, grab it
+-  if (getFrameIndexAddress(AM, SDLoc(N), Disp, Base)) {
++  if (!AM.hasIndexReg() && getFrameIndexAddress(AM, SDLoc(N), Disp, Base)) {
+     LLVM_DEBUG(dbgs() << "SUCCESS matched FI\n");
+     return true;
+   }
+@@ -964,6 +976,14 @@
+   if (AM.isPCRelative()) {
+     LLVM_DEBUG(dbgs() << "REJECT: Cannot match PC relative address\n");
+     return false;
++  }
++
++  // What no addressing mode took, such as a frame index with an index register: this pattern
++  // comes last, so compute the sum into an address register. The upstream backend lost the
++  // index here.
++  if ((AM.hasIndexReg() || AM.Disp != 0) && !AM.hasSymbolicDisplacement()) {
++    Base = N;
++    return true;
+   }
+ 
+   // AddrType::ARI does not use these
+--- a/llvm/lib/Target/M68k64/M68k64ISelLowering.cpp
++++ b/llvm/lib/Target/M68k64/M68k64ISelLowering.cpp
+@@ -49,7 +49,7 @@
+                                        const M68k64Subtarget &STI)
+     : TargetLowering(TM, STI), Subtarget(STI), TM(TM) {
+ 
+-  MVT PtrVT = MVT::i32;
++  MVT PtrVT = MVT::i64;
+ 
+   // This is based on M68k64 SetCC (scc) setting the destination byte to all 1s.
+   // See also getSetCCResultType().
+@@ -62,6 +62,7 @@
+   addRegisterClass(MVT::i8, &M68k64::DR8RegClass);
+   addRegisterClass(MVT::i16, &M68k64::XR16RegClass);
+   addRegisterClass(MVT::i32, &M68k64::XR32RegClass);
++  addRegisterClass(MVT::i64, &M68k64::XR64RegClass);
+ 
+   for (auto VT : MVT::integer_valuetypes()) {
+     setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i1, Promote);
+@@ -80,10 +81,17 @@
+   setOperationAction({ISD::MUL, ISD::SDIV, ISD::UDIV}, MVT::i8, Promote);
+   setOperationAction({ISD::MUL, ISD::SDIV, ISD::UDIV}, MVT::i16, Legal);
+   if (Subtarget.atLeastM68020())
++  {
+     setOperationAction({ISD::MUL, ISD::SDIV, ISD::UDIV}, MVT::i32, Legal);
+-  else
++    setOperationAction({ISD::MUL, ISD::SDIV, ISD::UDIV}, MVT::i64, Legal);
++    setOperationAction({ISD::SREM, ISD::UREM, ISD::MULHS, ISD::MULHU, ISD::SMUL_LOHI, ISD::UMUL_LOHI, ISD::SDIVREM, ISD::UDIVREM}, MVT::i64, Expand);
++    for (MVT From : {MVT::i8, MVT::i16, MVT::i32})
++      for (unsigned Ext : {ISD::ZEXTLOAD, ISD::SEXTLOAD, ISD::EXTLOAD})
++        setLoadExtAction(Ext, MVT::i64, From, Expand);
++    setTruncStoreAction(MVT::i64, MVT::i16, Expand);
++    setTruncStoreAction(MVT::i64, MVT::i8, Expand);
++  } else
+     setOperationAction({ISD::MUL, ISD::SDIV, ISD::UDIV}, MVT::i32, LibCall);
+-  setOperationAction(ISD::MUL, MVT::i64, LibCall);
+ 
+   for (auto OP :
+        {ISD::SREM, ISD::UREM, ISD::UDIVREM, ISD::SDIVREM,
+@@ -104,11 +112,14 @@
+     setOperationAction(OP, MVT::i32, Custom);
+   }
+ 
+-  for (auto OP : {ISD::SHL_PARTS, ISD::SRA_PARTS, ISD::SRL_PARTS})
++  // i64 parts are the halves of a 128-bit shift (compiler-rt's ti functions).
++  for (auto OP : {ISD::SHL_PARTS, ISD::SRA_PARTS, ISD::SRL_PARTS}) {
+     setOperationAction(OP, MVT::i32, Custom);
++    setOperationAction(OP, MVT::i64, Custom);
++  }
+ 
+   // Add/Sub overflow ops with MVT::Glues are lowered to CCR dependences.
+-  for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
++  for (auto VT : {MVT::i8, MVT::i16, MVT::i32, MVT::i64}) {
+     setOperationAction(ISD::ADDC, VT, Custom);
+     setOperationAction(ISD::ADDE, VT, Custom);
+     setOperationAction(ISD::SUBC, VT, Custom);
+@@ -116,7 +127,7 @@
+   }
+ 
+   // SADDO and friends are legal with this setup, i hope
+-  for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
++  for (auto VT : {MVT::i8, MVT::i16, MVT::i32, MVT::i64}) {
+     setOperationAction(ISD::SADDO, VT, Custom);
+     setOperationAction(ISD::UADDO, VT, Custom);
+     setOperationAction(ISD::SSUBO, VT, Custom);
+@@ -126,7 +137,7 @@
+   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
+   setOperationAction(ISD::BRCOND, MVT::Other, Custom);
+ 
+-  for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
++  for (auto VT : {MVT::i8, MVT::i16, MVT::i32, MVT::i64}) {
+     setOperationAction(ISD::BR_CC, VT, Expand);
+     setOperationAction(ISD::SELECT, VT, Custom);
+     setOperationAction(ISD::SELECT_CC, VT, Expand);
+@@ -134,19 +145,19 @@
+     setOperationAction(ISD::SETCCCARRY, VT, Custom);
+   }
+ 
+-  for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
++  for (auto VT : {MVT::i8, MVT::i16, MVT::i32, MVT::i64}) {
+     setOperationAction(ISD::BSWAP, VT, Expand);
+     setOperationAction(ISD::CTTZ, VT, Expand);
+     setOperationAction(ISD::CTLZ, VT, Expand);
+     setOperationAction(ISD::CTPOP, VT, Expand);
+   }
+ 
+-  setOperationAction(ISD::ConstantPool, MVT::i32, Custom);
+-  setOperationAction(ISD::JumpTable, MVT::i32, Custom);
+-  setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+-  setOperationAction(ISD::GlobalTLSAddress, MVT::i32, Custom);
+-  setOperationAction(ISD::ExternalSymbol, MVT::i32, Custom);
+-  setOperationAction(ISD::BlockAddress, MVT::i32, Custom);
++  setOperationAction(ISD::ConstantPool, MVT::i64, Custom);
++  setOperationAction(ISD::JumpTable, MVT::i64, Custom);
++  setOperationAction(ISD::GlobalAddress, MVT::i64, Custom);
++  setOperationAction(ISD::GlobalTLSAddress, MVT::i64, Custom);
++  setOperationAction(ISD::ExternalSymbol, MVT::i64, Custom);
++  setOperationAction(ISD::BlockAddress, MVT::i64, Custom);
+ 
+   setOperationAction(ISD::VASTART, MVT::Other, Custom);
+   setOperationAction(ISD::VAEND, MVT::Other, Expand);
+@@ -157,13 +168,15 @@
+   setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
+ 
+   setOperationAction(ISD::DYNAMIC_STACKALLOC, PtrVT, Custom);
++  setOperationAction(ISD::FRAMEADDR, PtrVT, Custom);
++  setOperationAction(ISD::RETURNADDR, PtrVT, Custom);
+ 
+   computeRegisterProperties(STI.getRegisterInfo());
+ 
+   // We lower the `atomic-compare-and-swap` to `__sync_val_compare_and_swap`
+   // for subtarget < M68020
+-  setMaxAtomicSizeInBitsSupported(32);
+-  setOperationAction(ISD::ATOMIC_CMP_SWAP, {MVT::i8, MVT::i16, MVT::i32},
++  setMaxAtomicSizeInBitsSupported(64);
++  setOperationAction(ISD::ATOMIC_CMP_SWAP, {MVT::i8, MVT::i16, MVT::i32, MVT::i64},
+                      Subtarget.atLeastM68020() ? Legal : LibCall);
+ 
+   setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
+@@ -185,7 +198,7 @@
+           ISD::ATOMIC_LOAD_UMAX,
+           ISD::ATOMIC_SWAP,
+       },
+-      {MVT::i8, MVT::i16, MVT::i32}, LibCall);
++      {MVT::i8, MVT::i16, MVT::i32, MVT::i64}, LibCall);
+ 
+   setMinFunctionAlignment(Align(2));
+ }
+@@ -199,12 +212,12 @@
+ 
+ Register
+ M68k64TargetLowering::getExceptionPointerRegister(const Constant *) const {
+-  return M68k64::D0;
++  return M68k64::QD0;
+ }
+ 
+ Register
+ M68k64TargetLowering::getExceptionSelectorRegister(const Constant *) const {
+-  return M68k64::D1;
++  return M68k64::QD1;
+ }
+ 
+ InlineAsm::ConstraintCode
+@@ -267,7 +280,7 @@
+ static SDValue CreateCopyOfByValArgument(SDValue Src, SDValue Dst,
+                                          SDValue Chain, ISD::ArgFlagsTy Flags,
+                                          SelectionDAG &DAG, const SDLoc &DL) {
+-  SDValue SizeNode = DAG.getConstant(Flags.getByValSize(), DL, MVT::i32);
++  SDValue SizeNode = DAG.getConstant(Flags.getByValSize(), DL, MVT::i64);
+ 
+   return DAG.getMemcpy(
+       Chain, DL, Dst, Src, SizeNode, Flags.getNonZeroByValAlign(),
+@@ -336,7 +349,7 @@
+         return false;
+     } else {
+       unsigned Opcode = Def->getOpcode();
+-      if ((Opcode == M68k64::LEA32p || Opcode == M68k64::LEA32f) &&
++      if ((Opcode == M68k64::LEA64p || Opcode == M68k64::LEA64f) &&
+           Def->getOperand(1).isFI()) {
+         FI = Def->getOperand(1).getIndex();
+         Bytes = Flags.getByValSize();
+@@ -452,9 +465,11 @@
+   // partial types
+   int Offset = VA.getLocMemOffset();
+   if (VA.getValVT() == MVT::i8) {
+-    Offset += 3;
++    Offset += 7;
+   } else if (VA.getValVT() == MVT::i16) {
+-    Offset += 2;
++    Offset += 6;
++  } else if (VA.getValVT() == MVT::i32) {
++    Offset += 4;
+   }
+ 
+   // TODO Interrupt handlers
+@@ -540,7 +555,7 @@
+   M68k64MachineFunctionInfo *MFI = MF.getInfo<M68k64MachineFunctionInfo>();
+   // const M68k64RegisterInfo *TRI = Subtarget.getRegisterInfo();
+ 
+-  if (CallConv == CallingConv::M68k64_INTR)
++  if (CallConv == CallingConv::M68k_INTR)
+     report_fatal_error("M68k64 interrupts may not be called directly");
+ 
+   auto Attr = MF.getFunction().getFnAttribute("disable-tail-calls");
+@@ -951,6 +966,8 @@
+       const TargetRegisterClass *RC;
+       if (RegVT == MVT::i32)
+         RC = &M68k64::XR32RegClass;
++      else if (RegVT == MVT::i64)
++        RC = &M68k64::XR64RegClass;
+       else
+         llvm_unreachable("Unknown argument type!");
+ 
+@@ -1154,7 +1171,7 @@
+ 
+     // ??? How will this work if CC does not use registers for args passing?
+     // ??? What if I return multiple structs?
+-    unsigned RetValReg = M68k64::D0;
++    unsigned RetValReg = M68k64::QD0;
+     Chain = DAG.getCopyToReg(Chain, DL, RetValReg, Val, Glue);
+     Glue = Chain.getValue(1);
+ 
+@@ -1343,8 +1360,8 @@
+         switch (Reg) {
+         default:
+           break;
+-        case M68k64::A0:
+-        case M68k64::A1:
++        case M68k64::QA0:
++        case M68k64::QA1:
+           if (++NumInRegs == MaxInRegs)
+             return false;
+           break;
+@@ -1417,6 +1434,10 @@
+     return LowerVASTART(Op, DAG);
+   case ISD::DYNAMIC_STACKALLOC:
+     return LowerDYNAMIC_STACKALLOC(Op, DAG);
++  case ISD::FRAMEADDR:
++    return LowerFRAMEADDR(Op, DAG);
++  case ISD::RETURNADDR:
++    return LowerRETURNADDR(Op, DAG);
+   case ISD::SHL_PARTS:
+     return LowerShiftLeftParts(Op, DAG);
+   case ISD::SRA_PARTS:
+@@ -1448,10 +1469,10 @@
+ SDValue M68k64TargetLowering::getTLSGetAddr(GlobalAddressSDNode *GA,
+                                           SelectionDAG &DAG,
+                                           unsigned TargetFlags) const {
+-  SDValue GOT = DAG.getGLOBAL_OFFSET_TABLE(MVT::i32);
++  SDValue GOT = DAG.getGLOBAL_OFFSET_TABLE(MVT::i64);
+   SDValue TGA = DAG.getTargetGlobalAddress(
+       GA->getGlobal(), GA, GA->getValueType(0), GA->getOffset(), TargetFlags);
+-  SDValue Arg = DAG.getNode(ISD::ADD, SDLoc(GA), MVT::i32, GOT, TGA);
++  SDValue Arg = DAG.getNode(ISD::ADD, SDLoc(GA), MVT::i64, GOT, TGA);
+ 
+   PointerType *PtrTy = PointerType::get(*DAG.getContext(), 0);
+ 
+@@ -1476,22 +1497,22 @@
+   SDValue TGA =
+       DAG.getTargetGlobalAddress(GA->getGlobal(), GA, GA->getValueType(0),
+                                  GA->getOffset(), M68k64II::MO_TLSLD);
+-  return DAG.getNode(ISD::ADD, SDLoc(GA), MVT::i32, TGA, Addr);
++  return DAG.getNode(ISD::ADD, SDLoc(GA), MVT::i64, TGA, Addr);
+ }
+ 
+ SDValue M68k64TargetLowering::LowerTLSInitialExec(GlobalAddressSDNode *GA,
+                                                 SelectionDAG &DAG) const {
+-  SDValue GOT = DAG.getGLOBAL_OFFSET_TABLE(MVT::i32);
++  SDValue GOT = DAG.getGLOBAL_OFFSET_TABLE(MVT::i64);
+   SDValue Tp = getM68k64ReadTp(SDLoc(GA), DAG);
+   SDValue TGA =
+       DAG.getTargetGlobalAddress(GA->getGlobal(), GA, GA->getValueType(0),
+                                  GA->getOffset(), M68k64II::MO_TLSIE);
+-  SDValue Addr = DAG.getNode(ISD::ADD, SDLoc(GA), MVT::i32, TGA, GOT);
++  SDValue Addr = DAG.getNode(ISD::ADD, SDLoc(GA), MVT::i64, TGA, GOT);
+   SDValue Offset =
+-      DAG.getLoad(MVT::i32, SDLoc(GA), DAG.getEntryNode(), Addr,
++      DAG.getLoad(MVT::i64, SDLoc(GA), DAG.getEntryNode(), Addr,
+                   MachinePointerInfo::getGOT(DAG.getMachineFunction()));
+ 
+-  return DAG.getNode(ISD::ADD, SDLoc(GA), MVT::i32, Offset, Tp);
++  return DAG.getNode(ISD::ADD, SDLoc(GA), MVT::i64, Offset, Tp);
+ }
+ 
+ SDValue M68k64TargetLowering::LowerTLSLocalExec(GlobalAddressSDNode *GA,
+@@ -1500,7 +1521,7 @@
+   SDValue TGA =
+       DAG.getTargetGlobalAddress(GA->getGlobal(), GA, GA->getValueType(0),
+                                  GA->getOffset(), M68k64II::MO_TLSLE);
+-  return DAG.getNode(ISD::ADD, SDLoc(GA), MVT::i32, TGA, Tp);
++  return DAG.getNode(ISD::ADD, SDLoc(GA), MVT::i64, TGA, Tp);
+ }
+ 
+ SDValue M68k64TargetLowering::LowerGlobalTLSAddress(SDValue Op,
+@@ -1658,6 +1679,18 @@
+   // that doing a bittest on the i32 value is ok.
+   if (Src.getValueType() == MVT::i8 || Src.getValueType() == MVT::i16)
+     Src = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i32, Src);
++
++  // There is only a 32-bit BTST on registers, which takes the bit number modulo
++  // 32. For a 64-bit value shift the upper half down when bit 5 of the number is
++  // set (shift counts run to 63 in long mode), then test the low half.
++  if (Src.getValueType() == MVT::i64) {
++    SDValue Amt = DAG.getZExtOrTrunc(BitNo, DL, MVT::i64);
++    Amt = DAG.getNode(ISD::AND, DL, MVT::i64, Amt,
++                      DAG.getConstant(32, DL, MVT::i64));
++    Src = DAG.getNode(ISD::SRL, DL, MVT::i64, Src, Amt);
++    Src = DAG.getNode(ISD::TRUNCATE, DL, MVT::i32, Src);
++    BitNo = DAG.getZExtOrTrunc(BitNo, DL, MVT::i32);
++  }
+ 
+   // If the operand types disagree, extend the shift amount to match.  Since
+   // BTST ignores high bits (like shifts) we can use anyextend.
+@@ -3019,6 +3052,8 @@
+         return std::make_pair(0U, &M68k64::DR16RegClass);
+       case MVT::i32:
+         return std::make_pair(0U, &M68k64::DR32RegClass);
++      case MVT::i64:
++        return std::make_pair(0U, &M68k64::DR64RegClass);
+       default:
+         break;
+       }
+@@ -3029,6 +3064,8 @@
+         return std::make_pair(0U, &M68k64::AR16RegClass);
+       case MVT::i32:
+         return std::make_pair(0U, &M68k64::AR32RegClass);
++      case MVT::i64:
++        return std::make_pair(0U, &M68k64::AR64RegClass);
+       default:
+         break;
+       }
+@@ -3038,13 +3075,27 @@
+     }
+   }
+ 
+-  return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
++  // An explicit register ("{d0}", from `register long x asm("d0")`) with a 64-bit
++  // value is the 64-bit register: the default lookup finds the 32-bit D0 first.
++  std::pair<unsigned, const TargetRegisterClass *> R =
++      TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
++  if (VT == MVT::i64 && R.first && R.second &&
++      (M68k64::DR32RegClass.contains(R.first) ||
++       M68k64::AR32RegClass.contains(R.first))) {
++    const TargetRegisterClass *RC64 =
++        M68k64::DR32RegClass.contains(R.first) ? &M68k64::DR64RegClass
++                                               : &M68k64::AR64RegClass;
++    if (MCRegister Super = TRI->getMatchingSuperReg(
++            R.first, M68k64::MxSubRegIndex32Lo, RC64))
++      return std::make_pair(unsigned(Super), RC64);
++  }
++  return R;
+ }
+ 
+ /// Determines whether the callee is required to pop its own arguments.
+ /// Callee pop is necessary to support tail calls.
+ bool M68k64::isCalleePop(CallingConv::ID CC, bool IsVarArg, bool GuaranteeTCO) {
+-  return CC == CallingConv::M68k64_RTD && !IsVarArg;
++  return CC == CallingConv::M68k_RTD && !IsVarArg;
+ }
+ 
+ // Return true if it is OK for this CMOV pseudo-opcode to be cascaded
+@@ -3376,6 +3427,33 @@
+ // bytes in one go. Touching the stack at 4K increments is necessary to ensure
+ // that the guard pages used by the OS virtual memory manager are allocated in
+ // correct sequence.
++// The frame is LINK A6: the caller's A6 at 0(A6), the return address at 8(A6),
++// 8 bytes each in long mode. Taking the address forces a frame pointer.
++SDValue M68k64TargetLowering::LowerFRAMEADDR(SDValue Op,
++                                             SelectionDAG &DAG) const {
++  MachineFunction &MF = DAG.getMachineFunction();
++  MF.getFrameInfo().setFrameAddressIsTaken(true);
++  EVT VT = Op.getValueType();
++  SDLoc DL(Op);
++  unsigned Depth = Op.getConstantOperandVal(0);
++  SDValue FrameAddr =
++      DAG.getCopyFromReg(DAG.getEntryNode(), DL, M68k64::QA6, VT);
++  while (Depth--)
++    FrameAddr = DAG.getLoad(VT, DL, DAG.getEntryNode(), FrameAddr,
++                            MachinePointerInfo());
++  return FrameAddr;
++}
++
++SDValue M68k64TargetLowering::LowerRETURNADDR(SDValue Op,
++                                              SelectionDAG &DAG) const {
++  EVT VT = Op.getValueType();
++  SDLoc DL(Op);
++  SDValue Frame = LowerFRAMEADDR(Op, DAG);
++  SDValue Slot = DAG.getNode(ISD::ADD, DL, VT, Frame,
++                             DAG.getConstant(8, DL, VT));
++  return DAG.getLoad(VT, DL, DAG.getEntryNode(), Slot, MachinePointerInfo());
++}
++
+ SDValue M68k64TargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
+                                                     SelectionDAG &DAG) const {
+   MachineFunction &MF = DAG.getMachineFunction();
+@@ -3443,8 +3521,8 @@
+ 
+   SDValue Zero = DAG.getConstant(0, DL, VT);
+   SDValue One = DAG.getConstant(1, DL, VT);
+-  SDValue MinusRegisterSize = DAG.getSignedConstant(-32, DL, VT);
+-  SDValue RegisterSizeMinus1 = DAG.getConstant(32 - 1, DL, VT);
++  SDValue MinusRegisterSize = DAG.getSignedConstant(-(int64_t)VT.getSizeInBits(), DL, VT);
++  SDValue RegisterSizeMinus1 = DAG.getConstant(VT.getSizeInBits() - 1, DL, VT);
+   SDValue ShamtMinusRegisterSize =
+       DAG.getNode(ISD::ADD, DL, VT, Shamt, MinusRegisterSize);
+   SDValue RegisterSizeMinus1Shamt =
+@@ -3495,8 +3573,8 @@
+ 
+   SDValue Zero = DAG.getConstant(0, DL, VT);
+   SDValue One = DAG.getConstant(1, DL, VT);
+-  SDValue MinusRegisterSize = DAG.getSignedConstant(-32, DL, VT);
+-  SDValue RegisterSizeMinus1 = DAG.getConstant(32 - 1, DL, VT);
++  SDValue MinusRegisterSize = DAG.getSignedConstant(-(int64_t)VT.getSizeInBits(), DL, VT);
++  SDValue RegisterSizeMinus1 = DAG.getConstant(VT.getSizeInBits() - 1, DL, VT);
+   SDValue ShamtMinusRegisterSize =
+       DAG.getNode(ISD::ADD, DL, VT, Shamt, MinusRegisterSize);
+   SDValue RegisterSizeMinus1Shamt =
+--- a/llvm/lib/Target/M68k64/M68k64ISelLowering.h
++++ b/llvm/lib/Target/M68k64/M68k64ISelLowering.h
+@@ -176,6 +176,8 @@
+   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
+   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
+   SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
++  SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
++  SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
+   SDValue LowerShiftLeftParts(SDValue Op, SelectionDAG &DAG) const;
+   SDValue LowerShiftRightParts(SDValue Op, SelectionDAG &DAG, bool IsSRA) const;
+ 
+--- a/llvm/lib/Target/M68k64/M68k64InstrArithmetic.td
++++ b/llvm/lib/Target/M68k64/M68k64InstrArithmetic.td
+@@ -38,15 +38,18 @@
+ def MxOpMode8_d_EA  : MxOpModeEncoding<0b000>;
+ def MxOpMode16_d_EA : MxOpModeEncoding<0b001>;
+ def MxOpMode32_d_EA : MxOpModeEncoding<0b010>;
++def MxOpMode64_d_EA : MxOpModeEncoding<0b010>;
+ 
+ // op Dn, EA
+ def MxOpMode8_EA_d  : MxOpModeEncoding<0b100>;
+ def MxOpMode16_EA_d : MxOpModeEncoding<0b101>;
+ def MxOpMode32_EA_d : MxOpModeEncoding<0b110>;
++def MxOpMode64_EA_d : MxOpModeEncoding<0b110>;
+ 
+ // op EA, An
+ def MxOpMode16_a_EA : MxOpModeEncoding<0b011>;
+ def MxOpMode32_a_EA : MxOpModeEncoding<0b111>;
++def MxOpMode64_a_EA : MxOpModeEncoding<0b111>;
+ 
+ 
+ //===----------------------------------------------------------------------===//
+@@ -195,7 +198,7 @@
+ multiclass MxBiArOp_DF<string MN, SDNode NODE, bit isComm,
+                        bits<4> CMD, bits<4> CMDI> {
+ 
+-  foreach SZ = [8, 16, 32] in {
++  foreach SZ = [8, 16, 32, 64] in {
+     // op $mem, $reg
+     def NAME#SZ#"dk"  : MxBiArOp_R_RM<MN, NODE,
+                                       !cast<MxType>("MxType"#SZ#"d"),
+@@ -268,7 +271,7 @@
+                                          CMD>;
+   } // foreach SZ
+ 
+-  foreach SZ = [16, 32] in
++  foreach SZ = [16, 32, 64] in
+   def NAME#SZ#"dr" : MxBiArOp_R_RR_xEA<MN, NODE,
+                                        !cast<MxType>("MxType"#SZ#"d"),
+                                        !cast<MxType>("MxType"#SZ#"r"),
+@@ -283,21 +286,21 @@
+ let Pattern = [(null_frag)] in
+ multiclass MxBiArOp_AF<string MN, SDNode NODE, bits<4> CMD> {
+ 
+-  def NAME#"32ak" : MxBiArOp_R_RM<MN, NODE, MxType32a, MxType32.KOp, MxType32.KPat,
++  def NAME#"64ak" : MxBiArOp_R_RM<MN, NODE, MxType64a, MxType64.KOp, MxType64.KPat,
+                                   CMD, MxEncAddrMode_k<"opd">>;
+-  def NAME#"32aq" : MxBiArOp_R_RM<MN, NODE, MxType32a, MxType32.QOp, MxType32.QPat,
++  def NAME#"64aq" : MxBiArOp_R_RM<MN, NODE, MxType64a, MxType64.QOp, MxType64.QPat,
+                                   CMD, MxEncAddrMode_q<"opd">>;
+-  def NAME#"32af" : MxBiArOp_R_RM<MN, NODE, MxType32a, MxType32.FOp, MxType32.FPat,
++  def NAME#"64af" : MxBiArOp_R_RM<MN, NODE, MxType64a, MxType64.FOp, MxType64.FPat,
+                                   CMD, MxEncAddrMode_f<"opd">>;
+-  def NAME#"32ap" : MxBiArOp_R_RM<MN, NODE, MxType32a, MxType32.POp, MxType32.PPat,
++  def NAME#"64ap" : MxBiArOp_R_RM<MN, NODE, MxType64a, MxType64.POp, MxType64.PPat,
+                                   CMD, MxEncAddrMode_p<"opd">>;
+-  def NAME#"32aj" : MxBiArOp_R_RM<MN, NODE, MxType32a, MxType32.JOp, MxType32.JPat,
++  def NAME#"64aj" : MxBiArOp_R_RM<MN, NODE, MxType64a, MxType64.JOp, MxType64.JPat,
+                                   CMD, MxEncAddrMode_j<"opd">>;
+-  def NAME#"32ab" : MxBiArOp_R_RM<MN, NODE, MxType32a, MxType32.BOp, MxType32.BPat,
++  def NAME#"64ab" : MxBiArOp_R_RM<MN, NODE, MxType64a, MxType64.BOp, MxType64.BPat,
+                                   CMD, MxEncAddrMode_abs<"opd", true>>;
+-  def NAME#"32ai" : MxBiArOp_R_RI_xEA<MN, NODE, MxType32a, CMD>;
+-
+-  def NAME#"32ar" : MxBiArOp_R_RR_xEA<MN, NODE, MxType32a, MxType32r, CMD>;
++  def NAME#"64ai" : MxBiArOp_R_RI_xEA<MN, NODE, MxType64a, CMD>;
++
++  def NAME#"64ar" : MxBiArOp_R_RR_xEA<MN, NODE, MxType64a, MxType64r, CMD>;
+ 
+ } // MxBiArOp_AF
+ 
+@@ -317,7 +320,7 @@
+ //   t8: i32 = ISD::ADD GLOBAL_OFFSET_TABLE, TargetGlobalTLSAddress:i32<ptr @myvar>
+ //     ====>
+ //   t8: i32,i8 = ADD32ab GLOBAL_OFFSET_TABLE, TargetGlobalTLSAddress:i32<ptr @myvar>
+-def : Pat<(add MxARD32:$src, tglobaltlsaddr:$opd), (ADD32ab MxARD32:$src, MxAL32:$opd)>;
++def : Pat<(add MxARD64:$src, tglobaltlsaddr:$opd), (ADD64ab MxARD64:$src, MxAL64:$opd)>;
+ 
+ let Uses = [CCR], Defs = [CCR] in {
+ let Constraints = "$src = $dst" in {
+@@ -344,7 +347,8 @@
+     // SIZE
+     !cond(!eq(TYPE.Size, 8): 0b00,
+           !eq(TYPE.Size, 16): 0b01,
+-          !eq(TYPE.Size, 32): 0b10),
++          !eq(TYPE.Size, 32): 0b10,
++          !eq(TYPE.Size, 64): 0b10),
+     0b00, /*R/M*/0b0,
+     // Source register
+     (operand "$opd", 3)
+@@ -356,7 +360,7 @@
+ multiclass MxBiArOp_RFF<string MN, SDNode NODE, bit isComm, bits<4> CMD> {
+ 
+ let isCommutable = isComm in {
+-  foreach SZ = [8, 16, 32] in
++  foreach SZ = [8, 16, 32, 64] in
+   def NAME#SZ#"dd"  : MxBiArOp_R_RRX<MN, NODE, !cast<MxType>("MxType"#SZ#"d"), CMD>;
+ } // isComm
+ 
+@@ -375,7 +379,7 @@
+ defm OR  : MxBiArOp_DF<"or",  MxOr,  1, 0x8, 0x0>;
+ 
+ multiclass MxBiArOp_DF_EAd<string MN, SDNode NODE, bits<4> CMD, bits<4> CMDI> {
+-  foreach SZ = [8, 16, 32] in {
++  foreach SZ = [8, 16, 32, 64] in {
+     let isCommutable = 1 in
+     def NAME#SZ#"dd"  : MxBiArOp_R_RR_EAd<MN, NODE,
+                                           !cast<MxType>("MxType"#SZ#"d"),
+@@ -503,13 +507,13 @@
+                                           MxEncAddrMode_j<"mem">>;
+ }
+ 
+-foreach S = [8, 16, 32] in {
++foreach S = [8, 16, 32, 64] in {
+   def CMP#S#di : MxCmp_RI<!cast<MxType>("MxType"#S#"d")>;
+   def CMP#S#bi : MxCmp_BI<!cast<MxType>("MxType"#S#"d")>;
+ } // foreach
+ 
+ def CMP8dd : MxCmp_RR<MxType8d>;
+-foreach S = [16, 32] in {
++foreach S = [16, 32, 64] in {
+   def CMP#S#dr : MxCmp_RR<!cast<MxType>("MxType"#S#"r"),
+                           !cast<MxType>("MxType"#S#"d")>;
+ }
+@@ -518,11 +522,13 @@
+ defm CMP8d  : MMxCmp_RM<MxType8d>;
+ defm CMP16d : MMxCmp_RM<MxType16d>;
+ defm CMP32d : MMxCmp_RM<MxType32d>;
++defm CMP64d : MMxCmp_RM<MxType64d>;
+ 
+ // cmp #imm, mem
+ defm CMP8  : MMxCmp_MI<MxType8d>;
+ defm CMP16 : MMxCmp_MI<MxType16d>;
+ defm CMP32 : MMxCmp_MI<MxType32d>;
++defm CMP64 : MMxCmp_MI<MxType64d>;
+ 
+ 
+ //===----------------------------------------------------------------------===//
+@@ -547,7 +553,9 @@
+       // word -> long
+       !and(!eq(FROM.Size, 16), !eq(TO.Size, 32)): 0b011,
+       // byte -> long
+-      !and(!eq(FROM.Size, 8), !eq(TO.Size, 32)): 0b111
++      !and(!eq(FROM.Size, 8), !eq(TO.Size, 32)): 0b111,
++      // long -> quad: the word -> long form behind the W prefix
++      !and(!eq(FROM.Size, 32), !eq(TO.Size, 64)): 0b011
+     ),
+     0b000,
+     // REGISTER
+@@ -557,9 +565,17 @@
+ 
+ def EXT16 : MxExt<MxType16d, MxType8d>;
+ def EXT32 : MxExt<MxType32d, MxType16d>;
++def EXT64 : MxExt<MxType64d, MxType32d>;
+ 
+ def : Pat<(sext_inreg i16:$src, i8),  (EXT16 $src)>;
+ def : Pat<(sext_inreg i32:$src, i16), (EXT32 $src)>;
++def : Pat<(sext_inreg i64:$src, i32), (EXT64 $src)>;
++def : Pat<(sext_inreg i64:$src, i16),
++          (EXT64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
++                                (MOVSXd32d16 (EXTRACT_SUBREG $src, MxSubRegIndex16Lo)), MxSubRegIndex32Lo))>;
++def : Pat<(sext_inreg i64:$src, i8),
++          (EXT64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
++                                (MOVSXd32d8 (EXTRACT_SUBREG $src, MxSubRegIndex8Lo)), MxSubRegIndex32Lo))>;
+ def : Pat<(sext_inreg i32:$src, i8),
+           (EXT32 (MOVXd32d16 (EXT16 (EXTRACT_SUBREG $src, MxSubRegIndex16Lo))))>;
+ 
+@@ -601,8 +617,8 @@
+       (operand "$dst", 3),
+       !if(SIGNED, 0b1, 0b0),
+       /*SIZE*/0b0, 0b0000000,
+-      // Dr REGISTER
+-      0b000)
++      // Dr REGISTER: the same as Dq, so that no remainder overwrites another register
++      (operand "$dst", 3))
+   );
+ }
+ 
+@@ -729,6 +745,21 @@
+ 
+ defm MUL : MxDiMuOp<"mul", 0xC>;
+ 
++// 64 x 64 and 64 / 64: the long forms behind the W prefix
++let Defs = [CCR], Constraints = "$src = $dst" in
++class MxDiMuOp_DD_Quad<string MN, SDNode NODE, bits<10> CMD, bit SIGNED = false>
++    : MxInst<(outs MxDRD64:$dst), (ins MxDRD64:$src, MxDRD64:$opd), MN#"\t$opd, $dst",
++             [(set i64:$dst, CCR, (NODE i64:$src, i64:$opd))]> {
++  let Inst = (ascend
++    (descend CMD, /*MODE*/0b000, /*REGISTER*/(operand "$opd", 3)),
++    (descend 0b0, (operand "$dst", 3), !if(SIGNED, 0b1, 0b0), /*SIZE*/0b0, 0b0000000,
++             (operand "$dst", 3))
++  );
++}
++def SDIVd64d64 : MxDiMuOp_DD_Quad<"divs.q", sdiv, 0x131, /*SIGNED*/true>;
++def UDIVd64d64 : MxDiMuOp_DD_Quad<"divu.q", udiv, 0x131, /*SIGNED*/false>;
++def SMULd64d64 : MxDiMuOp_DD_Quad<"muls.q", MxSMul, 0x130, /*SIGNED*/true>;
++def UMULd64d64 : MxDiMuOp_DD_Quad<"mulu.q", MxUMul, 0x130, /*SIGNED*/false>;
+ def SMULd32d32 : MxDiMuOp_DD_Long<"muls.l", MxSMul, 0x130, /*SIGNED*/true>;
+ def UMULd32d32 : MxDiMuOp_DD_Long<"mulu.l", MxUMul, 0x130, /*SIGNED*/false>;
+ 
+@@ -749,6 +780,7 @@
+              MxSubRegIndex16Lo)>;
+ 
+ def : Pat<(mul i32:$dst, i32:$opd), (SMULd32d32 $dst, $opd)>;
++def : Pat<(mul i64:$dst, i64:$opd), (SMULd64d64 $dst, $opd)>;
+ 
+ 
+ // RI
+@@ -825,7 +857,7 @@
+ } // let Constraints
+ } // let Defs = [CCR]
+ 
+-foreach S = [8, 16, 32] in {
++foreach S = [8, 16, 32, 64] in {
+   def NEG#S#d  : MxNeg_D<!cast<MxType>("MxType"#S#"d")>;
+   def NEGX#S#d : MxNegX_D<!cast<MxType>("MxType"#S#"d")>;
+   def NOT#S#d  : MxNot_D<!cast<MxType>("MxType"#S#"d")>;
+@@ -834,12 +866,14 @@
+ def : Pat<(MxSub 0, i8 :$src), (NEG8d  MxDRD8 :$src)>;
+ def : Pat<(MxSub 0, i16:$src), (NEG16d MxDRD16:$src)>;
+ def : Pat<(MxSub 0, i32:$src), (NEG32d MxDRD32:$src)>;
++def : Pat<(MxSub 0, i64:$src), (NEG64d MxDRD64:$src)>;
+ // SExt of i1 values.
+ // Although we specify `ZeroOrNegativeOneBooleanContent` for boolean content,
+ // we're still adding an AND here as we don't know the origin of the i1 value.
+ def : Pat<(sext_inreg i8:$src,  i1), (NEG8d  (AND8di  MxDRD8:$src,  1))>;
+ def : Pat<(sext_inreg i16:$src, i1), (NEG16d (AND16di MxDRD16:$src, 1))>;
+ def : Pat<(sext_inreg i32:$src, i1), (NEG32d (AND32di MxDRD32:$src, 1))>;
++def : Pat<(sext_inreg i64:$src, i1), (NEG64d (AND64di MxDRD64:$src, 1))>;
+ 
+ //===----------------------------------------------------------------------===//
+ // no-CCR Patterns
+@@ -861,6 +895,8 @@
+             (ADD16dr MxXRD16:$src, MxDRD16:$opd)>;
+   def : Pat<(!cast<SDNode>(N) i32:$src, i32:$opd),
+             (ADD32dr MxXRD32:$src, MxDRD32:$opd)>;
++def : Pat<(!cast<SDNode>(N) i64:$src, i64:$opd),
++            (ADD64dr MxXRD64:$src, MxDRD64:$opd)>;
+ 
+   // add (An), reg
+   def : Pat<(!cast<SDNode>(N) MxType8.VT:$src, (Mxloadi8 MxType8.JPat:$opd)),
+@@ -869,6 +905,8 @@
+             (ADD16dj MxDRD16:$src, MxType16.JOp:$opd)>;
+   def : Pat<(!cast<SDNode>(N) MxType32.VT:$src, (Mxloadi32 MxType32.JPat:$opd)),
+             (ADD32dj MxDRD32:$src, MxType32.JOp:$opd)>;
++def : Pat<(!cast<SDNode>(N) MxType64.VT:$src, (Mxloadi64 MxType64.JPat:$opd)),
++            (ADD64dj MxDRD64:$src, MxType64.JOp:$opd)>;
+ 
+   // add (i,An), reg
+   def : Pat<(!cast<SDNode>(N) MxType8.VT:$src, (Mxloadi8 MxType8.PPat:$opd)),
+@@ -877,6 +915,8 @@
+             (ADD16dp MxDRD16:$src, MxType16.POp:$opd)>;
+   def : Pat<(!cast<SDNode>(N) MxType32.VT:$src, (Mxloadi32 MxType32.PPat:$opd)),
+             (ADD32dp MxDRD32:$src, MxType32.POp:$opd)>;
++def : Pat<(!cast<SDNode>(N) MxType64.VT:$src, (Mxloadi64 MxType64.PPat:$opd)),
++            (ADD64dp MxDRD64:$src, MxType64.POp:$opd)>;
+ 
+   // add (i,An,Xn), reg
+   def : Pat<(!cast<SDNode>(N) MxType8.VT:$src, (Mxloadi8 MxType8.FPat:$opd)),
+@@ -885,6 +925,8 @@
+             (ADD16df MxDRD16:$src, MxType16.FOp:$opd)>;
+   def : Pat<(!cast<SDNode>(N) MxType32.VT:$src, (Mxloadi32 MxType32.FPat:$opd)),
+             (ADD32df MxDRD32:$src, MxType32.FOp:$opd)>;
++def : Pat<(!cast<SDNode>(N) MxType64.VT:$src, (Mxloadi64 MxType64.FPat:$opd)),
++            (ADD64df MxDRD64:$src, MxType64.FOp:$opd)>;
+ 
+   // add reg, imm
+   def : Pat<(!cast<SDNode>(N) i8: $src, Mxi8immSExt8:$opd),
+@@ -898,6 +940,8 @@
+   let AddedComplexity = 15 in {
+   def : Pat<(!cast<SDNode>(N) i32:$src, Mxi32immSExt32:$opd),
+             (ADD32di MxDRD32:$src, imm:$opd)>;
++def : Pat<(!cast<SDNode>(N) i64:$src, Mxi64immSExt64:$opd),
++            (ADD64di MxDRD64:$src, imm:$opd)>;
+   } // AddedComplexity = 15
+ 
+   // add imm, (An)
+@@ -910,12 +954,16 @@
+   def : Pat<(store (!cast<SDNode>(N) (load MxType32.JPat:$dst), MxType32.IPat:$opd),
+                    MxType32.JPat:$dst),
+             (ADD32ji MxType32.JOp:$dst, imm:$opd)>;
++def : Pat<(store (!cast<SDNode>(N) (load MxType64.JPat:$dst), MxType64.IPat:$opd),
++                   MxType64.JPat:$dst),
++            (ADD64ji MxType64.JOp:$dst, imm:$opd)>;
+ 
+ } // foreach add, addc
+ 
+ def : Pat<(adde i8 :$src, i8 :$opd), (ADDX8dd  MxDRD8 :$src, MxDRD8 :$opd)>;
+ def : Pat<(adde i16:$src, i16:$opd), (ADDX16dd MxDRD16:$src, MxDRD16:$opd)>;
+ def : Pat<(adde i32:$src, i32:$opd), (ADDX32dd MxDRD32:$src, MxDRD32:$opd)>;
++def : Pat<(adde i64:$src, i64:$opd), (ADDX64dd MxDRD64:$src, MxDRD64:$opd)>;
+ 
+ 
+ 
+@@ -928,6 +976,8 @@
+             (SUB16dd MxDRD16:$src, MxDRD16:$opd)>;
+   def : Pat<(!cast<SDNode>(N) i32:$src, i32:$opd),
+             (SUB32dd MxDRD32:$src, MxDRD32:$opd)>;
++def : Pat<(!cast<SDNode>(N) i64:$src, i64:$opd),
++            (SUB64dd MxDRD64:$src, MxDRD64:$opd)>;
+ 
+ 
+   // sub (An), reg
+@@ -937,6 +987,8 @@
+             (SUB16dj MxDRD16:$src, MxType16.JOp:$opd)>;
+   def : Pat<(!cast<SDNode>(N) MxType32.VT:$src, (Mxloadi32 MxType32.JPat:$opd)),
+             (SUB32dj MxDRD32:$src, MxType32.JOp:$opd)>;
++def : Pat<(!cast<SDNode>(N) MxType64.VT:$src, (Mxloadi64 MxType64.JPat:$opd)),
++            (SUB64dj MxDRD64:$src, MxType64.JOp:$opd)>;
+ 
+   // sub (i,An), reg
+   def : Pat<(!cast<SDNode>(N) MxType8.VT:$src, (Mxloadi8 MxType8.PPat:$opd)),
+@@ -945,6 +997,8 @@
+             (SUB16dp MxDRD16:$src, MxType16.POp:$opd)>;
+   def : Pat<(!cast<SDNode>(N) MxType32.VT:$src, (Mxloadi32 MxType32.PPat:$opd)),
+             (SUB32dp MxDRD32:$src, MxType32.POp:$opd)>;
++def : Pat<(!cast<SDNode>(N) MxType64.VT:$src, (Mxloadi64 MxType64.PPat:$opd)),
++            (SUB64dp MxDRD64:$src, MxType64.POp:$opd)>;
+ 
+   // sub (i,An,Xn), reg
+   def : Pat<(!cast<SDNode>(N) MxType8.VT:$src, (Mxloadi8 MxType8.FPat:$opd)),
+@@ -953,6 +1007,8 @@
+             (SUB16df MxDRD16:$src, MxType16.FOp:$opd)>;
+   def : Pat<(!cast<SDNode>(N) MxType32.VT:$src, (Mxloadi32 MxType32.FPat:$opd)),
+             (SUB32df MxDRD32:$src, MxType32.FOp:$opd)>;
++def : Pat<(!cast<SDNode>(N) MxType64.VT:$src, (Mxloadi64 MxType64.FPat:$opd)),
++            (SUB64df MxDRD64:$src, MxType64.FOp:$opd)>;
+ 
+   // sub reg, imm
+   def : Pat<(!cast<SDNode>(N) i8 :$src, Mxi8immSExt8 :$opd),
+@@ -961,6 +1017,8 @@
+             (SUB16di MxDRD16:$src, imm:$opd)>;
+   def : Pat<(!cast<SDNode>(N) i32:$src, Mxi32immSExt32:$opd),
+             (SUB32di MxDRD32:$src, imm:$opd)>;
++def : Pat<(!cast<SDNode>(N) i64:$src, Mxi64immSExt64:$opd),
++            (SUB64di MxDRD64:$src, imm:$opd)>;
+ 
+   // sub imm, (An)
+   def : Pat<(store (!cast<SDNode>(N) (load MxType8.JPat:$dst), MxType8.IPat:$opd),
+@@ -972,12 +1030,16 @@
+   def : Pat<(store (!cast<SDNode>(N) (load MxType32.JPat:$dst), MxType32.IPat:$opd),
+                    MxType32.JPat:$dst),
+             (SUB32ji MxType32.JOp:$dst, imm:$opd)>;
++def : Pat<(store (!cast<SDNode>(N) (load MxType64.JPat:$dst), MxType64.IPat:$opd),
++                   MxType64.JPat:$dst),
++            (SUB64ji MxType64.JOp:$dst, imm:$opd)>;
+ 
+ } // foreach sub, subx
+ 
+ def : Pat<(sube i8 :$src, i8 :$opd), (SUBX8dd  MxDRD8 :$src, MxDRD8 :$opd)>;
+ def : Pat<(sube i16:$src, i16:$opd), (SUBX16dd MxDRD16:$src, MxDRD16:$opd)>;
+ def : Pat<(sube i32:$src, i32:$opd), (SUBX32dd MxDRD32:$src, MxDRD32:$opd)>;
++def : Pat<(sube i64:$src, i64:$opd), (SUBX64dd MxDRD64:$src, MxDRD64:$opd)>;
+ 
+ multiclass BitwisePat<string INST, SDNode OP> {
+   // op reg, reg
+@@ -987,6 +1049,8 @@
+             (!cast<MxInst>(INST#"16dd") MxDRD16:$src, MxDRD16:$opd)>;
+   def : Pat<(OP i32:$src, i32:$opd),
+             (!cast<MxInst>(INST#"32dd") MxDRD32:$src, MxDRD32:$opd)>;
++def : Pat<(OP i64:$src, i64:$opd),
++            (!cast<MxInst>(INST#"64dd") MxDRD64:$src, MxDRD64:$opd)>;
+   // op reg, imm
+   def : Pat<(OP i8: $src, Mxi8immSExt8 :$opd),
+             (!cast<MxInst>(INST#"8di")  MxDRD8 :$src, imm:$opd)>;
+@@ -994,6 +1058,8 @@
+             (!cast<MxInst>(INST#"16di") MxDRD16:$src, imm:$opd)>;
+   def : Pat<(OP i32:$src, Mxi32immSExt32:$opd),
+             (!cast<MxInst>(INST#"32di") MxDRD32:$src, imm:$opd)>;
++def : Pat<(OP i64:$src, Mxi64immSExt64:$opd),
++            (!cast<MxInst>(INST#"64di") MxDRD64:$src, imm:$opd)>;
+ }
+ 
+ defm : BitwisePat<"AND", and>;
+--- a/llvm/lib/Target/M68k64/M68k64InstrAtomics.td
++++ b/llvm/lib/Target/M68k64/M68k64InstrAtomics.td
+@@ -6,7 +6,7 @@
+ //
+ //===----------------------------------------------------------------------===//
+ 
+-foreach size = [8, 16, 32] in {
++foreach size = [8, 16, 32, 64] in {
+   def : Pat<(!cast<SDPatternOperator>("atomic_load_"#size) MxCP_ARI:$ptr),
+             (!cast<MxInst>("MOV"#size#"dj") !cast<MxMemOp>("MxARI"#size):$ptr)>;
+ 
+@@ -60,6 +60,7 @@
+ def CASARI8  : MxCASARIOp<0x1, MxType8d>;
+ def CASARI16 : MxCASARIOp<0x2, MxType16d>;
+ def CASARI32 : MxCASARIOp<0x3, MxType32d>;
++def CASARI64 : MxCASARIOp<0x3, MxType64d>;
+ 
+ class MxCASARIDOp<bits<2> size_encoding, MxType type>
+     : MxInst<(outs type.ROp:$out),
+@@ -78,6 +79,7 @@
+ def CASARID8  : MxCASARIDOp<0x1, MxType8d>;
+ def CASARID16 : MxCASARIDOp<0x2, MxType16d>;
+ def CASARID32 : MxCASARIDOp<0x3, MxType32d>;
++def CASARID64 : MxCASARIDOp<0x3, MxType64d>;
+ 
+ class MxCASARIIOp<bits<2> size_encoding, MxType type>
+     : MxInst<(outs type.ROp:$out),
+@@ -96,6 +98,7 @@
+ def CASARII8  : MxCASARIIOp<0x1, MxType8d>;
+ def CASARII16 : MxCASARIIOp<0x2, MxType16d>;
+ def CASARII32 : MxCASARIIOp<0x3, MxType32d>;
++def CASARII64 : MxCASARIIOp<0x3, MxType64d>;
+ 
+ class MxCASALOp<bits<2> size_encoding, MxType type>
+     : MxInst<(outs type.ROp:$out),
+@@ -114,9 +117,10 @@
+ def CASAL8  : MxCASALOp<0x1, MxType8d>;
+ def CASAL16 : MxCASALOp<0x2, MxType16d>;
+ def CASAL32 : MxCASALOp<0x3, MxType32d>;
++def CASAL64 : MxCASALOp<0x3, MxType64d>;
+ 
+ foreach mode = ["ARI", "ARII", "ARID", "AL"] in {
+-foreach size = [8, 16, 32] in {
++foreach size = [8, 16, 32, 64] in {
+   def : Pat<(!cast<SDPatternOperator>("atomic_cmp_swap_i"#size) !cast<ComplexPattern>("MxCP_"#mode):$ptr,
+                                                                 !cast<MxRegOp>("MxDRD"#size):$cmp,
+                                                                 !cast<MxRegOp>("MxDRD"#size):$new),
+--- a/llvm/lib/Target/M68k64/M68k64InstrBits.td
++++ b/llvm/lib/Target/M68k64/M68k64InstrBits.td
+@@ -133,8 +133,11 @@
+ multiclass MxBITPatR<MxInst INSTd, MxInst INSTi, SDNode NODE> {
+ def : Pat<(NODE MxType32d.VT:$dst, MxType32d.VT:$bitno),
+           (INSTd MxType32d.ROp:$dst, MxType32d.ROp:$bitno)>;
+-def : Pat<(NODE MxType32d.VT:$dst, MxType32d.IPat:$bitno),
+-          (INSTi MxType32d.ROp:$dst, MxType32d.IOp:$bitno)>;
++// imm (not IPat) makes TableGen turn the constant into a TargetConstant; with
++// IPat the bit number stayed an ordinary Constant, was put in a register, and
++// the immediate field got that register's number.
++def : Pat<(NODE MxType32d.VT:$dst, (i32 imm:$bitno)),
++          (INSTi MxType32d.ROp:$dst, imm:$bitno)>;
+ }
+ 
+ defm : MxBITPatR<BTST32dd, BTST32di, MxBtst>;
+@@ -143,8 +146,8 @@
+                      MxOperand MEMOpd, ComplexPattern MEMPat> {
+ def : Pat<(NODE (TYPE.Load MEMPat:$dst), TYPE.VT:$bitno),
+           (INSTd MEMOpd:$dst, TYPE.ROp:$bitno)>;
+-def : Pat<(NODE (TYPE.Load MEMPat:$dst), TYPE.IPat:$bitno),
+-          (INSTi MEMOpd:$dst, TYPE.IOp:$bitno)>;
++def : Pat<(NODE (TYPE.Load MEMPat:$dst), (TYPE.VT imm:$bitno)),
++          (INSTi MEMOpd:$dst, imm:$bitno)>;
+ }
+ 
+ defm : MxBITPatM<BTST8qd, BTST8qi, MxBtst,
+--- a/llvm/lib/Target/M68k64/M68k64InstrCompiler.td
++++ b/llvm/lib/Target/M68k64/M68k64InstrCompiler.td
+@@ -16,35 +16,33 @@
+ // ConstantPool, GlobalAddress, ExternalSymbol, and JumpTable
+ //===----------------------------------------------------------------------===//
+ 
+-def : Pat<(i32 (MxWrapper tconstpool    :$src)), (MOV32ri tconstpool    :$src)>;
+-def : Pat<(i32 (MxWrapper tglobaladdr   :$src)), (MOV32ri tglobaladdr   :$src)>;
+-def : Pat<(i32 (MxWrapper texternalsym  :$src)), (MOV32ri texternalsym  :$src)>;
+-def : Pat<(i32 (MxWrapper tjumptable    :$src)), (MOV32ri tjumptable    :$src)>;
+-def : Pat<(i32 (MxWrapper tblockaddress :$src)), (MOV32ri tblockaddress :$src)>;
++def : Pat<(i64 (MxWrapper tconstpool    :$src)), (MOV64ri tconstpool    :$src)>;
++def : Pat<(i64 (MxWrapper tglobaladdr   :$src)), (MOV64ri tglobaladdr   :$src)>;
++def : Pat<(i64 (MxWrapper texternalsym  :$src)), (MOV64ri texternalsym  :$src)>;
++def : Pat<(i64 (MxWrapper tjumptable    :$src)), (MOV64ri tjumptable    :$src)>;
++def : Pat<(i64 (MxWrapper tblockaddress :$src)), (MOV64ri tblockaddress :$src)>;
+ 
+-def : Pat<(add MxDRD32:$src, (MxWrapper tconstpool:$opd)),
+-          (ADD32di MxDRD32:$src, tconstpool:$opd)>;
+-def : Pat<(add MxARD32:$src, (MxWrapper tjumptable:$opd)),
+-          (ADD32ai MxARD32:$src, tjumptable:$opd)>;
+-def : Pat<(add MxARD32:$src, (MxWrapper tglobaladdr :$opd)),
+-          (ADD32ai MxARD32:$src, tglobaladdr:$opd)>;
+-def : Pat<(add MxARD32:$src, (MxWrapper texternalsym:$opd)),
+-          (ADD32ai MxARD32:$src, texternalsym:$opd)>;
+-def : Pat<(add MxARD32:$src, (MxWrapper tblockaddress:$opd)),
+-          (ADD32ai MxARD32:$src, tblockaddress:$opd)>;
++def : Pat<(add MxARD64:$src, (MxWrapper tjumptable:$opd)),
++          (ADD64ai MxARD64:$src, tjumptable:$opd)>;
++def : Pat<(add MxARD64:$src, (MxWrapper tglobaladdr :$opd)),
++          (ADD64ai MxARD64:$src, tglobaladdr:$opd)>;
++def : Pat<(add MxARD64:$src, (MxWrapper texternalsym:$opd)),
++          (ADD64ai MxARD64:$src, texternalsym:$opd)>;
++def : Pat<(add MxARD64:$src, (MxWrapper tblockaddress:$opd)),
++          (ADD64ai MxARD64:$src, tblockaddress:$opd)>;
+ 
+-def : Pat<(store (i32 (MxWrapper tglobaladdr:$src)), iPTR:$dst),
+-          (MOV32ji MxARI32:$dst, tglobaladdr:$src)>;
+-def : Pat<(store (i32 (MxWrapper texternalsym:$src)), iPTR:$dst),
+-          (MOV32ji MxARI32:$dst, texternalsym:$src)>;
+-def : Pat<(store (i32 (MxWrapper tblockaddress:$src)), iPTR:$dst),
+-          (MOV32ji MxARI32:$dst, tblockaddress:$src)>;
++def : Pat<(store (i64 (MxWrapper tglobaladdr:$src)), iPTR:$dst),
++          (MOV64ji MxARI64:$dst, tglobaladdr:$src)>;
++def : Pat<(store (i64 (MxWrapper texternalsym:$src)), iPTR:$dst),
++          (MOV64ji MxARI64:$dst, texternalsym:$src)>;
++def : Pat<(store (i64 (MxWrapper tblockaddress:$src)), iPTR:$dst),
++          (MOV64ji MxARI64:$dst, tblockaddress:$src)>;
+ 
+-def : Pat<(i32 (MxWrapperPC tconstpool    :$src)), (LEA32q tconstpool    :$src)>;
+-def : Pat<(i32 (MxWrapperPC tglobaladdr   :$src)), (LEA32q tglobaladdr   :$src)>;
+-def : Pat<(i32 (MxWrapperPC texternalsym  :$src)), (LEA32q texternalsym  :$src)>;
+-def : Pat<(i32 (MxWrapperPC tjumptable    :$src)), (LEA32q tjumptable    :$src)>;
+-def : Pat<(i32 (MxWrapperPC tblockaddress :$src)), (LEA32q tblockaddress :$src)>;
++def : Pat<(i64 (MxWrapperPC tconstpool    :$src)), (LEA64q tconstpool    :$src)>;
++def : Pat<(i64 (MxWrapperPC tglobaladdr   :$src)), (LEA64q tglobaladdr   :$src)>;
++def : Pat<(i64 (MxWrapperPC texternalsym  :$src)), (LEA64q texternalsym  :$src)>;
++def : Pat<(i64 (MxWrapperPC tjumptable    :$src)), (LEA64q tjumptable    :$src)>;
++def : Pat<(i64 (MxWrapperPC tblockaddress :$src)), (LEA64q tblockaddress :$src)>;
+ 
+ 
+ //===----------------------------------------------------------------------===//
+@@ -63,6 +61,7 @@
+ def CMOV8d  : MxCMove<MxType8d>;
+ def CMOV16d : MxCMove<MxType16d>;
+ def CMOV32r : MxCMove<MxType32r>;
++def CMOV64r : MxCMove<MxType64r>;
+ 
+ 
+ //===----------------------------------------------------------------------===//
+@@ -74,14 +73,14 @@
+ // pointer before prolog-epilog rewriting occurs.
+ // Pessimistically assume ADJCALLSTACKDOWN / ADJCALLSTACKUP will become
+ // sub / add which can clobber CCR.
+-let Defs = [SP, CCR], Uses = [SP] in {
++let Defs = [QSP, CCR], Uses = [QSP] in {
+ 
+   def ADJCALLSTACKDOWN
+-    : MxPseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
++    : MxPseudo<(outs), (ins i64imm:$amt1, i64imm:$amt2),
+                [(MxCallSeqStart timm:$amt1, timm:$amt2)]>;
+ 
+   def ADJCALLSTACKUP
+-    : MxPseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
++    : MxPseudo<(outs), (ins i64imm:$amt1, i64imm:$amt2),
+                [(MxCallSeqEnd timm:$amt1, timm:$amt2)]>;
+ 
+ } // Defs
+@@ -98,17 +97,17 @@
+ // register which is part of the address mode may be assigned a
+ // callee-saved register.
+ def : Pat<(MxTCRet (load MxCP_ARII:$dst), imm:$adj),
+-          (TCRETURNj (MOV32af_TC MxARII32:$dst), imm:$adj)>,
++          (TCRETURNj (MOV64af_TC MxARII64:$dst), imm:$adj)>,
+       Requires<[IsNotPIC]>;
+ 
+-def : Pat<(MxTCRet AR32_TC:$dst, imm:$adj),
+-          (TCRETURNj MxARI32_TC:$dst, imm:$adj)>;
++def : Pat<(MxTCRet AR64_TC:$dst, imm:$adj),
++          (TCRETURNj MxARI64_TC:$dst, imm:$adj)>;
+ 
+-def : Pat<(MxTCRet (i32 tglobaladdr:$dst), imm:$adj),
+-          (TCRETURNq MxPCD32:$dst, imm:$adj)>;
++def : Pat<(MxTCRet (i64 tglobaladdr:$dst), imm:$adj),
++          (TCRETURNq MxPCD64:$dst, imm:$adj)>;
+ 
+-def : Pat<(MxTCRet (i32 texternalsym:$dst), imm:$adj),
+-          (TCRETURNq MxPCD32:$dst, imm:$adj)>;
++def : Pat<(MxTCRet (i64 texternalsym:$dst), imm:$adj),
++          (TCRETURNq MxPCD64:$dst, imm:$adj)>;
+ 
+ 
+ //===----------------------------------------------------------------------===//
+@@ -120,7 +119,23 @@
+ // the heap.
+ //===----------------------------------------------------------------------===//
+ 
+-let Defs = [SP, CCR], Uses = [SP] in
++let Defs = [QSP, CCR], Uses = [QSP] in
+ let usesCustomInserter = 1 in
+-def SALLOCA : MxPseudo<(outs MxARD32:$dst), (ins MxARD32:$size),
++def SALLOCA : MxPseudo<(outs MxARD64:$dst), (ins MxARD64:$size),
+                        [(set iPTR:$dst, (MxSegAlloca iPTR:$size))]>;
++
++//===----------------------------------------------------------------------===//
++// i64 and its smaller parts. A .L write to a data register clears bits 63 to 32.
++//===----------------------------------------------------------------------===//
++def : Pat<(i64 (zext i32:$s)), (SUBREG_TO_REG (i64 0), (MOV32dd i32:$s), MxSubRegIndex32Lo)>;
++def : Pat<(i64 (zext i16:$s)), (SUBREG_TO_REG (i64 0), (MOVZXd32d16 i16:$s), MxSubRegIndex32Lo)>;
++def : Pat<(i64 (zext i8:$s)),  (SUBREG_TO_REG (i64 0), (MOVZXd32d8 i8:$s), MxSubRegIndex32Lo)>;
++def : Pat<(i64 (anyext i32:$s)), (INSERT_SUBREG (i64 (IMPLICIT_DEF)), i32:$s, MxSubRegIndex32Lo)>;
++def : Pat<(i64 (anyext i16:$s)), (SUBREG_TO_REG (i64 0), (MOVXd32d16 i16:$s), MxSubRegIndex32Lo)>;
++def : Pat<(i64 (anyext i8:$s)),  (SUBREG_TO_REG (i64 0), (MOVXd32d8 i8:$s), MxSubRegIndex32Lo)>;
++def : Pat<(i64 (sext i32:$s)), (EXT64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)), i32:$s, MxSubRegIndex32Lo))>;
++def : Pat<(i64 (sext i16:$s)), (EXT64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)), (MOVSXd32d16 i16:$s), MxSubRegIndex32Lo))>;
++def : Pat<(i64 (sext i8:$s)),  (EXT64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)), (MOVSXd32d8 i8:$s), MxSubRegIndex32Lo))>;
++def : Pat<(i32 (trunc i64:$s)), (EXTRACT_SUBREG MxXRD64:$s, MxSubRegIndex32Lo)>;
++def : Pat<(i16 (trunc i64:$s)), (EXTRACT_SUBREG (i32 (EXTRACT_SUBREG MxXRD64:$s, MxSubRegIndex32Lo)), MxSubRegIndex16Lo)>;
++def : Pat<(i8  (trunc i64:$s)), (EXTRACT_SUBREG (i32 (EXTRACT_SUBREG MxXRD64:$s, MxSubRegIndex32Lo)), MxSubRegIndex8Lo)>;
+--- a/llvm/lib/Target/M68k64/M68k64InstrControl.td
++++ b/llvm/lib/Target/M68k64/M68k64InstrControl.td
+@@ -138,7 +138,17 @@
+     );
+ }
+ 
+-def JMP32j : MxJMP<MxARI32, MxEncAddrMode_j<"dst">>;
++def JMP32j : MxJMP<MxARI64, MxEncAddrMode_j<"dst">>;
++
++// jmp (sym,%pc): only for the assembler, the code generator jumps through registers
++let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in
++def JMP32q : MxInst<(outs), (ins MxPCD64:$dst), "jmp	$dst", []> {
++  let Inst =
++    (ascend
++      (descend 0b0100, 0b1110, 0b11, MxEncAddrMode_q<"dst">.EA),
++      MxEncAddrMode_q<"dst">.Supplement
++    );
++}
+ 
+ 
+ // FIXME Support 16 bit indirect jump.
+@@ -275,7 +285,7 @@
+ // a use to prevent stack-pointer assignments that appear immediately
+ // before calls from potentially appearing dead. Uses for argument
+ // registers are added manually.
+-let Uses = [SP] in
++let Uses = [QSP] in
+ let isCall = 1 in
+ ///------------------------------+---------+---------
+ /// F  E  D  C  B  A  9  8  7  6 | 5  4  3 | 2  1  0
+@@ -291,43 +301,43 @@
+     );
+ }
+ 
+-def CALLk : MxCall<MxPCI32, MxEncAddrMode_k<"dst">>;
+-def CALLq : MxCall<MxPCD32, MxEncAddrMode_q<"dst">>;
+-def CALLb : MxCall<MxAL32,  MxEncAddrMode_abs<"dst", true>>;
+-def CALLj : MxCall<MxARI32, MxEncAddrMode_j<"dst">>;
++def CALLk : MxCall<MxPCI64, MxEncAddrMode_k<"dst">>;
++def CALLq : MxCall<MxPCD64, MxEncAddrMode_q<"dst">>;
++def CALLb : MxCall<MxAL64,  MxEncAddrMode_abs<"dst", true>>;
++def CALLj : MxCall<MxARI64, MxEncAddrMode_j<"dst">>;
+ 
+ multiclass CallPat<MxCall callOp, Predicate pred> {
+   let Predicates = [pred] in {
+-    def : Pat<(MxCall (i32 tglobaladdr:$dst)),  (callOp tglobaladdr:$dst)>;
+-    def : Pat<(MxCall (i32 texternalsym:$dst)), (callOp texternalsym:$dst)>;
+-    def : Pat<(MxCall (i32 imm:$dst)),          (callOp imm:$dst)>;
++    def : Pat<(MxCall (i64 tglobaladdr:$dst)),  (callOp tglobaladdr:$dst)>;
++    def : Pat<(MxCall (i64 texternalsym:$dst)), (callOp texternalsym:$dst)>;
++    def : Pat<(MxCall (i64 imm:$dst)),          (callOp imm:$dst)>;
+   }
+ }
+ 
+ defm : CallPat<CALLq, IsPIC>;
+-defm : CallPat<CALLb, IsNotPIC>;
+-
+-def : Pat<(MxCall iPTR:$dst), (CALLj MxARI32:$dst)>;
++defm : CallPat<CALLq, IsNotPIC>;
++
++def : Pat<(MxCall iPTR:$dst), (CALLj MxARI64:$dst)>;
+ 
+ //===----------------------------------------------------------------------===//
+ // Tail Call
+ //===----------------------------------------------------------------------===//
+ 
+ let isCodeGenOnly = 1 in {
+-let Uses = [SP] in {
++let Uses = [QSP] in {
+ let isCall = 1, isTerminator = 1, isBarrier = 1 in {
+ 
+ let isReturn = 1 in
+-def TCRETURNq : MxPseudo<(outs), (ins MxPCD32:$dst,    i32imm:$adj)>;
+-def TAILJMPq  : MxPseudo<(outs), (ins MxPCD32:$dst)>;
++def TCRETURNq : MxPseudo<(outs), (ins MxPCD64:$dst,    i32imm:$adj)>;
++def TAILJMPq  : MxPseudo<(outs), (ins MxPCD64:$dst)>;
+ 
+ // NOTE j does not mean load and jump M68k64 jmp just calculates EA and jumps
+ // and it is using Mem form like (An) thus j letter.
+ let isReturn = 1 in
+-def TCRETURNj : MxPseudo<(outs), (ins MxARI32_TC:$dst, i32imm:$adj)>;
+-def TAILJMPj  : MxPseudo<(outs), (ins MxARI32_TC:$dst)>;
++def TCRETURNj : MxPseudo<(outs), (ins MxARI64_TC:$dst, i32imm:$adj)>;
++def TAILJMPj  : MxPseudo<(outs), (ins MxARI64_TC:$dst)>;
+ } // isCall = 1, isTerminator = 1, isBarrier = 1
+-} // Uses = [SP]
++} // Uses = [QSP]
+ } // isCodeGenOnly = 1
+ 
+ //===----------------------------------------------------------------------===//
+@@ -364,6 +374,8 @@
+                           [(set MxDRD16:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
+ def SETCS_C32d : MxPseudo<(outs MxXRD32:$dst), (ins),
+                           [(set MxXRD32:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
++def SETCS_C64d : MxPseudo<(outs MxDRD64:$dst), (ins),
++                          [(set MxDRD64:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
+ } // Uses = [CCR], Defs = [CCR], isPseudo = 1
+ 
+ 
+@@ -372,6 +384,8 @@
+ 
+ def : Pat<(i16 (sext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C16d)>;
+ def : Pat<(i32 (sext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C32d)>;
++def : Pat<(i64 (anyext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C64d)>;
++def : Pat<(i64 (sext (i8 (MxSetCC_C MxCONDcs, CCR)))), (SETCS_C64d)>;
+ 
+ // We canonicalize 'scs' to "(and (subx reg,reg), 1)" on the hope that the and
+ // will be eliminated and that the subx can be extended up to a wider type.  When
+--- a/llvm/lib/Target/M68k64/M68k64InstrData.td
++++ b/llvm/lib/Target/M68k64/M68k64InstrData.td
+@@ -50,6 +50,7 @@
+ def MxMoveSize8  : MxMoveSize<0b01>;
+ def MxMoveSize16 : MxMoveSize<0b11>;
+ def MxMoveSize32 : MxMoveSize<0b10>;
++def MxMoveSize64 : MxMoveSize<0b10>;
+ 
+ class MxMoveEncoding<MxMoveSize size, MxEncMemOp dst_enc, MxEncMemOp src_enc> {
+   dag Value = (ascend
+@@ -119,18 +120,35 @@
+ 
+ foreach DST_REG = ["r", "a"] in {
+   foreach SRC_REG = ["r", "a"] in
+-  foreach TYPE = [MxType16, MxType32] in
++  foreach TYPE = [MxType16, MxType32, MxType64] in
+   def MOV # TYPE.Size # DST_REG # SRC_REG # TYPE.Postfix
+       : MxMove_RR<TYPE, DST_REG, SRC_REG,
+                   MxMoveEncoding<!cast<MxMoveSize>("MxMoveSize"#TYPE.Size),
+                                  !cast<MxEncMemOp>("MxMoveDstOpEnc_"#DST_REG),
+                                  !cast<MxEncMemOp>("MxMoveSrcOpEnc_"#SRC_REG)>>;
+ } // foreach DST_REG
+-foreach TYPE = [MxType8, MxType16, MxType32] in
++foreach TYPE = [MxType8, MxType16, MxType32, MxType64] in
+ def MOV # TYPE.Size # dd # TYPE.Postfix
+     : MxMove_RR<TYPE, "d", "d",
+                 MxMoveEncoding<!cast<MxMoveSize>("MxMoveSize"#TYPE.Size),
+                                MxMoveDstOpEnc_d, MxMoveSrcOpEnc_d>>;
++
++// R <- R without touching the flags: what a register copy has to be, since the register
++// allocator can put one between a compare and its branch. The N prefix comes from TSFlags{1}.
++class MxMoveN<string size, MxOperand DST, MxOperand SRC, MxMoveSize SIZE_ENC, MxEncMemOp DST_ENC, MxEncMemOp SRC_ENC>
++    : MxInst<(outs DST:$dst), (ins SRC:$src), "movn."#size#"\t$src, $dst", []> {
++  let Inst = MxMoveEncoding<SIZE_ENC, DST_ENC, SRC_ENC>.Value;
++  let TSFlags{1} = 1;
++  let isMoveReg = 1;
++  let hasSideEffects = 0;
++}
++def MOVN8dd  : MxMoveN<"b", MxDRD8,  MxDRD8,  MxMoveSize8,  MxMoveDstOpEnc_d, MxMoveSrcOpEnc_d>;
++def MOVN16rr : MxMoveN<"w", MxXRD16, MxXRD16, MxMoveSize16, MxMoveDstOpEnc_r, MxMoveSrcOpEnc_r>;
++def MOVN32rr : MxMoveN<"l", MxXRD32, MxXRD32, MxMoveSize32, MxMoveDstOpEnc_r, MxMoveSrcOpEnc_r>;
++def MOVN32ra : MxMoveN<"l", MxXRD32, MxARD32, MxMoveSize32, MxMoveDstOpEnc_r, MxMoveSrcOpEnc_a>;
++def MOVN64rr : MxMoveN<"q", MxXRD64, MxXRD64, MxMoveSize64, MxMoveDstOpEnc_r, MxMoveSrcOpEnc_r>;
++def MOVN32ar : MxMoveN<"l", MxARD32, MxXRD32, MxMoveSize32, MxMoveDstOpEnc_a, MxMoveSrcOpEnc_r>;
++def MOVN32aa : MxMoveN<"l", MxARD32, MxARD32, MxMoveSize32, MxMoveDstOpEnc_a, MxMoveSrcOpEnc_a>;
+ 
+ // M <- R
+ let mayStore = 1 in {
+@@ -147,7 +165,7 @@
+ 
+ foreach REG = ["r", "a", "d"] in
+ foreach AM = MxMoveSupportedAMs in {
+-  foreach TYPE = !if(!eq(REG, "d"), [MxType8, MxType16, MxType32], [MxType16, MxType32]) in
++  foreach TYPE = !if(!eq(REG, "d"), [MxType8, MxType16, MxType32, MxType64], [MxType16, MxType32, MxType64]) in
+   def MOV # TYPE.Size # AM # REG # TYPE.Postfix
+       : MxMove_MR<TYPE, !cast<MxOpBundle>("MxOp"#TYPE.Size#"AddrMode_"#AM), REG,
+                   MxMoveEncoding<!cast<MxMoveSize>("MxMoveSize"#TYPE.Size),
+@@ -156,7 +174,7 @@
+ } // foreach AM
+ 
+ foreach AM = MxMoveSupportedAMs in {
+-  foreach TYPE = [MxType8, MxType16, MxType32] in
++  foreach TYPE = [MxType8, MxType16, MxType32, MxType64] in
+   def MOV # TYPE.Size # AM # i # TYPE.Postfix
+       : MxMove_MI<TYPE, !cast<MxOpBundle>("MxOp"#TYPE.Size#"AddrMode_"#AM),
+                   MxMoveEncoding<!cast<MxMoveSize>("MxMoveSize"#TYPE.Size),
+@@ -173,7 +191,7 @@
+               [(null_frag)], ENC>;
+ 
+ foreach REG = ["r", "a", "d"] in {
+-  foreach TYPE = !if(!eq(REG, "d"), [MxType8, MxType16, MxType32], [MxType16, MxType32]) in
++  foreach TYPE = !if(!eq(REG, "d"), [MxType8, MxType16, MxType32, MxType64], [MxType16, MxType32, MxType64]) in
+   def MOV # TYPE.Size # REG # i # TYPE.Postfix
+       : MxMove_RI<TYPE, REG,
+                   MxMoveEncoding<!cast<MxMoveSize>("MxMoveSize"#TYPE.Size),
+@@ -193,7 +211,7 @@
+ 
+ foreach REG = ["r", "a", "d"] in
+ foreach AM = MxMoveSupportedAMs in {
+-  foreach TYPE = !if(!eq(REG, "d"), [MxType8, MxType16, MxType32], [MxType16, MxType32]) in
++  foreach TYPE = !if(!eq(REG, "d"), [MxType8, MxType16, MxType32, MxType64], [MxType16, MxType32, MxType64]) in
+   def MOV # TYPE.Size # REG # AM # TYPE.Postfix
+       : MxMove_RM<TYPE, REG, !cast<MxOpBundle>("MxOp"#TYPE.Size#"AddrMode_"#AM),
+                   !cast<MxEncMemOp>("MxMoveSrcOpEnc_"#AM)>;
+@@ -203,7 +221,7 @@
+ let Pattern = [(null_frag)] in {
+   foreach REG = ["r", "a"] in
+   foreach AM = MxMoveSupportedAMs in {
+-    foreach TYPE = [MxType16, MxType32] in
++    foreach TYPE = [MxType16, MxType32, MxType64] in
+     def MOV # TYPE.Size # REG # AM # _TC
+         : MxMove_RM<TYPE, REG, !cast<MxOpBundle>("MxOp"#TYPE.Size#"AddrMode_"#AM),
+                     !cast<MxEncMemOp>("MxMoveSrcOpEnc_"#AM)> {
+@@ -222,7 +240,7 @@
+ 
+ foreach DST_AM = MxMoveSupportedAMs in
+ foreach SRC_AM = MxMoveSupportedAMs in {
+-  foreach TYPE = [MxType8, MxType16, MxType32] in
++  foreach TYPE = [MxType8, MxType16, MxType32, MxType64] in
+   def MOV # TYPE.Size # DST_AM # SRC_AM # TYPE.Postfix
+       : MxMove_MM<TYPE, !cast<MxOpBundle>("MxOp"#TYPE.Size#"AddrMode_"#DST_AM),
+                   !cast<MxOpBundle>("MxOp"#TYPE.Size#"AddrMode_"#SRC_AM),
+@@ -231,17 +249,17 @@
+ } // foreach SRC_AM
+ 
+ // Store ABS(basically pointer) as Immdiate to Mem
+-def : Pat<(store   MxType32.BPat :$src, MxType32.PPat :$dst),
+-          (MOV32pi MxType32.POp  :$dst, MxType32.IOp  :$src)>;
+-
+-def : Pat<(store   MxType32.BPat :$src, MxType32.FPat :$dst),
+-          (MOV32fi MxType32.FOp  :$dst, MxType32.IOp  :$src)>;
+-
+-def : Pat<(store   MxType32.BPat :$src, MxType32.BPat :$dst),
+-          (MOV32bi MxType32.BOp  :$dst, MxType32.IOp  :$src)>;
+-
+-def : Pat<(store   MxType32.BPat :$src, MxType32.JPat :$dst),
+-          (MOV32ji MxType32.JOp  :$dst, MxType32.IOp  :$src)>;
++def : Pat<(store   MxType64.BPat :$src, MxType64.PPat :$dst),
++          (MOV64pi MxType64.POp  :$dst, MxType64.IOp  :$src)>;
++
++def : Pat<(store   MxType64.BPat :$src, MxType64.FPat :$dst),
++          (MOV64fi MxType64.FOp  :$dst, MxType64.IOp  :$src)>;
++
++def : Pat<(store   MxType64.BPat :$src, MxType64.BPat :$dst),
++          (MOV64bi MxType64.BOp  :$dst, MxType64.IOp  :$src)>;
++
++def : Pat<(store   MxType64.BPat :$src, MxType64.JPat :$dst),
++          (MOV64ji MxType64.JOp  :$dst, MxType64.IOp  :$src)>;
+ 
+ //===----------------------------------------------------------------------===//
+ // MOVEQ
+@@ -304,7 +322,7 @@
+ }
+ 
+ foreach AM = MxMoveSupportedAMs in {
+-  foreach TYPE = [MxType16, MxType32] in
++  foreach TYPE = [MxType16, MxType32, MxType64] in
+   def MOVM # TYPE.Size # AM # m # TYPE.Postfix
+       : MxMOVEM_MR<TYPE, !if(!eq(TYPE, MxType16), MxMOVEM_W, MxMOVEM_L),
+                    !cast<MxOpBundle>("MxOp"#TYPE.Size#"AddrMode_"#AM).Op,
+@@ -322,7 +340,7 @@
+ }
+ 
+ foreach AM = MxMoveSupportedAMs in {
+-  foreach TYPE = [MxType16, MxType32] in
++  foreach TYPE = [MxType16, MxType32, MxType64] in
+   def MOVM # TYPE.Size # m # AM # TYPE.Postfix
+       : MxMOVEM_RM<TYPE, !if(!eq(TYPE, MxType16), MxMOVEM_W, MxMOVEM_L),
+                    !cast<MxOpBundle>("MxOp"#TYPE.Size#"AddrMode_"#AM).Op,
+@@ -343,16 +361,23 @@
+ // Mem <- Reg
+ def MOVM16jm_P : MxMOVEM_MR_Pseudo<MxType16r, MxType16.JOp>;
+ def MOVM32jm_P : MxMOVEM_MR_Pseudo<MxType32r, MxType32.JOp>;
++def MOVM64jm_P : MxMOVEM_MR_Pseudo<MxType64r, MxType64.JOp>;
+ 
+ def MOVM16pm_P : MxMOVEM_MR_Pseudo<MxType16r, MxType16.POp>;
+ def MOVM32pm_P : MxMOVEM_MR_Pseudo<MxType32r, MxType32.POp>;
++def MOVM64pm_P : MxMOVEM_MR_Pseudo<MxType64r, MxType64.POp>;
++// Spills of a byte register: MOVEM has no byte size, so these become MOVEM.W of its word register.
++def MOVM8pm_P : MxMOVEM_MR_Pseudo<MxType8d, MxType16.POp>;
++def MOVM8mp_P : MxMOVEM_RM_Pseudo<MxType8d, MxType16.POp>;
+ 
+ // Reg <- Mem
+ def MOVM16mj_P : MxMOVEM_RM_Pseudo<MxType16r, MxType16.JOp>;
+ def MOVM32mj_P : MxMOVEM_RM_Pseudo<MxType32r, MxType32.JOp>;
++def MOVM64mj_P : MxMOVEM_RM_Pseudo<MxType64r, MxType64.JOp>;
+ 
+ def MOVM16mp_P : MxMOVEM_RM_Pseudo<MxType16r, MxType16.POp>;
+ def MOVM32mp_P : MxMOVEM_RM_Pseudo<MxType32r, MxType32.POp>;
++def MOVM64mp_P : MxMOVEM_RM_Pseudo<MxType64r, MxType64.POp>;
+ 
+ 
+ //===----------------------------------------------------------------------===//
+@@ -496,8 +521,8 @@
+ ///  0  1  0  0 | DST REG | 1  1  1 |   MODE  |   REG
+ /// ----------------------------------------------------
+ class MxLEA<MxOpBundle SRC, MxEncMemOp SRC_ENC>
+-    : MxInst<(outs MxARD32:$dst), (ins SRC.Op:$src),
+-             "lea\t$src, $dst", [(set i32:$dst, SRC.Pat:$src)]> {
++    : MxInst<(outs MxARD64:$dst), (ins SRC.Op:$src),
++             "lea\t$src, $dst", [(set i64:$dst, SRC.Pat:$src)]> {
+   let Inst = (ascend
+     (descend 0b0100, (operand "$dst", 3), 0b111, SRC_ENC.EA),
+     SRC_ENC.Supplement
+@@ -505,24 +530,24 @@
+ }
+ 
+ foreach AM = ["p", "f", "b", "q", "k"] in
+-def LEA32 # AM : MxLEA<!cast<MxOpBundle>("MxOp32AddrMode_"#AM),
++def LEA64 # AM : MxLEA<!cast<MxOpBundle>("MxOp64AddrMode_"#AM),
+                        !cast<MxEncMemOp>("MxMoveSrcOpEnc_"#AM)>;
+ 
+ //===----------------------------------------------------------------------===//
+ // LINK/UNLK
+ //===----------------------------------------------------------------------===//
+ 
+-let Uses = [SP], Defs = [SP] in {
++let Uses = [QSP], Defs = [QSP] in {
+ let mayStore = 1 in {
+ 
+-def LINK16 : MxInst<(outs), (ins MxARD16:$src, Mxi16imm:$disp), "link.w\t$src, $disp", []> {
++def LINK16 : MxInst<(outs), (ins MxARD64:$src, Mxi16imm:$disp), "link.w\t$src, $disp", []> {
+   let Inst = (ascend
+     (descend 0b0100111001010, (operand "$src", 3)),
+     (operand "$disp", 16)
+   );
+ }
+ 
+-def LINK32 : MxInst<(outs), (ins MxARD16:$src, Mxi32imm:$disp), "link.l\t$src, $disp", []> {
++def LINK32 : MxInst<(outs), (ins MxARD64:$src, Mxi32imm:$disp), "link.l\t$src, $disp", []> {
+   let Inst = (ascend
+     (descend 0b0100100000001, (operand "$src", 3)),
+     (slice "$disp", 31, 16),
+@@ -530,25 +555,26 @@
+   );
+ }
+ 
+-def UNLK : MxInst<(outs), (ins MxARD32:$src), "unlk\t$src", []> {
++def UNLK : MxInst<(outs), (ins MxARD64:$src), "unlk\t$src", []> {
+   let Inst = (descend 0b0100111001011, (operand "$src", 3));
+ }
+ 
+ } // let mayStore = 1
+-} // let Uses = [SP], Defs = [SP]
++} // let Uses = [QSP], Defs = [QSP]
+ 
+ //===----------------------------------------------------------------------===//
+ // Pseudos
+ //===----------------------------------------------------------------------===//
+ 
+ /// Pushe/Pop to/from SP for simplicity
+-let Uses = [SP], Defs = [SP], hasSideEffects = 0 in {
++let Uses = [QSP], Defs = [QSP], hasSideEffects = 0 in {
+ 
+ // SP <- SP - <size>; (SP) <- Dn
+ let mayStore = 1 in {
+ def PUSH8d  : MxPseudo<(outs), (ins DR8:$reg)>;
+ def PUSH16d : MxPseudo<(outs), (ins DR16:$reg)>;
+ def PUSH32r : MxPseudo<(outs), (ins XR32:$reg)>;
++def PUSH64r : MxPseudo<(outs), (ins XR64:$reg)>;
+ } // let mayStore = 1
+ 
+ // Dn <- (SP); SP <- SP + <size>
+@@ -556,6 +582,7 @@
+ def POP8d  : MxPseudo<(outs DR8:$reg),  (ins)>;
+ def POP16d : MxPseudo<(outs DR16:$reg), (ins)>;
+ def POP32r : MxPseudo<(outs XR32:$reg), (ins)>;
++def POP64r : MxPseudo<(outs XR64:$reg), (ins)>;
+ } // let mayLoad = 1
+ 
+ } // let Uses/Defs = [SP], hasSideEffects = 0
+@@ -583,6 +610,7 @@
+ def MOVI8di  : MxPseudoMove_DI<MxType8d>;
+ def MOVI16ri : MxPseudoMove_DI<MxType16r>;
+ def MOVI32ri : MxPseudoMove_DI<MxType32r>;
++def MOVI64ri : MxPseudoMove_DI<MxType64r>;
+ } // let Defs = [CCR]
+ 
+ /// This group of Pseudos is analogues to the real x86 extending moves, but
+@@ -812,3 +840,4 @@
+ def FMOVE32d_fpcs : MxFMove_R_FSYS<"d">;
+ def FMOVE32fpi_a  : MxFMove_FSYS_R<"a">;
+ def FMOVE32a_fpi  : MxFMove_R_FSYS<"a">;
++
+--- a/llvm/lib/Target/M68k64/M68k64InstrFormats.td
++++ b/llvm/lib/Target/M68k64/M68k64InstrFormats.td
+@@ -119,13 +119,15 @@
+                                  "encodePCRelImm<8>">.Value;
+ }
+ 
++// (bd.L,PC) in the 68020 full format, no index: everything within 2 GB of the code.
+ class MxEncAddrMode_q<string opnd_name> : MxEncMemOp {
+   let EA = (descend /*MODE*/0b111,
+-                     /*REGISTER*/0b010);
+-
+-  // 16-bit Displacement
+-  let Supplement = (operand "$"#opnd_name, 16,
+-                            (encoder "encodePCRelImm<16>"));
++                     /*REGISTER*/0b011);
++
++  let Supplement = (ascend
++    (descend 0b0000000101110000),
++    (operand "$"#opnd_name, 32, (encoder "encodePCRelFull"))
++  );
+ }
+ 
+ class MxEncAddrMode_p<string opnd_name> : MxEncMemOp {
+@@ -164,7 +166,9 @@
+                            (encoder "encodeRelocImm<16>")),
+       !eq(size, 32) : (operand "$"#opnd_name, 32,
+                            (encoder "encodeRelocImm<32>"),
+-                           (decoder "DecodeImm32"))
++                           (decoder "DecodeImm32")),
++      !eq(size, 64) : (operand "$"#opnd_name, 64,
++                           (encoder "encodeRelocImm<64>"))
+     );
+ }
+ 
+@@ -204,7 +208,8 @@
+ def MxEncSize8  : MxEncSize<0b00>;
+ def MxEncSize16 : MxEncSize<0b01>;
+ def MxEncSize32 : MxEncSize<0b10>;
+-def MxEncSize64 : MxEncSize<0b11>;
++// .Q is .L behind the W prefix, which the code emitter adds.
++def MxEncSize64 : MxEncSize<0b10>;
+ 
+ // M68k64 INSTRUCTION. Most instructions specify the location of an operand by
+ // using the effective address field in the operation word. The effective address
+@@ -227,6 +232,8 @@
+   let AsmString      = asmStr;
+   let Pattern        = pattern;
+   let Itinerary      = itin;
++  // A .Q instruction: the code emitter writes the W prefix in front.
++  let TSFlags{0}     = !or(!ne(!find(asmStr, ".q\t"), -1), !ne(!find(asmStr, ".q "), -1));
+ 
+   dag Inst = (ascend);
+ 
+--- a/llvm/lib/Target/M68k64/M68k64InstrInfo.cpp
++++ b/llvm/lib/Target/M68k64/M68k64InstrInfo.cpp
+@@ -355,6 +355,19 @@
+   int64_t Imm = MIB->getOperand(1).getImm();
+   bool IsAddressReg = false;
+ 
++  if (MVTSize == MVT::i64) {
++    if (M68k64::DR64RegClass.contains(Reg) && Imm >= -128 && Imm <= 127) {
++      // MOVEQ sign extends to 64 bits in long mode.
++      Register Low = RI.getSubReg(Reg, M68k64::MxSubRegIndex32Lo);
++      MIB->setDesc(get(M68k64::MOVQ));
++      MIB->getOperand(0).setReg(Low);
++      MIB.addReg(Reg, RegState::ImplicitDefine);
++    } else {
++      MIB->setDesc(get(M68k64::MOV64ri));
++    }
++    return true;
++  }
++
+   const auto *DR32 = RI.getRegClass(M68k64::DR32RegClassID);
+   const auto *AR32 = RI.getRegClass(M68k64::AR32RegClassID);
+   const auto *AR16 = RI.getRegClass(M68k64::AR16RegClassID);
+@@ -391,19 +404,6 @@
+ 
+     BuildMI(MBB, MIB.getInstr(), DL, get(M68k64::MOVQ), SReg).addImm(~Imm & 0xFF);
+     BuildMI(MBB, MIB.getInstr(), DL, get(M68k64::NOT8d), SubReg).addReg(SubReg);
+-
+-    MIB->removeFromParent();
+-
+-    // Special case for setting address register to NULL (0)
+-  } else if (IsAddressReg && Imm == 0) {
+-    LLVM_DEBUG(dbgs() << "SUBA\n");
+-
+-    MachineBasicBlock &MBB = *MIB->getParent();
+-    DebugLoc DL = MIB->getDebugLoc();
+-
+-    BuildMI(MBB, MIB.getInstr(), DL, get(M68k64::SUB32ar), SReg)
+-        .addReg(SReg, RegState::Undef)
+-        .addReg(SReg, RegState::Undef);
+ 
+     MIB->removeFromParent();
+ 
+@@ -640,6 +640,10 @@
+     return ExpandPUSH_POP(MIB, get(M68k64::MOV8ed), true);
+   case M68k64::PUSH16d:
+     return ExpandPUSH_POP(MIB, get(M68k64::MOV16er), true);
++  case M68k64::PUSH64r:
++    return ExpandPUSH_POP(MIB, get(M68k64::MOV64er), true);
++  case M68k64::POP64r:
++    return ExpandPUSH_POP(MIB, get(M68k64::MOV64ro), false);
+   case M68k64::PUSH32r:
+     return ExpandPUSH_POP(MIB, get(M68k64::MOV32er), true);
+ 
+@@ -656,6 +660,8 @@
+     return Expand2AddrUndef(MIB, get(M68k64::SUBX16dd));
+   case M68k64::SETCS_C32d:
+     return Expand2AddrUndef(MIB, get(M68k64::SUBX32dd));
++  case M68k64::SETCS_C64d:
++    return Expand2AddrUndef(MIB, get(M68k64::SUBX64dd));
+   }
+   return false;
+ }
+@@ -694,12 +700,20 @@
+   unsigned Opc = 0;
+ 
+   // First deal with the normal symmetric copies.
+-  if (M68k64::XR32RegClass.contains(DstReg, SrcReg))
+-    Opc = M68k64::MOV32rr;
++  if (M68k64::XR64RegClass.contains(DstReg, SrcReg))
++    Opc = M68k64::MOVN64rr;
++  else if (M68k64::XR32RegClass.contains(DstReg, SrcReg))
++    Opc = M68k64::MOVN32rr;
++  else if (M68k64::DR32RegClass.contains(DstReg) && M68k64::AR32RegClass.contains(SrcReg))
++    Opc = M68k64::MOVN32ra;
++  else if (M68k64::AR32RegClass.contains(DstReg) && M68k64::XR32RegClass.contains(SrcReg))
++    Opc = M68k64::MOVN32ar;   // sign extends into the rest of the address register
++  else if (M68k64::AR32RegClass.contains(DstReg, SrcReg))
++    Opc = M68k64::MOVN32aa;
+   else if (M68k64::XR16RegClass.contains(DstReg, SrcReg))
+-    Opc = M68k64::MOV16rr;
++    Opc = M68k64::MOVN16rr;
+   else if (M68k64::DR8RegClass.contains(DstReg, SrcReg))
+-    Opc = M68k64::MOV8dd;
++    Opc = M68k64::MOVN8dd;
+ 
+   if (Opc) {
+     BuildMI(MBB, MI, DL, get(Opc), DstReg)
+@@ -786,8 +800,8 @@
+   case 2:
+     if (M68k64::XR16RegClass.hasSubClassEq(RC))
+       return load ? M68k64::MOVM16mp_P : M68k64::MOVM16pm_P;
+-    if (M68k64::DR8RegClass.hasSubClassEq(RC))
+-      return load ? M68k64::MOVM16mp_P : M68k64::MOVM16pm_P;
++    if (M68k64::DR8RegClass.hasSubClassEq(RC))   // MOVEM.W of the word register, see ExpandPseudo
++      return load ? M68k64::MOVM8mp_P : M68k64::MOVM8pm_P;
+     if (M68k64::CCRCRegClass.hasSubClassEq(RC))
+       return load ? M68k64::MOVM16mp_P : M68k64::MOVM16pm_P;
+     llvm_unreachable("Unknown 2-byte regclass");
+@@ -795,6 +809,10 @@
+     if (M68k64::XR32RegClass.hasSubClassEq(RC))
+       return load ? M68k64::MOVM32mp_P : M68k64::MOVM32pm_P;
+     llvm_unreachable("Unknown 4-byte regclass");
++  case 8:
++    if (M68k64::XR64RegClass.hasSubClassEq(RC))
++      return load ? M68k64::MOVM64mp_P : M68k64::MOVM64pm_P;
++    llvm_unreachable("Unknown 8-byte regclass");
+   }
+ }
+ 
+@@ -874,7 +892,7 @@
+   // lucky get one, otherwise it does not really matter which callee-save to
+   // use.
+   MachineRegisterInfo &RegInfo = MF->getRegInfo();
+-  GlobalBaseReg = RegInfo.createVirtualRegister(&M68k64::AR32_NOSPRegClass);
++  GlobalBaseReg = RegInfo.createVirtualRegister(&M68k64::AR64_NOSPRegClass);
+   MxFI->setGlobalBaseReg(GlobalBaseReg);
+   return GlobalBaseReg;
+ }
+@@ -930,7 +948,7 @@
+     const M68k64InstrInfo *TII = STI.getInstrInfo();
+ 
+     // Generate lea (__GLOBAL_OFFSET_TABLE_,%PC), %A5
+-    BuildMI(FirstMBB, MBBI, DL, TII->get(M68k64::LEA32q), GlobalBaseReg)
++    BuildMI(FirstMBB, MBBI, DL, TII->get(M68k64::LEA64q), GlobalBaseReg)
+         .addExternalSymbol("_GLOBAL_OFFSET_TABLE_", M68k64II::MO_GOTPCREL);
+ 
+     return true;
+--- a/llvm/lib/Target/M68k64/M68k64InstrInfo.td
++++ b/llvm/lib/Target/M68k64/M68k64InstrInfo.td
+@@ -19,8 +19,8 @@
+ // Profiles
+ //===----------------------------------------------------------------------===//
+ 
+-def MxSDT_CallSeqStart : SDCallSeqStart<[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
+-def MxSDT_CallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
++def MxSDT_CallSeqStart : SDCallSeqStart<[SDTCisVT<0, i64>, SDTCisVT<1, i64>]>;
++def MxSDT_CallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i64>, SDTCisVT<1, i64>]>;
+ 
+ def MxSDT_Call    : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
+ 
+@@ -186,6 +186,7 @@
+ def MxSize8  : MxSize<8,  "b", "byte">;
+ def MxSize16 : MxSize<16, "w", "word">;
+ def MxSize32 : MxSize<32, "l", "long">;
++def MxSize64 : MxSize<64, "q", "quad">;
+ def MxSizeF32 : MxSize<32, "s", "f32">;
+ def MxSizeF64 : MxSize<64, "d", "f64">;
+ def MxSizeF80 : MxSize<80, "x", "f80">;
+@@ -231,7 +232,7 @@
+ 
+ // REGISTER DIRECT. The operand is in the data register specified by
+ // the effective address register field.
+-foreach size = [16, 32] in {
++foreach size = [16, 32, 64] in {
+   def MxXRD # size : MxRegOp<!cast<ValueType>("i"#size), !cast<MxRegClass>("XR"#size),
+                              !cast<MxSize>("MxSize"#size), "r">;
+   def MxXRD # size # _TC : MxRegOp<!cast<ValueType>("i"#size), !cast<MxRegClass>("XR"#size#"_TC"),
+@@ -241,7 +242,7 @@
+ // DATA REGISTER DIRECT. The operand is in the data register specified by
+ // the effective address register field.
+ let ParserMatchClass = MxDRegClass in {
+-foreach size = [8, 16, 32] in {
++foreach size = [8, 16, 32, 64] in {
+   def MxDRD # size : MxRegOp<!cast<ValueType>("i"#size), !cast<MxRegClass>("DR"#size),
+                              !cast<MxSize>("MxSize"#size), "d">;
+   if !gt(size, 8) then
+@@ -253,7 +254,7 @@
+ // ADDRESS REGISTER DIRECT. The operand is in the address register specified by
+ // the effective address register field.
+ let ParserMatchClass = MxARegClass in {
+-foreach size = [16, 32] in {
++foreach size = [16, 32, 64] in {
+   def MxARD # size : MxRegOp<!cast<ValueType>("i"#size), !cast<MxRegClass>("AR"#size),
+                              !cast<MxSize>("MxSize"#size), "a">;
+   def MxARD # size # _TC : MxRegOp<!cast<ValueType>("i"#size), !cast<MxRegClass>("AR"#size#"_TC"),
+@@ -289,10 +290,10 @@
+ // a data reference with the exception of the jump and jump-to-subroutine
+ // instructions.
+ def MxARI         : MxOpClass<"ARI">;
+-foreach size = ["8", "16", "32"] in {
++foreach size = ["8", "16", "32", "64"] in {
+   defvar ResSize = !cast<MxSize>("MxSize"#size);
+-  def MxARI # size       : MxMemOp<(ops AR32),    ResSize, "j", "printARI"#size#"Mem", MxARI>;
+-  def MxARI # size # _TC : MxMemOp<(ops AR32_TC), ResSize, "j", "printARI"#size#"Mem", MxARI>;
++  def MxARI # size       : MxMemOp<(ops AR64),    ResSize, "j", "printARI"#size#"Mem", MxARI>;
++  def MxARI # size # _TC : MxMemOp<(ops AR64_TC), ResSize, "j", "printARI"#size#"Mem", MxARI>;
+ } // foreach size
+ 
+ // ADDRESS REGISTER INDIRECT WITH POSTINCREMENT. The address of the operand is
+@@ -303,10 +304,10 @@
+ // by two rather than one to keep the stack pointer on a word boundary.
+ // The reference is classified as a data reference.
+ def MxARIPI       : MxOpClass<"ARIPI">;
+-foreach size = ["8", "16", "32"] in {
++foreach size = ["8", "16", "32", "64"] in {
+   defvar ResSize = !cast<MxSize>("MxSize"#size);
+-  def MxARIPI # size       : MxMemOp<(ops AR32),    ResSize, "o", "printARIPI"#size#"Mem", MxARIPI>;
+-  def MxARIPI # size # _TC : MxMemOp<(ops AR32_TC), ResSize, "o", "printARIPI"#size#"Mem", MxARIPI>;
++  def MxARIPI # size       : MxMemOp<(ops AR64),    ResSize, "o", "printARIPI"#size#"Mem", MxARIPI>;
++  def MxARIPI # size # _TC : MxMemOp<(ops AR64_TC), ResSize, "o", "printARIPI"#size#"Mem", MxARIPI>;
+ } // foreach size
+ 
+ // ADDRESS REGISTER INDIRECT WITH PREDECREMENT. The address of the operand is in
+@@ -317,10 +318,10 @@
+ // two rather than one to keep the stack pointer on a word boundary.
+ // The reference is classified as a data reference.
+ def MxARIPD       : MxOpClass<"ARIPD">;
+-foreach size = ["8", "16", "32"] in {
++foreach size = ["8", "16", "32", "64"] in {
+   defvar ResSize = !cast<MxSize>("MxSize"#size);
+-  def MxARIPD # size       : MxMemOp<(ops AR32),    ResSize, "e", "printARIPD"#size#"Mem", MxARIPD>;
+-  def MxARIPD # size # _TC : MxMemOp<(ops AR32_TC), ResSize, "e", "printARIPD"#size#"Mem", MxARIPD>;
++  def MxARIPD # size       : MxMemOp<(ops AR64),    ResSize, "e", "printARIPD"#size#"Mem", MxARIPD>;
++  def MxARIPD # size # _TC : MxMemOp<(ops AR64_TC), ResSize, "e", "printARIPD"#size#"Mem", MxARIPD>;
+ } // foreach size
+ 
+ // ADDRESS REGISTER INDIRECT WITH DISPLACEMENT. This addressing mode requires one
+@@ -329,10 +330,10 @@
+ // extension word. The reference is classified as a data reference with the
+ // exception of the jump and jump-to-subroutine instructions.
+ def MxARID        : MxOpClass<"ARID">;
+-foreach size = ["8", "16", "32"] in {
++foreach size = ["8", "16", "32", "64"] in {
+   defvar ResSize = !cast<MxSize>("MxSize"#size);
+-  def MxARID # size       : MxMemOp<(ops i16imm:$disp, AR32:$reg),    ResSize, "p", "printARID"#size#"Mem", MxARID>;
+-  def MxARID # size # _TC : MxMemOp<(ops i16imm:$disp, AR32_TC:$reg), ResSize, "p", "printARID"#size#"Mem", MxARID>;
++  def MxARID # size       : MxMemOp<(ops i16imm:$disp, AR64:$reg),    ResSize, "p", "printARID"#size#"Mem", MxARID>;
++  def MxARID # size # _TC : MxMemOp<(ops i16imm:$disp, AR64_TC:$reg), ResSize, "p", "printARID"#size#"Mem", MxARID>;
+ } // foreach size
+ 
+ // ADDRESS REGISTER INDIRECT WITH INDEX. This addressing mode requires one word
+@@ -342,10 +343,10 @@
+ // The reference is classified as a data reference with the exception of the
+ // jump and jump-to-subroutine instructions
+ def MxARII       : MxOpClass<"ARII">;
+-foreach size = ["8", "16", "32"] in {
++foreach size = ["8", "16", "32", "64"] in {
+   defvar ResSize = !cast<MxSize>("MxSize"#size);
+-  def MxARII # size       : MxMemOp<(ops i8imm:$disp, AR32:$reg,    XR32:$index), ResSize, "f", "printARII"#size#"Mem", MxARII>;
+-  def MxARII # size # _TC : MxMemOp<(ops i8imm:$disp, AR32_TC:$reg, XR32:$index), ResSize, "f", "printARII"#size#"Mem", MxARII>;
++  def MxARII # size       : MxMemOp<(ops i8imm:$disp, AR64:$reg,    XR64:$index), ResSize, "f", "printARII"#size#"Mem", MxARII>;
++  def MxARII # size # _TC : MxMemOp<(ops i8imm:$disp, AR64_TC:$reg, XR64:$index), ResSize, "f", "printARII"#size#"Mem", MxARII>;
+ } // foreach size
+ 
+ // ABSOLUTE SHORT ADDRESS. This addressing mode requires one word of extension.
+@@ -364,6 +365,7 @@
+ def MxAS8      : MxMemOp<(ops OtherVT), MxSize8,  "B", "printAS8Mem",  MxAddr8>;
+ def MxAS16     : MxMemOp<(ops OtherVT), MxSize16, "B", "printAS16Mem", MxAddr16>;
+ def MxAS32     : MxMemOp<(ops OtherVT), MxSize32, "B", "printAS32Mem", MxAddr32>;
++def MxAS64     : MxMemOp<(ops OtherVT), MxSize64, "B", "printAS64Mem", MxAddr32>;
+ 
+ // ABSOLUTE LONG ADDRESS. This addressing mode requires two words of extension.
+ // The address of the operand is developed by the concatenation of the extension
+@@ -374,12 +376,13 @@
+ def MxAL8      : MxMemOp<(ops OtherVT), MxSize8,  "b", "printAL8Mem",  MxAddr8>;
+ def MxAL16     : MxMemOp<(ops OtherVT), MxSize16, "b", "printAL16Mem", MxAddr16>;
+ def MxAL32     : MxMemOp<(ops OtherVT), MxSize32, "b", "printAL32Mem", MxAddr32>;
++def MxAL64     : MxMemOp<(ops OtherVT), MxSize64, "b", "printAL64Mem", MxAddr32>;
+ 
+ def MxPCD : MxOpClass<"PCD">;
+ def MxPCI : MxOpClass<"PCI">;
+ 
+ let OperandType = "OPERAND_PCREL" in {
+-foreach size = ["8", "16", "32"] in {
++foreach size = ["8", "16", "32", "64"] in {
+ defvar ResSize = !cast<MxSize>("MxSize"#size);
+ // PROGRAM COUNTER WITH DISPLACEMENT. This addressing mode requires one word of
+ // extension. The address of the operand is the sum of the address in the program
+@@ -394,7 +397,7 @@
+ // word, and the contents of the index register.  The value in the program
+ // counter is the address of the extension word. This reference is classified as
+ // a program reference.
+-def MxPCI # size : MxMemOp<(ops i8imm:$disp, XR32:$index), ResSize,  "k", "printPCI"#size#"Mem", MxPCI>;
++def MxPCI # size : MxMemOp<(ops i8imm:$disp, XR64:$index), ResSize,  "k", "printPCI"#size#"Mem", MxPCI>;
+ } // foreach size
+ } // OPERAND_PCREL
+ 
+@@ -424,6 +427,7 @@
+ def Mxi8imm  : MxOp<i8,  MxSize8,  "i">;
+ def Mxi16imm : MxOp<i16, MxSize16, "i">;
+ def Mxi32imm : MxOp<i32, MxSize32, "i">;
++def Mxi64imm : MxOp<i64, MxSize64, "i">;
+ } // OPERAND_IMMEDIATE
+ 
+ class MxBrTargetOperand<int N> : Operand<OtherVT> {
+@@ -538,6 +542,7 @@
+ def MximmSExt16    : PatLeaf<(imm), [{ return isInt<16>(N->getSExtValue()); }]>;
+ 
+ def Mxi32immSExt32 : PatLeaf<(i32 imm)>;
++def Mxi64immSExt64 : PatLeaf<(i64 imm)>;
+ def MximmSExt32    : PatLeaf<(imm), [{ return isInt<32>(N->getSExtValue()); }]>;
+ 
+ // Used for Shifts and Rotations, since M68k64 immediates in these instructions
+@@ -549,6 +554,7 @@
+ def Mximm8_1to8   : ImmLeaf<i8,  [{ return Imm >= 1 && Imm <= 8; }]>;
+ def Mximm16_1to8  : ImmLeaf<i16, [{ return Imm >= 1 && Imm <= 8; }]>;
+ def Mximm32_1to8  : ImmLeaf<i32, [{ return Imm >= 1 && Imm <= 8; }]>;
++def Mximm64_1to8  : ImmLeaf<i64, [{ return Imm >= 1 && Imm <= 8; }]>;
+ 
+ // Helper fragments for loads.
+ // It's always safe to treat a anyext i16 load as a i32 load if the i16 is
+@@ -563,6 +569,9 @@
+   return false;
+ }]>;
+ 
++def Mxloadi64 : PatFrag<(ops node:$ptr), (i64 (unindexedload node:$ptr)), [{
++  return cast<LoadSDNode>(N)->getExtensionType() == ISD::NON_EXTLOAD;
++}]>;
+ def Mxloadi32 : PatFrag<(ops node:$ptr), (i32 (unindexedload node:$ptr)), [{
+   LoadSDNode *LD = cast<LoadSDNode>(N);
+   ISD::LoadExtType ExtType = LD->getExtensionType();
+@@ -691,7 +700,7 @@
+ 
+ // TODO: We can use MxOp<S>AddrMode_<AM> in more places to
+ // replace MxType-based operand factoring.
+-foreach size = [8, 16, 32] in {
++foreach size = [8, 16, 32, 64] in {
+   // Dn
+   def MxOp#size#AddrMode_d
+     : MxOpBundle<size, !cast<MxOperand>("MxDRD"#size), ?>;
+@@ -734,7 +743,7 @@
+                     !cast<PatFrag>("Mxi"#size#"immSExt"#size)>;
+ } // foreach size = [8, 16, 32]
+ 
+-foreach size = [16, 32] in {
++foreach size = [16, 32, 64] in {
+   // An
+   def MxOp#size#AddrMode_a
+     : MxOpBundle<size, !cast<MxOperand>("MxARD"#size), ?>;
+@@ -795,6 +804,19 @@
+              Mxloadi32>;
+ 
+ def MxType32 : MxType32Class<?,?>;
++class MxType64Class<string rLet, MxOperand reg>
++    : MxType<i64, "q", "", rLet, reg,
++             MxARI64,   MxCP_ARI,
++             MxARIPI64, MxCP_ARIPI,
++             MxARIPD64, MxCP_ARIPD,
++             MxARID64,  MxCP_ARID,
++             MxARII64,  MxCP_ARII,
++             MxAL64,    MxCP_AL,
++             MxPCD64,   MxCP_PCD,
++             MxPCI64,   MxCP_PCI,
++             Mxi64imm,  Mxi64immSExt64,
++             Mxloadi64>;
++def MxType64 : MxType64Class<?,?>;
+ 
+ 
+ def MxType8d : MxType8Class<"d", MxDRD8>;
+@@ -805,12 +827,16 @@
+ def MxType32d : MxType32Class<"d", MxDRD32>;
+ def MxType32a : MxType32Class<"a", MxARD32>;
+ def MxType32r : MxType32Class<"r", MxXRD32>;
++def MxType64d : MxType64Class<"d", MxDRD64>;
++def MxType64a : MxType64Class<"a", MxARD64>;
++def MxType64r : MxType64Class<"r", MxXRD64>;
+ 
+ let Postfix = "_TC" in {
+ def MxType16d_TC : MxType16Class<"d", MxDRD16_TC>;
+ def MxType16a_TC : MxType16Class<"a", MxARD16_TC>;
+ def MxType16r_TC : MxType16Class<"r", MxXRD16_TC>;
+ def MxType32d_TC : MxType32Class<"d", MxDRD32_TC>;
++def MxType64r_TC : MxType64Class<"r", MxXRD64_TC>;
+ def MxType32a_TC : MxType32Class<"a", MxARD32_TC>;
+ def MxType32r_TC : MxType32Class<"r", MxXRD32_TC>;
+ }
+--- a/llvm/lib/Target/M68k64/M68k64InstrShiftRotate.td
++++ b/llvm/lib/Target/M68k64/M68k64InstrShiftRotate.td
+@@ -80,10 +80,12 @@
+   def NAME#"8dd"  : MxSR_DD<MN, MxType8d,  NODE, RODI, ROOP>;
+   def NAME#"16dd" : MxSR_DD<MN, MxType16d, NODE, RODI, ROOP>;
+   def NAME#"32dd" : MxSR_DD<MN, MxType32d, NODE, RODI, ROOP>;
++  def NAME#"64dd" : MxSR_DD<MN, MxType64d, NODE, RODI, ROOP>;
+ 
+   def NAME#"8di"  : MxSR_DI<MN, MxType8d,  NODE, RODI, ROOP>;
+   def NAME#"16di" : MxSR_DI<MN, MxType16d, NODE, RODI, ROOP>;
+   def NAME#"32di" : MxSR_DI<MN, MxType32d, NODE, RODI, ROOP>;
++  def NAME#"64di" : MxSR_DI<MN, MxType64d, NODE, RODI, ROOP>;
+ 
+   } // $src = $dst
+   } // Defs = [CCR]
+--- a/llvm/lib/Target/M68k64/M68k64RegisterInfo.cpp
++++ b/llvm/lib/Target/M68k64/M68k64RegisterInfo.cpp
+@@ -45,11 +45,11 @@
+ M68k64RegisterInfo::M68k64RegisterInfo(const M68k64Subtarget &ST)
+     // FIXME x26 not sure it this the correct value, it expects RA, but M68k64
+     // passes IP anyway, how this works?
+-    : M68k64GenRegisterInfo(M68k64::A0, 0, 0, M68k64::PC), Subtarget(ST) {
+-  StackPtr = M68k64::SP;
+-  FramePtr = M68k64::A6;
+-  GlobalBasePtr = M68k64::A5;
+-  BasePtr = M68k64::A4;
++    : M68k64GenRegisterInfo(M68k64::QA0, 0, 0, M68k64::PC), Subtarget(ST) {
++  StackPtr = M68k64::QSP;
++  FramePtr = M68k64::QA6;
++  GlobalBasePtr = M68k64::QA5;
++  BasePtr = M68k64::QA4;
+ }
+ 
+ //===----------------------------------------------------------------------===//
+@@ -69,7 +69,7 @@
+ 
+ const TargetRegisterClass *
+ M68k64RegisterInfo::getRegsForTailCall(const MachineFunction &MF) const {
+-  return &M68k64::XR32_TCRegClass;
++  return &M68k64::XR64_TCRegClass;
+ }
+ 
+ unsigned
+@@ -141,7 +141,7 @@
+   }
+ 
+   setBitVector(M68k64::PC);
+-  setBitVector(M68k64::SP);
++  setBitVector(M68k64::QSP);
+ 
+   if (TFI->hasFP(MF)) {
+     setBitVector(FramePtr);
+--- a/llvm/lib/Target/M68k64/M68k64RegisterInfo.td
++++ b/llvm/lib/Target/M68k64/M68k64RegisterInfo.td
+@@ -27,6 +27,7 @@
+ let Namespace = "M68k64" in {
+   def MxSubRegIndex8Lo  : SubRegIndex<8, 0>;
+   def MxSubRegIndex16Lo : SubRegIndex<16, 0>;
++  def MxSubRegIndex32Lo : SubRegIndex<32, 0>;
+ }
+ 
+ multiclass MxDataRegister<int INDEX, string REG_NAME, list<string> ALTNAMES = []> {
+@@ -39,6 +40,10 @@
+     : MxReg<REG_NAME, INDEX,
+             [!cast<Register>("W"#NAME)], [MxSubRegIndex16Lo],
+             [INDEX], ALTNAMES>;
++  def "Q"#NAME
++    : MxReg<REG_NAME, INDEX,
++            [!cast<Register>(NAME)], [MxSubRegIndex32Lo],
++            [INDEX], ALTNAMES>;
+ }
+ 
+ multiclass MxAddressRegister<int INDEX, string REG_NAME, list<string> ALTNAMES = []> {
+@@ -47,6 +52,10 @@
+   def NAME
+     : MxReg<REG_NAME, INDEX,
+             [!cast<Register>("W"#NAME)], [MxSubRegIndex16Lo],
++            [!add(8,INDEX)], ALTNAMES>;
++  def "Q"#NAME
++    : MxReg<REG_NAME, INDEX,
++            [!cast<Register>(NAME)], [MxSubRegIndex32Lo],
+             [!add(8,INDEX)], ALTNAMES>;
+ }
+ 
+@@ -108,19 +117,22 @@
+ 
+ // Address Registers
+ let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<16,16,16>]> in
++let isAllocatable = 0 in
+ def AR16 : MxRegClass<[i16], 16, (add (sequence "WA%u", 0, 6), WSP)>;
+ let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
++let isAllocatable = 0 in
+ def AR32 : MxRegClass<[i32], 32, (add (sequence "A%u", 0, 6), SP)>;
+ 
+ let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
++let isAllocatable = 0 in
+ def AR32_NOSP : MxRegClass<[i32], 32, (sequence "A%u", 0, 6)>;
+ 
+ // Index Register Classes
+ // FIXME try alternative ordering like `D0, D1, A0, A1, ...`
+ let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<16,16,16>]> in
+-def XR16 : MxRegClass<[i16], 16, (add DR16, AR16)>;
++def XR16 : MxRegClass<[i16], 16, (add DR16)>;
+ let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
+-def XR32 : MxRegClass<[i32], 32, (add DR32, AR32)>;
++def XR32 : MxRegClass<[i32], 32, (add DR32)>;
+ 
+ let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
+ def SPC  : MxRegClass<[i32], 32, (add SP)>;
+@@ -133,7 +145,7 @@
+ let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<80,128,32>]> in
+ def FPDR80 : MxRegClass<[f80], 32, (add FPDR32)>;
+ 
+-let CopyCost = -1 in {
++let CopyCost = -1, isAllocatable = 0 in {
+   let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<8,16,16>]> in
+   def CCRC : MxRegClass<[i8],  16, (add CCR)>;
+   let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<16,16,16>]> in
+@@ -148,8 +160,8 @@
+ }
+ 
+ let isAllocatable = 0 in {
+-  let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
+-  def PCC  : MxRegClass<[i32], 32, (add PC)>;
++  let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<64,64,64>]> in
++  def PCC  : MxRegClass<[i64], 32, (add PC)>;
+ }
+ 
+ // Register used with tail call
+@@ -159,17 +171,28 @@
+ def DR32_TC : MxRegClass<[i32], 32, (add D0, D1)>;
+ 
+ let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<16,16,16>]> in
++let isAllocatable = 0 in
+ def AR16_TC : MxRegClass<[i16], 16, (add A0, A1)>;
+ let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
++let isAllocatable = 0 in
+ def AR32_TC : MxRegClass<[i32], 32, (add A0, A1)>;
+ 
+ let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<16,16,16>]> in
+-def XR16_TC : MxRegClass<[i16], 16, (add DR16_TC, AR16_TC)>;
++def XR16_TC : MxRegClass<[i16], 16, (add DR16_TC)>;
+ let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
+-def XR32_TC : MxRegClass<[i32], 32, (add DR32_TC, AR32_TC)>;
++def XR32_TC : MxRegClass<[i32], 32, (add DR32_TC)>;
+ 
+-// These classes provide spill/restore order if used with MOVEM instruction
+-let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in {
+-  def SPILL   : MxRegClass<[i32], 32, (add XR32)>;
+-  def SPILL_R : MxRegClass<[i32], 32, (add SP, (sequence "A%u", 6, 0), (sequence "D%u", 7, 0))>;
++
++// 64-bit: every address is here, and i64 data.
++let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<64,64,64>]> in {
++def DR64 : MxRegClass<[i64], 64, (sequence "QD%u", 0, 7)>;
++def AR64 : MxRegClass<[i64], 64, (add (sequence "QA%u", 0, 6), QSP)>;
++def AR64_NOSP : MxRegClass<[i64], 64, (sequence "QA%u", 0, 6)>;
++def XR64 : MxRegClass<[i64], 64, (add DR64, AR64)>;
++def SPC64 : MxRegClass<[i64], 64, (add QSP)>;
++def DR64_TC : MxRegClass<[i64], 64, (add QD0, QD1)>;
++def AR64_TC : MxRegClass<[i64], 64, (add QA0, QA1)>;
++def XR64_TC : MxRegClass<[i64], 64, (add DR64_TC, AR64_TC)>;
++def SPILL   : MxRegClass<[i64], 64, (add XR64)>;
++def SPILL_R : MxRegClass<[i64], 64, (add QSP, (sequence "QA%u", 6, 0), (sequence "QD%u", 7, 0))>;
+ }
+--- a/llvm/lib/Target/M68k64/M68k64Subtarget.cpp
++++ b/llvm/lib/Target/M68k64/M68k64Subtarget.cpp
+@@ -12,9 +12,6 @@
+ //===----------------------------------------------------------------------===//
+ 
+ #include "M68k64Subtarget.h"
+-#include "GISel/M68k64CallLowering.h"
+-#include "GISel/M68k64LegalizerInfo.h"
+-#include "GISel/M68k64RegisterBankInfo.h"
+ #include "M68k64.h"
+ #include "M68k64MachineFunction.h"
+ #include "M68k64RegisterInfo.h"
+@@ -40,7 +37,7 @@
+ /// Select the M68k64 CPU for the given triple and cpu name.
+ static StringRef selectM68k64CPU(Triple TT, StringRef CPU) {
+   if (CPU.empty() || CPU == "generic") {
+-    CPU = "M68000";
++    CPU = "M68040";
+   }
+   return CPU;
+ }
+@@ -55,12 +52,6 @@
+       TargetTriple(TT) {
+   TSInfo = std::make_unique<M68k64SelectionDAGInfo>();
+ 
+-  CallLoweringInfo.reset(new M68k64CallLowering(*getTargetLowering()));
+-  Legalizer.reset(new M68k64LegalizerInfo(*this));
+-
+-  auto *RBI = new M68k64RegisterBankInfo(*getRegisterInfo());
+-  RegBankInfo.reset(RBI);
+-  InstSelector.reset(createM68k64InstructionSelector(TM, *this, *RBI));
+ }
+ 
+ M68k64Subtarget::~M68k64Subtarget() = default;
+@@ -69,21 +60,6 @@
+   return TSInfo.get();
+ }
+ 
+-const CallLowering *M68k64Subtarget::getCallLowering() const {
+-  return CallLoweringInfo.get();
+-}
+-
+-InstructionSelector *M68k64Subtarget::getInstructionSelector() const {
+-  return InstSelector.get();
+-}
+-
+-const LegalizerInfo *M68k64Subtarget::getLegalizerInfo() const {
+-  return Legalizer.get();
+-}
+-
+-const RegisterBankInfo *M68k64Subtarget::getRegBankInfo() const {
+-  return RegBankInfo.get();
+-}
+ 
+ bool M68k64Subtarget::isPositionIndependent() const {
+   return TM.isPositionIndependent();
+--- a/llvm/lib/Target/M68k64/M68k64Subtarget.h
++++ b/llvm/lib/Target/M68k64/M68k64Subtarget.h
+@@ -18,10 +18,6 @@
+ #include "M68k64ISelLowering.h"
+ #include "M68k64InstrInfo.h"
+ 
+-#include "llvm/CodeGen/GlobalISel/CallLowering.h"
+-#include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
+-#include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
+-#include "llvm/CodeGen/RegisterBankInfo.h"
+ #include "llvm/CodeGen/TargetSubtargetInfo.h"
+ #include "llvm/IR/DataLayout.h"
+ #include "llvm/MC/MCInstrItineraries.h"
+@@ -140,7 +136,7 @@
+   Align getStackAlignment() const { return Align(stackAlignment); }
+ 
+   /// getSlotSize - Stack slot size in bytes.
+-  unsigned getSlotSize() const { return 4; }
++  unsigned getSlotSize() const { return 8; }
+ 
+   M68k64Subtarget &initializeSubtargetDependencies(StringRef CPU, Triple TT,
+                                                  StringRef FS,
+@@ -168,18 +164,8 @@
+   // SelectionDAGISel related APIs.
+   std::unique_ptr<const SelectionDAGTargetInfo> TSInfo;
+ 
+-  // GlobalISel related APIs.
+-  std::unique_ptr<CallLowering> CallLoweringInfo;
+-  std::unique_ptr<InstructionSelector> InstSelector;
+-  std::unique_ptr<LegalizerInfo> Legalizer;
+-  std::unique_ptr<RegisterBankInfo> RegBankInfo;
+-
+ public:
+   const SelectionDAGTargetInfo *getSelectionDAGInfo() const override;
+-  const CallLowering *getCallLowering() const override;
+-  InstructionSelector *getInstructionSelector() const override;
+-  const LegalizerInfo *getLegalizerInfo() const override;
+-  const RegisterBankInfo *getRegBankInfo() const override;
+ };
+ } // namespace llvm
+ 
+--- a/llvm/lib/Target/M68k64/M68k64TargetMachine.cpp
++++ b/llvm/lib/Target/M68k64/M68k64TargetMachine.cpp
+@@ -17,10 +17,6 @@
+ #include "M68k64Subtarget.h"
+ #include "M68k64TargetObjectFile.h"
+ #include "TargetInfo/M68k64TargetInfo.h"
+-#include "llvm/CodeGen/GlobalISel/IRTranslator.h"
+-#include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
+-#include "llvm/CodeGen/GlobalISel/Legalizer.h"
+-#include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
+ #include "llvm/CodeGen/Passes.h"
+ #include "llvm/CodeGen/TargetPassConfig.h"
+ #include "llvm/InitializePasses.h"
+@@ -36,7 +32,6 @@
+ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeM68k64Target() {
+   RegisterTargetMachine<M68k64TargetMachine> X(getTheM68k64Target());
+   auto *PR = PassRegistry::getPassRegistry();
+-  initializeGlobalISel(*PR);
+   initializeM68k64AsmPrinterPass(*PR);
+   initializeM68k64DAGToDAGISelLegacyPass(*PR);
+   initializeM68k64ExpandPseudoPass(*PR);
+@@ -122,10 +117,6 @@
+     return *getM68k64TargetMachine().getSubtargetImpl();
+   }
+   void addIRPasses() override;
+-  bool addIRTranslator() override;
+-  bool addLegalizeMachineIR() override;
+-  bool addRegBankSelect() override;
+-  bool addGlobalInstructionSelect() override;
+   bool addInstSelector() override;
+   void addPreSched2() override;
+   void addPreEmitPass() override;
+@@ -148,28 +139,6 @@
+   return false;
+ }
+ 
+-bool M68k64PassConfig::addIRTranslator() {
+-  addPass(new IRTranslator());
+-  return false;
+-}
+-
+-bool M68k64PassConfig::addLegalizeMachineIR() {
+-  addPass(new Legalizer());
+-  return false;
+-}
+-
+-bool M68k64PassConfig::addRegBankSelect() {
+-  addPass(new RegBankSelect());
+-  return false;
+-}
+-
+-bool M68k64PassConfig::addGlobalInstructionSelect() {
+-  addPass(new InstructionSelect());
+-  return false;
+-}
+-
+ void M68k64PassConfig::addPreSched2() { addPass(createM68k64ExpandPseudoPass()); }
+ 
+-void M68k64PassConfig::addPreEmitPass() {
+-  addPass(createM68k64CollapseMOVEMPass());
+-}
++void M68k64PassConfig::addPreEmitPass() {}
+--- a/llvm/lib/Target/M68k64/MCTargetDesc/M68k64BaseInfo.h
++++ b/llvm/lib/Target/M68k64/MCTargetDesc/M68k64BaseInfo.h
+@@ -87,7 +87,7 @@
+   for (unsigned i = 0U; i != NumWords; ++i) {
+     uint16_t Part = (Val >> (i * 16)) & 0xFFFF;
+     Part = support::endian::byte_swap(Part, llvm::endianness::big);
+-    NewVal |= (Part << (i * 16));
++    NewVal |= (static_cast<value_t>(Part) << (i * 16));
+   }
+   return NewVal;
+ }
+@@ -260,13 +260,21 @@
+   case M68k64::WA6:
+   case M68k64::WSP:
+   case M68k64::A0:
++  case M68k64::QA0:
+   case M68k64::A1:
++  case M68k64::QA1:
+   case M68k64::A2:
++  case M68k64::QA2:
+   case M68k64::A3:
++  case M68k64::QA3:
+   case M68k64::A4:
++  case M68k64::QA4:
+   case M68k64::A5:
++  case M68k64::QA5:
+   case M68k64::A6:
++  case M68k64::QA6:
+   case M68k64::SP:
++  case M68k64::QSP:
+     return true;
+   default:
+     return false;
+--- a/llvm/lib/Target/M68k64/MCTargetDesc/M68k64ELFObjectWriter.cpp
++++ b/llvm/lib/Target/M68k64/MCTargetDesc/M68k64ELFObjectWriter.cpp
+@@ -39,7 +39,7 @@
+ } // namespace
+ 
+ M68k64ELFObjectWriter::M68k64ELFObjectWriter(uint8_t OSABI)
+-    : MCELFObjectTargetWriter(false, OSABI, ELF::EM_68K, /* RELA */ true) {}
++    : MCELFObjectTargetWriter(true, OSABI, ELF::EM_68K, /* RELA */ true) {}
+ 
+ M68k64ELFObjectWriter::~M68k64ELFObjectWriter() {}
+ 
+@@ -63,6 +63,8 @@
+                                            bool IsPCRel) const {
+   auto Specifier = M68k64::Specifier(Target.getSpecifier());
+   unsigned Kind = Fixup.getKind();
++  if (Kind == FK_Data_8) // No such relocation exists for the 68000 family: ours, R_68K64_64.
++    return 240;
+   M68k64RelType Type = getType(Kind, Specifier, IsPCRel);
+   switch (Specifier) {
+   case M68k64::S_GOTTPOFF:
+--- a/llvm/lib/Target/M68k64/MCTargetDesc/M68k64FixupKinds.h
++++ b/llvm/lib/Target/M68k64/MCTargetDesc/M68k64FixupKinds.h
+@@ -25,6 +25,8 @@
+     return 1;
+   case FK_Data_4:
+     return 2;
++  case FK_Data_8:
++    return 3;
+   }
+   llvm_unreachable("invalid fixup kind!");
+ }
+--- a/llvm/lib/Target/M68k64/MCTargetDesc/M68k64InstPrinter.h
++++ b/llvm/lib/Target/M68k64/MCTargetDesc/M68k64InstPrinter.h
+@@ -73,6 +73,9 @@
+   void printARI32Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
+     printARIMem(MI, opNum, O);
+   }
++  void printARI64Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
++    printARIMem(MI, opNum, O);
++  }
+ 
+   void printARIPI8Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
+     printARIPIMem(MI, opNum, O);
+@@ -81,6 +84,9 @@
+     printARIPIMem(MI, opNum, O);
+   }
+   void printARIPI32Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
++    printARIPIMem(MI, opNum, O);
++  }
++  void printARIPI64Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
+     printARIPIMem(MI, opNum, O);
+   }
+ 
+@@ -93,6 +99,9 @@
+   void printARIPD32Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
+     printARIPDMem(MI, opNum, O);
+   }
++  void printARIPD64Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
++    printARIPDMem(MI, opNum, O);
++  }
+ 
+   void printARID8Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
+     printARIDMem(MI, opNum, O);
+@@ -101,6 +110,9 @@
+     printARIDMem(MI, opNum, O);
+   }
+   void printARID32Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
++    printARIDMem(MI, opNum, O);
++  }
++  void printARID64Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
+     printARIDMem(MI, opNum, O);
+   }
+ 
+@@ -113,6 +125,9 @@
+   void printARII32Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
+     printARIIMem(MI, opNum, O);
+   }
++  void printARII64Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
++    printARIIMem(MI, opNum, O);
++  }
+ 
+   void printAS8Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
+     printAbsMem(MI, opNum, O);
+@@ -121,6 +136,9 @@
+     printAbsMem(MI, opNum, O);
+   }
+   void printAS32Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
++    printAbsMem(MI, opNum, O);
++  }
++  void printAS64Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
+     printAbsMem(MI, opNum, O);
+   }
+ 
+@@ -133,6 +151,9 @@
+   void printAL32Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
+     printAbsMem(MI, opNum, O);
+   }
++  void printAL64Mem(const MCInst *MI, unsigned opNum, raw_ostream &O) {
++    printAbsMem(MI, opNum, O);
++  }
+ 
+   void printPCD8Mem(const MCInst *MI, uint64_t Address, unsigned opNum,
+                     raw_ostream &O) {
+@@ -143,6 +164,10 @@
+     printPCDMem(MI, Address, opNum, O);
+   }
+   void printPCD32Mem(const MCInst *MI, uint64_t Address, unsigned opNum,
++                     raw_ostream &O) {
++    printPCDMem(MI, Address, opNum, O);
++  }
++  void printPCD64Mem(const MCInst *MI, uint64_t Address, unsigned opNum,
+                      raw_ostream &O) {
+     printPCDMem(MI, Address, opNum, O);
+   }
+@@ -159,6 +184,10 @@
+                      raw_ostream &O) {
+     printPCIMem(MI, Address, opNum, O);
+   }
++  void printPCI64Mem(const MCInst *MI, uint64_t Address, unsigned opNum,
++                     raw_ostream &O) {
++    printPCIMem(MI, Address, opNum, O);
++  }
+ };
+ } // end namespace llvm
+ 
+--- a/llvm/lib/Target/M68k64/MCTargetDesc/M68k64MCAsmInfo.cpp
++++ b/llvm/lib/Target/M68k64/MCTargetDesc/M68k64MCAsmInfo.cpp
+@@ -28,8 +28,8 @@
+ void M68k64ELFMCAsmInfo::anchor() {}
+ 
+ M68k64ELFMCAsmInfo::M68k64ELFMCAsmInfo(const Triple &T) {
+-  CodePointerSize = 4;
+-  CalleeSaveStackSlotSize = 4;
++  CodePointerSize = 8;
++  CalleeSaveStackSlotSize = 8;
+ 
+   IsLittleEndian = false;
+ 
+--- a/llvm/lib/Target/M68k64/MCTargetDesc/M68k64MCCodeEmitter.cpp
++++ b/llvm/lib/Target/M68k64/MCTargetDesc/M68k64MCCodeEmitter.cpp
+@@ -53,6 +53,10 @@
+   void encodeRelocImm(const MCInst &MI, unsigned OpIdx, unsigned InsertPos,
+                       APInt &Value, SmallVectorImpl<MCFixup> &Fixups,
+                       const MCSubtargetInfo &STI) const;
++
++  void encodePCRelFull(const MCInst &MI, unsigned OpIdx, unsigned InsertPos,
++                       APInt &Value, SmallVectorImpl<MCFixup> &Fixups,
++                       const MCSubtargetInfo &STI) const;
+ 
+   template <unsigned Size>
+   void encodePCRelImm(const MCInst &MI, unsigned OpIdx, unsigned InsertPos,
+@@ -183,6 +187,21 @@
+   }
+ }
+ 
++// The displacement of (bd,PC) counts from the extension word, 2 bytes before the fixup.
++void M68k64MCCodeEmitter::encodePCRelFull(const MCInst &MI, unsigned OpIdx,
++                                          unsigned InsertPos, APInt &Value,
++                                          SmallVectorImpl<MCFixup> &Fixups,
++                                          const MCSubtargetInfo &STI) const {
++  const MCOperand &MCO = MI.getOperand(OpIdx);
++  if (MCO.isImm()) {
++    Value |= M68k64::swapWord<uint32_t>(static_cast<uint32_t>(MCO.getImm()));
++  } else if (MCO.isExpr()) {
++    const MCExpr *Expr = MCBinaryExpr::createAdd(
++        MCO.getExpr(), MCConstantExpr::create(2, Ctx), Ctx);
++    addFixup(Fixups, getBytePosition<32>(InsertPos), Expr, FK_Data_4, true);
++  }
++}
++
+ void M68k64MCCodeEmitter::encodeFPSYSSelect(const MCInst &MI, unsigned OpIdx,
+                                           unsigned InsertPos, APInt &Value,
+                                           SmallVectorImpl<MCFixup> &Fixups,
+@@ -250,6 +269,15 @@
+   APInt Scratch(64, 0U); // One APInt word is enough.
+   getBinaryCodeForInstr(MI, Fixups, EncodedInst, Scratch, STI);
+ 
++  // .Q: the W prefix goes in front, and the fixups move with the instruction.
++  // N (bit 4): a MOVE that keeps the flags.
++  if (uint64_t Flags = MCII.get(MI.getOpcode()).TSFlags & 3) {
++    uint16_t Prefix = 0xA000 | ((Flags & 1) ? 8 : 0) | ((Flags & 2) ? 0x10 : 0);
++    support::endian::write<uint16_t>(CB, Prefix, llvm::endianness::big);
++    for (MCFixup &F : Fixups)
++      F.setOffset(F.getOffset() + 2);
++  }
++
+   unsigned InstSize = EncodedInst.getBitWidth();
+   for (unsigned i = 0; i != InstSize; i += 16)
+     support::endian::write<uint16_t>(

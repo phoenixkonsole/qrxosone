@@ -75,6 +75,18 @@ int main(void)
         usleep(1000);
     }
     CHECK(a[8] == 4 && a[10] == LOOPBACK && a[11] == up, "recvfrom %u from %x:%u", a[8], a[10], a[11]);
+    /* random bytes and clock for native 68k programs */
+    memset(ram + 500, 0, 64);
+    CHECK(call(QRX_NET_RANDOM, 0, 500, 32, 0, 0, 0, &e) == 32, "random %u", e);
+    memcpy(ram + 600, ram + 500, 32);
+    CHECK(call(QRX_NET_RANDOM, 0, 500, 32, 0, 0, 0, &e) == 32, "random again %u", e);
+    CHECK(memcmp(ram + 500, ram + 600, 32) != 0, "two random blocks are the same");
+    CHECK(ram[532] == 0, "random wrote past its length");
+    CHECK(call(QRX_NET_RANDOM, 0, 500, 0, 0, 0, 0, &e) == UINT32_MAX, "random of no bytes");
+    CHECK(call(QRX_NET_RANDOM, 0, 500, 257, 0, 0, 0, &e) == UINT32_MAX, "random over the limit");
+    memset(a, 0, sizeof a);
+    qrx_hostnet_call(QRX_NET_TIME, a, ram);
+    CHECK(a[8] == 0 && a[10] > 1700000000u && a[11] < 1000000u, "time %u.%u", a[10], a[11]);
     if (failures) { printf("%u failures\n", failures); return 1; }
     puts("host sockets: all checks passed");
     return 0;

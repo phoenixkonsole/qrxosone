@@ -1,0 +1,1241 @@
+--- a/llvm/CMakeLists.txt
++++ b/llvm/CMakeLists.txt
+@@ -543,6 +543,7 @@
+   CSKY
+   DirectX
+   M68k
++  M68k64
+   Xtensa
+ )
+ 
+--- a/llvm/include/llvm/TargetParser/Triple.h
++++ b/llvm/include/llvm/TargetParser/Triple.h
+@@ -64,6 +64,7 @@
+     loongarch32, // LoongArch (32-bit): loongarch32
+     loongarch64, // LoongArch (64-bit): loongarch64
+     m68k,        // M68k: Motorola 680x0 family
++    m68k64,      // M68k64: QRX 68100EC64, 64-bit 680x0
+     mips,        // MIPS: mips, mipsallegrex, mipsr6
+     mipsel,      // MIPSEL: mipsel, mipsallegrexe, mipsr6el
+     mips64,      // MIPS64: mips64, mips64r6, mipsn32, mipsn32r6
+@@ -208,6 +209,7 @@
+   enum OSType {
+     UnknownOS,
+ 
++    AROS,
+     Darwin,
+     DragonFly,
+     FreeBSD,
+@@ -571,6 +573,10 @@
+     return getOSVersion() >= Other.getOSVersion();
+   }
+ 
++  bool isAROS() const {
++    return getOS() == Triple::AROS;
++  }
++
+   /// Comparison function for checking OS X version compatibility, which handles
+   /// supporting skewed version numbering schemes used by the "darwin" triples.
+   LLVM_ABI bool isMacOSXVersionLT(unsigned Major, unsigned Minor = 0,
+--- a/llvm/lib/TargetParser/Triple.cpp
++++ b/llvm/lib/TargetParser/Triple.cpp
+@@ -47,6 +47,7 @@
+   case loongarch32:    return "loongarch32";
+   case loongarch64:    return "loongarch64";
+   case m68k:           return "m68k";
++  case m68k64:         return "m68k64";
+   case mips64:         return "mips64";
+   case mips64el:       return "mips64el";
+   case mips:           return "mips";
+@@ -196,6 +197,7 @@
+   case ppcle:       return "ppc";
+ 
+   case m68k:        return "m68k";
++  case m68k64:      return "m68k";
+ 
+   case mips:
+   case mipsel:
+@@ -295,6 +297,7 @@
+   case AIX: return "aix";
+   case AMDHSA: return "amdhsa";
+   case AMDPAL: return "amdpal";
++  case AROS: return "aros";
+   case BridgeOS: return "bridgeos";
+   case CUDA: return "cuda";
+   case Darwin: return "darwin";
+@@ -463,6 +466,7 @@
+       .Case("avr", avr)
+       .StartsWith("bpf", BPFArch)
+       .Case("m68k", m68k)
++      .Case("m68k64", m68k64)
+       .Case("mips", mips)
+       .Case("mipsel", mipsel)
+       .Case("mips64", mips64)
+@@ -614,6 +618,7 @@
+           .Case("thumbeb", Triple::thumbeb)
+           .Case("avr", Triple::avr)
+           .Case("m68k", Triple::m68k)
++          .Case("m68k64", Triple::m68k64)
+           .Case("msp430", Triple::msp430)
+           .Cases({"mips", "mipseb", "mipsallegrex", "mipsisa32r6", "mipsr6"},
+                  Triple::mips)
+@@ -708,6 +713,7 @@
+ 
+ static Triple::OSType parseOS(StringRef OSName) {
+   return StringSwitch<Triple::OSType>(OSName)
++      .StartsWith("aros", Triple::AROS)
+       .StartsWith("darwin", Triple::Darwin)
+       .StartsWith("dragonfly", Triple::DragonFly)
+       .StartsWith("freebsd", Triple::FreeBSD)
+@@ -1001,6 +1007,7 @@
+   case Triple::loongarch32:
+   case Triple::loongarch64:
+   case Triple::m68k:
++  case Triple::m68k64:
+   case Triple::mips64:
+   case Triple::mips64el:
+   case Triple::mips:
+@@ -1764,6 +1771,7 @@
+   case llvm::Triple::bpfel:
+   case llvm::Triple::hsail64:
+   case llvm::Triple::loongarch64:
++  case llvm::Triple::m68k64:
+   case llvm::Triple::mips64:
+   case llvm::Triple::mips64el:
+   case llvm::Triple::nvptx64:
+@@ -2062,6 +2070,7 @@
+   case Triple::sparcv9:
+   case Triple::systemz:
+   case Triple::m68k:
++  case Triple::m68k64:
+ 
+   // ARM is intentionally unsupported here, changing the architecture would
+   // drop any arch suffixes.
+@@ -2359,6 +2368,7 @@
+   case Triple::hexagon:
+   case Triple::lanai:
+   case Triple::m68k:
++  case Triple::m68k64:
+   case Triple::msp430:
+   case Triple::systemz:
+   case Triple::xcore:
+--- a/llvm/lib/TargetParser/TargetDataLayout.cpp
++++ b/llvm/lib/TargetParser/TargetDataLayout.cpp
+@@ -574,6 +574,9 @@
+     return computeLoongArchDataLayout(*this);
+   case Triple::m68k:
+     return computeM68kDataLayout(*this);
++  case Triple::m68k64:
++    // QRX 68100EC64: big endian, natural alignment, 64-bit pointers.
++    return "E-m:e-p:64:64-i8:8-i16:16-i32:32-i64:64-f32:32-f64:64-n8:16:32:64-a:0:16-S64";
+   case Triple::mips:
+   case Triple::mipsel:
+   case Triple::mips64:
+--- a/llvm/lib/BinaryFormat/ELF.cpp
++++ b/llvm/lib/BinaryFormat/ELF.cpp
+@@ -230,6 +230,7 @@
+   case Triple::loongarch64:
+     return EM_LOONGARCH;
+   case Triple::m68k:
++  case Triple::m68k64:
+     return EM_68K;
+   case Triple::mips:
+   case Triple::mipsel:
+--- a/llvm/include/llvm/Object/ELFObjectFile.h
++++ b/llvm/include/llvm/Object/ELFObjectFile.h
+@@ -1366,7 +1366,7 @@
+   bool IsLittleEndian = ELFT::Endianness == llvm::endianness::little;
+   switch (EF.getHeader().e_machine) {
+   case ELF::EM_68K:
+-    return Triple::m68k;
++    return ELFT::Is64Bits ? Triple::m68k64 : Triple::m68k;
+   case ELF::EM_386:
+   case ELF::EM_IAMCU:
+     return Triple::x86;
+--- a/llvm/include/llvm/IR/RuntimeLibcalls.td
++++ b/llvm/include/llvm/IR/RuntimeLibcalls.td
+@@ -3517,7 +3517,7 @@
+ def isDefaultLibcallArch : RuntimeLibcallPredicate<[{
+   TT.isMIPS() || TT.isLoongArch() || TT.isVE() || TT.isBPF() ||
+   TT.getArch() == Triple::csky || TT.getArch() == Triple::arc ||
+-  TT.getArch() == Triple::m68k ||  TT.getArch() == Triple::xtensa ||
++  TT.getArch() == Triple::m68k || TT.getArch() == Triple::m68k64 || TT.getArch() == Triple::xtensa ||
+   (TT.isSystemZ() && !TT.isOSzOS())
+ }]>;
+ 
+--- a/clang/lib/Basic/Targets.cpp
++++ b/clang/lib/Basic/Targets.cpp
+@@ -145,6 +145,8 @@
+       return std::make_unique<AppleMachOAArch64TargetInfo>(Triple, Opts);
+ 
+     switch (os) {
++    case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<AArch64leTargetInfo>>(Triple, Opts);
+     case llvm::Triple::FreeBSD:
+       return std::make_unique<FreeBSDTargetInfo<AArch64leTargetInfo>>(Triple,
+                                                                       Opts);
+@@ -189,6 +191,8 @@
+ 
+   case llvm::Triple::aarch64_be:
+     switch (os) {
++    case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<AArch64beTargetInfo>>(Triple, Opts);
+     case llvm::Triple::FreeBSD:
+       return std::make_unique<FreeBSDTargetInfo<AArch64beTargetInfo>>(Triple,
+                                                                       Opts);
+@@ -220,6 +224,8 @@
+       }
+     case llvm::Triple::LiteOS:
+       return std::make_unique<OHOSTargetInfo<ARMleTargetInfo>>(Triple, Opts);
++    case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<ARMleTargetInfo>>(Triple, Opts);
+     case llvm::Triple::FreeBSD:
+       return std::make_unique<FreeBSDTargetInfo<ARMleTargetInfo>>(Triple, Opts);
+     case llvm::Triple::Fuchsia:
+@@ -260,6 +266,8 @@
+       return std::make_unique<FuchsiaTargetInfo<ARMbeTargetInfo>>(Triple, Opts);
+     case llvm::Triple::Linux:
+       return std::make_unique<LinuxTargetInfo<ARMbeTargetInfo>>(Triple, Opts);
++    case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<ARMbeTargetInfo>>(Triple, Opts);
+     case llvm::Triple::NetBSD:
+       return std::make_unique<NetBSDTargetInfo<ARMbeTargetInfo>>(Triple, Opts);
+     case llvm::Triple::RTEMS:
+@@ -350,10 +358,20 @@
+       return std::make_unique<MipsTargetInfo>(Triple, Opts);
+     }
+ 
++  case llvm::Triple::m68k64:
++    switch (os) {
++    case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<M68k64TargetInfo>>(Triple, Opts);
++    default:
++      return std::make_unique<M68k64TargetInfo>(Triple, Opts);
++    }
++
+   case llvm::Triple::m68k:
+     switch (os) {
+     case llvm::Triple::Linux:
+       return std::make_unique<LinuxTargetInfo<M68kTargetInfo>>(Triple, Opts);
++        case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<M68kTargetInfo>>(Triple, Opts);
+     case llvm::Triple::NetBSD:
+       return std::make_unique<NetBSDTargetInfo<M68kTargetInfo>>(Triple, Opts);
+     default:
+@@ -364,6 +382,8 @@
+     switch (os) {
+     case llvm::Triple::Linux:
+       return std::make_unique<LinuxTargetInfo<PPC32TargetInfo>>(Triple, Opts);
++    case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<PPC32TargetInfo>>(Triple, Opts);
+     case llvm::Triple::FreeBSD:
+       return std::make_unique<FreeBSDTargetInfo<PPC32TargetInfo>>(Triple, Opts);
+     case llvm::Triple::NetBSD:
+@@ -382,6 +402,8 @@
+     switch (os) {
+     case llvm::Triple::Linux:
+       return std::make_unique<LinuxTargetInfo<PPC32TargetInfo>>(Triple, Opts);
++    case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<PPC32TargetInfo>>(Triple, Opts);
+     case llvm::Triple::FreeBSD:
+       return std::make_unique<FreeBSDTargetInfo<PPC32TargetInfo>>(Triple, Opts);
+     default:
+@@ -394,6 +416,8 @@
+       return std::make_unique<LinuxTargetInfo<PPC64TargetInfo>>(Triple, Opts);
+     case llvm::Triple::Lv2:
+       return std::make_unique<PS3PPUTargetInfo<PPC64TargetInfo>>(Triple, Opts);
++    case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<PPC64TargetInfo>>(Triple, Opts);
+     case llvm::Triple::FreeBSD:
+       return std::make_unique<FreeBSDTargetInfo<PPC64TargetInfo>>(Triple, Opts);
+     case llvm::Triple::NetBSD:
+@@ -410,6 +434,8 @@
+     switch (os) {
+     case llvm::Triple::Linux:
+       return std::make_unique<LinuxTargetInfo<PPC64TargetInfo>>(Triple, Opts);
++    case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<PPC64TargetInfo>>(Triple, Opts);
+     case llvm::Triple::FreeBSD:
+       return std::make_unique<FreeBSDTargetInfo<PPC64TargetInfo>>(Triple, Opts);
+     case llvm::Triple::NetBSD:
+@@ -433,6 +459,8 @@
+ 
+   case llvm::Triple::riscv32:
+     switch (os) {
++    case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<RISCV32TargetInfo>>(Triple, Opts);
+     case llvm::Triple::NetBSD:
+       return std::make_unique<NetBSDTargetInfo<RISCV32TargetInfo>>(Triple,
+                                                                    Opts);
+@@ -444,6 +472,8 @@
+ 
+   case llvm::Triple::riscv64:
+     switch (os) {
++    case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<RISCV64TargetInfo>>(Triple, Opts);
+     case llvm::Triple::FreeBSD:
+       return std::make_unique<FreeBSDTargetInfo<RISCV64TargetInfo>>(Triple,
+                                                                     Opts);
+@@ -557,6 +587,9 @@
+         return std::make_unique<AndroidX86_32TargetInfo>(Triple, Opts);
+       }
+     }
++    case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<X86_32TargetInfo>>(Triple,
++                                                                        Opts);
+     case llvm::Triple::DragonFly:
+       return std::make_unique<DragonFlyBSDTargetInfo<X86_32TargetInfo>>(Triple,
+                                                                         Opts);
+@@ -616,6 +649,9 @@
+         return std::make_unique<OHOSX86_64TargetInfo>(Triple, Opts);
+       }
+     }
++    case llvm::Triple::AROS:
++      return std::make_unique<AROSTargetInfo<X86_64TargetInfo>>(Triple,
++                                                                        Opts);
+     case llvm::Triple::DragonFly:
+       return std::make_unique<DragonFlyBSDTargetInfo<X86_64TargetInfo>>(Triple,
+                                                                         Opts);
+--- a/clang/lib/Basic/Targets/M68k.h
++++ b/clang/lib/Basic/Targets/M68k.h
+@@ -62,6 +62,38 @@
+   }
+ };
+ 
++// QRX 68100EC64 long mode: LP64, natural alignment.
++class LLVM_LIBRARY_VISIBILITY M68k64TargetInfo : public M68kTargetInfo {
++public:
++  M68k64TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
++      : M68kTargetInfo(Triple, Opts) {
++    PointerWidth = PointerAlign = LongWidth = LongAlign = 64;
++    LongLongAlign = DoubleAlign = 64;
++    IntAlign = FloatAlign = 32;
++    SuitableAlign = 64;
++    LongDoubleWidth = LongDoubleAlign = 64;
++    LongDoubleFormat = &llvm::APFloat::IEEEdouble();
++    SizeType = UnsignedLong;
++    PtrDiffType = SignedLong;
++    IntPtrType = SignedLong;
++    Int64Type = SignedLong;
++    IntMaxType = SignedLong;
++    MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
++  }
++  void getTargetDefines(const LangOptions &Opts, MacroBuilder &Builder) const override {
++    // Not __m68k__ or __mc68000: code that tests those expects the 32-bit m68k ABI
++    // (AROS picks its register call convention by them).
++    Builder.defineMacro("__m68k64__");
++    Builder.defineMacro("__mc68100ec64__");
++    Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1");
++    Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_2");
++    Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4");
++    Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8");
++    Builder.defineMacro("_LP64");
++    Builder.defineMacro("__LP64__");
++  }
++};
++
+ } // namespace targets
+ } // namespace clang
+ 
+--- a/clang/lib/CodeGen/CodeGenModule.cpp
++++ b/clang/lib/CodeGen/CodeGenModule.cpp
+@@ -118,6 +118,7 @@
+     return createDefaultTargetCodeGenInfo(CGM);
+ 
+   case llvm::Triple::m68k:
++  case llvm::Triple::m68k64:
+     return createM68kTargetCodeGenInfo(CGM);
+   case llvm::Triple::mips:
+   case llvm::Triple::mipsel:
+--- a/clang/lib/CodeGen/Targets/M68k.cpp
++++ b/clang/lib/CodeGen/Targets/M68k.cpp
+@@ -49,7 +49,29 @@
+   }
+ }
+ 
++namespace {
++// m68k64 varargs: every argument takes an 8-byte stack slot, small ones at its high address.
++class M68k64ABIInfo : public DefaultABIInfo {
++public:
++  using DefaultABIInfo::DefaultABIInfo;
++  RValue EmitVAArg(CodeGenFunction &CGF, Address VAListAddr, QualType Ty,
++                   AggValueSlot Slot) const override {
++    return emitVoidPtrVAArg(CGF, VAListAddr, Ty, /*IsIndirect=*/false,
++                            getContext().getTypeInfoInChars(Ty),
++                            CharUnits::fromQuantity(8),
++                            /*AllowHigherAlign=*/true, Slot);
++  }
++};
++class M68k64TargetCodeGenInfo : public TargetCodeGenInfo {
++public:
++  M68k64TargetCodeGenInfo(CodeGenTypes &CGT)
++      : TargetCodeGenInfo(std::make_unique<M68k64ABIInfo>(CGT)) {}
++};
++} // namespace
++
+ std::unique_ptr<TargetCodeGenInfo>
+ CodeGen::createM68kTargetCodeGenInfo(CodeGenModule &CGM) {
++  if (CGM.getTriple().getArch() == llvm::Triple::m68k64)
++    return std::make_unique<M68k64TargetCodeGenInfo>(CGM.getTypes());
+   return std::make_unique<M68kTargetCodeGenInfo>(CGM.getTypes());
+ }
+--- a/clang/lib/Driver/ToolChains/CommonArgs.cpp
++++ b/clang/lib/Driver/ToolChains/CommonArgs.cpp
+@@ -99,6 +99,7 @@
+   case llvm::Triple::loongarch32:
+   case llvm::Triple::loongarch64:
+   case llvm::Triple::m68k:
++  case llvm::Triple::m68k64:
+     return !clang::driver::tools::areOptimizationsEnabled(Args);
+   default:
+     break;
+@@ -749,6 +750,7 @@
+     return "";
+ 
+   case llvm::Triple::m68k:
++  case llvm::Triple::m68k64:
+     return m68k::getM68kTargetCPU(Args);
+ 
+   case llvm::Triple::mips:
+@@ -901,6 +903,7 @@
+     NVPTX::getNVPTXTargetFeatures(D, Triple, Args, Features);
+     break;
+   case llvm::Triple::m68k:
++  case llvm::Triple::m68k64:
+     m68k::getM68kTargetFeatures(D, Triple, Args, Features);
+     break;
+   case llvm::Triple::msp430:
+--- a/lld/ELF/Arch/M68k64.cpp
++++ b/lld/ELF/Arch/M68k64.cpp
+@@ -0,0 +1,83 @@
++//===- M68k64.cpp - QRX 68100EC64 ----------------------------------------===//
++//
++// Static linking for the m68k64 target: ELF64, big endian, EM_68K. There is no GOT, PLT or TLS
++// support yet. R_68K64_64 is ours: the 68000 family has no 64-bit relocation.
++//
++//===----------------------------------------------------------------------===//
++
++#include "Symbols.h"
++#include "Target.h"
++#include "llvm/BinaryFormat/ELF.h"
++#include "llvm/Support/Endian.h"
++
++using namespace llvm;
++using namespace llvm::support::endian;
++using namespace llvm::ELF;
++using namespace lld;
++using namespace lld::elf;
++
++namespace {
++constexpr uint32_t R_68K64_64 = 240;
++
++class M68k64 final : public TargetInfo {
++public:
++  M68k64(Ctx &ctx) : TargetInfo(ctx) {
++    symbolicRel = RelType(R_68K64_64);
++    defaultImageBase = 0x10000;
++    defaultMaxPageSize = 0x1000;
++    defaultCommonPageSize = 0x1000;
++  }
++  RelExpr getRelExpr(RelType type, const Symbol &s,
++                     const uint8_t *loc) const override;
++  void relocate(uint8_t *loc, const Relocation &rel,
++                uint64_t val) const override;
++};
++} // namespace
++
++RelExpr M68k64::getRelExpr(RelType type, const Symbol &s,
++                           const uint8_t *loc) const {
++  switch (uint32_t(type)) {
++  case R_68K64_64:
++  case R_68K_32:
++  case R_68K_16:
++  case R_68K_8:
++    return R_ABS;
++  case R_68K_PC32:
++  case R_68K_PC16:
++  case R_68K_PC8:
++    return R_PC;
++  case R_68K_NONE:
++    return R_NONE;
++  default:
++    Err(ctx) << getErrorLoc(ctx, loc) << "unknown relocation (" << type.v
++             << ") against symbol " << &s;
++    return R_NONE;
++  }
++}
++
++void M68k64::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
++  switch (uint32_t(rel.type)) {
++  case R_68K64_64:
++    write64be(loc, val);
++    break;
++  case R_68K_32:
++  case R_68K_PC32:
++    checkInt(ctx, loc, val, 32, rel);
++    write32be(loc, val);
++    break;
++  case R_68K_16:
++  case R_68K_PC16:
++    checkInt(ctx, loc, val, 16, rel);
++    write16be(loc, val);
++    break;
++  case R_68K_8:
++  case R_68K_PC8:
++    checkInt(ctx, loc, val, 8, rel);
++    *loc = val;
++    break;
++  default:
++    llvm_unreachable("unknown relocation");
++  }
++}
++
++void elf::setM68k64TargetInfo(Ctx &ctx) { ctx.target.reset(new M68k64(ctx)); }
+--- a/lld/ELF/CMakeLists.txt
++++ b/lld/ELF/CMakeLists.txt
+@@ -33,6 +33,7 @@
+   Arch/PPC64.cpp
+   Arch/RISCV.cpp
+   Arch/SPARCV9.cpp
++  Arch/M68k64.cpp
+   Arch/SystemZ.cpp
+   Arch/X86.cpp
+   Arch/X86_64.cpp
+--- a/lld/ELF/Target.h
++++ b/lld/ELF/Target.h
+@@ -207,6 +207,7 @@
+ void setPPCTargetInfo(Ctx &);
+ void setRISCVTargetInfo(Ctx &);
+ void setSPARCV9TargetInfo(Ctx &);
++void setM68k64TargetInfo(Ctx &);
+ void setSystemZTargetInfo(Ctx &);
+ void setX86TargetInfo(Ctx &);
+ void setX86_64TargetInfo(Ctx &);
+--- a/lld/ELF/Target.cpp
++++ b/lld/ELF/Target.cpp
+@@ -88,6 +88,8 @@
+     return setRISCVTargetInfo(ctx);
+   case EM_SPARCV9:
+     return setSPARCV9TargetInfo(ctx);
++  case EM_68K:
++    return setM68k64TargetInfo(ctx);
+   case EM_S390:
+     return setSystemZTargetInfo(ctx);
+   case EM_X86_64:
+--- a/lld/ELF/Driver.cpp
++++ b/lld/ELF/Driver.cpp
+@@ -176,6 +176,7 @@
+           .Case("elf_i386", {ELF32LEKind, EM_386})
+           .Case("elf_iamcu", {ELF32LEKind, EM_IAMCU})
+           .Case("elf64_sparc", {ELF64BEKind, EM_SPARCV9})
++          .Case("elf64m68k", {ELF64BEKind, EM_68K})
+           .Case("msp430elf", {ELF32LEKind, EM_MSP430})
+           .Case("elf64_amdgpu", {ELF64LEKind, EM_AMDGPU})
+           .Case("elf64loongarch", {ELF64LEKind, EM_LOONGARCH})
+--- a/lld/ELF/InputFiles.cpp
++++ b/lld/ELF/InputFiles.cpp
+@@ -1785,6 +1785,8 @@
+     return EM_RISCV;
+   case Triple::sparcv9:
+     return EM_SPARCV9;
++  case Triple::m68k64:
++    return EM_68K;
+   case Triple::systemz:
+     return EM_S390;
+   case Triple::x86:
+--- a/lld/ELF/ScriptParser.cpp
++++ b/lld/ELF/ScriptParser.cpp
+@@ -461,6 +461,7 @@
+       .Case("elf32-littleriscv", {ELF32LEKind, EM_RISCV})
+       .Case("elf64-littleriscv", {ELF64LEKind, EM_RISCV})
+       .Case("elf64-sparc", {ELF64BEKind, EM_SPARCV9})
++      .Case("elf64-m68k", {ELF64BEKind, EM_68K})
+       .Case("elf32-msp430", {ELF32LEKind, EM_MSP430})
+       .Case("elf32-loongarch", {ELF32LEKind, EM_LOONGARCH})
+       .Case("elf64-loongarch", {ELF64LEKind, EM_LOONGARCH})
+--- a/clang/include/clang/Options/Options.td
++++ b/clang/include/clang/Options/Options.td
+@@ -1463,6 +1463,10 @@
+   HelpText<"Path to libomptarget-nvptx bitcode library">;
+ def libomptarget_spirv_bc_path_EQ : Joined<["--"], "libomptarget-spirv-bc-path=">, Group<i_Group>,
+   HelpText<"Path to libomptarget-spirv bitcode library">;
++def detach : Flag<["-"], "detach">,
++             Visibility<[ClangOption]>,
++             Flags<[NoArgumentUnused]>,
++             HelpText<"Run in detached mode">;
+ def dD : Flag<["-"], "dD">, Group<d_Group>, Visibility<[ClangOption, CC1Option]>,
+   HelpText<"Print macro definitions in -E mode in addition to normal output">;
+ def dI : Flag<["-"], "dI">, Group<d_Group>, Visibility<[ClangOption, CC1Option]>,
+@@ -6064,6 +6068,10 @@
+ def multiply__defined__unused : Separate<["-"], "multiply_defined_unused">;
+ def multiply__defined : Separate<["-"], "multiply_defined">;
+ def mwarn_nonportable_cfstrings : Flag<["-"], "mwarn-nonportable-cfstrings">, Group<m_Group>;
++def nix : Flag<["-"], "nix">,
++             Visibility<[ClangOption]>,
++             Flags<[NoArgumentUnused]>,
++             HelpText<"Enable *nix support">;
+ def canonical_prefixes : Flag<["-"], "canonical-prefixes">,
+   Flags<[HelpHidden]>, Visibility<[ClangOption, CLOption, DXCOption]>,
+   HelpText<"Use absolute paths for invoking subcommands (default)">;
+@@ -6160,6 +6168,10 @@
+   MarshallingInfoFlag<CodeGenOpts<"InstrumentForProfiling">>;
+ def pipe : Flag<["-", "--"], "pipe">,
+   HelpText<"Use pipes between commands, when possible">;
++def posixc : Flag<["-"], "posixc">,
++             Visibility<[ClangOption]>,
++             Flags<[NoArgumentUnused]>,
++             HelpText<"Enable POSIX C">;
+ def prebind__all__twolevel__modules : Flag<["-"], "prebind_all_twolevel_modules">;
+ def prebind : Flag<["-"], "prebind">;
+ def preload : Flag<["-"], "preload">;
+@@ -6226,6 +6238,10 @@
+   NegFlag<SetFalse>,
+   BothFlags<[], [ClangOption, CC1Option, FlangOption, FC1Option]>>;
+ def static_pie : Flag<["-"], "static-pie">, Group<Link_Group>;
++def stdc : Flag<["-"], "stdc">,
++             Visibility<[ClangOption]>,
++             Flags<[NoArgumentUnused]>,
++             HelpText<"Enable STDC">;
+ def read__only__relocs : Separate<["-"], "read_only_relocs">;
+ def remap : Flag<["-"], "remap">;
+ def rewrite_objc : Flag<["-"], "rewrite-objc">, Flags<[NoXarchOption]>,
+@@ -6621,6 +6637,23 @@
+ def fno_pie : Flag<["-"], "fno-pie">, Group<f_Group>;
+ def pie : Flag<["-"], "pie">, Group<Link_Group>;
+ def no_pie : Flag<["-"], "no-pie">, Group<Link_Group>;
++def no_posixc : Flag<["-"], "no-posixc">,
++             Visibility<[ClangOption]>,
++             Flags<[NoArgumentUnused]>,
++             HelpText<"Dont use POSIX C">;
++def no_stdc : Flag<["-"], "no-stdc">,
++             Visibility<[ClangOption]>,
++             Flags<[NoArgumentUnused]>,
++             HelpText<"Dont use STDC">;
++def no_sysbase : Flag<["-"], "no_sysbase">,
++             Visibility<[ClangOption]>,
++             Flags<[NoArgumentUnused]>,
++             HelpText<"Dont expose SysBase">;
++def nosysbase : Flag<["-"], "nosysbase">, Alias<no_sysbase>;
++def noposixc : Flag<["-"], "noposixc">, Alias<no_posixc>;
++def nostdc : Flag<["-"], "nostdc">, Alias<no_stdc>;
++// deadwood's AROS gcc: leave out the C libraries (libm, libstdlib, libcrt)
++def noclibs : Flag<["-"], "noclibs">, Alias<no_stdc>;
+ 
+ } // let Vis = [Default, FlangOption]
+ 
+--- a/clang/lib/Basic/Targets/OSTargets.h
++++ b/clang/lib/Basic/Targets/OSTargets.h
+@@ -31,6 +31,45 @@
+                         MacroBuilder &Builder) const override {
+     TgtInfo::getTargetDefines(Opts, Builder);
+     getOSDefines(Opts, TgtInfo::getTriple(), Builder);
++  }
++};
++
++// AROS target
++template <typename Target>
++class LLVM_LIBRARY_VISIBILITY AROSTargetInfo
++   : public OSTargetInfo<Target> {
++protected:
++  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
++                    MacroBuilder &Builder) const override {
++    // std defines for AROS
++    DefineStd(Builder, "AROS", Opts);
++    // defines for AmigaOS support
++    Builder.defineMacro("AMIGA");
++    Builder.defineMacro("_AMIGA");
++
++#if (0)
++    /* AROS GCC does NOT define this, so neither
++       do we. */
++    Builder.defineMacro("__AMIGA__");
++#endif
++
++    Builder.defineMacro("__ELF__");
++    if (Opts.POSIXThreads)
++      Builder.defineMacro("_REENTRANT");
++    if (Opts.CPlusPlus)
++      Builder.defineMacro("_GNU_SOURCE");
++    if (this->HasFloat128)
++      Builder.defineMacro("__FLOAT128__");
++  }
++
++public:
++  AROSTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
++      : OSTargetInfo<Target>(Triple, Opts) {
++      this->WCharType = TargetInfo::UnsignedInt;
++      this->WIntType = TargetInfo::UnsignedInt;
++#if (0)
++      CharIsSigned = false;
++#endif
+   }
+ };
+ 
+--- a/clang/lib/Driver/CMakeLists.txt
++++ b/clang/lib/Driver/CMakeLists.txt
+@@ -45,6 +45,7 @@
+   ToolChains/AMDGPU.cpp
+   ToolChains/AMDGPUOpenMP.cpp
+   ToolChains/AVR.cpp
++  ToolChains/AROS.cpp
+   ToolChains/BareMetal.cpp
+   ToolChains/Clang.cpp
+   ToolChains/CommonArgs.cpp
+--- a/clang/lib/Driver/Driver.cpp
++++ b/clang/lib/Driver/Driver.cpp
+@@ -12,6 +12,7 @@
+ #include "ToolChains/AMDGPUOpenMP.h"
+ #include "ToolChains/AVR.h"
+ #include "ToolChains/Arch/RISCV.h"
++#include "ToolChains/AROS.h"
+ #include "ToolChains/BareMetal.h"
+ #include "ToolChains/CSKYToolChain.h"
+ #include "ToolChains/Clang.h"
+@@ -6826,6 +6827,9 @@
+     case llvm::Triple::AIX:
+       TC = std::make_unique<toolchains::AIX>(*this, Target, Args);
+       break;
++    case llvm::Triple::AROS:
++      TC = std::make_unique<toolchains::AROSClang>(*this, Target, Args);
++      break;
+     case llvm::Triple::Haiku:
+       TC = std::make_unique<toolchains::Haiku>(*this, Target, Args);
+       break;
+--- a/clang/lib/Driver/ToolChains/AROS.cpp
++++ b/clang/lib/Driver/ToolChains/AROS.cpp
+@@ -0,0 +1,404 @@
++//===--- AROS.cpp - AROS Tool Chain -------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++#include "AROS.h"
++
++#include "clang/Driver/CommonArgs.h"
++#include "clang/Driver/InputInfo.h"
++
++//#include "Arch/ARM.h"
++//#include "Arch/PPC.h"
++//#include "Arch/RISCV.h"
++#include "clang/Config/config.h"
++#include "clang/Driver/Compilation.h"
++#include "clang/Driver/Driver.h"
++#include "clang/Driver/DriverDiagnostic.h"
++#include "clang/Options/Options.h"
++#include "llvm/ADT/StringExtras.h"
++#include "llvm/Option/ArgList.h"
++#include "llvm/Support/FileSystem.h"
++#include "llvm/Support/Path.h"
++#include "llvm/Support/VirtualFileSystem.h"
++
++using namespace llvm::opt;
++using namespace clang;
++using namespace clang::driver;
++using namespace clang::driver::tools;
++using namespace clang::driver::toolchains;
++
++
++void
++AROS::Assembler::ConstructJob(Compilation &C,
++                              const JobAction &JA,
++                              const InputInfo &Output,
++                              const InputInfoList &Inputs,
++                              const ArgList &Args,
++                              const char *LinkingOutput) const {
++    claimNoWarnArgs(Args);
++
++    const char *DefaultAssembler = "as";
++    ArgStringList CmdArgs;
++
++    switch (getToolChain().getArch()) {
++    default:
++        break;
++    case llvm::Triple::x86:
++        CmdArgs.push_back("--32");
++        break;
++    case llvm::Triple::x86_64:
++        CmdArgs.push_back("--64");
++        break;
++    }
++
++    Args.AddAllArgs(CmdArgs, options::OPT_I);
++    Args.AddAllArgValues(CmdArgs,
++                       options::OPT_Wa_COMMA,
++                       options::OPT_Xassembler);
++
++    CmdArgs.push_back("-o");
++    CmdArgs.push_back(Output.getFilename());
++
++    for (const auto &II : Inputs)
++        CmdArgs.push_back(II.getFilename());
++
++    const char *Exec = 
++        Args.MakeArgString(getToolChain().GetProgramPath(DefaultAssembler));
++    C.addCommand(std::make_unique<Command>(
++        JA, *this, ResponseFileSupport::None(), Exec, CmdArgs, Inputs));
++}
++
++static const char *getLDMOption(const llvm::Triple &T, const ArgList &Args) {
++    switch (T.getArch()) {
++    case llvm::Triple::x86:
++        return "elf_i386";
++#if (0)
++    case llvm::Triple::aarch64:
++        return "aarch64";
++    case llvm::Triple::aarch64_be:
++        return "aarch64b";
++    case llvm::Triple::arm:
++    case llvm::Triple::thumb:
++    case llvm::Triple::armeb:
++    case llvm::Triple::thumbeb:
++        return isArmBigEndian(T, Args) ? "armelfb_eabi" : "armelf_eabi";
++    case llvm::Triple::ppc:
++        return "elf32ppc";
++    case llvm::Triple::ppc64:
++        return "elf64ppc";
++    case llvm::Triple::ppc64le:
++        return "elf64lppc";
++    case llvm::Triple::riscv32:
++        return "elf32lriscv";
++    case llvm::Triple::riscv64:
++        return "elf64lriscv";
++#endif
++    case llvm::Triple::x86_64:
++        return "elf_x86_64";
++    case llvm::Triple::m68k64:
++        return "elf64m68k";
++    default:
++        return nullptr;
++    }
++}
++
++void
++AROS::Linker::ConstructJob(Compilation &C,
++                           const JobAction &JA,
++                           const InputInfo &Output,
++                           const InputInfoList &Inputs,
++                           const ArgList &Args,
++                           const char *LinkingOutput) const {
++    const toolchains::AROSClang &AROSTC =
++      static_cast<const toolchains::AROSClang &>(getToolChain());
++    const char *Exec = Args.MakeArgString(AROSTC.GetLinkerPath());
++    const Driver &D = AROSTC.getDriver();
++    const std::string &SysRoot = D.SysRoot;
++    ArgStringList CmdArgs;
++    const llvm::Triple &Target = AROSTC.getTriple();
++    llvm::Triple CompilerTarget(LLVM_DEFAULT_TARGET_TRIPLE);
++
++    if (llvm::sys::path::filename(Exec) == "lld") {
++        CmdArgs.push_back("-flavor");
++        CmdArgs.push_back("gnu");
++        if (!D.SysRoot.empty())
++            CmdArgs.push_back(Args.MakeArgString("--sysroot=" + SysRoot));
++    }
++
++    if (!Args.hasArg(options::OPT_static)) {
++        CmdArgs.push_back("--eh-frame-hdr");
++    }
++    
++    if (const char *LDMOption = getLDMOption(Target, Args)) {
++        CmdArgs.push_back("-m");
++        CmdArgs.push_back(LDMOption);
++    } else {
++#if (0)
++        D.Diag(diag::err_target_unknown_triple) << Triple.str();
++        return;
++#endif
++    }
++
++    if (Output.isFilename()) {
++        CmdArgs.push_back("-o");
++        CmdArgs.push_back(Output.getFilename());
++    } else {
++         assert(Output.isNothing() && "Invalid output.");
++    }
++
++    AROSTC.addStartObjectFileArgs(Args, CmdArgs);
++
++  Args.addAllArgs(CmdArgs, {options::OPT_L, options::OPT_T_Group,
++                            options::OPT_s, options::OPT_t, options::OPT_r});
++
++    AddLinkerInputs(AROSTC, Inputs, Args, CmdArgs, JA);
++
++    if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
++        bool jobWantsPThread;
++        if ((jobWantsPThread = AROSTC.ShouldLinkCXXStdlib(Args))) {
++            AROSTC.AddCXXStdlibLibArgs(Args, CmdArgs);
++        }
++
++        SmallString<128> LibPath(SysRoot);
++        if (Target.isArch32Bit() && CompilerTarget.isArch64Bit()) {
++            llvm::sys::path::append(LibPath, "lib32");
++        } else {
++            llvm::sys::path::append(LibPath, "lib");
++        }
++
++        CmdArgs.push_back(Args.MakeArgString(StringRef("-L") + LibPath));
++
++        CmdArgs.push_back("--start-group");
++        if ((jobWantsPThread) ||
++           (Args.hasArg(options::OPT_pthreads, options::OPT_pthread))) {
++            CmdArgs.push_back("-lpthread");
++        }
++        // The library list of deadwood's AROS (its gcc-10.5.0 LIB_SPEC): the C library is
++        // libstdlib and libcrt, libcrtprog adds the program startup. -nostdc leaves them out,
++        // as -noclibs does there.
++        CmdArgs.push_back("-lmui");
++        CmdArgs.push_back("-larossupport");
++        CmdArgs.push_back("-lamiga");
++        if (!Args.hasArg(options::OPT_no_stdc)) {
++            CmdArgs.push_back("-lm");
++            CmdArgs.push_back("-lstdlib");
++            if (!Args.hasArg(options::OPT_nostartfiles))
++                CmdArgs.push_back("-lcrtprog");
++            CmdArgs.push_back("-lcrt");
++        }
++        for (const char *L : {"-lcodesets", "-lkeymap", "-lexpansion", "-lcommodities",
++                              "-ldiskfont", "-lasl", "-lmuimaster", "-ldatatypes",
++                              "-lcybergraphics", "-lworkbench", "-licon", "-lintuition",
++                              "-lgadtools", "-llayers", "-laros", "-lpartition", "-liffparse",
++                              "-lgraphics", "-llocale", "-ldos", "-lutility"})
++            CmdArgs.push_back(L);
++        if (!Args.hasArg(options::OPT_nosysbase)) {
++            CmdArgs.push_back("-lexec");
++        }
++        CmdArgs.push_back("-lautoinit");
++        CmdArgs.push_back("-llibinit");
++        CmdArgs.push_back("--end-group");
++        // The 68100EC64 has no FPU: float and double, and the 128-bit integer helpers, come from
++        // compiler-rt's builtins, which the SDK keeps as libclang_rt.builtins-m68k64.a
++        if (Target.getArch() == llvm::Triple::m68k64)
++            CmdArgs.push_back("-lclang_rt.builtins-m68k64");
++    }
++
++    C.addCommand(std::make_unique<Command>(
++        JA, *this, ResponseFileSupport::AtFileUTF8(),
++        Exec, CmdArgs, Inputs));
++}
++
++
++//------------------------------------------------------------------------------------------------------//
++
++
++AROSClang::AROSClang(const Driver &D,
++                             const llvm::Triple &Triple,
++                             const llvm::opt::ArgList &Args)
++    : Generic_ELF(D, Triple, Args) {
++    if (GetCXXStdlibType(Args) == ToolChain::CST_Libstdcxx) {
++
++    }
++}
++
++#if (0)
++bool AROSClang::IsUnwindTablesDefault() const {
++    // FIXME:
++
++    // all non-x86 targets need unwind tables, however,
++    // LLVM currently does not know how to emit them.
++
++    // FIXME:
++    // Is this the correct implementation of this function ???
++//  bool AROSClang::IsUnwindTablesDefault(const ArgList &Args) const {
++    //// Unwind tables are not emitted if -fno-exceptions
++    //// is supplied (except when targeting x86_64).
++    //return getArch() == llvm::Triple::x86_64 ||
++    //    (GetExceptionModel(Args) != llvm::ExceptionHandling::SjLj &&
++    //    Args.hasFlag(options::OPT_fexceptions,
++    //                 options::OPT_fno_exceptions,
++    //                 true));
++
++    return getArch() == llvm::Triple::x86_64;
++}
++#endif
++
++void AROSClang::
++AddAROSSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
++                         llvm::opt::ArgStringList &CC1Args) const {
++    const Driver &D = getDriver();
++    const std::string &SysRoot = D.SysRoot;
++
++    if (!DriverArgs.hasArg(options::OPT_nobuiltininc)) {
++        addSystemInclude(DriverArgs, CC1Args, SysRoot + "/include");
++        if (!DriverArgs.hasArg(options::OPT_no_posixc)) {
++            SmallString<128> ResourceDir(SysRoot);
++            llvm::sys::path::append(ResourceDir, "include/aros/posixc");
++            addSystemInclude(DriverArgs, CC1Args, ResourceDir);
++        }// OPT_no_posixc
++        if (!DriverArgs.hasArg(options::OPT_no_stdc)) {
++            SmallString<128> ResourceDir(SysRoot);
++            llvm::sys::path::append(ResourceDir, "include/aros/stdc");
++            addSystemInclude(DriverArgs, CC1Args, ResourceDir);
++        }// OPT_no_stdc
++    }// OPT_nobuiltininc
++}
++
++void AROSClang::
++AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
++                          llvm::opt::ArgStringList &CC1Args) const {
++    if (DriverArgs.hasArg(options::OPT_nostdinc))
++        return;
++
++    if (!DriverArgs.hasArg(options::OPT_nobuiltininc)) {
++        SmallString<128> Dir(getDriver().ResourceDir);
++        llvm::sys::path::append(Dir, "include");
++        addSystemInclude(DriverArgs, CC1Args, Dir.str());
++    }
++
++    if (DriverArgs.hasArg(options::OPT_nostdlibinc))
++        return;
++
++    if (std::optional<std::string> Path = getStdlibIncludePath())
++        addSystemInclude(DriverArgs, CC1Args, *Path);
++
++    AddAROSSystemIncludeArgs(DriverArgs, CC1Args);
++}
++
++void AROSClang::
++addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
++                      llvm::opt::ArgStringList &CC1Args,
++                      Action::OffloadKind DeviceOffloadingKind) const {
++    if (DriverArgs.hasArg(options::OPT_posixc)) {
++        CC1Args.push_back("-D_POSIX_SOURCE");
++    }
++    if (DriverArgs.hasArg(options::OPT_nix)) {
++        CC1Args.push_back("-D__NIX__");
++    }
++}
++
++
++bool AROSClang::handlesTarget(const llvm::Triple &Triple) {
++  if (Triple.getOS() != llvm::Triple::AROS)
++    return false;
++  return Triple.getEnvironmentName() == "elf";
++}
++
++void AROSClang::
++AddClangCXXStdlibIncludeArgs(const llvm::opt::ArgList &DriverArgs,
++                             llvm::opt::ArgStringList &CC1Args) const {
++    if (DriverArgs.hasArg(options::OPT_nostdlibinc) ||
++        DriverArgs.hasArg(options::OPT_nostdincxx))
++        return;
++
++    SmallString<128> ClangBinDir(getDriver().Dir);
++    switch (GetCXXStdlibType(DriverArgs)) {
++    case ToolChain::CST_Libcxx: {
++        SmallString<128> Dir(ClangBinDir);
++        llvm::sys::path::append(Dir, "..", "include", "c++", "v1");
++        llvm::sys::fs::make_absolute(Dir);
++        llvm::sys::path::remove_dots(Dir, /*remove_dot_dot=*/true);
++        addSystemInclude(DriverArgs, CC1Args, Dir.str());
++        break;
++    }
++    case ToolChain::CST_Libstdcxx:
++        break;
++    }
++    AddAROSSystemIncludeArgs(DriverArgs, CC1Args);
++}
++
++void AROSClang::
++AddCXXStdlibLibArgs(const llvm::opt::ArgList &DriverArgs,
++                    llvm::opt::ArgStringList &CC1Args) const {
++    SmallString<128> ClangBinDir(getDriver().Dir);
++    switch (GetCXXStdlibType(DriverArgs)) {
++    case ToolChain::CST_Libcxx: {
++        SmallString<128> Dir(ClangBinDir);
++        llvm::sys::path::append(Dir, "..", "lib");
++        llvm::sys::fs::make_absolute(Dir);
++        llvm::sys::path::remove_dots(Dir, /*remove_dot_dot=*/true);
++        CC1Args.push_back(DriverArgs.MakeArgString("-L" + Dir));
++        CC1Args.push_back("-lc++");
++        CC1Args.push_back("-lc++abi");
++        CC1Args.push_back("-lunwind");
++        break;
++    }
++    case ToolChain::CST_Libstdcxx:
++        CC1Args.push_back("-lstdc++");
++        break;
++    }
++}
++
++void AROSClang::
++addStartObjectFileArgs(const llvm::opt::ArgList &Args,
++                       llvm::opt::ArgStringList &CmdArgs) const {
++    const Driver &D = getDriver();
++
++   /* we need to provide cxx-startup.o, for c++ code,
++    * even when no startfiles is specified
++    */
++    if (!D.CCCIsCXX() && Args.hasArg(options::OPT_nostartfiles))
++        return;
++
++    const std::string &SysRoot = D.SysRoot;
++    SmallString<128> LibPath(SysRoot);
++    const llvm::Triple &Target = getTriple();
++    llvm::Triple CompilerTarget(LLVM_DEFAULT_TARGET_TRIPLE);
++    SmallString<10> tgtPath("lib/");
++    if (Target.isArch32Bit() && CompilerTarget.isArch64Bit()) {
++        SmallString<128> TstLibPath(LibPath);
++        llvm::sys::path::append(TstLibPath, "lib32/");
++        if (getVFS().exists(TstLibPath))
++            tgtPath.assign("lib32/");
++    }
++    llvm::sys::path::append(LibPath, tgtPath);
++
++    if (!Args.hasArg(options::OPT_nostartfiles)) {
++        // Standard AROS/AmigaOS-like startfiles.
++        CmdArgs.push_back(Args.MakeArgString(LibPath + "startup.o"));
++        if (Args.hasArg(options::OPT_detach)) {
++            CmdArgs.push_back(Args.MakeArgString(LibPath + "detach.o"));
++        }
++    }
++    // cxx-startup.o for __dso_handle
++    CmdArgs.push_back(Args.MakeArgString(LibPath + "cxx-startup.o"));
++    if (!Args.hasArg(options::OPT_nostartfiles) && Args.hasArg(options::OPT_nix)) {
++        // *nix support startfiles.
++        CmdArgs.push_back(Args.MakeArgString(LibPath + "nixmain.o"));
++    }
++}
++
++
++Tool *AROSClang::buildAssembler() const {
++    return new tools::AROS::Assembler(*this);
++}
++
++Tool *AROSClang::buildLinker() const {
++    return new tools::AROS::Linker(*this);
++}
+--- a/clang/lib/Driver/ToolChains/AROS.h
++++ b/clang/lib/Driver/ToolChains/AROS.h
+@@ -0,0 +1,118 @@
++//===--- AROS.h - AROS ToolChain Implementations ----------*- C -*-===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++#ifndef LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_AROS_H
++#define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_AROS_H
++
++#include "Gnu.h"
++#include "clang/Driver/Tool.h"
++#include "clang/Driver/ToolChain.h"
++#include "llvm/Config/llvm-config.h" // for LLVM_DEFAULT_TARGET_TRIPLE
++
++namespace clang {
++namespace driver {
++namespace tools {
++
++/// AROS -- Directly call GNU Binutils assembler and linker
++namespace AROS {
++class LLVM_LIBRARY_VISIBILITY Assembler : public Tool {
++public:
++  Assembler(const ToolChain &TC)
++      : Tool("AROS::Assembler", "assembler", TC) {}
++
++  bool hasIntegratedCPP() const override { return false; }
++
++  void ConstructJob(Compilation &C, const JobAction &JA,
++                    const InputInfo &Output, const InputInfoList &Inputs,
++                    const llvm::opt::ArgList &TCArgs,
++                    const char *LinkingOutput) const override;
++};
++
++class LLVM_LIBRARY_VISIBILITY Linker : public Tool {
++public:
++  Linker(const ToolChain &TC)
++      : Tool("AROS::Linker", "linker", TC) {}
++  bool isLinkJob() const override { return true; }
++  bool hasIntegratedCPP() const override { return false; }
++  void ConstructJob(Compilation &C, const JobAction &JA,
++                    const InputInfo &Output, const InputInfoList &Inputs,
++                    const llvm::opt::ArgList &TCArgs,
++                    const char *LinkingOutput) const override;
++};
++
++} // end namespace AROS
++} // end namespace tools
++
++namespace toolchains {
++class LLVM_LIBRARY_VISIBILITY AROSClang : public Generic_ELF {
++public:
++  AROSClang(const Driver &D,
++                const llvm::Triple &Triple,
++                const llvm::opt::ArgList &Args);
++  ~AROSClang() override = default;
++
++  static bool handlesTarget(const llvm::Triple &Triple);
++
++  bool isPICDefault() const override { return false; }
++  bool isPIEDefault(const llvm::opt::ArgList &Args) const override {
++    return false;
++  }
++  bool isPICDefaultForced() const override { return false; }
++  bool SupportsProfiling() const override { return false; }
++
++  void AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
++                            llvm::opt::ArgStringList &CC1Args) const override;
++
++  void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
++                             llvm::opt::ArgStringList &CC1Args,
++                             Action::OffloadKind DeviceOffloadKind) const override;
++
++  void AddClangCXXStdlibIncludeArgs(const llvm::opt::ArgList &DriverArgs,
++                             llvm::opt::ArgStringList &CC1Args) const override;
++
++  void AddCXXStdlibLibArgs(const llvm::opt::ArgList &Args,
++                           llvm::opt::ArgStringList &CmdArgs) const override;
++
++  void addStartObjectFileArgs(const llvm::opt::ArgList &Args,
++                              llvm::opt::ArgStringList &CmdArgs) const;
++
++  RuntimeLibType GetDefaultRuntimeLibType() const override {
++    return ToolChain::RLT_CompilerRT;
++  }
++
++  CXXStdlibType GetDefaultCXXStdlibType() const override {
++    return ToolChain::CST_Libcxx;
++  }
++
++  const char *getDefaultLinker() const override {
++    const llvm::Triple &Target = getTriple();
++    llvm::Triple CompilerTarget(LLVM_DEFAULT_TARGET_TRIPLE);
++
++    if (Target.isArch32Bit() && CompilerTarget.isArch64Bit())
++      return "collect-aros32";
++
++    return "collect-aros";
++  }
++private:
++  void AddAROSSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
++                            llvm::opt::ArgStringList &CC1Args) const;
++
++  std::string SysRoot;
++
++protected:
++  Tool *buildAssembler() const override;
++  Tool *buildLinker() const override;
++};
++
++
++} // end namespace toolchains
++} // end namespace driver
++} // end namespace clang
++
++#endif // LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_AROS_H
+--- a/clang/lib/Lex/InitHeaderSearch.cpp
++++ b/clang/lib/Lex/InitHeaderSearch.cpp
+@@ -211,6 +211,7 @@
+ bool InitHeaderSearch::ShouldAddDefaultIncludePaths(
+     const llvm::Triple &triple) {
+   switch (triple.getOS()) {
++  case llvm::Triple::AROS:
+   case llvm::Triple::AIX:
+   case llvm::Triple::DragonFly:
+   case llvm::Triple::ELFIAMCU:
