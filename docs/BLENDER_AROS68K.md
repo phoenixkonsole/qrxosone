@@ -79,7 +79,8 @@ GHOST ist C++ ohne großen Bedarf an der Standardbibliothek. Für die Oberfläch
 1. `GHOST_SystemAROS` mit Fenstern über Intuition oder direkt über die QRX-RTG-Anzeige, plus Maus,
    Tastatur und Uhr aus `input.device` und `QRXHostInput`.
 2. Einen GL-Kontext für diese Fenster, siehe nächster Abschnitt.
-3. Für Stufe 1 ersetzt `intern/qrx/qrx_ghost_stub.c` alles, nur die Pfad-Funktionen sind echt.
+
+Stand 12. November: gebaut, siehe „Oberfläche über die GL-Tür“ weiter unten.
 
 ## OpenGL im Viewport
 
@@ -89,8 +90,8 @@ Die 2.79-Oberfläche braucht OpenGL 2.1 mit GLSL und zeichnet sie auch für Men�
   aller Erfahrung für eine bedienbare Oberfläche zu langsam, gemessen ist es noch nicht.
 - **Host-GL-Tür für 68k-Programme:** Die Engine hat schon GL für x86-Gäste (`qrx_hostapi_gl.c`). Eine Tür
   für 68k-Programme würde GL-Aufrufe direkt zum Mac bringen, ähnlich wie QRX3D. Das ist Arbeit in der
-  Engine (Kontext pro Fenster, Zeiger in Gast-RAM, GLSL 1.20 auf Metal oder dem GL des Macs) und damit
-  **eine Entscheidung für den Nutzer**, siehe unten.
+  Engine (Kontext pro Fenster, Zeiger in Gast-RAM, GLSL 1.20 auf Metal oder dem GL des Macs).
+  **Entschieden am 11. November: Host-GL-Tür.** Gebaut, siehe unten.
 
 ## Stufen
 
@@ -330,8 +331,101 @@ außerhalb dieses Ports weitere Programme trifft. Vermutlich betrifft es jedes A
 
 ### Offene Entscheidungen
 
-1. **Oberfläche und OpenGL:** Für die GUI braucht es eine Host-GL-Tür für 68k-Programme in der Engine, oder man
-   nimmt Mesa im Gast. Bei den gemessenen Zeiten halte ich Mesa für unbrauchbar, und der GUI-Weg hängt außerdem an Python 3
-   und einer C++-Standardbibliothek.
+1. **Oberfläche und OpenGL:** entschieden für die Host-GL-Tür (11. November), gebaut am 12. November.
 2. **Distribution:** `blender -b` ist ein Kommandozeilenprogramm. Die Engine im Bundle ist seit dem 11. November auf
    dem nötigen Stand. Ein Eintrag im App-Menü ergibt vor der Oberfläche trotzdem wenig Sinn.
+
+### Oberfläche über die GL-Tür (12. November)
+
+**Blender 2.79b läuft mit Oberfläche im Gast und lässt sich bedienen.** Getestet sind: Splash schließen, Menü
+„File“ öffnen, Tab in den Edit-Modus, F12 rendern (10,8 s, Ergebnis im Bild-Editor) und Strg+Alt+U (Einstellungen
+als zweites Fenster mit eigenem, geteiltem Kontext). Alle Eingaben kamen als eingespielte Klicks und Tasten der Engine
+(`QRX_TEST_CLICKS`, `QRX_TEST_KEYS`); von Hand bedient hat es noch niemand.
+
+**GL-Tür (Engine `full68k/qrx_gl68k.c`, Dienst 8, Feature-Bit 2).** Die Gastbibliothek `tools/qrxgl68k/guest`
+(`libqrxgl.a`, ersetzt `libGL`/`libGLU` beim Linken) schreibt jeden Aufruf in einen Befehlsstrom im Gast-RAM. Die
+Engine arbeitet ihn auf einem echten OpenGL-2.1-Kontext des Macs ab (Legacy-Profil, GLSL 1.20, „2.1 Metal“ auf dem M1).
+Beide Hälften erzeugt `tools/qrxgl68k/gen.py` aus den GLEW-Prototypen der Funktionen, die der Mac hat: 1256 Funktionen
+mit einer Nummer, 1060 vollständig unterstützt. Was fehlt, steht in `unsupported.txt`: Evaluatoren, VAOs, Instancing,
+UBOs. GLEW meldet diese Erweiterungen als nicht vorhanden.
+
+- Ein Aufruf wartet nur, wenn er etwas zurückgibt oder die Engine Gast-Speicher lesen oder schreiben muss.
+  Vektor- und Uniform-Arrays fester Größe gehen inline mit.
+- Gast-Adressen gehen als 64-Bit-Werte in den Strom. Ein 64-Bit-Gast (siehe `docs/armithlon/qrx64-umstieg.md`)
+  braucht kein neues Protokoll; nur die Gastbibliothek setzt das obere Wort auf 0.
+- Byte-Reihenfolge:
+  - Pixeldaten tauscht GL selbst (`GL_UNPACK/PACK_SWAP_BYTES` auf dem Host an, für den Gast als aus gemeldet).
+  - Vertexdaten haben keinen solchen Schalter. Pufferobjekte liegen deshalb in der Engine als Kopie in
+    Gast-Reihenfolge, und jeder Zeichenaufruf wandelt die Vertices, die er braucht, in Client-Arrays um.
+  - `glMapBuffer` gibt eine Kopie im Gast-Speicher, die beim Unmap zurückgeschrieben wird.
+- Jedes Fenster ist ein FBO in Fenstergröße, das für Framebuffer 0 steht. Die Engine bildet dafür `glBindFramebuffer`,
+  `glDrawBuffer`, `glReadBuffer` und die zugehörigen `glGet` ab.
+- `QRX_GL68K_CAPTURE=pfad` speichert jedes präsentierte Bild als PPM, `QRX_GL68K_TRACE=n` protokolliert die ersten n
+  Aufrufe im Engine-Log.
+
+Prüfung der Tür allein: Eine Testszene (`tools/qrxgl68k/test`) enthält Immediate Mode, Texturen in Bytes, 5_6_5 und
+Floats, VBO- und Index-Puffer mit `glMapBuffer`, Client-Arrays, GLSL mit Uniforms, Display-Listen, FBO, `glReadPixels`
+und Blenders Mesh-Pfad (`GL_SHORT`-Normalen, `GL_UNSIGNED_INT`-Indizes, Licht, Tiefe). Als 68k-Programm ist sie
+**bitgleich** mit derselben Szene nativ auf dem Mac, wenn auch dort ein FBO der Framebuffer ist. Gegen ein echtes
+Mac-Fenster weichen 389 von 256.000 Pixeln ab, und zwar nur an Rasterisierungs-Grenzfällen (Texel genau auf
+Pixelmitte, Diagonalen). Das ist eine Eigenschaft des Macs, nicht der Tür.
+
+**GHOST für AROS (`tools/blender/ghost`).**
+- `ghost_aros_native.c` ist der Intuition-Teil:
+  - Fenster auf dem Workbench-Bildschirm, die sich einen IDCMP-Port teilen.
+  - Tasten über `MapRawKey`, Mausrad über `RAWKEY_NM_WHEEL_*`.
+  - Das Bild der Tür kommt mit `WritePixelArray` ins Fenster.
+- Ist der Workbench-Bildschirm kleiner als 1024×600 oder ohne Truecolor, öffnet GHOST einen eigenen RTG-Bildschirm
+  (1280×800, `QRX_BLENDER_SCREEN=BxH`).
+- Läuft der QRX-Desktop nicht, nennt GHOST diesen Bildschirm „QRX“. Grund: `C:QRXHostInput` setzt den Zeiger
+  immer relativ zum öffentlichen Bildschirm „QRX“; ohne ihn kam keine Mausbewegung bei Blender an.
+- `QRX_GHOST_TRACE` protokolliert Ereignisse.
+- Noch nicht da:
+  - eigene Mauszeiger-Formen (nur der Warte-Zeiger)
+  - Zeiger versetzen (fortlaufendes Ziehen bei Zahlenfeldern)
+  - Zwischenablage zum Mac (nur innerhalb von Blender)
+  - Minimieren
+
+Start: `tools/blender/run-gui.sh` (siehe `tools/blender/README.md`). Der Job braucht `CD SYS:`, sonst findet Blender
+seine Python-Skripte nicht. Der Batch-Baum `tree` hat keine Schriften; die Oberfläche läuft im eigenen Baum `guitree`.
+
+**Mac-Referenz.** Das offizielle Blender 2.79b für den Mac ist ein Intel-Programm, und auf diesem Mac fehlt Rosetta.
+Die Referenz ist deshalb derselbe Quellcode nativ für arm64 (`tools/blender/configure-host-gui.sh`, Abhängigkeiten aus
+`build-hostdeps.sh`: Python 3.5.10 und FreeType 2.12.1). Sie benutzt dieselben GHOST-Klassen; nur die Intuition-Schicht
+(`hostref/ghost_host_native.c`) und die GL-Schicht (`hostref/qgl_host.c`, das GL des Macs direkt, FBO als Framebuffer
+wie die Tür) sind ersetzt. Sie bekommt dieselben Klicks nach derselben Zahl präsentierter Bilder. Pro Bild
+1272×771 = 980.712 Pixel:
+
+| Zustand | Pixel verschieden | was |
+|---|---|---|
+| erstes Bild | 0 | |
+| Splash | 894 | Speicheranzeige im Kopf, Ecke unten links |
+| nach Klick (Splash zu) | 1.008 | dazu das gestrichelte Muster am 3D-Cursor |
+| Menü „File“ offen | 12.827 | dazu die Tastenkürzel: die Referenz ist mit `__APPLE__` gebaut und zeigt „Cmd“ statt „Ctrl“, das Menü wird dadurch anders breit |
+
+Das sind keine Fehler des Gasts: Die Speicherwerte sind andere, und das Strichmuster rechnet der Mac in einem
+Software-Rückfall („Fallback to SW vertex for line stipple“). Die Streifen der Bereichsecke unten links zeigt nur der
+Gast; ich vermute Hover-Zustand oder Mausposition, geprüft ist es nicht. Die Schriftmaße sind trotz FreeType 2.14 im
+Gast gegen 2.12.1 in der Referenz gleich (`blf.dimensions`). Renders mit dem neuen Build sind weiter **pixelgleich** mit
+dem Mac: Python-Szene 0 von 76.800, Startszene 960×540 0 von 518.400.
+
+**Compilerfehler in GCC 16 für m68k.** Der Vergleich fand zwei Fehler im Gast:
+- Die Outliner-Namen lagen 20 Pixel zu weit links, unter den Icons.
+- In der Zeitleiste fehlten die Bildnummern.
+
+Die Ursache ist dieselbe. GCC sichert ein aufrufflüchtiges FPU-Register (`fp0`/`fp1`) um einen Aufruf als 96-Bit-Extended
+(`fmovex`) und liest es danach als 32-Bit-Float 8 Byte weiter zurück, also aus den unteren Mantissenbytes. Im Outliner
+wurde so aus `offsx += UI_UNIT_X + 2 * ufac` (20 + 22) die 22. Das passiert mit dem alten Reload und mit LRA, also
+unabhängig vom Allokator, und es ist kein Fehler der Engine (JIT und Interpreter rechnen gleich). `aros_cc.py` übersetzt
+jetzt alles mit `-fno-caller-saves`. libstdc++, Python, die Port-Objekte und Blender sind damit neu gebaut. Von 1.077
+solchen Sicherungen in Blender bleiben 26, alle in echten `long double`-Funktionen (libstdc++-Ausgabe,
+`__isinfl`). Nicht neu geprüft: CPythons eigene Tests (vorher 59/60).
+
+Beim Neubau fiel auf, dass `shim/include/sys/uio.h` kein `extern "C"` hatte. Der neu gebaute libstdc++ verlangte deshalb
+ein C++-`writev`. Das ist korrigiert.
+
+**Nicht erledigt:**
+- Die Bundle-Engine hat die GL-Tür noch nicht. Die Tests liefen mit der Engine aus diesem Zweig
+  (`.build/blender-2.79b/engine-build`). Für Nutzer braucht es erst den Merge nach `claude/qrx-22.5.11` und dann eine
+  neue Bundle-Engine; die alte wird vorher gesichert.
+- Geschwindigkeit ist nicht gemessen. Der Start bis zur Oberfläche dauerte in den Testläufen unter 100 s.

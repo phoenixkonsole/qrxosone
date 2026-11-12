@@ -53,6 +53,8 @@ if [ ! -e "$W/gcc/build/src/.libs/libstdc++.a" ]; then
   QRX_CXX_BARE=1 make -C "$W/gcc/build" -k -j8 || true
   [ -e "$W/gcc/build/src/.libs/libstdc++.a" ] || { echo "libstdc++ did not build"; exit 1; }
 fi
+# GL for 68k programs through the ARMithlon door: Blender links it in place of libGL.
+"$REPO/tools/qrxgl68k/build_guest.sh" "$W/port" >/dev/null
 "$HERE/configure.sh" >/dev/null
 ninja -C "$W/build" -j 8 blender || true
 "$HERE/build_port.py"
