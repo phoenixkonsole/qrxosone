@@ -364,6 +364,31 @@ patch('''    if (filemanager_close_hit(x, y)) { close_filemanager(); return; }
     if (qrx_ipfs_drive_click(x, y)) return;
     if (filemanager_title_hit(x, y)) { begin_file_gesture(x, y, 0); return; }''')
 
+# Window frames, title bars and their gadgets use the screen's pens 0-7. The desktop loads its
+# wallpaper palette from colour 0 on, so they all came out in the wallpaper's dark blue and the
+# close, depth and zoom gadgets of AROS and Windows windows could not be seen. On a truecolor
+# screen the wallpaper does not need those colours: give them back the AROS Workbench ones.
+patch('''    if (!g_refresh_only) for (i = 0; i < QRX_COLORS; ++i) {
+        SetRGB32(&s->ViewPort, (ULONG)i,
+                 rgb32(qrx_palette[i][0]),
+                 rgb32(qrx_palette[i][1]),
+                 rgb32(qrx_palette[i][2]));
+    }''','''    if (!g_refresh_only) for (i = 0; i < QRX_COLORS; ++i) {
+        SetRGB32(&s->ViewPort, (ULONG)i,
+                 rgb32(qrx_palette[i][0]),
+                 rgb32(qrx_palette[i][1]),
+                 rgb32(qrx_palette[i][2]));
+    }
+    if (!g_refresh_only && g_screen_depth > 8) {
+        static const UBYTE wb[8][3] = { {0xAA,0xAA,0xAA}, {0x00,0x00,0x00}, {0xFF,0xFF,0xFF}, {0x66,0x88,0xBB},
+                                        {0xEE,0x44,0x44}, {0x55,0xDD,0x55}, {0x00,0x44,0xDD}, {0xEE,0x99,0x00} };
+        for (i = 0; i < 8; ++i) SetRGB32(&s->ViewPort, (ULONG)i, rgb32(wb[i][0]), rgb32(wb[i][1]), rgb32(wb[i][2]));
+    }''')
+# The terminal's close gadget only sent it behind the other windows, so it stayed on screen.
+# Close hides it now (AROS HideWindow); TERM, the top menu and the shortcuts show it again.
+patch('''            if (terminal_close_hit(mx, my)) { WindowToBack(g_terminal); return 1; }''','''            if (terminal_close_hit(mx, my)) { HideWindow(g_terminal); return 1; }''')
+assert s.count('WindowToFront(g_terminal)')>=1
+s=s.replace('WindowToFront(g_terminal)','ShowWindow(g_terminal,WINDOW_FRONTMOST);WindowToFront(g_terminal)')
 (out/'qrx_desktop.armithlon.c').write_text(s)
 for f in ('qrx_icons.c','qrx_wicon.h','ipfs-drive.c'):shutil.copy(extra/f,out/f)
 if not (out/'qrx_wallpaper.h').exists():

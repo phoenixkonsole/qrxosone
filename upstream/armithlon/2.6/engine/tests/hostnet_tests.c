@@ -12,7 +12,7 @@ static unsigned failures;
 #define CHECK(x, ...) do { if (!(x)) { printf("FAIL line %d: ", __LINE__); printf(__VA_ARGS__); puts(""); failures++; } } while (0)
 static uint32_t call(uint32_t op, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5, uint32_t *err)
 {
-    uint32_t a[12] = { a0, a1, a2, a3, a4, a5, 0, 0, 0, 0, 0, 0 };
+    uint32_t a[13] = { a0, a1, a2, a3, a4, a5, 0, 0, 0, 0, 0, 0, 0 };
     qrx_hostnet_call(op, a, ram);
     if (err) *err = a[9];
     return a[8];
@@ -21,7 +21,7 @@ int main(void)
 {
     uint32_t e, ls = call(NET_SOCKET, 1, 0, 0, 0, 0, 0, &e);
     CHECK(ls != UINT32_MAX, "socket");
-    uint32_t a[12] = { ls, 0, 0 };
+    uint32_t a[13] = { ls, 0, 0 };
     /* port 0: the host picks one */
     CHECK(call(NET_BIND, ls, LOOPBACK, 0, 0, 0, 0, &e) == 0, "bind %u", e);
     CHECK(call(NET_LISTEN, ls, 4, 0, 0, 0, 0, &e) == 0, "listen %u", e);

@@ -14,6 +14,7 @@
 #include <sys/random.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MAXSOCK 64
@@ -107,6 +108,12 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
         gettimeofday(&tv, NULL);
         a[10] = (uint32_t)tv.tv_sec;
         a[11] = (uint32_t)tv.tv_usec;
+        {   /* the Mac's offset from UTC in seconds, east positive: guests set a local clock with it */
+            struct tm lt;
+            time_t now = tv.tv_sec;
+            localtime_r(&now, &lt);
+            a[12] = (uint32_t)(int32_t)lt.tm_gmtoff;
+        }
         a[8] = 0;
         return;
     }
