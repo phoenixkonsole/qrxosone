@@ -8,6 +8,7 @@
 #include "qrx_ppc.h"
 #include "qrx_ppc_jit.h"
 #include "qrx_pef.h"
+#include "qrx_macapp.h"
 #include "qrx_mix.h"
 
 #include <stdio.h>
@@ -2540,6 +2541,228 @@ static void pef_build_reloc_fragment(uint8_t *buf)
     pef_put32(buf, PEF3_LOADER_OFF + 146u, 0u);
 }
 
+/* P2.1: application files.  A MacBinary II wrapper carries the fragment in its
+ * data fork and names it through the 'cfrg' resource of the resource fork;
+ * qrx_app_load() is the whole path from the application file to the entry
+ * point. */
+#define MACAPP_DATA_OFF 128u
+#define MACAPP_DATA_PAD 256u
+#define MACAPP_RSRC_OFF (MACAPP_DATA_OFF + MACAPP_DATA_PAD)
+#define MACAPP_RSRC_LEN 82u
+#define MACAPP_SIZE (MACAPP_RSRC_OFF + MACAPP_RSRC_LEN)
+
+static uint16_t macapp_crc(const uint8_t *p, uint32_t n)
+{
+    uint16_t crc = 0u;
+    uint32_t i;
+    unsigned bit;
+
+    for (i = 0u; i < n; i++) {
+        crc = (uint16_t)(crc ^ ((uint16_t)p[i] << 8));
+        for (bit = 0u; bit < 8u; bit++)
+            crc = (crc & 0x8000u) ? (uint16_t)((crc << 1) ^ 0x1021u)
+                                  : (uint16_t)(crc << 1);
+    }
+    return crc;
+}
+
+/* Header, then the PEF container as data fork (padded to 128), then a resource
+ * fork with one 'cfrg' resource (id 0) that names the container. */
+static void macapp_build(uint8_t *img)
+{
+    uint8_t *rsrc = img + MACAPP_RSRC_OFF;
+
+    memset(img, 0, MACAPP_SIZE);
+    img[1] = 7;
+    memcpy(img + 2u, "QRXApp1", 7u);
+    pef_put32(img, 65u, 0x4150504Cu);       /* 'APPL' */
+    pef_put32(img, 69u, 0x51525821u);       /* 'QRX!' */
+    pef_put32(img, 83u, PEF_IMAGE_SIZE);    /* data fork: the container */
+    pef_put32(img, 87u, MACAPP_RSRC_LEN);
+    img[122] = 129u;                        /* MacBinary II */
+    img[123] = 129u;
+    pef_build_fragment(img + MACAPP_DATA_OFF);
+
+    pef_put32(rsrc, 0u, 16u);               /* data area right after header */
+    pef_put32(rsrc, 4u, 32u);               /* map after the data */
+    pef_put32(rsrc, 8u, 16u);               /* data area length */
+    pef_put32(rsrc, 12u, 50u);              /* map length */
+    pef_put32(rsrc, 16u, 12u);              /* resource length */
+    pef_put32(rsrc, 20u, 0u);               /* reserved word */
+    pef_put32(rsrc, 24u, 0u);               /* fragment offset */
+    pef_put32(rsrc, 28u, PEF_IMAGE_SIZE);   /* fragment length */
+    pef_put32(rsrc, 32u, 16u);              /* map: copy of the header */
+    pef_put32(rsrc, 36u, 32u);
+    pef_put32(rsrc, 40u, 16u);
+    pef_put32(rsrc, 44u, 50u);
+    pef_put32(rsrc, 48u, 0u);               /* next map */
+    pef_put16(rsrc, 52u, 0u);               /* file reference */
+    pef_put16(rsrc, 54u, 0u);               /* attributes */
+    pef_put16(rsrc, 56u, 28u);              /* type list */
+    pef_put16(rsrc, 58u, 0u);               /* name list */
+    pef_put16(rsrc, 60u, 0u);               /* one type */
+    pef_put32(rsrc, 62u, 0x63667267u);      /* 'cfrg' */
+    pef_put16(rsrc, 66u, 0u);               /* one resource */
+    pef_put16(rsrc, 68u, 10u);              /* reference list */
+    pef_put16(rsrc, 70u, 0u);               /* id 0 */
+    pef_put16(rsrc, 72u, 0xFFFFu);          /* no name */
+    rsrc[74] = 0u;                          /* attributes */
+    pef_put16(img, 124u, macapp_crc(img, 124u));
+}
+
+static void test_macapp(void)
+{
+    static qrx_pef_t image;
+    static uint8_t app[MACAPP_SIZE];
+    static const uint8_t cfrg_ok[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 208};
+    static const uint8_t cfrg_span[12] = {0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 208};
+    static const uint8_t cfrg_word[12] = {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 208};
+    uint8_t damaged[MACAPP_SIZE];
+    qrx_macbin_t mb;
+    qrx_cfrg_t cfrg;
+    const uint8_t *res;
+    uint32_t res_len;
+    uint32_t tvector;
+    unsigned before = failures;
+
+    macapp_build(app);
+
+    expect_u32("macapp_args",
+               (uint32_t)qrx_macbin_parse(0, app, MACAPP_SIZE),
+               (uint32_t)QRX_MACAPP_ERR_ARG);
+    expect_u32("macapp_short", (uint32_t)qrx_macbin_parse(&mb, app, 127u),
+               (uint32_t)QRX_MACAPP_ERR_SHORT);
+    memcpy(damaged, app, sizeof(damaged));
+    damaged[0] = 1u;
+    expect_u32("macapp_version",
+               (uint32_t)qrx_macbin_parse(&mb, damaged, MACAPP_SIZE),
+               (uint32_t)QRX_MACAPP_ERR_HEADER);
+    memcpy(damaged, app, sizeof(damaged));
+    damaged[1] = 0u;
+    expect_u32("macapp_name_length",
+               (uint32_t)qrx_macbin_parse(&mb, damaged, MACAPP_SIZE),
+               (uint32_t)QRX_MACAPP_ERR_HEADER);
+    memcpy(damaged, app, sizeof(damaged));
+    pef_put32(damaged, 83u, 0x20000000u);
+    expect_u32("macapp_fork_limit",
+               (uint32_t)qrx_macbin_parse(&mb, damaged, MACAPP_SIZE),
+               (uint32_t)QRX_MACAPP_ERR_HEADER);
+    memcpy(damaged, app, sizeof(damaged));
+    pef_put32(damaged, 87u, 200u);
+    expect_u32("macapp_rsrc_short",
+               (uint32_t)qrx_macbin_parse(&mb, damaged, MACAPP_SIZE),
+               (uint32_t)QRX_MACAPP_ERR_SHORT);
+    memcpy(damaged, app, sizeof(damaged));
+    damaged[124] ^= 0xFFu;
+    expect_u32("macapp_crc",
+               (uint32_t)qrx_macbin_parse(&mb, damaged, MACAPP_SIZE),
+               (uint32_t)QRX_MACAPP_ERR_CRC);
+
+    expect_u32("macapp_parse",
+               (uint32_t)qrx_macbin_parse(&mb, app, MACAPP_SIZE),
+               (uint32_t)QRX_MACAPP_OK);
+    expect_u32("macapp_data_len", mb.data_len, PEF_IMAGE_SIZE);
+    expect_u32("macapp_rsrc_len", mb.rsrc_len, MACAPP_RSRC_LEN);
+    expect_u32("macapp_type", mb.file_type, 0x4150504Cu);
+    expect_u32("macapp_creator", mb.file_creator, 0x51525821u);
+    expect_u32("macapp_has_crc", (uint32_t)mb.has_crc, 1u);
+    expect_u32("macapp_name_len", mb.name_len, 7u);
+    if (strcmp(mb.name, "QRXApp1") != 0) {
+        printf("FAIL macapp_name_value\n");
+        failures++;
+    }
+
+    expect_u32("macapp_rsrc_find",
+               (uint32_t)qrx_rsrc_find(mb.rsrc, mb.rsrc_len, QRX_CFRG_TYPE, 0,
+                                       &res, &res_len),
+               (uint32_t)QRX_MACAPP_OK);
+    expect_u32("macapp_rsrc_size", res_len, 12u);
+    expect_u32("macapp_rsrc_id",
+               (uint32_t)qrx_rsrc_find(mb.rsrc, mb.rsrc_len, QRX_CFRG_TYPE, 1,
+                                       &res, &res_len),
+               (uint32_t)QRX_MACAPP_ERR_NO_CFRG);
+    expect_u32("macapp_rsrc_type",
+               (uint32_t)qrx_rsrc_find(mb.rsrc, mb.rsrc_len, 0x74657374u, 0,
+                                       &res, &res_len),
+               (uint32_t)QRX_MACAPP_ERR_NO_CFRG);
+    memcpy(damaged, app, sizeof(damaged));
+    pef_put32(damaged, MACAPP_RSRC_OFF + 8u, 100u);
+    expect_u32("macapp_rsrc_data_short",
+               (uint32_t)qrx_rsrc_find(damaged + MACAPP_RSRC_OFF, MACAPP_RSRC_LEN,
+                                       QRX_CFRG_TYPE, 0, &res, &res_len),
+               (uint32_t)QRX_MACAPP_ERR_SHORT);
+    expect_u32("macapp_rsrc_map",
+               (uint32_t)qrx_rsrc_find(mb.rsrc, 20u, QRX_CFRG_TYPE, 0, &res,
+                                       &res_len),
+               (uint32_t)QRX_MACAPP_ERR_RSRC);
+    memcpy(damaged, app, sizeof(damaged));
+    pef_put16(damaged, MACAPP_RSRC_OFF + 60u, 8u);
+    expect_u32("macapp_rsrc_types",
+               (uint32_t)qrx_rsrc_find(damaged + MACAPP_RSRC_OFF, MACAPP_RSRC_LEN,
+                                       QRX_CFRG_TYPE, 0, &res, &res_len),
+               (uint32_t)QRX_MACAPP_ERR_RSRC);
+
+    expect_u32("macapp_cfrg", (uint32_t)qrx_cfrg_parse(&cfrg, cfrg_ok, 12u,
+                                                       PEF_IMAGE_SIZE),
+               (uint32_t)QRX_MACAPP_OK);
+    expect_u32("macapp_cfrg_offset", cfrg.offset, 0u);
+    expect_u32("macapp_cfrg_length", cfrg.length, PEF_IMAGE_SIZE);
+    expect_u32("macapp_cfrg_span",
+               (uint32_t)qrx_cfrg_parse(&cfrg, cfrg_span, 12u, PEF_IMAGE_SIZE),
+               (uint32_t)QRX_MACAPP_ERR_CFRG);
+    expect_u32("macapp_cfrg_word",
+               (uint32_t)qrx_cfrg_parse(&cfrg, cfrg_word, 12u, PEF_IMAGE_SIZE),
+               (uint32_t)QRX_MACAPP_ERR_CFRG);
+    expect_u32("macapp_cfrg_short",
+               (uint32_t)qrx_cfrg_parse(&cfrg, cfrg_ok, 8u, PEF_IMAGE_SIZE),
+               (uint32_t)QRX_MACAPP_ERR_CFRG);
+    expect_u32("macapp_cfrg_empty",
+               (uint32_t)qrx_cfrg_parse(&cfrg, cfrg_word, 12u, 0u),
+               (uint32_t)QRX_MACAPP_ERR_CFRG);
+
+    memset(memory, 0, sizeof(memory));
+    qrx_ppc_init(&ppc, memory, (uint32_t)sizeof(memory));
+    expect_u32("macapp_load",
+               (uint32_t)qrx_app_load(&image, &ppc, PEF_LOAD_BASE, app,
+                                      MACAPP_SIZE, 0, 0),
+               (uint32_t)QRX_MACAPP_OK);
+    tvector = qrx_pef_main_tvector(&image);
+    expect_u32("macapp_tvector", tvector, PEF_LOAD_BASE);
+    expect_u32("macapp_entry", get32(tvector), PEF_LOAD_BASE + 8u);
+
+    ppc.cpu.pc = get32(tvector);
+    ppc.cpu.gpr[1] = 0x3000;
+    ppc.cpu.gpr[2] = 0x3000;
+    expect_status("macapp_run", qrx_ppc_run(&ppc, 1000), QRX_PPC_TRAP);
+    expect_u32("macapp_run_r3", ppc.cpu.gpr[3], 42u);
+    expect_u32("macapp_run_mem", get32(DATA_BASE), 42u);
+
+    /* A wrapper without a resource fork, and a 'cfrg' that points past the
+     * data fork, are refused before the loader sees any bytes. */
+    memcpy(damaged, app, sizeof(damaged));
+    pef_put32(damaged, 87u, 0u);
+    pef_put16(damaged, 124u, macapp_crc(damaged, 124u));
+    expect_u32("macapp_no_cfrg",
+               (uint32_t)qrx_app_load(&image, &ppc, PEF_LOAD_BASE, damaged,
+                                      MACAPP_SIZE, 0, 0),
+               (uint32_t)QRX_MACAPP_ERR_NO_CFRG);
+    memcpy(damaged, app, sizeof(damaged));
+    pef_put32(damaged, MACAPP_RSRC_OFF + 28u, 4096u);
+    pef_put16(damaged, 124u, macapp_crc(damaged, 124u));
+    expect_u32("macapp_cfrg_past_fork",
+               (uint32_t)qrx_app_load(&image, &ppc, PEF_LOAD_BASE, damaged,
+                                      MACAPP_SIZE, 0, 0),
+               (uint32_t)QRX_MACAPP_ERR_CFRG);
+    memcpy(damaged, app, sizeof(damaged));
+    damaged[MACAPP_DATA_OFF] = (uint8_t)'X';
+    pef_put16(damaged, 124u, macapp_crc(damaged, 124u));
+    expect_u32("macapp_bad_pef",
+               (uint32_t)qrx_app_load(&image, &ppc, PEF_LOAD_BASE, damaged,
+                                      MACAPP_SIZE, 0, 0),
+               (uint32_t)QRX_MACAPP_ERR_PEF);
+    report("macapp", before);
+}
+
 static void test_pef_reloc(void)
 {
     static qrx_pef_t image;
@@ -4808,6 +5031,7 @@ int main(void)
     test_jit_faults();
     test_pef_loader();
     test_pef_reloc();
+    test_macapp();
     test_mixed_call();
     test_mixed_stack();
     test_mixed_fpu();

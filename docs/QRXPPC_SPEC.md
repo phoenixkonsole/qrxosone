@@ -201,12 +201,30 @@ Relokation an einem Drei-Section-Container (Code/Data/Loader): TVector12,
 unaufgelöster Import, unbekannter Opcode, ungültiger Section-Index und
 Reloc-Stream außerhalb der Loader-Section.
 
-Nicht enthalten: gepackte Sections (`QRX_PEF_ERR_PACKED`), MacBinary/
-Resource-Forks, 68k-Container, Glue-Code-Erzeugung für Mixed Mode und jeder
-Toolbox-Aufruf. Der Resolver erhält Bibliothek, Symbolklasse und Namen und
-liefert die Adresse selbst; eine Export-Hash-Suche oder Lazy-Bindung gibt es
-nicht, alle Importe werden beim Laden aufgelöst. Ein geladener PEF-Container
-ist daher noch **keine** laufende MacOS-9-App.
+Nicht enthalten: gepackte Sections (`QRX_PEF_ERR_PACKED`), 68k-Container,
+Glue-Code-Erzeugung für Mixed Mode und jeder Toolbox-Aufruf. Der Resolver
+erhält Bibliothek, Symbolklasse und Namen und liefert die Adresse selbst; eine
+Export-Hash-Suche oder Lazy-Bindung gibt es nicht, alle Importe werden beim
+Laden aufgelöst. Ein geladener PEF-Container ist daher noch **keine** laufende
+MacOS-9-App.
+
+Eine MacOS-Anwendungsdatei öffnet `tools/qrxppc/qrx_macapp.c`:
+`qrx_macbin_parse()` prüft den 128-Byte-Kopf (Versionsbyte 0, Namenslänge 1…63,
+Fork-Längen, bei MacBinary II ab Byte 122 zusätzlich die CRC-16-CCITT über die
+ersten 124 Bytes) und schneidet Daten- und Resource-Fork heraus;
+`qrx_rsrc_find()` liest Ressourcen-Kopf, Map, Typ- und Referenzliste und liefert
+eine Ressource zu Typ und ID; `qrx_cfrg_parse()` dekodiert das `cfrg`-Resource
+(reserviertes Wort 0, Offset und Länge des Containers) und prüft gegen die
+Länge des Daten-Forks, dass das Fragment vollständig darin liegt.
+`qrx_app_load()` verkettet den Weg: MacBinary → `cfrg` → `qrx_pef_parse()` →
+`qrx_pef_load()` → `qrx_pef_relocate()`. Jeder Schritt hat einen eigenen Status
+(`QRX_MACAPP_ERR_*`): fehlender Resource-Fork `NO_CFRG`, unbrauchbares Fragment
+`PEF`, Fork- oder Map-Grenzen `SHORT`/`RSRC`, Kopf und CRC `HEADER`/`CRC`. Der
+Test `macapp` baut ein synthetisches MacBinary mit eingebettetem Fragment, lädt
+es und führt es bis zum `sc` aus (Ergebnis 42), und prüft die Ablehnungen für
+Kopf, CRC, Fork-Grenzen, Ressourcen-Map und `cfrg`. Werkzeug- und Finder-Felder
+werden gelesen (Typ, Creator, Name), aber nicht ausgewertet; ob eine Datei eine
+Applikation ist, entscheidet allein, ob sich ein ladbares Fragment findet.
 
 ## Mixed Mode (P1.5)
 

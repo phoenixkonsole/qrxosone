@@ -26,6 +26,7 @@ echo "  CC  QRXPPC.elf"
     -Itools/qrxppc \
     tools/qrxppc/qrx_ppc.c tools/qrxppc/qrx_ppc_fpu.c \
     tools/qrxppc/qrx_ppc_jit.c tools/qrxppc/qrx_pef.c \
+    tools/qrxppc/qrx_macapp.c \
     tools/qrxppc/qrx_mix.c tools/qrxppc/qrx_ppc_test.c \
     -o "$OUT/QRXPPC.elf"
 
