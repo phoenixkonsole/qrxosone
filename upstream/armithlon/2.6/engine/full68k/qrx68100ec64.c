@@ -47,7 +47,7 @@ static inline int64_t sext(uint64_t v, unsigned s)
 {
     return s == 8 ? (int64_t)v : (int64_t)((v & size_mask(s)) ^ sign_bit(s)) - (int64_t)sign_bit(s);
 }
-static _Noreturn void stop_with(ctx *x, enum qec64_status s) { x->c->status = s; x->c->fault_pc = x->start_pc; longjmp(x->out, 1); }
+static _Noreturn void stop_with(ctx *x, enum qec64_status s) { x->c->status = s; x->c->fault_pc = x->start_pc; _longjmp(x->out, 1); }
 static _Noreturn void unimpl(ctx *x) { stop_with(x, QEC64_UNIMPLEMENTED); }
 
 /* ---- memory: big endian. Aligned accesses keep the 68040's order between cores. */
@@ -78,10 +78,20 @@ static uint64_t rd(ctx *x, uint64_t a, unsigned n)
     for (unsigned i = 0; i < n; i++) v = v << 8 | p[i];
     return v;
 }
+/* A write into RAM the JIT translated: those translations are stale now. */
+static void code_written(qec64_cpu *c, uint64_t a, unsigned n)
+{
+    for (uint64_t g = a >> QEC64_CODE_SHIFT; g <= (a + n - 1) >> QEC64_CODE_SHIFT; g++)
+        __atomic_store_n(&c->code_map[g], 0, __ATOMIC_RELAXED);
+    __atomic_fetch_add(c->code_gen, 1, __ATOMIC_SEQ_CST);
+}
 static void wr(ctx *x, uint64_t a, unsigned n, uint64_t v)
 {
     if (__builtin_expect(a >= QEC64_MMIO_BASE, 0)) { v &= size_mask(n); mmio(x, a, n, true, &v); return; }
     uint8_t *p = mem_at(x, a, n);
+    if (__builtin_expect(x->c->code_map != NULL, 0) &&
+        (x->c->code_map[a >> QEC64_CODE_SHIFT] | x->c->code_map[(a + n - 1) >> QEC64_CODE_SHIFT]))
+        code_written(x->c, a, n);
     switch (n) {
     case 1: __atomic_store_n(p, (uint8_t)v, __ATOMIC_RELEASE); return;
     case 2: if (!(a & 1)) { __atomic_store_n((uint16_t *)p, __builtin_bswap16((uint16_t)v), __ATOMIC_RELEASE); return; } break;
@@ -1240,7 +1250,7 @@ enum qec64_status qec64_run(qec64_cpu *c, uint64_t max)
     x.op = 0; x.pfx = 0; x.start_pc = c->pc;
     c->status = QEC64_RUNNING;
     c->budget = max;
-    if (setjmp(x.out)) {
+    if (_setjmp(x.out)) {   /* not setjmp: on macOS it saves the signal mask with a system call */
         c->instructions++;
         if (!to_exception(&x)) return c->status;
     }

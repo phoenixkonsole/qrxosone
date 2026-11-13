@@ -322,9 +322,22 @@ durchgängigen Glue-Fall (PPC → Import → 68k-Callback mit UniversalProcPtr �
 PPC ohne Signatur) samt verschachteltem Rahmen und abgelehntem `ProcInfo`.
 Dieser Fall hängt an derselben Funktion wie die drei `qrx_mix_rd_invoke()`-
 Mutanten und braucht deshalb keine eigene Mutation. `mixed_import_procinfo`
-prüft Index-Importe, denen ein Deskriptor für die `ProcInfo`-Ableitung
-zugeordnet ist; eine zwanzigste Mutation schaltet genau diese Ableitung in
-`mix_run()` ab und wird von diesem Fall erkannt.
+prüft Index-Importe, denen `qrx_mix_register()` einen Deskriptor für die
+`ProcInfo`-Ableitung mitgibt, und dass die Rohregister nur noch über
+`QRX_MIX_RAW` erreichbar sind: Signatur und Deskriptor schließen sich aus, fehlt
+beides, bleibt die vorherige Bindung samt Import-Slot unangetastet. Eine
+zwanzigste Mutation schaltet die Ableitung in `mix_run()` ab, eine
+einundzwanzigste die Prüfung, die den Rohregisterpfad an `QRX_MIX_RAW` bindet;
+dieser Fall erkennt beide. Eine zweiundzwanzigste lässt `qrx_mix_call()` eine
+fehlende Signatur wieder als Rohregisterpfad durchgehen; `mixed_errors` erkennt
+sie, weil es die Ablehnung samt unverändertem PC prüft. Eine dreiundzwanzigste
+lässt `qrx_mix_register_proc()` eine fehlende Signatur wieder aus dem `ProcInfo`
+ableiten; `mixed_proc_procinfo_errors` erkennt sie an der erwarteten
+`QRX_MIX_ERR_ARG` und daran, dass der abgelehnte Deskriptor unregistriert
+bleibt. Eine vierundzwanzigste schneidet in `qrx_cfrg_parse()` die Prüfung gegen
+die Daten-Fork-Länge ab (`> fork_size` statt `> fork_size - offset`); `macapp`
+erkennt sie an einem `cfrg`, dessen Fragment über das Fork-Ende hinausragt und
+trotzdem angenommen würde.
 `QRXPPC: 0 failure(s)`.
 Die bestehenden Fälle laufen zusätzlich per JIT auf einer separaten
 Speicherkopie und vergleichen den vollständigen CPU-/Speicherzustand. Der
@@ -430,9 +443,14 @@ PEF-Relokationsanweisungen an: TVec-, Section- und Import-Fixups laufen über
 einen Resolver, der alle Importe vor dem ersten Schreibzugriff auflöst.
 `pef_loader` und `pef_reloc` führen synthetische Container interpretiert und
 per JIT aus. Der Mixed-Mode-Übergang steht als Brücke (P1.5) und nimmt
-auch Routine-Deskriptoren als Einsprungpunkt; offen sind gepackte
-Sections, MacBinary/Resource-Forks, 68k-Container, Dispatch-Deskriptoren
-mit Selektoren und Glue-Code-Erzeugung für echte MacOS-Aufrufe.
+auch Routine-Deskriptoren als Einsprungpunkt. `qrx_macapp.c` liest inzwischen
+den MacBinary-II-Kopf samt CRC und Fork-Grenzen, den Resource-Fork mit Map,
+Typ- und Referenzliste und das `cfrg`-Resource; `qrx_app_load()` lädt daraus
+den Container und führt ihn bis zum Einsprung. `macapp` prüft den Weg von der
+Anwendungsdatei bis zum laufenden Code (Ergebnis 42) und die Ablehnungen für
+Kopf, CRC, Fork-Grenzen, Map und `cfrg`. Offen sind gepackte Sections,
+68k-Container, Dispatch-Deskriptoren mit Selektoren, Glue-Code-Erzeugung für
+echte MacOS-Aufrufe und die Toolbox selbst.
 
 #### P2.2 Toolbox-Minimum
 

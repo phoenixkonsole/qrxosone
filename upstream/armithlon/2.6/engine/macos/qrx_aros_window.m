@@ -282,7 +282,8 @@ int qrx_aros_window_open(QRXVM *vm,size_t ramBytes){@autoreleasepool{
  guestVM=vm;diskPreferences=[[NSBundle mainBundle].bundleIdentifier isEqualToString:@"org.qrxosone.armithlon.aros"]?[NSUserDefaults standardUserDefaults]:[[NSUserDefaults alloc]initWithSuiteName:@"org.qrxosone.armithlon.aros"];
  NSString *defaultPath=[[[NSBundle mainBundle]bundlePath].stringByDeletingLastPathComponent stringByAppendingPathComponent:@"Apps"];
  [[NSFileManager defaultManager]createDirectoryAtPath:defaultPath withIntermediateDirectories:YES attributes:nil error:nil];
- NSString *appsPath=[diskPreferences stringForKey:@"AppsDirectory"]?:defaultPath;
+ /* QRX_APPS_DIR (tests, scripts) wins over the folder chosen in the menu */
+ NSString *appsPath=getenv("QRX_APPS_DIR")?[NSString stringWithUTF8String:getenv("QRX_APPS_DIR")]:([diskPreferences stringForKey:@"AppsDirectory"]?:defaultPath);
  if(qrx_hostfs_mount(&appsDisk,appsPath.fileSystemRepresentation,false)){
   mountedAppsPath=appsPath;qrx_hostfs_attach2(vm,&appsDisk);
   fprintf(stderr,"[APPS] writable second disk: %s\n",appsPath.fileSystemRepresentation);

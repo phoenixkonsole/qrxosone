@@ -282,11 +282,12 @@ static void midi_service(QRXFullCPU *c,uint8_t *q){
 }
 /* ---- TCP/IP: the guest's buffers are in 68k RAM */
 static void net_service(QRXFullCPU *c,uint8_t *q){
-    uint32_t a[12];
+    uint32_t a[13]={0};
     for(unsigned i=0;i<12;i++)a[i]=rd32(q+16+i*4u);
     if(rd32(q+12)==QRX_NET_RANDOM&&(uint64_t)a[1]+a[2]>c->vm.ram.size){wr32(q+16+8*4u,UINT32_MAX);return;}
     qrx_hostnet_call(rd32(q+12),a,c->ram_owned);
-    for(unsigned i=8;i<12;i++)wr32(q+16+i*4u,a[i]);
+    /* The 13th word only for the clock: older guests have room for 12 */
+    for(unsigned i=8;i<(rd32(q+12)==QRX_NET_TIME?13u:12u);i++)wr32(q+16+i*4u,a[i]);
 }
 /* ---- A whole frame from x86 memory into guest RAM. The 68k would need a load, a
  * table look-up and a store per pixel; the frame buffer the display reads is plain RAM. */

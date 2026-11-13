@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Builds an Amiga Fast File System (DOS\\1) disk image from a host directory.
 
-Usage: mkffsimg.py <directory> <image> [size in MB, default 32] [volume name, default QRXSYS]
+Usage: mkffsimg.py <directory> <image> [size in MB, default 32; above about 50 MB with bitmap
+extension blocks] [volume name, default QRXSYS]
 
 The image has no partition table: blocks 0 and 1 are the boot block, the root block is in the
 middle, as on a floppy. qrxdisk.device serves it on the 68100EC64 reference machine and AROS's
@@ -42,10 +43,15 @@ class Image:
         self.blocks = {}                # block number: list of 128 longs, or bytes for data
         self.used = set(range(RESERVED)) | {self.root}
         nbm = (self.n - RESERVED + BITS_PER_BITMAP - 1) // BITS_PER_BITMAP
-        if nbm > 25:
-            raise SystemExit("too big for a bitmap without extension blocks")
-        self.bitmaps = [self.root + 1 + i for i in range(nbm)]
-        self.used |= set(self.bitmaps)
+        # The root holds 25 bitmap pointers; each extension block holds 127 more and a link.
+        next_free = self.root + 1
+        self.bitmaps = list(range(next_free, next_free + nbm))
+        next_free += nbm
+        next = max(0, (nbm - 25 + LONGS - 2) // (LONGS - 1))
+        self.bm_ext = list(range(next_free, next_free + next))
+        if next_free + next > self.n:
+            raise SystemExit("image too small for its bitmap")
+        self.used |= set(self.bitmaps) | set(self.bm_ext)
         self.next = RESERVED
         self.volname = volname
 
@@ -144,8 +150,17 @@ class Image:
         r[0] = T_HEADER
         r[3] = HT_SIZE
         r[LONGS - 50] = 0xFFFFFFFF                          # bm_flag: the bitmap is valid
-        for i, b in enumerate(self.bitmaps):
+        for i, b in enumerate(self.bitmaps[:25]):
             r[LONGS - 49 + i] = b
+        if self.bm_ext:
+            r[LONGS - 24] = self.bm_ext[0]                  # bm_ext: the first extension block
+            rest = self.bitmaps[25:]
+            for k, eb in enumerate(self.bm_ext):
+                longs = [0] * LONGS
+                part = rest[k * (LONGS - 1):(k + 1) * (LONGS - 1)]
+                longs[:len(part)] = part
+                longs[LONGS - 1] = self.bm_ext[k + 1] if k + 1 < len(self.bm_ext) else 0
+                self.blocks[eb] = struct.pack(">%dI" % LONGS, *longs)
         now = amiga_date(time.time())
         r[LONGS - 23:LONGS - 20] = list(now)                # root altered
         r[LONGS - 10:LONGS - 7] = list(now)                 # volume altered
@@ -178,9 +193,12 @@ class Image:
         for i, bmb in enumerate(self.bitmaps):
             longs = [0] * LONGS
             for k in range(LONGS - 1):
+                base = RESERVED + i * BITS_PER_BITMAP + k * 32
+                if base >= self.n:
+                    continue
                 v = 0
                 for bit in range(32):
-                    blk = RESERVED + i * BITS_PER_BITMAP + k * 32 + bit
+                    blk = base + bit
                     if blk < self.n and blk not in self.used:
                         v |= 1 << bit
                 longs[1 + k] = v

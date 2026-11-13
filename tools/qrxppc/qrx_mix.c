@@ -505,13 +505,22 @@ qrx_mix_status_t qrx_mix_register(qrx_mix_t *mix, unsigned index,
 
     if (!mix || !mix->ppc || !fn || index >= QRX_MIX_IMPORTS)
         return QRX_MIX_ERR_ARG;
+    /* Raw registers are not a fallback any more: QRX_MIX_RAW asks for them, a
+     * signature never carries a descriptor, and one of the two is required.
+     * Anything else would be a parameter the bridge silently ignores; the
+     * checks run before the slot is written, so a rejected registration leaves
+     * the previous binding in place. */
+    if (!sig && !descriptor)
+        return QRX_MIX_ERR_ARG;
+    if (sig && descriptor)
+        return QRX_MIX_ERR_ARG;
     if (sig) {
         mix_slot_t slots[QRX_MIX_SIG_MAX];
         unsigned words = 0u;
 
         if (!mix_sig_valid(sig) || !mix_layout(sig, slots, &words))
             return QRX_MIX_ERR_SIG;
-    } else if (descriptor) {
+    } else if (descriptor != QRX_MIX_RAW) {
         qrx_mix_status_t rc;
 
         /* An index carries no ProcInfo of its own, so the descriptor the
@@ -535,7 +544,7 @@ qrx_mix_status_t qrx_mix_register(qrx_mix_t *mix, unsigned index,
         mix->sig_used[index] = 1u;
         mix->import_desc[index] = 0u;
         mix->import_desc_used[index] = 0u;
-    } else if (descriptor) {
+    } else if (descriptor != QRX_MIX_RAW) {
         mix->sig_used[index] = 0u;
         mix->import_desc[index] = descriptor;
         mix->import_desc_used[index] = 1u;
@@ -557,16 +566,15 @@ qrx_mix_status_t qrx_mix_register_proc(qrx_mix_t *mix, uint32_t descriptor,
 
     if (!mix || !mix->ppc || !fn || descriptor < QRX_MIX_IMPORTS)
         return QRX_MIX_ERR_ARG;
+    /* Neither placement is a fallback any more: QRX_MIX_PROCINFO asks for the
+     * ProcInfo derivation, a signature decides on its own, and a missing
+     * signature is rejected before the descriptor is even read. */
+    if (!sig)
+        return QRX_MIX_ERR_ARG;
     rc = qrx_mix_rd_resolve(mix, descriptor, QRX_MIX_RD_ISA_68K, &info);
     if (rc != QRX_MIX_OK)
         return rc;
-    if (sig) {
-        mix_slot_t slots[QRX_MIX_SIG_MAX];
-        unsigned words = 0u;
-
-        if (!mix_sig_valid(sig) || !mix_layout(sig, slots, &words))
-            return QRX_MIX_ERR_SIG;
-    } else {
+    if (sig == QRX_MIX_PROCINFO) {
         qrx_mix_sig_t derived;
 
         /* Fail here rather than on the first call: an import whose ProcInfo
@@ -574,6 +582,12 @@ qrx_mix_status_t qrx_mix_register_proc(qrx_mix_t *mix, uint32_t descriptor,
         rc = mix_proc_import_sig(mix, descriptor, &info, &derived);
         if (rc != QRX_MIX_OK)
             return rc;
+    } else {
+        mix_slot_t slots[QRX_MIX_SIG_MAX];
+        unsigned words = 0u;
+
+        if (!mix_sig_valid(sig) || !mix_layout(sig, slots, &words))
+            return QRX_MIX_ERR_SIG;
     }
     for (slot = 0; slot < QRX_MIX_PROCS; slot++) {
         if (mix->proc_used[slot] && mix->proc_desc[slot] == descriptor)
@@ -588,7 +602,7 @@ qrx_mix_status_t qrx_mix_register_proc(qrx_mix_t *mix, uint32_t descriptor,
     mix->proc_desc[slot] = descriptor;
     mix->proc_fn[slot] = fn;
     mix->proc_ctx[slot] = ctx;
-    if (sig) {
+    if (sig != QRX_MIX_PROCINFO) {
         mix->proc_sigs[slot] = *sig;
         mix->proc_sig_used[slot] = 1u;
         mix->proc_sig_derived[slot] = 0u;
@@ -626,6 +640,14 @@ qrx_mix_status_t qrx_mix_call(qrx_mix_t *mix, uint32_t entry,
     }
     if (!mix || !(p = mix->ppc) || !p->mem.data || entry == 0u)
         return QRX_MIX_ERR_ARG;
+    /* Raw registers are a legacy path as well: QRX_MIX_RAW_SIG asks for them,
+     * a missing signature is rejected before the frame is written, so a
+     * rejected call leaves the guest state alone. */
+    if (sig == QRX_MIX_RAW_SIG) {
+        sig = NULL;
+    } else if (!sig) {
+        return QRX_MIX_ERR_ARG;
+    }
     if (sig) {
         mix_slot_t slots[QRX_MIX_SIG_MAX];
         unsigned want_gpr = 0u;

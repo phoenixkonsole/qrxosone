@@ -63,7 +63,22 @@ struct qec64_cpu {
      * bus fault. In long mode only. */
     bool (*on_mmio)(qec64_cpu *self, uint64_t addr, unsigned size, bool write, uint64_t *value);
     void *machine;
+    /* JIT, see qrx68100ec64_jit.c: the core's own state, and the machine's map of the RAM that
+     * holds translated code (one byte per 256 bytes, QEC64_CODE_SHIFT) with a generation that
+     * every write into such RAM bumps. NULL code_map: no JIT on this machine. */
+    void *jit;
+    uint8_t *code_map;
+    uint32_t *code_gen;
 };
+#define QEC64_CODE_SHIFT 8
+
+/* Like qec64_run, but long mode code runs translated to AArch64 where the JIT can. Falls back to
+ * qec64_run without code_map, outside long mode and on other hosts. */
+enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max);
+/* Frees the core's translations. */
+void qec64_jit_free(qec64_cpu *c);
+/* Allocates code_map and code_gen for RAM of ram_size bytes; free both with free(). */
+bool qec64_jit_map_new(uint64_t ram_size, uint8_t **code_map, uint32_t **code_gen);
 
 void qec64_init(qec64_cpu *c, uint8_t *ram, uint64_t ram_size, uint32_t core_id);
 /* Runs up to max instructions and returns why it ended. */
