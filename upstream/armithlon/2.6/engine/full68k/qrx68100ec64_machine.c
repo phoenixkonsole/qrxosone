@@ -29,6 +29,8 @@ struct qec64_machine {
     unsigned char queue[4096];                 /* console input pushed while running */
     unsigned q_head, q_tail;
     void *user;
+    uint8_t *code_map;                         /* the JIT's, NULL with QRX_EC64_JIT=0 */
+    uint32_t *code_gen;
 };
 static uint64_t now_us(void)
 {
@@ -97,7 +99,7 @@ static void *core_thread(void *arg)
             pthread_mutex_unlock(&m->lock);
             continue;
         }
-        enum qec64_status st = qec64_run(c, SLICE);
+        enum qec64_status st = qec64_jit_run(c, SLICE);
         uint64_t next = m->next_timer_us[id];
         if (next && now_us() >= next) {
             m->next_timer_us[id] = next + c->timer_us;
@@ -148,10 +150,16 @@ qec64_machine *qec64_machine_new(uint8_t *ram, uint64_t ram_size, unsigned cores
         c->on_console = on_console;
         c->on_console_in = on_console_in;
     }
+    const char *jit = getenv("QRX_EC64_JIT");
+    if ((!jit || strcmp(jit, "0")) && qec64_jit_map_new(ram_size, &m->code_map, &m->code_gen))
+        for (unsigned i = 0; i < cores; i++) { m->cpu[i].code_map = m->code_map; m->cpu[i].code_gen = m->code_gen; }
     return m;
 }
 void qec64_machine_free(qec64_machine *m)
 {
+    for (unsigned i = 0; i < m->cores; i++) qec64_jit_free(&m->cpu[i]);
+    free(m->code_map);
+    free(m->code_gen);
     pthread_mutex_destroy(&m->lock);
     pthread_cond_destroy(&m->wake);
     free(m);
