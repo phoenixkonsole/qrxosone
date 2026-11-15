@@ -24,6 +24,14 @@ ARMithlon 1.1 cumulative source and native host integration:
 ARMithlon on Apple Silicon (68k JIT, Metal RTG, HostFS, AHI, QRX86 host door):
 [measurements, changes and open work](docs/armithlon/performance-2026-11-03.md).
 FPU in the 68k JIT and two FPU faults fixed: [docs/armithlon/fpu-jit-2026-11-07.md](docs/armithlon/fpu-jit-2026-11-07.md).
+Amiga, PC and Mac volumes side by side, and the road to historical Mac
+filesystems (MFS/HFS/HFS+, DiskCopy/NDIF, AppleDouble):
+[docs/armithlon/roadmap-volumes-2026-11.md](docs/armithlon/roadmap-volumes-2026-11.md).
+Read-only Mac image containers (raw, DiskCopy 4.2, NDIF data forks, Apple
+Partition Map) plus MFS, HFS and HFS+/HFSX readers (resource forks, Finder
+info, HFS wrapper) and AppleSingle/AppleDouble/MacBinary II/BinHex 4.0 fork
+containers, all with synthetic guest tests:
+[tools/armithlon/macimage](tools/armithlon/macimage).
 
 Linux i386 GUI work: [embedded X11 subset and AROS windows](docs/QRX_X11.md).
 

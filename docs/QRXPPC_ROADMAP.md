@@ -328,16 +328,30 @@ prüft Index-Importe, denen `qrx_mix_register()` einen Deskriptor für die
 beides, bleibt die vorherige Bindung samt Import-Slot unangetastet. Eine
 zwanzigste Mutation schaltet die Ableitung in `mix_run()` ab, eine
 einundzwanzigste die Prüfung, die den Rohregisterpfad an `QRX_MIX_RAW` bindet;
-dieser Fall erkennt beide. Eine zweiundzwanzigste lässt `qrx_mix_call()` eine
+dieser Fall erkennt beide. Eine zweiundzwanzigste lässt
+`qrx_mix_register_proc()` die Ablehnung einer fehlenden Signatur aus; sie endet
+stattdessen in `QRX_MIX_ERR_SIG`; `mixed_proc_procinfo_errors` erkennt sie an
+der erwarteten `QRX_MIX_ERR_ARG` und daran, dass der abgelehnte Deskriptor
+unregistriert bleibt. Eine dreiundzwanzigste lässt `qrx_mix_call()` eine
 fehlende Signatur wieder als Rohregisterpfad durchgehen; `mixed_errors` erkennt
-sie, weil es die Ablehnung samt unverändertem PC prüft. Eine dreiundzwanzigste
-lässt `qrx_mix_register_proc()` eine fehlende Signatur wieder aus dem `ProcInfo`
-ableiten; `mixed_proc_procinfo_errors` erkennt sie an der erwarteten
-`QRX_MIX_ERR_ARG` und daran, dass der abgelehnte Deskriptor unregistriert
-bleibt. Eine vierundzwanzigste schneidet in `qrx_cfrg_parse()` die Prüfung gegen
+sie, weil es die Ablehnung samt unverändertem PC prüft. Eine vierundzwanzigste schneidet in `qrx_cfrg_parse()` die Prüfung gegen
 die Daten-Fork-Länge ab (`> fork_size` statt `> fork_size - offset`); `macapp`
 erkennt sie an einem `cfrg`, dessen Fragment über das Fork-Ende hinausragt und
-trotzdem angenommen würde.
+trotzdem angenommen würde. Eine fünfundzwanzigste lässt in
+`qrx_mm_set_handle_size()` das Wachstum ohne Datenkopie zu (`mm_copy(..., 0)`);
+`toolbox_mm` erkennt sie am verlorenen Kopf nach dem Wachstum.
+Eine sechsundzwanzigste dreht die ID-Prüfung in `rm_find()` um
+(`e->id != id`); `toolbox_rm` erkennt sie an den Holen je ID und am falschen
+Treffer. Eine siebenundzwanzigste addiert in `fm_dispatch_io()` 1 auf
+`f->size`/`ioActCount` des GetEOF-Pfades; `toolbox_fm` erkennt sie an
+`ioActCount = size+1`. Eine achtundzwanzigste lässt `qd_pat_bit()` immer 1
+liefern; `toolbox_qd` erkennt sie daran, dass das 50-%-`FillRect` eine volle
+Zeile statt `0x0AA00000` malt. Eine neunundzwanzigste setzt in
+`wm_composite()` jedes Pixel auf 0 statt auf 1; `toolbox_wm` erkennt sie an
+der leeren Komposition nach `ShowWindow` und nach dem Verschieben. Eine
+dreißigste dreht in `menu_write_record()` die Enabling-Bedingung um
+(`!m->enabled[i]`); `toolbox_menu` erkennt sie an den beiden Hälften von
+`enableFlags` im Gastrecord nach `DisableItem`/`EnableItem`.
 `QRXPPC: 0 failure(s)`.
 Die bestehenden Fälle laufen zusätzlich per JIT auf einer separaten
 Speicherkopie und vergleichen den vollständigen CPU-/Speicherzustand. Der
@@ -405,7 +419,7 @@ Record-Tabelle werden geprüft, der erste Record passender ISA gewählt und
 `procDescriptor` absolut oder deskriptor-relativ aufgelöst. `qrx_mix_register_proc()`
 registriert einen 68k-Callback unter der Deskriptoradresse, den PPC-Code mit
 dieser Adresse in `r0` statt eines Import-Index anspricht; der Callback erhält
-den 68k-Einstiegspunkt als `args->proc`. Fünfzehn synthetische Fälle prüfen
+den 68k-Einstiegspunkt als `args->proc`. Siebenundzwanzig synthetische Fälle prüfen
 Rahmen, Register- und Stack-Argumente, gemischte Integer-/FP-Listen, Rückgabe,
 68k-Speicherzugriff, Deskriptoren und die Fehlerpfade. Offen: Glue-Code-Erzeugung, Aggregate/Varargs in Signaturen,
 Dispatch-Deskriptoren mit Selektoren, CFM-Fragmentvorbereitung und gemischte
@@ -436,9 +450,10 @@ MacOS-Installation im Gast.
 - Speicherverwaltung, Handles, Zeigervalidierung.
 - Fehlerbehandlung statt Hänger.
 
-Stand 2026-11-09: `tools/qrxppc/qrx_pef.c` liest Container-Header,
-Section-Header, Loader-Header, Import- und Exporttabellen und lädt ungepackte
-Sections in den Gastspeicher, und `qrx_pef_relocate()` wendet die
+Stand 2026-11-13: `tools/qrxppc/qrx_pef.c` liest Container-Header,
+Section-Header, Loader-Header, Import- und Exporttabellen, lädt die Sections in
+den Gastspeicher und expandiert pattern-initialisierte Datensektionen (Kind 2)
+mit den fünf PEF-Pattern-Opcodes; und `qrx_pef_relocate()` wendet die
 PEF-Relokationsanweisungen an: TVec-, Section- und Import-Fixups laufen über
 einen Resolver, der alle Importe vor dem ersten Schreibzugriff auflöst.
 `pef_loader` und `pef_reloc` führen synthetische Container interpretiert und
@@ -448,27 +463,113 @@ den MacBinary-II-Kopf samt CRC und Fork-Grenzen, den Resource-Fork mit Map,
 Typ- und Referenzliste und das `cfrg`-Resource; `qrx_app_load()` lädt daraus
 den Container und führt ihn bis zum Einsprung. `macapp` prüft den Weg von der
 Anwendungsdatei bis zum laufenden Code (Ergebnis 42) und die Ablehnungen für
-Kopf, CRC, Fork-Grenzen, Map und `cfrg`. Offen sind gepackte Sections,
-68k-Container, Dispatch-Deskriptoren mit Selektoren, Glue-Code-Erzeugung für
+Kopf, CRC, Fork-Grenzen, Map und `cfrg`. Offen sind 68k-Container, eine Namens→Trap-Abbildung für die 289 Importe
+einer echten App, Dispatch-Deskriptoren mit Selektoren, Glue-Code-Erzeugung für
 echte MacOS-Aufrufe und die Toolbox selbst.
 
 #### P2.2 Toolbox-Minimum
+
+Stand: Schritt 1 bis 4 sind HLE-bar. Schritt 1/2: `NewPtr`/`NewHandle` mit
+echter Master-Pointer-Semantik, Größen-API, `FreeMem`/`MaxMem`, Resource
+Manager (flat 32 Einträge, AddResource-Seed, Resident-Markierung) und File
+Manager (virtuelles Volume „QRXPPC" ab VRefNum 1, bis zu 32 Dateien,
+Pascal-Namen case-insensitive, Access-Pfad-Marks). Schritt 3: QuickDraw
+(1-Bit-Bitmaps im Gästespeicher, Port-Bounds-Clipping, Rect-Helfer,
+Paint/Erase/Invert/Fill/Frame, Stiftzustand, Bresenham-Linien), Window Manager
+(232-Byte-`WindowRecord` aus der MM-Zone, Content-Bitmap, Front-to-Back-Liste,
+`ShowWindow`/`HideWindow`/`CloseWindow`/`MoveWindow`/`SizeWindow` komponieren
+den Screen neu) sowie Menu- und Dialog-Manager (`MenuInfo` im MM-Handle,
+Item-Titel host-seitig, `enableFlags`-Spiegel im Gastrecord; Alerts und
+`ModalDialog` liefern sofort Item 1). Schritt 4: Text/Font (eine synthetische
+Systemschrift „Chicago" aus dem Public-Domain-8x8-Satz `qrx_font8x8.h`,
+`InitFonts`/`DrawChar`/`DrawString`/`DrawText`/`TextWidth`/`TextFont`/
+`TextFace`/`TextMode`/`TextSize`/`GetFontInfo`/`StringWidth`/`CharWidth`/
+`SpaceExtra`/`GetFontName`/`GetFNum`, Metrik und Pixel aus demselben
+Maßstab) und Event Manager (8er-Queue aus `EventRecord`s, `GetNextEvent`/
+`EventAvail`/`WaitNextEvent`/`PostEvent`/`FlushEvents`, `TickCount` aus einer
+Host-Tickquelle, `GetMouse`/`Button`/`StillDown`/`WaitMouseUp`/`GetKeys`,
+`SystemTask`; `WaitNextEvent` schläft nicht). Alles erreichbar über das
+vereinheitlichte Import-Dispatch (`qrx_tb_dispatch` mit `r3` =
+A-Linen-Nummer, `r4…` = Argumente). Umgesetzt in `tools/qrxppc/qrx_toolbox.c`;
+`toolbox_mm`, `toolbox_rm`, `toolbox_fm`, `toolbox_qd`, `toolbox_wm`,
+`toolbox_menu`, `toolbox_text` und `toolbox_event` laufen im Gast durch die
+`sc`-Naht und prüfen Ablehnungen (Doppelfreigabe, Fremdadresse, unbekannte
+Trap-Nummer, volle Zone; Resource-NotFound; fehlende/duplizierte Dateien,
+RefNum 999, unvollständige ParamBlocks; Rect-/Bitmap-/Pattern-Zeiger außerhalb
+der 256 KiB, falscher Fenstertyp, unbekanntes Menü; Textgröße 0, unlesbare
+Pascal-Strings, ungültige Record-Zeiger, volle Event-Queue). Pointer-Blöcke
+schrumpfen nur; Handle-Wachstum kopiert, ein Fehlschlag lässt den Block
+unberührt. Offen bleiben Zonen, Fensterrahmen, CopyBits, Sound, echte
+Hardware-Ereignisse und Schlafen in `WaitNextEvent` —
+und MacOS X bleibt der getrennte P3-Forschungspfad (Mach-O/dyld/libSystem).
 
 Reihenfolge:
 
 1. Memory Manager und Resource Manager.
 2. File Manager und Apple-Event-Grundlagen.
-3. QuickDraw, Window Manager, Dialog Manager, Menu Manager.
-4. Event Manager, Text/Font und Sound.
+3. ~~QuickDraw, Window Manager, Dialog Manager, Menu Manager~~ (erledigt;
+   Dialog Manager bewusst ohne Event-Loop).
+4. ~~Event Manager und Text/Font~~ (erledigt); Sound offen.
 5. QuickTime-/Movie-Toolbox nur nach stabilem Fenster- und Dateipfad.
 
 #### P2.3 Testprogramme
 
-- PPC-„Hello World“ über die Test-ABI.
-- Ein PPC-Toolbox-Programm öffnet ein Fenster und zeichnet Text.
-- Ein 68k-/PPC-gemischtes Programm.
-- Ein MacBinary-/Resource-Fork-Test.
+Stand 2026-11-14: Der App-Runner steht. `tools/qrxppc/qrx_apprun.c` lädt ein
+MacBinary-Bild oder einen nackten PEF-Container, legt die Sections bei
+`load_base` ab, liest den TVector (nach der Relokation absolut; nur bei
+Fragmenten ohne Relokation wird das Code-Delta addiert), ruft ihn über die
+Mixed-Mode-Brücke mit `r2` = TOC auf und protokolliert jeden Toolbox-Trap
+(Trap, Selektor, `r4`, `r5`, Ergebnis). Importe löst `qrx_appstub.c` über eine
+Namens→Trap-Tabelle auf; jeder Import bekommt einen Stub im Gast-Speicher,
+unbekannte Symbole eine Pseudotrap `0x7E00 + Index`. Der erste Trap ohne
+HLE-Antwort beendet den Lauf über `qrx_mix_request_stop()` mit
+`missing import <Bibliothek>::<Symbol>`; das Gast-Kommando `C:QRXAppRun` gibt
+Trace, Stub-Zahlen und Klartextgrund aus (Exit 2 = fehlender Trap, 3 = keine
+PEF-Anwendung). `test_apprun` prüft den Weg im Gast: `TickCount` → `TEInit`
+(fehlt) → `Button` (wird nicht mehr erreicht), dazu 68k-Ablehnung und ein
+Nicht-MacBinary-Bild.
+
+- PPC-„Hello World“ über die Test-ABI: als `macapp`-Suite vorhanden.
+- PPC-Toolbox-Programm mit Fenster und Text: Fenster- und Text-Slices sind
+  einzeln abgenommen (`toolbox_wm`, `toolbox_text`); ein kombiniertes
+  App-Programm fehlt noch.
+- Ein 68k-/PPC-gemischtes Programm: `mixed_*`-Suiten decken die Brücke ab,
+  ein gemischtes Anwendungsprogramm fehlt.
+- MacBinary-/Resource-Fork-Test: `macapp`-Suite und `apprun`-Suite.
 - Erst danach: QuickTime und LightWave mit lizenzierten Datenträgern.
+
+Reales PPC-Fragment, geprüft 2026-11-14: Im `ST50`-Installer des
+StuffIt-Expander-ISO steckt kein PPC-Programm, sondern ein Engine-Paket.
+`unar` packt den Datenfork aus; er enthält vier `Joy!peffpwpc`-Container
+(Offset 0, 248016, 281152, 337648), die das `cfrg`-Resource als
+`UnStuffEnginePPC`, `UUDecodingEnginePPC`, `UnZipEnginePPC` und
+`HQXEnginePPC` ausweist, während die Anwendung als segmentierte 68k-App
+(`CODE` 0–3) im Resource-Fork liegt. `C:QRXAppRun` parst, expandiert und
+relokalisiert den ersten Container (3 Sections, Datensektion als Pattern
+26206 → 33380 Bytes), baut für die 289 Importe aus fünf Bibliotheken
+58 Trap-Stubs, 8 indirekte und 223 Pseudotrap-Stubs, führt Init-Routine und
+Einsprung aus und beendet mit Exit 0: acht Traps (`Gestalt`, `GetZone`), alle
+von der HLE beantwortet, dann kehrt die Engine zurück. `Gestalt` (0xA1AD:
+`'thds'`, `'sysv'`, `'vers'`, `'os  '`, sonst -5551) und
+`GetZone`/`SetZone` (0xA11A/0xA11B) sind seit diesem Lauf in der HLE, die
+Namens→Trap-Abbildung steht in `tools/qrxppc/qrx_appstub.c`, die vollständige,
+nach Bibliothek gruppierte Liste mit HLE-Markierung in
+`docs/QRXPPC_EXPANDER_IMPORTS.md` (66 von 289 abgedeckt, 223 offen). Nächster
+Schritt für einen echten App-Start: ein Anwendungsfragment ohne
+68k-`CODE`-Segmente (z. B. eine reine PowerPC-App) besorgen und dort den Lauf
+bis zum nächsten fehlenden Import wiederholen; die Engine-Traps selbst sind
+abgearbeitet.
+
+Reale Medien, geprüft 2026-11-13: Das `Stuffit-Expander.iso` enthält auf dem
+HFS-Volume „Stuffit Expander 5.5“ nur den Installer
+(APPL/STi0, Datenfork `ST50…`, Resource-Fork mit `CODE`-Ressourcen) — eine
+68k-Anwendung ohne `cfrg`, die der Runner mit
+`68k application: 'CODE' resources, no 'cfrg'` ablehnt. `LightWave6.5_final.sit`
+enthält nach dem Entpacken nur ein `SVCT`-Installer-Archiv, keine Applikation;
+`QuickTime770Leopard_1.dmg` liefert ein Mac-OS-X-Paket (P3). Ein echtes
+PPC-/PEF-Programm liegt damit noch nicht vor; der Trap-Trace ist über die
+synthetische App abgenommen, die Liste der fehlenden Traps einer echten App
+lässt sich erst mit einem solchen Binary messen.
 
 Abnahme P2:
 
@@ -645,3 +746,229 @@ abgenommen; die Bezeichnung „MacOS-HLE“ wird erst ab M7 verwendet.
   P1.5-Mixed-Mode sowie P2 (PEF/MacBinary, Toolbox-HLE). Ohne diese Schichten
   startet noch kein MacOS-Programm; der DMG-Mount allein ist ausdrücklich kein
   Launcher.
+
+#### P2.4 68k-MacOS-Runtime (2026-11-14)
+
+Der 68k-Pfad steht als Grundgerüst: `tools/qrxppc/qrx_m68k.c` lädt die
+`CODE`-Ressourcen einer klassischen Anwendung in einen flachen 16-MiB-Mac-
+Adressraum (Rückfall 8/4 MiB), kopiert `CODE` 0 als Jump-Table nach A5, legt
+die Segmente ab 0x100000 ab und führt sie auf dem Musashi-68020-Kern aus.
+`QRX68KRun` protokolliert jeden A-Line-Trap; MemTop, Heap-Basis und die
+`NewPtr`-Grenze leiten sich aus der tatsächlich allokierten Blockgröße ab
+(`mem-kib` als optionales Argument, Rückfall 16 → 8 → 4 MiB; ein `mem-kib`
+über 16 MiB wird als erste Stufe versucht, nicht geklemmt); die HLE beantwortet `_LoadSeg`
+(0xA9F0), `_ExitToShell`, `_Gestalt`, `_GetZone`/`_SetZone` und
+`_NewPtr`/`_DisposePtr`, alles andere beendet den Lauf. Im Gast geprüft: ein
+synthetisches MacBinary-Programm bekommt `Gestalt` beantwortet und stoppt bei
+`TEInit` (0xA9CC, Exit 2); der LightWave-6.5-Installer lädt 15 Segmente und
+wird als VISE-gepackt abgelehnt (`ERR_PACKED`, Exit 4). Mit `mem-kib 4096`
+bleiben MemTop (0x400000), Zone (0x200000), Heap-Ende (0x300000) und `NewPtr`
+innerhalb des Blocks. Ohne `C:QRXMoreMemory` hat der Gast nur ~19 MB und fällt
+auf 8 MiB zurück; mit dem Board-RAM (1/4 Host-RAM, hier 4,0 GB) greift das
+Standard-Sizing von 16 MiB, und größere Blöcke sind verifiziert: 64 MiB
+(MemTop 0x04000000, Zone 0x02000000) und 1 GiB (MemTop 0x40000000, Zone
+0x20000000), beide bis `ExitToShell`. `tools/qrxppc/test_m68k_heap.sh` prüft
+MemTop, Zone, `GetZone` und das `NewPtr`-Limit für 16 MiB (Standard), 64, 8
+und 4 MiB auf dem Host und dass 2 MiB mit `ERR_MEM` abgelehnt werden.
+Die Annahme, die `CODE`-Köpfe seien nur Prologe, ist widerlegt: die
+Segmente sind **gepackt**. Bei VISE/InstallerMaker (LightWave 6.5) beginnt
+jede `CODE`-Ressource mit `A89F 000C`, CRC, entpackter und gepackter Größe
+(16 Byte Kopf, danach gepackte Daten — die Bytes sind kein 68k-Code, auch
+nicht ab Offset 4/8/12/16); Aladdins Installer (StuffIt Expander 5.5) beginnt
+mit `ADCR`. Der Loader erkennt beides und liefert `ERR_PACKED` samt Format
+(`QRX68KRun` Exit 4), statt beim ersten Kopfwort einen fehlenden Trap zu
+melden. Nur einzelne Segmente sind ungepackt (StuffIt `CODE` 14 trägt einen
+4-Byte-Prolog `00000001`, danach `moveq #0,d3` / `nop` / `tst.l d3`); ein
+echter Installer-Lauf braucht also den Packer des jeweiligen Herstellers.
+
+`_SysEnvirons` (0xA090) ist implementiert: Version 2 in einen 14-Byte-
+SysEnvRec (System 8.1.0, Prozessor 68020, `hasFPU`/`hasColorQD` 1,
+machineType 0), Version 0 füllt nichts, Version > 2 ergibt -5503. Das
+32-Bit-Adressieren meldet `Gestalt 'addr'` mit Bit 0 genau dann, wenn `MemTop`
+über 16 MiB liegt; im Gast bei 16 MiB (0) und 64 MiB (1) geprüft, dazu
+`SysEnvirons`-Fehlerwert und alle Record-Felder.
+
+Resource Manager und Handle-Allokatoren sind implementiert: `OpenResFile`
+(nur die geladene Applikation, RefNum -1, sonst -43), `CurResFile`,
+`UseResFile`, `GetResource` (Typ in D0, ID vom Stack, ein gecachtes Handle pro
+Ressource), `ReleaseResource`, `NewHandle`, `DisposeHandle`, `GetHandleSize`,
+`SetHandleSize`, `HLock`/`HUnlock`. Der Loader behält eine Kopie des Forks; im
+Gast belegt: `GetResource('CODE',1)` → Handle 0x008000C8, Größe 0x00C8,
+`NewHandle(0x100)`/`SetHandleSize(0x200)` mit Datenerhalt, `DisposeHandle`
+leert den Master-Pointer (neun Traps, alle beantwortet, Exit 0).
+
+Der File Manager läuft über eine Callback-Schicht (`qrx_m68k_set_fs()` mit
+`open`/`read`/`write`/`seek`/`close`): im Gast `dos.library` in einem
+`[host-root]`-Verzeichnis, im Host-Test stdio. Implementiert sind `_Open`,
+`_Create`, `_Close`, `_Read`, `_Write`, `_GetFPos`, `_SetFPos`, `_GetEOF` über
+`ParamBlockRec`, mit RefNums 1..8, `ioResult`/`ioActCount`/`ioEOF`,
+`fnfErr`/`ioErr`/`paramErr`/`tooManyFiles` und `..`-Schutz. Im Gast belegt:
+zwölf Traps, alle beantwortet, danach liegt `FSRoot/out.txt` mit `Hallo\n` auf
+dem Share. Offen: `Rename`, `Delete`, Verzeichnisse, Volume-/Finder-Infos.
+
+QuickDraw, Dialog und Event laufen über dieselbe Bauform: `qrx_m68k_set_gfx()`
+installiert `rect`/`line`/`text`, die Traps übersetzen Punkte, Rects und
+Zeiger. Implementiert sind Ports (`_InitGraf`, `_InitPort`, `_OpenPort`,
+`_SetPort`, `_GetPort`, `_ClosePort`), Stift (`_MoveTo`, `_LineTo`, `_Line`,
+`_PenSize`, `_PenMode`, `_PenPat`, `_PenNormal`, `_HidePen`, `_ShowPen`,
+`_GetPen`, `_SetPt`), die fünf Rect-Operationen plus `_EqualRect`,
+`_OffsetRect`, `_InsetRect`, `_PtInRect`, Text (`_DrawChar`, `_DrawString`,
+`_DrawText`, `_TextFont`, `_TextFace`, `_TextMode`, `_TextSize`), Cursor,
+`_SysBeep`, die Dialog-Traps (`_GetNewDialog` liest 'DLOG'/'DITL' und macht aus
+den Einträgen 4..7 Controls, `_DrawDialog` zeichnet Rahmen und Texte,
+`_ModalDialog` meldet den getroffenen Knopf, `_Alert` antwortet mit Item 1)
+und der Event Manager mit genau einer Event-Zelle aus `_PostEvent`. Im Gast
+belegt: `TestQD.mb` fährt 31 Traps, alle beantwortet, das Log zeigt elf
+Zeichnungen (`qd line 20,10 -> 20,50`, `qd rect fill 10,20,30,40`,
+`qd text 12,10 "Ready"` …), der Dialog kommt aus den Ressourcen, sein Knopf ist
+ein Control (`qd rect frame 30,10,45,60`, gezeichnet über `_Draw1Control`), und
+`_ModalDialog` meldet den Klick darauf. Offen: Fensterverwaltung, Menüs, echte
+Eingabe (Maus/Tastatur), `CopyBits`/Regions/Pictures/Farben,
+Schrift-Ressourcen, ein blockierender modaler Dialog und eigene Control-Arten
+außer dem Knopf.
+
+Fenster und Menüs laufen über zwei weitere Hooks derselben Schicht (`window`
+mit Operation, Frame und Titel, `menu` mit Operation, Menütitel, Item und
+Wert). Implementiert sind `_InitWindows`, `_GetWMgrPort`, `_NewWindow`,
+`_DisposeWindow`, `_CloseWindow`, `_ShowWindow`, `_HideWindow`,
+`_SelectWindow`, `_BringToFront`, `_SendBehind`, `_GetWRefCon`,
+`_SetWRefCon`, `_GetWTitle`, `_SetWTitle`, `_MoveWindow`, `_SizeWindow`,
+`_HiliteWindow`, `_BeginUpdate`, `_EndUpdate`, `_InvalRect`, `_FrontWindow`,
+`_FindWindow` sowie `_InitMenus`, `_NewMenu`, `_DisposeMenu`, `_AppendMenu`,
+`_InsertMenu`, `_DeleteMenu`, `_ClearMenuBar`, `_DrawMenuBar`, `_EnableItem`,
+`_DisableItem`, `_CheckItem`, `_GetMenuItemText`, `_SetMenuItemText`,
+`_CountMItems`, `_DeleteMenuItem`. Fenster-Records (64 Bytes, acht Fenster)
+und Menü-Handles (16-Byte-Block, acht Menüs, 24 Items) liegen im Gastblock,
+die Leiste hält acht Menüs. `_DisposeWindow`/`_CloseWindow` geben den
+Fenster-Record samt seinen Controls an den Heap zurück: `trap 0xA914 …
+a0=0x00800000 ok`, danach `trap 0xA913 … -> 0x00800000 ok` (dieselbe Adresse)
+und `trap 0xA92D … a0=0x00800000 -> 0x00000000 ok`; im Host-Test sind danach
+keine Fenster-Slots mehr belegt, das Front-Fenster ist 0, und in der
+Freiliste liegt genau der Record (`free blocks after CloseWindow`). Sie hängen nicht mehr nur am Log: `QRX68KRun` öffnet für jedes Mac-Fenster ein
+echtes Intuition-Fenster auf dem öffentlichen Schirm, QuickDraw zeichnet in
+dessen RastPort, die IDCMP-Ports werden in die Event-Queue gepumpt (Maus,
+Tasten, Aktivierung, Schließen-Gadget, Refresh), und der Mac-Scrap liegt über
+`clipboard.device` in derselben Zwischenablage wie die AROS-Anwendungen —
+Ausschneiden im Mac-Programm, Einfügen im AROS-Editor und umgekehrt. Die
+Menüleiste ist ein echter Menü-Strip: NewMenu/AppendMenu/InsertMenu/DeleteMenu
+füllen ein Modell, `CreateMenus`/`LayoutMenus`/`SetMenuStrip` bauen und hängen
+ihn an jedes Fenster, und eine Auswahl kommt als `menuEvt` (15, Menü-Kennung
+und Item in der Message) plus `mouseDown`/`mouseUp` mit der Menü-Kennung beim
+Programm an; ein Fenster, das nach `DrawMenuBar` entsteht, bekommt den
+bestehenden Strip beim Anlegen. Häkchen, Freigabe und Itemtext ändern nur den
+vorhandenen Eintrag: `_CheckItem` setzt `CHECKED` in der Häkchenspalte
+(`CHECKIT`), `_DisableItem` nimmt `ITEMENABLED` weg, `_SetMenuItemText` tauscht
+das `IntuiText` — danach `ResetMenuStrip`, ohne `CreateMenus`/`FreeMenus`.
+Auswerten lässt sich die Wahl wie unter MacOS: `_MenuSelect` gibt die gemeldete
+Menü-Kennung im oberen und die Item-Nummer im unteren Wort eines Longs zurück
+(`trap 0xA93D … -> 0x00800001`). Command-Zeichen kommen über `_SetItemCmd`
+(0xA84F) ins Modell und als `item-cmd` in den Strip (`aros: item 1 "Quit"
+command key 'Q' (patched)`) und lassen sich mit `_GetItemCmd` (0xA84E) wieder
+auslesen — im Gast belegt, indem das gelesene `Q` auf ein zweites Item
+geschrieben wird; `_MenuKey` bildet das Zeichen unabhängig von der Schreibweise
+auf das erste freigegebene Item ab (`trap 0xA93E … d0=0x00000071 ->
+0x00800002`, gesperrtes Item → 0). Dasselbe Muster trägt das Aussehen:
+`_SetItmStyle` (0xA942) stellt dem `IntuiText` einen gestylten `TextAttr` hin
+(`aros: item 1 "Quit" style 1 (patched, font style 0x2)`), `_SetItemMark`
+(0xA944) belegt die Merkzeichenspalte mit dem Haken (`aros: item 1 "Quit" mark
+'X' (patched as check)`), `_SetItmIcon` (0xA940) zeichnet Icon und Text in
+eine Bitmap und hängt die als `Image` in `ItemFill` mit gelöschtem `ITEMTEXT`
+(`aros: item 0 "Oeffnen" icon 3 (digit plus text in a 68x8 image, 118 text
+pixels, ITEMTEXT 0)`) — Intuition erlaubt nur eine Füllung je Item und keine
+gemischte Kette, ein zweites Item käme in eine eigene Zeile; Textwechsel
+zeichnet die Bitmap neu (`aros: item 0 text "Neu" redrawn with icon 3`), echte
+Mac-Icongrafik gibt es nicht. Die Bitmaps sind Eigentum des Gasts und werden
+vor jedem `FreeMenus` sowie beim `_DisposeMenu` freigegeben (`aros: menu "Datei"
+disposed, 1 icon bitmap(s) freed`) — vorher blieb der Speicher dort liegen.
+`_DeleteMenuItem` gibt die Bitmap des entfernten Items selbst frei (`aros: item
+1 deleted, icon bitmap freed`); das war der zweite Leck dieses Pfads, denn das
+Leeren des Modellplatzes überschrieb den Zeiger nur. Der Titel bleibt wie unter MacOS hervorgehoben, bis
+`_HiliteMenu(0)` ihn wieder aufhebt — der Ablauf `MenuSelect` → Befehl →
+`HiliteMenu(0)` läuft damit durch, die Hervorhebung lebt aber nur im Modell
+(`aros: menu 128 hilited ("Datei")` / `aros: menu highlight cleared`), weil
+Intuition einen Titel nur während des Trackings markiert. Im Gast belegt:
+`TestWin.mb` fährt 64 implementierte Traps, alle beantwortet; das Log zeigt `aros: window "Test" on the public screen`,
+`aros: menu bar 1 menu(s), 2 item(s) attached`, `win inval 12,14,30,40`,
+`PutScrap`/`GetScrap` mit `Hallo`, zwei Ereignisse aus dem Pump (`mouseDown`,
+`keyDown`), für das späte Fenster `Zweite` `aros: menu strip attached to
+"Zweite"`, die gepatchten Items (`aros: item 0 "Open" checked 1 enabled 0
+(patched, check column)`, `aros: item 0 text "Oeffnen" (patched)`) und mit dem
+Schalter `C:QRX68K_MENU_TEST` den Menü-Pfad `aros: menu pick "Datei" item 1
+(menu 128, event 15)` / `1 menu pick(s)` und dieselbe Auswahl über `_MenuSelect`
+(`0x00800001`, ohne den Schalter `0`) samt `_HiliteMenu(0)`, am Ende
+`2 window(s) created, 0 left open`.
+Der Control Manager läuft mit einem eigenen Kern: `_NewControl` (0xA954) legt
+einen Record mit Eigentümer, Bounds, Titel, Wert und Grenzen an und liefert
+einen Handle, `_ShowControl`/`_HideControl`/`_MoveControl`/`_SizeControl`/
+`_HiliteControl` (0xA957..0xA95D) ändern ihn, `_GetControlValue`/`_SetControlValue`
+und Minimum/Maximum (0xA960..0xA963) sowie `_GetControlTitle`/`_SetControlTitle`
+(0xA95E/0xA95F) lesen und schreiben die Felder, `_DrawControls`/`_Draw1Control`
+(0xA969/0xA96D) zeichnen Rahmen und Titel über die gfx-Hooks, und
+`_FindControl`/`_TrackControl` (0xA96C/0xA968) treffen den Knopf mit
+`inButton` (10). Die 'DITL'-Einträge eines Dialogs sind seit dem nächsten
+Schritt selbst Controls: `_GetNewDialog` legt für jeden Eintrag der Typen 4..7
+einen Record mit den Bounds und dem Text des Eintrags an, `item` merkt sich die
+Item-Nummer, und `_ModalDialog` nimmt einen `mouseDown` im Knopf, meldet seine
+Nummer als `itemHit` und konsumiert das Ereignis — ohne Klick bleibt Item 1.
+`_IsDialogEvent` bejaht so einen Klick (und `keyDown` bei vorhandenem Control),
+`_DialogSelect` schreibt die Nummer und liefert 1. Im Gast belegt (`TestQD.mb`,
+31 implementierte Traps): `trap 0xA97C … -> 0x00800000 ok` baut den Dialog,
+`trap 0xA991 … -> 0x00000000 ok` meldet ohne Klick Item 1, `trap 0xA97F … ->
+0x00000001 ok` erkennt den Klick als Dialogereignis, `trap 0xA96C … -> 0x0000000A
+ok` findet den Knopf mit `inButton`, `trap 0xA96D … -> 0x00000000 ok` zeichnet
+ihn (`qd rect frame 30,10,45,60`, `qd text 12,30 "Go"`), und der zweite
+`ModalDialog` meldet Item 2 (im Host-Test geprüft, das Gastlog zeigt die
+Trap-Antwort). Grenzen: kein `filterProc`, kein blockierendes Tracking, keine
+Command-Tasten-Äquivalente, keine Hervorhebung während des Klicks, Alerts ohne
+Items. `_DisposeDialog` (0xA983) und `_CloseDialog` (0xA982) schließen den
+Kreis: sie geben die Controls des Dialogs (wie `_KillControls`), die
+Item-Tabelle (Größe aus `count * 12 + Summe(len+1)`, weil der Record sie nicht
+speichert) und den 64-Byte-Record an den Heap zurück und tragen den Dialog aus
+`dialog_rec` aus. Im Gast belegt: `trap 0xA983 … a0=0x00800000 ok`, danach
+`trap 0xA97C … -> 0x00800000 ok` (derselbe Record) und `trap 0xA982 …
+a0=0x00800000 -> 0x00000000 ok`; im Host-Test liegt die Item-Tabelle wieder auf
+`Record+64`, das Control auf seiner alten Adresse, `nheap_free` ist 0, der
+Bump-Zeiger steht wieder auf dem Record und kein Dialog bleibt offen.
+`_DisposeControl` und `_KillControls` geben den Record an die
+Heap-Verwaltung zurück: Blöcke aus `NewPtr` tragen ihre Größe jetzt in einer
+Host-Tabelle, angrenzende freie Blöcke verschmelzen, und ein Block am oberen
+Rand zieht den Bump-Zeiger wieder herunter — der Zyklus „anlegen, benutzen,
+freigeben“ braucht so keinen neuen Speicher (dieselbe Leck-Klasse wie bei den
+Menü-Icons, nur diesmal gleich mit Freigabe). Im Gast belegt (dasselbe
+`TestWin.mb`, jetzt 64 implementierte
+Traps): `trap 0xA954 … -> 0x008010A0 ok` legt den Knopf an, `trap 0xA969 … ok`
+zeichnet ihn (`qd rect frame 100,20,120,60`, `qd text 22,100 "OK"`), `trap
+0xA960 … -> 0x00000001 ok`, `trap 0xA963 … ok` setzt 2, `trap 0xA95E … ok` holt
+`OK` zurück, `trap 0xA96C … a0=0x001004D8 -> 0x0000000A ok` findet und `trap
+0xA968 … -> 0x0000000A ok` trackt ihn. Grenzen: nur Knöpfe — keine
+CDEF-Prozeduren, keine Scrollbar/Checkbox/Radiogruppe, kein blockierendes
+`_TrackControl` mit Action-Proc, und die 'DITL'-Einträge eines Dialogs werden
+noch nicht zu Controls (`_ModalDialog` meldet weiter Item 1). Freigegeben werden
+Control-Records, Dialog-Record samt Item-Tabelle und Fenster-Record;
+`_DisposePtr` bleibt ohne Wirkung (der Trap nennt keine Größe), und
+`_CloseDialog`/`_CloseWindow` sind hier endgültig statt nur verbergend. Im Host-Test geprüft: nach
+`_DisposeControl` liefert `_NewControl` dieselbe Adresse und der Bump-Zeiger
+steht wieder auf ihr (`heap top after DisposeControl`), `_KillControls` räumt
+zwei Controls ab (`nheap_free == 0`), und die dritte Anlage landet wieder auf
+der ersten Adresse.
+Offen: WDEFs (Zoomen, Scrollen, Größenziehen), weitere Control-Arten (Checkbox
+und Radio werden angelegt, aber nicht als eigener Zustand gezeichnet),
+Untermenüs,
+Command-Zeichen aus 'MENU'-Ressourcen (nur `_SetItemCmd` setzt sie), echte
+Mac-Icongrafik (nur eine Ziffer vor dem Text, im Default-Font gezeichnet) und beliebige
+Merkzeichen in der Leiste (der Strip kennt nur Haken), die Stil-Bits
+Outline/Shadow/Condense/Extend, das Menü-Tracking in `_MenuSelect`
+(die Auswahl kommt fertig vom Gast, der Aufruf blockiert nicht) und eine
+sichtbare Titelhervorhebung (`_HiliteMenu` pflegt nur den Zustand),
+das Neuvermessen geänderter Itemtexte, weitere
+Scrap-Typen als `'TEXT'` und die Mac-Zeichensatz-Umwandlung.
+
+Nächste Schritte in dieser Reihenfolge: (1) einen ungepackten 68k-Test-App
+finden oder den VISE-/ADC-Packer implementieren, damit ein Segment real
+ausgeführt wird; (2) erst danach sind die PPC-Programme in den `SVCT`-Containern
+erreichbar. Die Dialog-Knöpfe sind bedienbar, ein Installer kann also seine
+Schaltflächen treffen.
+
+PPC-Stand gleichzeitig: die Gast-Suite `C:QRXPPC` läuft vollständig durch
+(`QRXPPC: 0 failure(s)`), inklusive `pef_loader`, `pef_reloc`, `apprun`,
+Toolbox (MM/RM/FM/QD/WM/Menü/Text/Event), JIT und FPU.

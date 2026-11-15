@@ -95,6 +95,7 @@
 
 typedef enum {
     QRX_MIX_OK = 0,
+    QRX_MIX_STOP,         /* a callback asked the bridge to stop the call */
     QRX_MIX_ERR_ARG,      /* invalid argument, stack bounds or alignment */
     QRX_MIX_ERR_SP,       /* callee did not restore the stack pointer */
     QRX_MIX_ERR_IMPORT,   /* unregistered import index at `sc` */
@@ -154,6 +155,7 @@ typedef struct {
     uint32_t sp_top;                /* upper stack bound, 16-byte aligned */
     uint32_t sp_limit;              /* lower stack bound */
     unsigned depth;                 /* nested call depth */
+    int stop_requested;             /* set by qrx_mix_request_stop() */
     qrx_mix_import_fn imports[QRX_MIX_IMPORTS];
     void *import_ctx[QRX_MIX_IMPORTS];
     qrx_mix_sig_t sigs[QRX_MIX_IMPORTS];
@@ -190,6 +192,13 @@ qrx_mix_status_t qrx_mix_init(qrx_mix_t *mix, qrx_ppc_t *ppc,
  * QRX_MIX_ERR_ARG: no argument is silently ignored, and a rejected
  * registration leaves the previous binding untouched.  PPC code always puts the
  * index in r0 before `sc`, so args->proc stays 0. */
+/* Ask the running qrx_mix_call() to return QRX_MIX_STOP after the current
+ * import callback.  The request is cleared when the next call starts; nested
+ * calls of the same bridge share the flag.  An import uses this to end a call
+ * at a point it cannot serve (for example an unimplemented Toolbox trap)
+ * instead of letting the PPC code continue with a made-up result. */
+void qrx_mix_request_stop(qrx_mix_t *mix);
+
 qrx_mix_status_t qrx_mix_register(qrx_mix_t *mix, unsigned index,
                                   uint32_t descriptor,
                                   qrx_mix_import_fn fn, void *ctx,

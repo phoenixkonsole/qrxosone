@@ -1051,6 +1051,15 @@ static bool i_bitop(T *t)
     }
     return true;
 }
+/* QRX_EC64_JIT_OFF: groups the JIT leaves to the interpreter, to find a faulty one. Bits: 1 MOVE,
+ * 2 MOVEQ, 4 line 4 (also 0x200 MOVEM, 0x400 MUL/DIV), 8 line 5, 0x10 branches, 0x20 ALU,
+ * 0x40 immediates and bit operations, 0x80 shifts, 0x800 chaining. */
+static unsigned jit_off(void)
+{
+    static int done; static unsigned v;
+    if (!done) { const char *e = getenv("QRX_EC64_JIT_OFF"); v = e ? (unsigned)strtoul(e, NULL, 0) : 0; done = 1; }
+    return v;
+}
 /* One instruction: 1 translated, 2 translated and ends the block, 0 not translated. */
 static int translate_one(T *t)
 {
@@ -1072,6 +1081,11 @@ static int translate_one(T *t)
     uint32_t *mark = t->p;
     unsigned nstub = t->nstub;
     int res;
+    unsigned off = jit_off(), line = op >> 12;
+    if (off && (((off & 1) && line >= 1 && line <= 3) || ((off & 2) && line == 7) || ((off & 4) && line == 4) ||
+                ((off & 0x200) && (op & 0xFB80) == 0x4880 && ((op >> 3) & 7) >= 2) || ((off & 0x400) && (op & 0xFF80) == 0x4C00) ||
+                ((off & 8) && line == 5) || ((off & 0x10) && line == 6) || ((off & 0x20) && (line == 8 || line == 9 || (line >= 11 && line <= 13))) ||
+                ((off & 0x40) && line == 0) || ((off & 0x80) && line == 14))) { t->pc = t->start; return 0; }
     switch (op >> 12) {
     case 0: res = i_immediate(t); break;
     case 1: case 2: case 3: res = i_move(t); break;
@@ -1302,7 +1316,7 @@ enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
             b = translate(c, j, pc);
             if (fl != j->flushes) site = NULL;
         }
-        if (site && b->code) {                 /* chain the exit that brought us here */
+        if (site && b->code && !(jit_off() & 0x800)) {   /* chain the exit that brought us here */
             int64_t dist = b->body - site;
 #if defined(__APPLE__)
             pthread_jit_write_protect_np(0);

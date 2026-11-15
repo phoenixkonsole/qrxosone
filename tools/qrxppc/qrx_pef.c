@@ -24,8 +24,21 @@
 #define PEF_IMPORT_SYMBOL_SIZE 4u
 #define PEF_EXPORT_SYMBOL_SIZE 10u
 #define PEF_RELOC_HEADER_SIZE 12u
+#define PEF_KIND_CODE 0u
+#define PEF_KIND_DATA 1u
+#define PEF_KIND_PACKED_DATA 2u
 #define PEF_KIND_LOADER 4u
 #define PEF_HASH_POWER_MAX 16u
+
+/* Container size of a section: code and unpacked data store unpackedSize
+ * bytes, a pattern-initialized (packed) data section and the loader section
+ * store packedSize bytes. */
+static uint32_t pef_section_container_size(const qrx_pef_section_t *s)
+{
+    if (s->kind == PEF_KIND_LOADER || s->kind == PEF_KIND_PACKED_DATA)
+        return s->packed_size != 0u ? s->packed_size : s->unpacked_size;
+    return s->unpacked_size;
+}
 
 #define PEF_TAG1 0x4A6F7921u     /* 'Joy!' */
 #define PEF_TAG2 0x70656666u     /* 'peff' */
@@ -126,10 +139,17 @@ qrx_pef_status_t qrx_pef_parse(qrx_pef_t *pef, const uint8_t *data,
         s->kind = h[24];
         s->share_kind = h[25];
         s->alignment = h[26];
-        if (s->packed_size != 0u)
+        /* Pattern-initialized data is expanded by qrx_pef_load(); every other
+         * kind keeps its contents verbatim, so packedSize must agree with
+         * unpackedSize there (a mismatch is a damaged section header). */
+        if (s->kind != PEF_KIND_PACKED_DATA && s->kind != PEF_KIND_LOADER &&
+            s->packed_size != 0u && s->packed_size != s->unpacked_size)
+            return QRX_PEF_ERR_PACKED;
+        if (s->kind == PEF_KIND_PACKED_DATA &&
+            s->unpacked_size == 0u)
             return QRX_PEF_ERR_PACKED;
         if (s->container_offset > size ||
-            size - s->container_offset < s->unpacked_size)
+            size - s->container_offset < pef_section_container_size(s))
             return QRX_PEF_ERR_OFFSET;
         if (s->kind == PEF_KIND_LOADER) {
             pef->loader_index = (int)i;
@@ -140,7 +160,7 @@ qrx_pef_status_t qrx_pef_parse(qrx_pef_t *pef, const uint8_t *data,
         return QRX_PEF_ERR_LOADER;
 
     loader = data + pef->sections[pef->loader_index].container_offset;
-    loader_size = pef->sections[pef->loader_index].unpacked_size;
+    loader_size = pef_section_container_size(&pef->sections[pef->loader_index]);
     if (loader_size < PEF_LOADER_HEADER_SIZE)
         return QRX_PEF_ERR_LOADER;
     pef->loader = loader;
@@ -288,6 +308,149 @@ qrx_pef_status_t qrx_pef_parse(qrx_pef_t *pef, const uint8_t *data,
     return QRX_PEF_OK;
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Pattern-initialized data (PEF section kind 2)                       */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    const uint8_t *data;
+    uint32_t size;
+    uint32_t pos;
+} pef_pattern_t;
+
+static int pef_pattern_vnum(pef_pattern_t *p, uint32_t *value)
+{
+    uint32_t v = 0;
+    unsigned bytes = 0;
+
+    for (;;) {
+        uint8_t c;
+
+        if (p->pos >= p->size || bytes++ >= 5u)
+            return 0;
+        c = p->data[p->pos++];
+        v = (v << 7) | (uint32_t)(c & 0x7Fu);
+        if ((c & 0x80u) == 0u) {
+            *value = v;
+            return 1;
+        }
+    }
+}
+
+/* Expands the five pattern opcodes documented in Mac OS Runtime
+ * Architectures, "Section Contents": zero run, block copy, repeated block and
+ * the two interleaved repeats (block/zero).  Every read and every write is
+ * bounded by packedSize/unpackedSize, so a damaged description fails with
+ * QRX_PEF_ERR_PACKED instead of overrunning guest memory. */
+static qrx_pef_status_t pef_unpack_section(const uint8_t *src, uint32_t packed,
+                                           uint8_t *dst, uint32_t unpacked)
+{
+    pef_pattern_t p;
+    uint32_t out = 0;
+
+    p.data = src;
+    p.size = packed;
+    p.pos = 0;
+    while (p.pos < p.size) {
+        uint8_t head = src[p.pos++];
+        uint32_t op = (uint32_t)(head >> 5);
+        uint32_t cnt = (uint32_t)(head & 0x1Fu);
+        uint32_t rep, cust, k;
+
+        if (cnt == 0u && !pef_pattern_vnum(&p, &cnt))
+            return QRX_PEF_ERR_PACKED;
+        if (cnt > unpacked - out)
+            return QRX_PEF_ERR_PACKED;
+
+        switch (op) {
+        case 0u:                                    /* zero run */
+            memset(dst + out, 0, cnt);
+            out += cnt;
+            break;
+        case 1u:                                    /* block copy */
+            if (cnt > p.size - p.pos)
+                return QRX_PEF_ERR_PACKED;
+            memcpy(dst + out, src + p.pos, cnt);
+            p.pos += cnt;
+            out += cnt;
+            break;
+        case 2u:                                    /* repeated block */
+            if (!pef_pattern_vnum(&p, &rep) || cnt > p.size - p.pos)
+                return QRX_PEF_ERR_PACKED;
+            for (k = 0; k <= rep; k++) {
+                if (cnt > unpacked - out)
+                    return QRX_PEF_ERR_PACKED;
+                memcpy(dst + out, src + p.pos, cnt);
+                out += cnt;
+            }
+            p.pos += cnt;
+            break;
+        case 3u:                                    /* repeat with block */
+        case 4u:                                    /* repeat with zero */
+        {
+            uint32_t common_at;
+
+            /* The common block (cnt literal bytes, or cnt zeros for op 4) is
+             * written once, then rep times a custom block followed by the same
+             * common block; the custom blocks follow the common one in the
+             * stream. */
+            if (!pef_pattern_vnum(&p, &cust) ||
+                !pef_pattern_vnum(&p, &rep))
+                return QRX_PEF_ERR_PACKED;
+            if (op == 3u && cnt > p.size - p.pos)
+                return QRX_PEF_ERR_PACKED;
+            common_at = p.pos;
+            if (op == 3u)
+                memcpy(dst + out, src + common_at, cnt);
+            else
+                memset(dst + out, 0, cnt);
+            out += cnt;
+            /* op 4 stores no common bytes: only the custom blocks follow. */
+            p.pos = common_at + (op == 3u ? cnt : 0u);
+            for (k = 0; k < rep; k++) {
+                if (cust > p.size - p.pos ||
+                    (uint64_t)cust + cnt > (uint64_t)(unpacked - out))
+                    return QRX_PEF_ERR_PACKED;
+                memcpy(dst + out, src + p.pos, cust);
+                p.pos += cust;
+                out += cust;
+                if (op == 3u)
+                    memcpy(dst + out, src + common_at, cnt);
+                else
+                    memset(dst + out, 0, cnt);
+                out += cnt;
+            }
+            break;
+        }
+        default:
+            return QRX_PEF_ERR_PACKED;
+        }
+    }
+    if (out != unpacked)
+        return QRX_PEF_ERR_PACKED;
+    return QRX_PEF_OK;
+}
+
+/* Sections are laid out one after another, each starting on a 4 KiB
+ * boundary: a real fragment has a 200 KiB code section, so a fixed stride per
+ * section index would let the code overlap the data section. */
+static uint64_t pef_section_layout(const qrx_pef_t *pef, uint32_t base,
+                                   unsigned index)
+{
+    uint64_t cursor = base;
+    unsigned i;
+
+    for (i = 0; i < index; i++) {
+        uint64_t size = pef->sections[i].total_size;
+
+        if (size < pef->sections[i].unpacked_size)
+            size = pef->sections[i].unpacked_size;
+        cursor = (cursor + size + 0xFFFu) & ~(uint64_t)0xFFFu;
+    }
+    return cursor;
+}
+
 qrx_pef_status_t qrx_pef_load(qrx_pef_t *pef, qrx_ppc_t *ppc, uint32_t base)
 {
     uint32_t i;
@@ -299,7 +462,7 @@ qrx_pef_status_t qrx_pef_load(qrx_pef_t *pef, qrx_ppc_t *ppc, uint32_t base)
      * container leaves guest memory untouched. */
     for (i = 0; i < pef->section_count; i++) {
         const qrx_pef_section_t *s = &pef->sections[i];
-        uint64_t addr = (uint64_t)base + (uint64_t)i * QRX_PEF_SECTION_STRIDE;
+        uint64_t addr = pef_section_layout(pef, base, i);
 
         if (addr > (uint64_t)ppc->mem.size ||
             (uint64_t)ppc->mem.size - addr < (uint64_t)s->unpacked_size)
@@ -307,11 +470,21 @@ qrx_pef_status_t qrx_pef_load(qrx_pef_t *pef, qrx_ppc_t *ppc, uint32_t base)
     }
     for (i = 0; i < pef->section_count; i++) {
         qrx_pef_section_t *s = &pef->sections[i];
-        uint32_t addr = base + i * QRX_PEF_SECTION_STRIDE;
+        uint32_t addr = (uint32_t)pef_section_layout(pef, base, i);
+        qrx_pef_status_t st = QRX_PEF_OK;
 
         if (s->unpacked_size != 0u)
+            memset(ppc->mem.data + addr, 0, s->unpacked_size);
+        if (s->kind == PEF_KIND_PACKED_DATA) {
+            st = pef_unpack_section(pef->data + s->container_offset,
+                                    s->packed_size, ppc->mem.data + addr,
+                                    s->unpacked_size);
+            if (st != QRX_PEF_OK)
+                return st;
+        } else if (s->unpacked_size != 0u) {
             memcpy(ppc->mem.data + addr, pef->data + s->container_offset,
                    s->unpacked_size);
+        }
         s->address = addr;
     }
     return QRX_PEF_OK;
@@ -344,13 +517,35 @@ uint32_t qrx_pef_section_address(const qrx_pef_t *pef, int index)
     return pef->sections[index].address;
 }
 
+static uint32_t pef_side_tvector(const qrx_pef_t *pef, int section,
+                                 uint32_t offset)
+{
+    if (!pef || !pef_section_in_range(pef, section))
+        return 0;
+    if (pef->sections[section].address == 0u)
+        return 0;
+    if (offset > pef->sections[section].unpacked_size ||
+        pef->sections[section].unpacked_size - offset < 8u)
+        return 0;
+    return pef->sections[section].address + offset;
+}
+
 uint32_t qrx_pef_main_tvector(const qrx_pef_t *pef)
 {
-    if (!pef || !pef_section_in_range(pef, pef->main_section))
-        return 0;
-    if (pef->sections[pef->main_section].address == 0u)
-        return 0;
-    return pef->sections[pef->main_section].address + pef->main_offset;
+    return pef ? pef_side_tvector(pef, pef->main_section, pef->main_offset)
+               : 0u;
+}
+
+uint32_t qrx_pef_init_tvector(const qrx_pef_t *pef)
+{
+    return pef ? pef_side_tvector(pef, pef->init_section, pef->init_offset)
+               : 0u;
+}
+
+uint32_t qrx_pef_term_tvector(const qrx_pef_t *pef)
+{
+    return pef ? pef_side_tvector(pef, pef->term_section, pef->term_offset)
+               : 0u;
 }
 
 
@@ -436,17 +631,18 @@ static void pef_reloc_repeat(pef_reloc_t *r, uint32_t start, uint32_t chunks,
         r->bad = 1;
         return;
     }
-    k = (int)r->hist_count - 1;
-    while (k >= 0 && acc < chunks) {
-        acc += r->hist[k].blocks;
+    k = (int)r->hist_count;
+    while (k > 0 && acc < chunks) {
         k--;
+        acc += r->hist[(unsigned)k % PEF_RELOC_MAX_INSNS].blocks;
     }
-    if (acc != chunks || k + 1 >= (int)r->hist_count) {
+    if (acc != chunks || r->hist_count - (unsigned)k > PEF_RELOC_MAX_INSNS) {
         r->bad = 1;
         return;
     }
     for (rep = 0; rep < times && !r->bad; rep++)
-        pef_reloc_exec(r, r->hist[k + 1].offset, start, 0, depth + 1u);
+        pef_reloc_exec(r, r->hist[(unsigned)k % PEF_RELOC_MAX_INSNS].offset,
+                       start, 0, depth + 1u);
 }
 
 static void pef_reloc_exec(pef_reloc_t *r, uint32_t off, uint32_t end,
@@ -629,13 +825,9 @@ static void pef_reloc_exec(pef_reloc_t *r, uint32_t off, uint32_t end,
         }
 
         if (!r->bad && record) {
-            if (r->hist_count >= (unsigned)PEF_RELOC_MAX_INSNS) {
-                r->bad = 1;
-            } else {
-                r->hist[r->hist_count].offset = start;
-                r->hist[r->hist_count].blocks = blocks;
-                r->hist_count++;
-            }
+            r->hist[r->hist_count % PEF_RELOC_MAX_INSNS].offset = start;
+            r->hist[r->hist_count % PEF_RELOC_MAX_INSNS].blocks = blocks;
+            r->hist_count++;
         }
     }
 }

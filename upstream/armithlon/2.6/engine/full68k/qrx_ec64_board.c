@@ -1,5 +1,6 @@
 /* The ARMithlon 68100EC64 board's devices, see qrx_ec64_board.h */
 #include "qrx_ec64_board.h"
+#include "qrx_hostnet.h"
 #include <string.h>
 #include <time.h>
 
@@ -35,6 +36,34 @@ static uint64_t clock_us(void)
     return (uint64_t)t.tv_sec * 1000000u + (uint64_t)t.tv_nsec / 1000u;
 }
 
+static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
+static void put_be32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16); p[2] = (uint8_t)(v >> 8); p[3] = (uint8_t)v; }
+/* The network service's buffers: the host would otherwise read and write outside guest RAM. */
+static int net_args_ok(const qec64_board *b, uint32_t op, const uint32_t *a)
+{
+    uint64_t lim = b->ram_size < UINT64_C(0x100000000) ? b->ram_size : UINT64_C(0x100000000);
+    switch (op) {
+    case 6: case 7: case 8: case 9: case 18: case 19:   /* send, recv, sendto, recvfrom, hostname, random */
+        return (uint64_t)a[1] + a[2] <= lim;
+    case 17: {                                           /* resolve: a string */
+        for (uint64_t p = a[1]; p < lim && p < (uint64_t)a[1] + 1024; p++) if (!b->ram[p]) return 1;
+        return 0;
+    }
+    default: return 1;
+    }
+}
+static void host_call(qec64_board *b, uint64_t addr)
+{
+    if (addr >= b->ram_size || b->ram_size - addr < 17 * 4 || (addr & 3)) return;
+    uint8_t *q = b->ram + addr;
+    uint32_t a[13];
+    for (unsigned i = 0; i < 13; i++) a[i] = be32(q + 16 + i * 4);
+    if (be32(q) != QEC64_HOST_NET) return;
+    uint32_t op = be32(q + 12);
+    if (!net_args_ok(b, op, a)) { a[8] = UINT32_MAX; a[9] = 10014; }
+    else qrx_hostnet_call(op, a, b->ram);
+    for (unsigned i = 8; i < 13; i++) put_be32(q + 16 + i * 4, a[i]);
+}
 bool qec64_board_mmio(qec64_cpu *c, uint64_t addr, unsigned size, bool write, uint64_t *value)
 {
     qec64_board *b = qec64_machine_user(c);
@@ -71,6 +100,9 @@ bool qec64_board_mmio(qec64_cpu *c, uint64_t addr, unsigned size, bool write, ui
     case QEC64_CPU_INSTRUCTIONS:
         if (write || size != 8) return false;
         *value = c->instructions; return true;
+    case QEC64_HOST_CALL:
+        if (!write || size != 8) return false;
+        host_call(b, *value); return true;
     case QEC64_CLOCK_UNIX:
         if (write || size != 8) return false;
         *value = (uint64_t)time(NULL); return true;

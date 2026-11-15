@@ -36,6 +36,13 @@
 #define QEC64_CLOCK_UNIX        0x0308u  /* .q read: seconds since 1970 (UTC) */
 #define QEC64_CPU_INSTRUCTIONS  0x0310u  /* .q read: instructions the reading core has run so far */
 
+/* Host services: a write of a request's RAM address runs it before the write returns. The request is
+ * 32-bit big endian words, laid out like the 32-bit door's (qrx86_door.c): [0] the service, [3] the
+ * operation, [4..16] arguments and results. Service 4 is the network (qrx_hostnet.h); buffers it names
+ * must lie in RAM below 4 GB, else the call fails with the Winsock error 10014 (bad address). */
+#define QEC64_HOST_CALL         0x0400u  /* .q write */
+#define QEC64_HOST_NET          4u
+
 typedef struct qec64_board {
     uint8_t *ram;
     uint64_t ram_size;

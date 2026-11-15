@@ -9,7 +9,9 @@
 #include "qrx_ppc_jit.h"
 #include "qrx_pef.h"
 #include "qrx_macapp.h"
+#include "qrx_toolbox.h"
 #include "qrx_mix.h"
+#include "qrx_apprun.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -153,6 +155,10 @@ static void expect_jit_block(const char *what, unsigned want)
 {
     unsigned got = jit.nblocks ? jit.blocks[0].insns : 0;
 
+#ifdef __AROS__
+    if (!jit_code)
+        return;                 /* no JIT on this target (m68k64): nothing was translated */
+#endif
     if (jit.nblocks != 1 || got != want) {
         printf("FAIL %s jit block: nblocks=%lu insns=%lu want=%u\n",
                what, (unsigned long)jit.nblocks, (unsigned long)got, want);
@@ -2292,6 +2298,27 @@ static void pef_build_fragment(uint8_t *buf)
     memcpy(buf + PEF_LOADER_OFF + 74u, "_main", 6u);
 }
 
+
+/* Pattern-initialized data (section kind 2) expands at load time.  The
+ * description below produces 8 zeros, "WXYZ" three times and 12 'A'. */
+static void pef_build_packed_fragment(uint8_t *buf)
+{
+    static const uint8_t pattern[] = {
+        0x00, 0x08,                          /* zero run of 8 */
+        0x44, 0x02, 'W', 'X', 'Y', 'Z',      /* block of 4, repeated 3x */
+        0x2C, 'A', 'A', 'A', 'A', 'A', 'A',  /* 12 literal bytes */
+        'A', 'A', 'A', 'A', 'A', 'A'
+    };
+
+    pef_build_fragment(buf);
+    buf[64] = 2;                             /* sectionKind: packed data */
+    pef_put32(buf, 48, 32u);                 /* totalSize */
+    pef_put32(buf, 52, 32u);                 /* unpackedSize */
+    pef_put32(buf, 56, (uint32_t)sizeof(pattern));
+    memcpy(buf + PEF_CODE_OFF, pattern, sizeof(pattern));
+    pef_put32(buf, PEF_LOADER_OFF + 4u, 0u); /* mainOffset */
+}
+
 static void test_pef_loader(void)
 {
     static qrx_pef_t image;
@@ -2410,6 +2437,30 @@ static void test_pef_loader(void)
         compare_jit_state(&ppc, &native);
     }
 #endif
+
+    /* A packed data section is expanded into guest memory. */
+    pef_build_packed_fragment(built);
+    expect_u32("pef_packed_parse",
+               (uint32_t)qrx_pef_parse(&image, built, PEF_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_OK);
+    memset(memory, 0, sizeof(memory));
+    expect_u32("pef_packed_load",
+               (uint32_t)qrx_pef_load(&image, &ppc, PEF_LOAD_BASE),
+               (uint32_t)QRX_PEF_OK);
+    expect_u32("pef_packed_zero", get32(PEF_LOAD_BASE), 0u);
+    expect_u32("pef_packed_repeat", get32(PEF_LOAD_BASE + 8u), 0x5758595Au);
+    expect_u32("pef_packed_second", get32(PEF_LOAD_BASE + 12u), 0x5758595Au);
+    expect_u32("pef_packed_tail", get32(PEF_LOAD_BASE + 20u), 0x41414141u);
+    expect_u32("pef_packed_end", get32(PEF_LOAD_BASE + 28u), 0x41414141u);
+    memcpy(damaged, built, sizeof(damaged));
+    pef_put32(damaged, 52u, 31u);           /* expansion no longer fits */
+    expect_u32("pef_packed_size_parse",
+               (uint32_t)qrx_pef_parse(&image, damaged, PEF_IMAGE_SIZE),
+               (uint32_t)QRX_PEF_OK);
+    expect_u32("pef_packed_short",
+               (uint32_t)qrx_pef_load(&image, &ppc, PEF_LOAD_BASE),
+               (uint32_t)QRX_PEF_ERR_PACKED);
+
     report("pef_loader", before);
 }
 
@@ -4792,8 +4843,1598 @@ static void test_mixed_rd_call_procinfo_errors(void)
  * memory changes the next call, an undecodable one fails the registration, and
  * the raw register path has to be requested with QRX_MIX_RAW; leaving both out
  * is an error that keeps the previous binding. */
-static void test_mixed_import_procinfo(void)
+/* P2.2: Memory Manager HLE.  The zone lives in guest memory, so the test can
+ * read every size word and master pointer the layer writes, and a hand-built
+ * PPC fragment reaches the layer through the single toolbox import. */
+#define MM_ZONE_BASE 0x20000u
+#define MM_ZONE_SIZE 0x10000u
+#define MM_FRAG 0x1A00u
+#define MM_STASH 0x1E00u
+
+static uint32_t ppc_addi(unsigned rd, unsigned ra, uint32_t si)
 {
+    return (14u << 26) | (rd << 21) | (ra << 16) | (si & 0xFFFFu);
+}
+
+static uint32_t ppc_lis(unsigned rd)
+{
+    return (15u << 26) | (rd << 21);
+}
+
+static uint32_t ppc_ori(unsigned rd, unsigned ra, uint32_t imm)
+{
+    return (24u << 26) | (rd << 21) | (ra << 16) | (imm & 0xFFFFu);
+}
+
+static uint32_t ppc_lwz(unsigned rd, unsigned ra, uint32_t d)
+{
+    return (32u << 26) | (rd << 21) | (ra << 16) | (d & 0xFFFFu);
+}
+
+static uint32_t ppc_lhz(unsigned rd, unsigned ra, uint32_t d)
+{
+    return (40u << 26) | (rd << 21) | (ra << 16) | (d & 0xFFFFu);
+}
+
+static uint32_t ppc_sth(unsigned rs, unsigned ra, uint32_t d)
+{
+    return (44u << 26) | (rs << 21) | (ra << 16) | (d & 0xFFFFu);
+}
+
+static uint32_t ppc_stw(unsigned rs, unsigned ra, uint32_t d)
+{
+    return (36u << 26) | (rs << 21) | (ra << 16) | (d & 0xFFFFu);
+}
+
+#define PPC_SC 0x44000002u
+#define PPC_BLR 0x4E800020u
+
+static void test_toolbox_mm(void)
+{
+    static qrx_mm_t mm;
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    qrx_mix_args_t args;
+    uint32_t ptr;
+    uint32_t handle;
+    uint32_t size;
+    uint32_t data;
+    uint32_t free_before;
+    uint32_t tvector;
+    unsigned i = 0u;
+    unsigned before = failures;
+
+    memset(&out, 0, sizeof(out));
+    memset(&args, 0, sizeof(args));
+
+    expect_u32("mm_init_args", (uint32_t)qrx_mm_init(0, &ppc, MM_ZONE_BASE,
+                                                    MM_ZONE_SIZE),
+               (uint32_t)QRX_MM_ERR_ARG);
+    expect_u32("mm_init_align", (uint32_t)qrx_mm_init(&mm, &ppc, 0x20001u,
+                                                     MM_ZONE_SIZE),
+               (uint32_t)QRX_MM_ERR_ARG);
+    expect_u32("mm_init_size", (uint32_t)qrx_mm_init(&mm, &ppc, 0x20000u, 0u),
+               (uint32_t)QRX_MM_ERR_ARG);
+    expect_u32("mm_init", (uint32_t)qrx_mm_init(&mm, &ppc, MM_ZONE_BASE,
+                                                MM_ZONE_SIZE),
+               (uint32_t)QRX_MM_OK);
+    expect_u32("mm_free_initial", qrx_mm_free_bytes(&mm), MM_ZONE_SIZE);
+
+    /* Pointer blocks: size word at data - 4, dispose semantics. */
+    expect_u32("mm_new_ptr", (uint32_t)qrx_mm_new_ptr(&mm, 16u, 0, &ptr),
+               (uint32_t)QRX_MM_OK);
+    expect_u32("mm_ptr_nonzero", ptr != 0u ? 1u : 0u, 1u);
+    expect_u32("mm_ptr_size_word", get32(ptr - 4u), 16u);
+    expect_u32("mm_get_ptr_size", (uint32_t)qrx_mm_get_ptr_size(&mm, ptr, &size),
+               (uint32_t)QRX_MM_OK);
+    expect_u32("mm_ptr_size", size, 16u);
+    put32(ptr, 0xDEADBEEFu);
+    expect_u32("mm_dispose_ptr", (uint32_t)qrx_mm_dispose_ptr(&mm, ptr),
+               (uint32_t)QRX_MM_OK);
+    expect_u32("mm_dispose_ptr_twice",
+               (uint32_t)qrx_mm_dispose_ptr(&mm, ptr),
+               (uint32_t)QRX_MM_ERR_INVALID);
+    expect_u32("mm_dispose_foreign", (uint32_t)qrx_mm_dispose_ptr(&mm, 0x1234u),
+               (uint32_t)QRX_MM_ERR_INVALID);
+
+    /* Handles: master pointer at the handle, size word at data - 4. */
+    expect_u32("mm_new_handle",
+               (uint32_t)qrx_mm_new_handle(&mm, 48u, 1, &handle),
+               (uint32_t)QRX_MM_OK);
+    data = get32(handle);
+    expect_u32("mm_handle_data_nonzero", data != 0u ? 1u : 0u, 1u);
+    expect_u32("mm_handle_size_word", get32(data - 4u), 48u);
+    expect_u32("mm_handle_cleared", get32(data), 0u);
+    expect_u32("mm_get_handle_size",
+               (uint32_t)qrx_mm_get_handle_size(&mm, handle, &size),
+               (uint32_t)QRX_MM_OK);
+    expect_u32("mm_handle_size", size, 48u);
+    put32(data, 0x11223344u);
+    put32(data + 4u, 0x55667788u);
+
+    /* Shrink in place: the first bytes stay. */
+    expect_u32("mm_handle_shrink",
+               (uint32_t)qrx_mm_set_handle_size(&mm, handle, 24u),
+               (uint32_t)QRX_MM_OK);
+    expect_u32("mm_handle_shrink_size",
+               (uint32_t)qrx_mm_get_handle_size(&mm, handle, &size),
+               (uint32_t)QRX_MM_OK);
+    expect_u32("mm_handle_shrunk", size, 24u);
+    expect_u32("mm_handle_kept", get32(data), 0x11223344u);
+
+    /* Grow by moving: the master pointer changes, the head survives. */
+    expect_u32("mm_handle_grow",
+               (uint32_t)qrx_mm_set_handle_size(&mm, handle, 96u),
+               (uint32_t)QRX_MM_OK);
+    data = get32(handle);
+    expect_u32("mm_handle_grow_size",
+               (uint32_t)qrx_mm_get_handle_size(&mm, handle, &size),
+               (uint32_t)QRX_MM_OK);
+    expect_u32("mm_handle_grown_size", size, 96u);
+    expect_u32("mm_handle_grow_kept", get32(data), 0x11223344u);
+    expect_u32("mm_handle_grow_word", get32(data + 4u), 0x55667788u);
+
+    /* Pointer blocks only shrink: growth is QRX_MM_ERR_SIZE. */
+    expect_u32("mm_new_ptr2", (uint32_t)qrx_mm_new_ptr(&mm, 8u, 0, &ptr),
+               (uint32_t)QRX_MM_OK);
+    expect_u32("mm_ptr_shrink", (uint32_t)qrx_mm_set_ptr_size(&mm, ptr, 4u),
+               (uint32_t)QRX_MM_OK);
+    expect_u32("mm_ptr_grow", (uint32_t)qrx_mm_set_ptr_size(&mm, ptr, 64u),
+               (uint32_t)QRX_MM_ERR_SIZE);
+    expect_u32("mm_ptr_size_still", (uint32_t)qrx_mm_get_ptr_size(&mm, ptr, &size),
+               (uint32_t)QRX_MM_OK);
+    expect_u32("mm_ptr_size4", size, 4u);
+
+    free_before = qrx_mm_free_bytes(&mm);
+    expect_u32("mm_dispose_ptr2", (uint32_t)qrx_mm_dispose_ptr(&mm, ptr),
+               (uint32_t)QRX_MM_OK);
+    expect_u32("mm_free_grows", qrx_mm_free_bytes(&mm) > free_before ? 1u : 0u,
+               1u);
+    expect_u32("mm_dispose_handle",
+               (uint32_t)qrx_mm_dispose_handle(&mm, handle),
+               (uint32_t)QRX_MM_OK);
+    expect_u32("mm_dispose_handle_twice",
+               (uint32_t)qrx_mm_dispose_handle(&mm, handle),
+               (uint32_t)QRX_MM_ERR_INVALID);
+    expect_u32("mm_free_after", qrx_mm_free_bytes(&mm) > MM_ZONE_SIZE - 512u
+               ? 1u : 0u, 1u);
+    expect_u32("mm_max_block", qrx_mm_max_block(&mm) > 0u ? 1u : 0u, 1u);
+
+    /* Full zone: nothing fits, NewPtr returns NIL through the dispatch. */
+    expect_u32("mm_full", (uint32_t)qrx_mm_new_ptr(&mm, 0x20000u, 0, &ptr),
+               (uint32_t)QRX_MM_ERR_FULL);
+    expect_u32("mm_full_out", ptr, 0u);
+
+    /* The dispatch seam: unknown traps are plain 0xFFFFFFFF. */
+    args.gpr[0] = 0xA0A0u;
+    expect_u32("mm_dispatch_unknown", qrx_mm_dispatch(&mm, &args, 0),
+               QRX_MM_UNKNOWN);
+    args.gpr[0] = QRX_TB_FREE_MEM;
+    expect_u32("mm_dispatch_freemem", qrx_mm_dispatch(&mm, &args, 0),
+               qrx_mm_free_bytes(&mm));
+
+    /* The application fragment calls the Memory Manager through import 0. */
+    expect_u32("mm_mix_init", (uint32_t)mix_setup(&mix, &ctx), (uint32_t)QRX_MIX_OK);
+    expect_u32("mm_register",
+               (uint32_t)qrx_mix_register(&mix, 0u, QRX_MIX_RAW,
+                                          qrx_mm_dispatch, &mm, 0),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mm_zone_init", (uint32_t)qrx_mm_init(&mm, &ppc, MM_ZONE_BASE,
+                                                    MM_ZONE_SIZE),
+               (uint32_t)QRX_MM_OK);
+
+#define TB_EMIT(word) put32(MM_FRAG + 4u * (i++), (word))
+    i = 0u;
+    TB_EMIT(ppc_addi(6, 0, MM_STASH));                 /* li r6, stash */
+    TB_EMIT(ppc_addi(0, 0, 0));                        /* li r0, 0 */
+    TB_EMIT(ppc_lis(3));                               /* lis r3, 0 */
+    TB_EMIT(ppc_ori(3, 3, QRX_TB_NEW_PTR));            /* ori r3, r3, NewPtr */
+    TB_EMIT(ppc_addi(4, 0, 16));                       /* li r4, 16 */
+    TB_EMIT(PPC_SC);
+    TB_EMIT(ppc_stw(3, 6, 0));                         /* stash[0] = ptr */
+    TB_EMIT(ppc_addi(5, 0, 0xFFFF));                   /* li r5, -1 */
+    TB_EMIT(ppc_stw(5, 3, 0));                         /* *ptr = -1 */
+    TB_EMIT(ppc_addi(0, 0, 0));
+    TB_EMIT(ppc_lis(3));
+    TB_EMIT(ppc_ori(3, 3, QRX_TB_NEW_HANDLE));
+    TB_EMIT(ppc_addi(4, 0, 64));                       /* li r4, 64 */
+    TB_EMIT(PPC_SC);
+    TB_EMIT(ppc_stw(3, 6, 4));                         /* stash[1] = handle */
+    TB_EMIT(ppc_lwz(4, 6, 4));                         /* lwz r4, 4(r6) */
+    TB_EMIT(ppc_addi(0, 0, 0));
+    TB_EMIT(ppc_lis(3));
+    TB_EMIT(ppc_ori(3, 3, QRX_TB_GET_HANDLE_SIZE));
+    TB_EMIT(PPC_SC);
+    TB_EMIT(ppc_stw(3, 6, 8));                         /* stash[2] = size */
+    TB_EMIT(PPC_BLR);
+    expect_u32("mm_app_call",
+               (uint32_t)qrx_mix_call(&mix, MM_FRAG, QRX_MIX_RAW_SIG, 0, &out,
+                                      4000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("mm_app_ptr", get32(MM_STASH) != 0u ? 1u : 0u, 1u);
+    expect_u32("mm_app_handle", get32(MM_STASH + 4u) != 0u ? 1u : 0u, 1u);
+    expect_u32("mm_app_size", get32(MM_STASH + 8u), 64u);
+    expect_u32("mm_app_data", get32(get32(MM_STASH)), 0xFFFFFFFFu);
+    tvector = get32(MM_STASH);
+    expect_u32("mm_app_size_word",
+               tvector != 0u ? get32(tvector - 4u) : 0u, 16u);
+    report("toolbox_mm", before);
+#undef TB_EMIT
+}
+
+/* P2.2: Resource Manager.  The fragment drives the trap seam through a
+ * single toolbox import: AddResource seeds a resource, the remaining traps
+ * prove the handle/type/id wiring and every negative path. */
+#define RM_FRAG 0x1A80u
+#define RM_STASH 0x1E10u
+#define RM_H_AT 96u   /* byte offset in stash holding the seeded handle */
+#define RM_H2_AT 100u /* byte offset in stash holding the named handle */
+#define RM_NAME_AT 0x1E90u /* Pascal "named" */
+
+static uint32_t ppc_lis2(unsigned rd, uint32_t imm)
+{
+    return (15u << 26) | (rd << 21) | ((imm >> 16) & 0xFFFFu);
+}
+
+static void test_toolbox_rm(void)
+{
+    static qrx_tb_t tb;
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    uint32_t handle;
+    uint32_t handle2;
+    uint32_t data;
+    unsigned i = 0u;
+    unsigned before = failures;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("rm_mix_init", (uint32_t)mix_setup(&mix, &ctx), (uint32_t)QRX_MIX_OK);
+    expect_u32("rm_register",
+               (uint32_t)qrx_mix_register(&mix, 0u, QRX_MIX_RAW,
+                                          qrx_tb_dispatch, &tb, 0),
+               (uint32_t)QRX_MIX_OK);
+    qrx_tb_init(&tb, &ppc, MM_ZONE_BASE, MM_ZONE_SIZE);
+    {
+        /* OS traps: Gestalt answers 'thds' without a Thread Manager, keeps an
+         * unknown selector an error and rejects a response pointer outside
+         * guest memory. */
+        qrx_mix_args_t gargs;
+
+        memset(&gargs, 0, sizeof(gargs));
+        gargs.gpr[0] = QRX_TB_GESTALT;
+        gargs.gpr[1] = 0x74686473u;   /* 'thds' */
+        gargs.gpr[2] = RM_STASH + 512u;
+        put32(RM_STASH + 512u, 0xFFFFFFFFu);
+        expect_u32("gestalt_thds", qrx_tb_dispatch(&tb, &gargs, 0), 0u);
+        expect_u32("gestalt_thds_value", get32(RM_STASH + 512u), 0u);
+        gargs.gpr[1] = 0x7A7A7A7Au;   /* 'zzzz' */
+        expect_u32("gestalt_undef", qrx_tb_dispatch(&tb, &gargs, 0),
+                   (uint32_t)-5551);
+        gargs.gpr[1] = 0x74686473u;
+        gargs.gpr[2] = 0xFFFFFFF0u;
+        expect_u32("gestalt_bad_ptr", qrx_tb_dispatch(&tb, &gargs, 0),
+                   (uint32_t)QRX_TB_PARAM_ERR);
+    }
+    expect_u32("rm_new_handle",
+               (uint32_t)qrx_mm_new_handle(&tb.mm, 6u, 0, &handle),
+               (uint32_t)QRX_MM_OK);
+    data = get32(handle);
+    put32(data, 0x72657344u); /* "resD" */
+    put32(data + 2u, 0x61740000u); /* "at" + pad */
+    expect_u32("rm_new_handle2",
+               (uint32_t)qrx_mm_new_handle(&tb.mm, 8u, 0, &handle2),
+               (uint32_t)QRX_MM_OK);
+    put32(RM_STASH + RM_H_AT, handle);
+    put32(RM_STASH + RM_H2_AT, handle2);
+    memory[RM_NAME_AT] = 5u;
+    memcpy(&memory[RM_NAME_AT + 1u], "named", 5u);
+    expect_u32("rm_seed_named_real",
+               (uint32_t)qrx_rm_add_resource(&tb.rm, 0x44415441u /* DATA */, 7,
+                                             "named", handle2),
+               (uint32_t)QRX_TB_NO_ERR);
+
+#define RM_E(w) put32(RM_FRAG + 4u * (i++), (w))
+    i = 0u;
+    RM_E(ppc_addi(8, 0, RM_STASH));                    /* li r8, stash */
+    /* AddResource('STR ', 1000, 0, H) */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_ADD));
+    RM_E(ppc_lis2(4, 0x53545220u));
+    RM_E(ppc_ori(4, 4, 0x2020u));
+    RM_E(ppc_addi(5, 0, 1000));
+    RM_E(ppc_addi(6, 0, 0));
+    RM_E(ppc_lwz(7, 8, RM_H_AT));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 0));                            /* +0 addErr = 0 */
+    /* GetResource('STR ', 1000) */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_GET));
+    RM_E(ppc_lis2(4, 0x53545220u));
+    RM_E(ppc_ori(4, 4, 0x2020u));
+    RM_E(ppc_addi(5, 0, 1000));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 4));                            /* +4 gotH = H */
+    /* ResError == 0 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_ERROR));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 8));                            /* +8 = 0 */
+    /* LoadResource(gotH) */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_LOAD));
+    RM_E(ppc_lwz(4, 8, 4));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 12));                           /* +12 = 0 */
+    /* SizeRsrc(gotH) */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_SIZE));
+    RM_E(ppc_lwz(4, 8, 4));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 16));                           /* +16 = 6 */
+    /* SetResAttrs(gotH, 0x42) */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_SET_ATTRS));
+    RM_E(ppc_lwz(4, 8, 4));
+    RM_E(ppc_addi(5, 0, 0x42));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 20));                           /* +20 = 0 */
+    /* GetResAttrs(gotH) */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_GET_ATTRS));
+    RM_E(ppc_lwz(4, 8, 4));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 24));                           /* +24 = 0x42 */
+    /* GetResource('STR ', 999) == 0; ResError == -192 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_GET));
+    RM_E(ppc_lis2(4, 0x53545220u));
+    RM_E(ppc_ori(4, 4, 0x2020u));
+    RM_E(ppc_addi(5, 0, 999));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 28));                           /* +28 = 0 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_ERROR));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 32));                           /* +32 = -192 */
+    /* CountResources('STR ') == 1 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_COUNT));
+    RM_E(ppc_lis2(4, 0x53545220u));
+    RM_E(ppc_ori(4, 4, 0x2020u));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 36));                           /* +36 = 1 */
+    /* GetIndResource('STR ', 1) == H */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_GET_IND));
+    RM_E(ppc_lis2(4, 0x53545220u));
+    RM_E(ppc_ori(4, 4, 0x2020u));
+    RM_E(ppc_addi(5, 0, 1));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 40));                           /* +40 = H */
+    /* CountTypes == 2; GetIndType(1) == 'DATA' (seeded first) */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_COUNT_TYPES));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 44));                           /* +44 = 2 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_GET_IND_TYPE));
+    RM_E(ppc_addi(4, 0, 1));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 48));                           /* +48 = 0x44415441 */
+    /* GetNamedResource('DATA', "named") == H2 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_GET_NAMED));
+    RM_E(ppc_lis2(4, 0x44415441u));
+    RM_E(ppc_ori(4, 4, 0x5441u));
+    RM_E(ppc_lis2(5, RM_NAME_AT));
+    RM_E(ppc_ori(5, 5, RM_NAME_AT & 0xFFFFu));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 52));                           /* +52 = H2 */
+    /* ReleaseResource(H) == 0; DetachResource(H) == 0; GetResource == 0 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_RELEASE));
+    RM_E(ppc_lwz(4, 8, RM_H_AT));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 56));                           /* +56 = 0 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_DETACH));
+    RM_E(ppc_lwz(4, 8, RM_H_AT));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 60));                           /* +60 = 0 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_GET));
+    RM_E(ppc_lis2(4, 0x53545220u));
+    RM_E(ppc_ori(4, 4, 0x2020u));
+    RM_E(ppc_addi(5, 0, 1000));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 64));                           /* +64 = 0 */
+    /* LoadResource(0xDEAD) == -192 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_LOAD));
+    RM_E(ppc_lis2(4, 0xDEADu));
+    RM_E(ppc_ori(4, 4, 0xDEADu));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 68));                           /* +68 = -192 */
+    /* AddResource('STR ', 1001, 0, H) again; SetResourceSize via
+     * ResourceDispatch($7003) to 10; SizeRsrc == 10 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_ADD));
+    RM_E(ppc_lis2(4, 0x53545220u));
+    RM_E(ppc_ori(4, 4, 0x2020u));
+    RM_E(ppc_addi(5, 0, 1001));
+    RM_E(ppc_addi(6, 0, 0));
+    RM_E(ppc_lwz(7, 8, RM_H_AT));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 72));                           /* +72 = 0 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_DISPATCH));
+    RM_E(ppc_lis(4));
+    RM_E(ppc_ori(4, 4, 0x7003u));
+    RM_E(ppc_lwz(5, 8, RM_H_AT));
+    RM_E(ppc_addi(6, 0, 10));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 76));                           /* +76 = 0 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_SIZE));
+    RM_E(ppc_lwz(4, 8, RM_H_AT));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 80));                           /* +80 = 10 */
+    /* RmveResource(H) == 0; GetResource('STR ', 1001) == 0 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_REMOVE));
+    RM_E(ppc_lwz(4, 8, RM_H_AT));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 84));                           /* +84 = 0 */
+    RM_E(ppc_addi(0, 0, 0));
+    RM_E(ppc_lis(3));
+    RM_E(ppc_ori(3, 3, QRX_TB_RM_GET));
+    RM_E(ppc_lis2(4, 0x53545220u));
+    RM_E(ppc_ori(4, 4, 0x2020u));
+    RM_E(ppc_addi(5, 0, 1001));
+    RM_E(PPC_SC);
+    RM_E(ppc_stw(3, 8, 88));                           /* +88 = 0 */
+    RM_E(PPC_BLR);
+#undef RM_E
+
+    expect_u32("rm_app_call",
+               (uint32_t)qrx_mix_call(&mix, RM_FRAG, QRX_MIX_RAW_SIG, 0, &out,
+                                      4000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("rm_add", get32(RM_STASH), 0u);
+    expect_u32("rm_gotH", get32(RM_STASH + 4u), handle);
+    expect_u32("rm_err0", get32(RM_STASH + 8u), 0u);
+    expect_u32("rm_load", get32(RM_STASH + 12u), 0u);
+    expect_u32("rm_size", get32(RM_STASH + 16u), 6u);
+    expect_u32("rm_setattrs", get32(RM_STASH + 20u), 0u);
+    expect_u32("rm_getattrs", get32(RM_STASH + 24u), 0x42u);
+    expect_u32("rm_missH", get32(RM_STASH + 28u), 0u);
+    expect_u32("rm_reserr", get32(RM_STASH + 32u), 0xFFFFFF40u);
+    expect_u32("rm_count", get32(RM_STASH + 36u), 1u);
+    expect_u32("rm_indH", get32(RM_STASH + 40u), handle);
+    expect_u32("rm_counttypes", get32(RM_STASH + 44u), 2u);
+    expect_u32("rm_indtype", get32(RM_STASH + 48u), 0x44415441u);
+    expect_u32("rm_namedH", get32(RM_STASH + 52u), handle2);
+    expect_u32("rm_release", get32(RM_STASH + 56u), 0u);
+    expect_u32("rm_detach", get32(RM_STASH + 60u), 0u);
+    expect_u32("rm_missdetach", get32(RM_STASH + 64u), 0u);
+    expect_u32("rm_loadbad", get32(RM_STASH + 68u), 0xFFFFFF40u);
+    expect_u32("rm_add2", get32(RM_STASH + 72u), 0u);
+    expect_u32("rm_setsize", get32(RM_STASH + 76u), 0u);
+    expect_u32("rm_sizeafter", get32(RM_STASH + 80u), 10u);
+    expect_u32("rm_remove", get32(RM_STASH + 84u), 0u);
+    expect_u32("rm_missremove", get32(RM_STASH + 88u), 0u);
+    report("toolbox_rm", before);
+}
+
+/* P2.2: File Manager.  One virtual volume, param blocks in guest memory:
+ * FileParams for Create/Delete/GetFileInfo/SetFileInfo, IOParam for
+ * Open/Close/Read/Write/GetEOF/SetEOF (offsets documented in qrx_toolbox.h). */
+#define FM_FRAG 0x0A00u
+#define FM_PB1 0x1F50u   /* FileParams */
+#define FM_PB2 0x1F70u   /* IOParam */
+#define FM_NAME 0x1F90u  /* "hello.txt", Pascal */
+#define FM_NOPE 0x1FA0u  /* "nope.txt", Pascal */
+#define FM_EMPTY 0x1FB0u /* length byte 0 */
+#define FM_W1 0x1FC0u    /* "Hello!" */
+#define FM_W2 0x1FC6u    /* "World!" */
+#define FM_B1 0x1FE0u    /* first read-back buffer */
+#define FM_B2 0x2000u    /* second read-back buffer */
+#define FM_STASH 0x1EE0u
+
+static void test_toolbox_fm(void)
+{
+    static qrx_tb_t tb;
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    unsigned i = 0u;
+    unsigned before = failures;
+    int ref1;
+    int ref2;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("fm_mix_init", (uint32_t)mix_setup(&mix, &ctx), (uint32_t)QRX_MIX_OK);
+    expect_u32("fm_register",
+               (uint32_t)qrx_mix_register(&mix, 0u, QRX_MIX_RAW,
+                                          qrx_tb_dispatch, &tb, 0),
+               (uint32_t)QRX_MIX_OK);
+    qrx_tb_init(&tb, &ppc, MM_ZONE_BASE, MM_ZONE_SIZE);
+
+    put32(FM_PB1 + 2u, FM_NAME);     /* FileParams.ioNamePtr */
+    put32(FM_PB2 + 4u, FM_NAME);     /* IOParam.ioNamePtr */
+    memory[FM_NAME] = 9u;
+    memcpy(&memory[FM_NAME + 1u], "hello.txt", 9u);
+    memory[FM_NOPE] = 8u;
+    memcpy(&memory[FM_NOPE + 1u], "nope.txt", 8u);
+    memory[FM_EMPTY] = 0u;
+    put32(FM_W1, 0x48656C6Fu);       /* "Hell" */
+    put32(FM_W1 + 4u, 0x6F210000u);  /* "o!" + pad */
+    put32(FM_W2, 0x576F726Cu);       /* "Worl" */
+    put32(FM_W2 + 4u, 0x64210000u);  /* "d!" + pad */
+
+#define FM_E(w) put32(FM_FRAG + 4u * (i++), (w))
+#define FM_PB2_SET() FM_E(ppc_lis(4)); FM_E(ppc_ori(4, 4, FM_PB2))
+#define FM_PB1_SET() FM_E(ppc_lis(4)); FM_E(ppc_ori(4, 4, FM_PB1))
+#define FM_TRAP_GET() FM_E(ppc_addi(0, 0, 0)); FM_E(ppc_lis(3)); FM_E(ppc_ori(3, 3, t))
+    i = 0u;
+    FM_E(ppc_addi(8, 0, FM_STASH));                    /* li r8, stash */
+    { /* Create; duplicate Create */
+        uint32_t t = QRX_TB_FM_CREATE;
+        FM_PB1_SET(); FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 0));
+        FM_PB1_SET(); FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 4));
+    }
+    { /* Open -> ioRefNum */
+        uint32_t t = QRX_TB_FM_OPEN;
+        FM_PB2_SET(); FM_TRAP_GET(); FM_E(PPC_SC);
+        FM_PB2_SET(); FM_E(ppc_lhz(3, 4, 10)); FM_E(ppc_stw(3, 8, 8));
+    }
+    { /* Write "Hello!" (6) */
+        uint32_t t = QRX_TB_FM_WRITE;
+        FM_PB2_SET();
+        FM_E(ppc_lis(5)); FM_E(ppc_ori(5, 5, FM_W1)); FM_E(ppc_stw(5, 4, 12));
+        FM_E(ppc_addi(5, 0, 6)); FM_E(ppc_stw(5, 4, 16));
+        FM_E(ppc_addi(5, 0, 0)); FM_E(ppc_sth(5, 4, 24));
+        FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 12));
+        FM_PB2_SET(); FM_E(ppc_lwz(3, 4, 20)); FM_E(ppc_stw(3, 8, 16));
+    }
+    { /* GetEOF == 6 */
+        uint32_t t = QRX_TB_FM_GET_EOF;
+        FM_PB2_SET(); FM_TRAP_GET(); FM_E(PPC_SC);
+        FM_PB2_SET(); FM_E(ppc_lwz(3, 4, 20)); FM_E(ppc_stw(3, 8, 20));
+    }
+    { /* Write "World!" (6) */
+        uint32_t t = QRX_TB_FM_WRITE;
+        FM_PB2_SET();
+        FM_E(ppc_lis(5)); FM_E(ppc_ori(5, 5, FM_W2)); FM_E(ppc_stw(5, 4, 12));
+        FM_E(ppc_addi(5, 0, 6)); FM_E(ppc_stw(5, 4, 16));
+        FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 24));
+        FM_PB2_SET(); FM_E(ppc_lwz(3, 4, 20)); FM_E(ppc_stw(3, 8, 28));
+    }
+    { /* GetEOF == 12; Close */
+        uint32_t t = QRX_TB_FM_GET_EOF;
+        FM_PB2_SET(); FM_TRAP_GET(); FM_E(PPC_SC);
+        FM_PB2_SET(); FM_E(ppc_lwz(3, 4, 20)); FM_E(ppc_stw(3, 8, 32));
+        t = QRX_TB_FM_CLOSE;
+        FM_PB2_SET(); FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 36));
+    }
+    { /* Reopen */
+        uint32_t t = QRX_TB_FM_OPEN;
+        FM_PB2_SET(); FM_TRAP_GET(); FM_E(PPC_SC);
+        FM_PB2_SET(); FM_E(ppc_lhz(3, 4, 10)); FM_E(ppc_stw(3, 8, 40));
+    }
+    { /* SetFileInfo word0 = 0x11223344; GetFileInfo reads it back */
+        uint32_t t = QRX_TB_FM_SET_FILE_INFO;
+        FM_PB1_SET();
+        FM_E(ppc_lis2(5, 0x11223344u)); FM_E(ppc_ori(5, 5, 0x3344u));
+        FM_E(ppc_stw(5, 4, 8));
+        FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 44));
+        t = QRX_TB_FM_GET_FILE_INFO;
+        FM_PB1_SET(); FM_TRAP_GET(); FM_E(PPC_SC);
+        FM_PB1_SET(); FM_E(ppc_lwz(3, 4, 8)); FM_E(ppc_stw(3, 8, 48));
+    }
+    { /* Read 20 into FM_B1 -> 12 bytes "Hello!World!" */
+        uint32_t t = QRX_TB_FM_READ;
+        FM_PB2_SET();
+        FM_E(ppc_lis(5)); FM_E(ppc_ori(5, 5, FM_B1)); FM_E(ppc_stw(5, 4, 12));
+        FM_E(ppc_addi(5, 0, 20)); FM_E(ppc_stw(5, 4, 16));
+        FM_E(ppc_addi(5, 0, 0)); FM_E(ppc_sth(5, 4, 24));
+        FM_TRAP_GET(); FM_E(PPC_SC);
+        FM_PB2_SET(); FM_E(ppc_lwz(3, 4, 20)); FM_E(ppc_stw(3, 8, 52));
+    }
+    { /* Read again at EOF -> 0 */
+        uint32_t t = QRX_TB_FM_READ;
+        FM_PB2_SET(); FM_TRAP_GET(); FM_E(PPC_SC);
+        FM_PB2_SET(); FM_E(ppc_lwz(3, 4, 20)); FM_E(ppc_stw(3, 8, 56));
+    }
+    { /* SetEOF ioActCount = 5; GetEOF == 5; Read into FM_B2 -> "Hello" */
+        uint32_t t = QRX_TB_FM_SET_EOF;
+        FM_PB2_SET();
+        FM_E(ppc_addi(5, 0, 5)); FM_E(ppc_stw(5, 4, 20));
+        FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 60));
+        t = QRX_TB_FM_GET_EOF;
+        FM_PB2_SET(); FM_TRAP_GET(); FM_E(PPC_SC);
+        FM_PB2_SET(); FM_E(ppc_lwz(3, 4, 20)); FM_E(ppc_stw(3, 8, 64));
+        t = QRX_TB_FM_READ;
+        FM_PB2_SET();
+        FM_E(ppc_lis(5)); FM_E(ppc_ori(5, 5, FM_B2)); FM_E(ppc_stw(5, 4, 12));
+        FM_E(ppc_addi(5, 0, 20)); FM_E(ppc_stw(5, 4, 16));
+        FM_E(ppc_addi(5, 0, 1)); FM_E(ppc_sth(5, 4, 24));
+        FM_E(ppc_addi(5, 0, 0)); FM_E(ppc_sth(5, 4, 26)); FM_E(ppc_sth(5, 4, 28));
+        FM_TRAP_GET(); FM_E(PPC_SC);
+        FM_PB2_SET(); FM_E(ppc_lwz(3, 4, 20)); FM_E(ppc_stw(3, 8, 68));
+    }
+    { /* Close; Delete; Open == -43 */
+        uint32_t t = QRX_TB_FM_CLOSE;
+        FM_PB2_SET(); FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 72));
+        t = QRX_TB_FM_DELETE;
+        FM_PB1_SET(); FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 76));
+        t = QRX_TB_FM_OPEN;
+        FM_PB2_SET(); FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 80));
+    }
+    { /* Open "nope.txt" == -43; Read bad refnum 999 == -51 */
+        uint32_t t = QRX_TB_FM_OPEN;
+        FM_PB2_SET();
+        FM_E(ppc_lis(5)); FM_E(ppc_ori(5, 5, FM_NOPE)); FM_E(ppc_stw(5, 4, 4));
+        FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 84));
+        t = QRX_TB_FM_READ;
+        FM_PB2_SET();
+        FM_E(ppc_addi(5, 0, 999)); FM_E(ppc_sth(5, 4, 10));
+        FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 88));
+    }
+    { /* Create with empty name == -50; Create with vref 99 == -32 */
+        uint32_t t = QRX_TB_FM_CREATE;
+        FM_PB1_SET();
+        FM_E(ppc_lis(5)); FM_E(ppc_ori(5, 5, FM_EMPTY)); FM_E(ppc_addi(6, 0, 0)); FM_E(ppc_sth(6, 4, 2)); FM_E(ppc_sth(5, 4, 4));
+        FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 92));
+        FM_PB1_SET();
+        FM_E(ppc_lis(5)); FM_E(ppc_ori(5, 5, FM_NAME)); FM_E(ppc_addi(6, 0, 0)); FM_E(ppc_sth(6, 4, 2)); FM_E(ppc_sth(5, 4, 4));
+        FM_E(ppc_addi(5, 0, 99)); FM_E(ppc_sth(5, 4, 6));
+        FM_TRAP_GET(); FM_E(PPC_SC); FM_E(ppc_stw(3, 8, 96));
+    }
+    FM_E(PPC_BLR);
+#undef FM_TRAP_GET
+#undef FM_PB1_SET
+#undef FM_PB2_SET
+#undef FM_E
+
+    expect_u32("fm_app_call",
+               (uint32_t)qrx_mix_call(&mix, FM_FRAG, QRX_MIX_RAW_SIG, 0, &out,
+                                      4000u),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("fm_create", get32(FM_STASH), 0u);
+    expect_u32("fm_create_dup", get32(FM_STASH + 4u), 0xFFFFFFD0u);
+    ref1 = (int32_t)get32(FM_STASH + 8u);
+    expect_u32("fm_open_ref", ref1 > 0 ? 1u : 0u, 1u);
+    expect_u32("fm_write1_err", get32(FM_STASH + 12u), 0u);
+    expect_u32("fm_write1_act", get32(FM_STASH + 16u), 6u);
+    expect_u32("fm_geteof1", get32(FM_STASH + 20u), 6u);
+    expect_u32("fm_write2_err", get32(FM_STASH + 24u), 0u);
+    expect_u32("fm_write2_act", get32(FM_STASH + 28u), 6u);
+    expect_u32("fm_geteof2", get32(FM_STASH + 32u), 12u);
+    expect_u32("fm_close", get32(FM_STASH + 36u), 0u);
+    ref2 = (int32_t)get32(FM_STASH + 40u);
+    expect_u32("fm_reopen_ref", ref2 > 0 ? 1u : 0u, 1u);
+    expect_u32("fm_setfinfo", get32(FM_STASH + 44u), 0u);
+    expect_u32("fm_getfinfo", get32(FM_STASH + 48u), 0x11223344u);
+    expect_u32("fm_read1_act", get32(FM_STASH + 52u), 12u);
+    expect_u32("fm_read2_act", get32(FM_STASH + 56u), 0u);
+    expect_u32("fm_seteof", get32(FM_STASH + 60u), 0u);
+    expect_u32("fm_geteof3", get32(FM_STASH + 64u), 5u);
+    expect_u32("fm_read3_act", get32(FM_STASH + 68u), 5u);
+    expect_u32("fm_close2", get32(FM_STASH + 72u), 0u);
+    expect_u32("fm_delete", get32(FM_STASH + 76u), 0u);
+    expect_u32("fm_open_deleted", get32(FM_STASH + 80u), 0xFFFFFFD5u);
+    expect_u32("fm_open_missing", get32(FM_STASH + 84u), 0xFFFFFFD5u);
+    expect_u32("fm_read_badref", get32(FM_STASH + 88u), 0xFFFFFFCDu);
+    expect_u32("fm_create_noname", get32(FM_STASH + 92u), 0xFFFFFFCEu);
+    expect_u32("fm_create_badvref", get32(FM_STASH + 96u), 0xFFFFFFE0u);
+    expect_u32("fm_buf1_head", get32(FM_B1), 0x48656C6Fu);
+    expect_u32("fm_buf1_mid", get32(FM_B1 + 4u), 0x6F21576Fu);
+    expect_u32("fm_buf1_tail", memory[FM_B1 + 8u], (uint32_t)'r');
+    expect_u32("fm_buf2_head", get32(FM_B2), 0x48656C6Fu);
+    expect_u32("fm_buf2_tail", memory[FM_B2 + 4u], (uint32_t)'o');
+    report("toolbox_fm", before);
+}
+
+
+/* P2.2 step 3: QuickDraw, Window Manager, Menu and Dialog Manager.  Screen
+ * and window bitmaps live in guest memory, so the host can read every pixel
+ * the layers set.  All calls go through the same sc seam as the earlier
+ * slices. */
+#define GUI_FRAG 0x0B00u
+#define GUI_STASH 0x1E80u
+#define GUI_THEPORT 0x2370u
+#define GUI_SCREEN 0x2380u
+#define GUI_PIX 0x2400u
+#define GUI_R_A 0x2300u
+#define GUI_R_B 0x2308u
+#define GUI_R_C 0x2310u
+#define GUI_R_D 0x2318u
+#define GUI_R_E 0x2320u
+#define GUI_FRAME 0x2328u
+#define GUI_PT 0x2330u
+#define GUI_PAT 0x2338u
+#define GUI_TITLE 0x2340u
+#define GUI_TITLE2 0x2348u
+#define GUI_STROUT 0x2350u
+#define GUI_MT1 0x2600u
+#define GUI_MT2 0x2610u
+#define GUI_MT3 0x2620u
+#define GUI_MTOUT 0x2630u
+
+static int32_t gui_get16(uint32_t addr)
+{
+    return (int32_t)(int16_t)(((uint16_t)memory[addr] << 8) |
+                              (uint16_t)memory[addr + 1u]);
+}
+
+static void gui_rect(uint32_t addr, int32_t top, int32_t left, int32_t bottom,
+                     int32_t right)
+{
+    memory[addr] = (uint8_t)((uint16_t)top >> 8);
+    memory[addr + 1u] = (uint8_t)top;
+    memory[addr + 2u] = (uint8_t)((uint16_t)left >> 8);
+    memory[addr + 3u] = (uint8_t)left;
+    memory[addr + 4u] = (uint8_t)((uint16_t)bottom >> 8);
+    memory[addr + 5u] = (uint8_t)bottom;
+    memory[addr + 6u] = (uint8_t)((uint16_t)right >> 8);
+    memory[addr + 7u] = (uint8_t)right;
+}
+
+static void gui_pstr(uint32_t addr, const char *s)
+{
+    size_t len = strlen(s);
+
+    memory[addr] = (uint8_t)len;
+    memcpy(&memory[addr + 1u], s, len);
+}
+
+/* Screen: 32x16 pixels, rowBytes 4, pixels at GUI_PIX. */
+static void gui_screen(void)
+{
+    unsigned i;
+
+    put32(GUI_SCREEN, GUI_PIX);
+    memory[GUI_SCREEN + 4u] = 0u;
+    memory[GUI_SCREEN + 5u] = 4u;
+    memory[GUI_SCREEN + 6u] = 0u;
+    memory[GUI_SCREEN + 7u] = 0u;
+    memory[GUI_SCREEN + 8u] = 0u;
+    memory[GUI_SCREEN + 9u] = 0u;
+    memory[GUI_SCREEN + 10u] = 0u;
+    memory[GUI_SCREEN + 11u] = 16u;
+    memory[GUI_SCREEN + 12u] = 0u;
+    memory[GUI_SCREEN + 13u] = 32u;
+    for (i = 0; i < 64u; i++)
+        memory[GUI_PIX + i] = 0u;
+    put32(GUI_THEPORT, 0u);
+}
+
+#define GUI_E(w) do { put32(GUI_FRAG + 4u * gi, (w)); gi++; } while (0)
+#define GUI_LI(r, v) do { \
+    GUI_E(ppc_lis(r)); GUI_E(ppc_ori((r), (r), (uint32_t)(v) & 0xFFFFu)); \
+} while (0)
+/* Full 32-bit constant: high half through addis, low half through ori. */
+#define GUI_LI2(r, v) do { \
+    GUI_E(ppc_lis2((r), (uint32_t)(v))); \
+    GUI_E(ppc_ori((r), (r), (uint32_t)(v) & 0xFFFFu)); \
+} while (0)
+#define GUI_TRAP(sel) do { \
+    GUI_E(ppc_addi(0, 0, 0)); GUI_E(ppc_lis(3)); \
+    GUI_E(ppc_ori(3, 3, (uint32_t)(sel))); GUI_E(PPC_SC); \
+} while (0)
+#define GUI_STASH_REG 9u
+#define GUI_ST(off) GUI_E(ppc_stw(3, GUI_STASH_REG, (off)))
+
+static void test_toolbox_qd(void)
+{
+    static qrx_tb_t tb;
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+    unsigned i, gi;
+    uint32_t rc;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("qd_mix_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("qd_register",
+               (uint32_t)qrx_mix_register(&mix, 0u, QRX_MIX_RAW,
+                                          qrx_tb_dispatch, &tb, 0),
+               (uint32_t)QRX_MIX_OK);
+    qrx_tb_init(&tb, &ppc, MM_ZONE_BASE, MM_ZONE_SIZE);
+    qrx_tb_set_screen(&tb, GUI_SCREEN);
+    /* Fixtures after the bridge setup: mix_setup clears its scratch window. */
+    memset(&memory[GUI_FRAG], 0, 0x400u);
+    gui_screen();
+    gui_rect(GUI_R_A, 0, 0, 2, 8);
+    gui_rect(GUI_R_B, 1, 0, 2, 4);
+    gui_rect(GUI_R_C, 1, 0, 2, 8);
+    gui_rect(GUI_R_D, 4, 4, 6, 12);
+    gui_rect(GUI_R_E, 8, 0, 12, 20);
+    for (i = 0u; i < 8u; i++)
+        memory[GUI_PAT + i] = 0xAAu;    /* 50 % pattern */
+
+    gi = 0u;
+    GUI_E(ppc_addi(GUI_STASH_REG, 0, GUI_STASH));      /* li r9, stash */
+    /* InitGraf(@thePort) publishes the current port (none yet = 0). */
+    GUI_LI(4, GUI_THEPORT); GUI_TRAP(QRX_TB_QD_INIT_GRAF); GUI_ST(0);
+    /* SetPort(screen); GetPort == screen. */
+    GUI_LI(4, GUI_SCREEN); GUI_TRAP(QRX_TB_QD_SET_PORT); GUI_ST(4);
+    GUI_TRAP(QRX_TB_QD_GET_PORT); GUI_ST(8);
+    /* PaintRect(0,0,2,8) -> two rows, first byte each.  Pixels are read
+     * back inside the fragment, right after the call that set them. */
+    GUI_LI(4, GUI_R_A); GUI_TRAP(QRX_TB_QD_PAINT_RECT); GUI_ST(12);
+    GUI_LI(4, GUI_PIX); GUI_E(ppc_lwz(3, 4, 0)); GUI_ST(76);
+    GUI_LI(4, GUI_PIX + 4u); GUI_E(ppc_lwz(3, 4, 0)); GUI_ST(80);
+    /* EraseRect(1,0,2,4) clears the first four columns of row 1. */
+    GUI_LI(4, GUI_R_B); GUI_TRAP(QRX_TB_QD_ERASE_RECT); GUI_ST(16);
+    GUI_LI(4, GUI_PIX + 4u); GUI_E(ppc_lwz(3, 4, 0)); GUI_ST(84);
+    /* InvertRect(1,0,2,8) inverts columns 0..7 of row 1. */
+    GUI_LI(4, GUI_R_C); GUI_TRAP(QRX_TB_QD_INVERT_RECT); GUI_ST(20);
+    GUI_LI(4, GUI_PIX + 4u); GUI_E(ppc_lwz(3, 4, 0)); GUI_ST(88);
+    /* FillRect(4,4,6,12) with the 50 % pattern. */
+    GUI_LI(4, GUI_R_D); GUI_LI(5, GUI_PAT);
+    GUI_TRAP(QRX_TB_QD_FILL_RECT); GUI_ST(24);
+    GUI_LI(4, GUI_PIX + 16u); GUI_E(ppc_lwz(3, 4, 0)); GUI_ST(92);
+    /* FrameRect(8,0,12,20) with a one-pixel pen. */
+    GUI_TRAP(QRX_TB_QD_PEN_NORMAL);
+    GUI_LI(4, GUI_R_E); GUI_TRAP(QRX_TB_QD_FRAME_RECT); GUI_ST(28);
+    GUI_LI(4, GUI_PIX + 32u); GUI_E(ppc_lwz(3, 4, 0)); GUI_ST(96);
+    GUI_LI(4, GUI_PIX + 36u); GUI_E(ppc_lwz(3, 4, 0)); GUI_ST(100);
+    /* PenSize(1,1); MoveTo(0,14); LineTo(10,14) draws row 14. */
+    GUI_LI2(4, 0x00010001u); GUI_TRAP(QRX_TB_QD_PEN_SIZE); GUI_ST(32);
+    GUI_LI(4, 0x0000000Eu); GUI_TRAP(QRX_TB_QD_MOVE_TO); GUI_ST(36);
+    GUI_LI2(4, 0x000A000Eu); GUI_TRAP(QRX_TB_QD_LINE_TO); GUI_ST(40);
+    GUI_LI(4, GUI_PIX + 56u); GUI_E(ppc_lwz(3, 4, 0)); GUI_ST(104);
+    /* GetPen(Point*) returns (10,14). */
+    GUI_LI(4, GUI_PT); GUI_TRAP(QRX_TB_QD_GET_PEN); GUI_ST(44);
+    /* Bad rect pointer, bad bitmap, bad pattern: all beyond the 256-KiB
+     * logical memory, so they must be rejected without touching anything. */
+    GUI_LI2(4, 0x000FFFF0u); GUI_TRAP(QRX_TB_QD_PAINT_RECT); GUI_ST(48);
+    GUI_LI2(4, 0x000FFFF0u); GUI_TRAP(QRX_TB_QD_SET_PORT); GUI_ST(52);
+    GUI_LI(4, GUI_R_A); GUI_LI2(5, 0x000FFFF0u);
+    GUI_TRAP(QRX_TB_QD_FILL_RECT); GUI_ST(56);
+    /* Unknown A-line is not ours. */
+    GUI_TRAP(0xA8F0u); GUI_ST(60);
+    /* SetRect writes a Rect; PtInRect then confirms a point inside it.  The
+     * point lives in the stash area, written as two halfwords because Point
+     * fields are not word aligned. */
+    GUI_LI(4, GUI_R_A); GUI_LI(5, 2); GUI_LI(6, 3); GUI_LI(7, 9); GUI_LI(8, 11);
+    GUI_TRAP(QRX_TB_QD_SET_RECT); GUI_ST(64);
+    GUI_E(ppc_addi(10, 0, 5));                         /* h = 5 */
+    GUI_E(ppc_sth(10, GUI_STASH_REG, 68));
+    GUI_E(ppc_addi(10, 0, 4));                         /* v = 4 */
+    GUI_E(ppc_sth(10, GUI_STASH_REG, 70));
+    GUI_E(ppc_addi(4, GUI_STASH_REG, 68)); GUI_LI(5, GUI_R_A);
+    GUI_TRAP(QRX_TB_QD_PT_IN_RECT); GUI_ST(72);
+    GUI_E(PPC_BLR);
+
+    rc = (uint32_t)qrx_mix_call(&mix, GUI_FRAG, QRX_MIX_RAW_SIG, 0, &out,
+                                4000u);
+    expect_u32("qd_app_call", rc, (uint32_t)QRX_MIX_OK);
+    expect_u32("qd_initgraf", get32(GUI_STASH), 0u);
+    expect_u32("qd_theport", get32(GUI_THEPORT), GUI_SCREEN);
+    expect_u32("qd_setport", get32(GUI_STASH + 4u), 0u);
+    expect_u32("qd_getport", get32(GUI_STASH + 8u), GUI_SCREEN);
+    expect_u32("qd_paint", get32(GUI_STASH + 12u), 0u);
+    expect_u32("qd_paint_row0", get32(GUI_STASH + 76u), 0xFF000000u);
+    expect_u32("qd_paint_row1", get32(GUI_STASH + 80u), 0xFF000000u);
+    expect_u32("qd_erase", get32(GUI_STASH + 16u), 0u);
+    expect_u32("qd_erase_row1", get32(GUI_STASH + 84u), 0x0F000000u);
+    expect_u32("qd_invert", get32(GUI_STASH + 20u), 0u);
+    expect_u32("qd_invert_row1", get32(GUI_STASH + 88u), 0xF0000000u);
+    expect_u32("qd_fill", get32(GUI_STASH + 24u), 0u);
+    expect_u32("qd_fill_row4", get32(GUI_STASH + 92u), 0x0AA00000u);
+    expect_u32("qd_frame", get32(GUI_STASH + 28u), 0u);
+    expect_u32("qd_frame_row8", get32(GUI_STASH + 96u), 0xFFFFF000u);
+    expect_u32("qd_frame_row9", get32(GUI_STASH + 100u), 0x80001000u);
+    expect_u32("qd_pensize", get32(GUI_STASH + 32u), 0u);
+    expect_u32("qd_moveto", get32(GUI_STASH + 36u), 0u);
+    expect_u32("qd_lineto", get32(GUI_STASH + 40u), 0u);
+    expect_u32("qd_line_row14", get32(GUI_STASH + 104u), 0xFFE00000u);
+    expect_u32("qd_paint_row0_kept", get32(GUI_PIX), 0xFF000000u);
+    expect_u32("qd_getpen", get32(GUI_STASH + 44u), 0u);
+    expect_u32("qd_getpen_h", (uint32_t)gui_get16(GUI_PT), 10u);
+    expect_u32("qd_getpen_v", (uint32_t)gui_get16(GUI_PT + 2u), 14u);
+    expect_u32("qd_bad_rect", get32(GUI_STASH + 48u), 0xFFFFFFCEu);
+    expect_u32("qd_bad_bitmap", get32(GUI_STASH + 52u), 0xFFFFFFCEu);
+    expect_u32("qd_bad_pattern", get32(GUI_STASH + 56u), 0xFFFFFFCEu);
+    expect_u32("qd_unknown_trap", get32(GUI_STASH + 60u), 0xFFFFFFFFu);
+    expect_u32("qd_setrect", get32(GUI_STASH + 64u), 0u);
+    expect_u32("qd_setrect_out", get32(GUI_R_A), 0x00020003u);
+    expect_u32("qd_ptinrect", get32(GUI_STASH + 72u), 1u);
+    report("toolbox_qd", before);
+}
+
+
+/* Window Manager through the seam: the window record and its content bitmap
+ * are allocated from the Memory Manager zone, so the same test proves both
+ * layers cooperate.  Frames here are content rects (origin = top/left). */
+#define GUI_WR 0x2358u       /* content rect 0,0,6,16 */
+#define GUI_MT4 0x2640u
+#define GUI_MTOUT2 0x2650u
+#define GUI_MTOUT3 0x2660u
+
+static void test_toolbox_wm(void)
+{
+    static qrx_tb_t tb;
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+    unsigned gi;
+    uint32_t rc;
+    uint32_t record;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("wm_mix_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("wm_register",
+               (uint32_t)qrx_mix_register(&mix, 0u, QRX_MIX_RAW,
+                                          qrx_tb_dispatch, &tb, 0),
+               (uint32_t)QRX_MIX_OK);
+    qrx_tb_init(&tb, &ppc, MM_ZONE_BASE, MM_ZONE_SIZE);
+    qrx_tb_set_screen(&tb, GUI_SCREEN);
+    memset(&memory[GUI_FRAG], 0, 0x400u);
+    memset(&memory[GUI_STASH], 0, 80u);
+    gui_screen();
+    gui_rect(GUI_FRAME, 4, 4, 10, 20);
+    gui_rect(GUI_WR, 0, 0, 6, 16);
+    gui_pstr(GUI_TITLE, "Test");
+    gui_pstr(GUI_TITLE2, "Zwei");
+    memory[GUI_PT] = 0u;
+    memory[GUI_PT + 1u] = 25u;         /* FindWindow point: h = 25 */
+    memory[GUI_PT + 2u] = 0u;
+    memory[GUI_PT + 3u] = 9u;          /* v = 9 */
+
+    gi = 0u;
+    GUI_E(ppc_addi(GUI_STASH_REG, 0, GUI_STASH));
+    GUI_LI(4, GUI_SCREEN); GUI_TRAP(QRX_TB_QD_SET_PORT); GUI_ST(96);
+    GUI_TRAP(QRX_TB_WM_INIT_WINDOWS); GUI_ST(4);
+    /* NewWindow(0, frame, "Test", hidden, 0, behind=0) */
+    GUI_LI(4, 0); GUI_LI(5, GUI_FRAME); GUI_LI(6, GUI_TITLE);
+    GUI_LI(7, 0); GUI_LI(8, 0); GUI_LI(10, 0);
+    GUI_TRAP(QRX_TB_WM_NEW_WINDOW); GUI_ST(0);
+    /* Draw a black content: SetPort(record + 82); PaintRect(0,0,6,16). */
+    GUI_E(ppc_lwz(11, GUI_STASH_REG, 0));
+    GUI_E(ppc_addi(4, 11, 82));
+    GUI_TRAP(QRX_TB_QD_SET_PORT); GUI_ST(100);
+    GUI_LI(4, GUI_WR); GUI_TRAP(QRX_TB_QD_PAINT_RECT); GUI_ST(104);
+    /* Show it, then ask who is in front. */
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 0));
+    GUI_TRAP(QRX_TB_WM_SHOW_WINDOW); GUI_ST(8);
+    GUI_LI(4, GUI_PIX + 16u); GUI_E(ppc_lwz(3, 4, 0)); GUI_ST(76);
+    GUI_TRAP(QRX_TB_WM_FRONT_WINDOW); GUI_ST(12);
+    /* Title round trip and refCon round trip. */
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 0)); GUI_LI(5, GUI_TITLE2);
+    GUI_TRAP(QRX_TB_WM_SET_TITLE); GUI_ST(16);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 0)); GUI_LI(5, GUI_STROUT);
+    GUI_TRAP(QRX_TB_WM_GET_TITLE); GUI_ST(20);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 0)); GUI_LI(5, 0xCAFEu);
+    GUI_TRAP(QRX_TB_WM_SET_REFCON); GUI_ST(108);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 0));
+    GUI_TRAP(QRX_TB_WM_GET_REFCON); GUI_ST(24);
+    /* Hide clears the desktop. */
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 0));
+    GUI_TRAP(QRX_TB_WM_HIDE_WINDOW); GUI_ST(28);
+    GUI_LI(4, GUI_PIX + 16u); GUI_E(ppc_lwz(3, 4, 0)); GUI_ST(80);
+    /* A foreign pointer is not a window. */
+    GUI_LI(4, 0x00007777u); GUI_TRAP(QRX_TB_WM_SHOW_WINDOW); GUI_ST(32);
+    /* Move to (20,8), then resize the content to 10x6, then show again. */
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 0)); GUI_LI2(5, 0x00140008u);
+    GUI_TRAP(QRX_TB_WM_MOVE_WINDOW); GUI_ST(36);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 0)); GUI_LI2(5, 0x000A0006u);
+    GUI_TRAP(QRX_TB_WM_SIZE_WINDOW); GUI_ST(40);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 0));
+    GUI_TRAP(QRX_TB_WM_SHOW_WINDOW); GUI_ST(112);
+    GUI_LI(4, GUI_PIX + 32u); GUI_E(ppc_lwz(3, 4, 0)); GUI_ST(84);
+    /* FindWindow((25,9)) hits the moved window. */
+    GUI_LI(4, GUI_PT); GUI_LI(5, GUI_MTOUT);
+    GUI_TRAP(QRX_TB_WM_FIND_WINDOW); GUI_ST(52);
+    GUI_LI(4, GUI_MTOUT); GUI_E(ppc_lwz(3, 4, 0)); GUI_ST(56);
+    /* Close, then the same pointer is gone. */
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 0));
+    GUI_TRAP(QRX_TB_WM_CLOSE_WINDOW); GUI_ST(44);
+    GUI_LI(4, GUI_PIX + 32u); GUI_E(ppc_lwz(3, 4, 0)); GUI_ST(88);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 0));
+    GUI_TRAP(QRX_TB_WM_SHOW_WINDOW); GUI_ST(48);
+    GUI_E(PPC_BLR);
+
+    rc = (uint32_t)qrx_mix_call(&mix, GUI_FRAG, QRX_MIX_RAW_SIG, 0, &out,
+                                4000u);
+    expect_u32("wm_app_call", rc, (uint32_t)QRX_MIX_OK);
+    record = get32(GUI_STASH);
+    expect_u32("wm_newwindow", record != 0u ? 1u : 0u, 1u);
+    expect_u32("wm_initwindows", get32(GUI_STASH + 4u), 0u);
+    expect_u32("wm_showwindow", get32(GUI_STASH + 8u), 0u);
+    expect_u32("wm_setport_win", get32(GUI_STASH + 100u), 0u);
+    expect_u32("wm_paint_content", get32(GUI_STASH + 104u), 0u);
+    expect_u32("wm_front", get32(GUI_STASH + 12u), record);
+    expect_u32("wm_settitle", get32(GUI_STASH + 16u), 0u);
+    expect_u32("wm_gettitle", get32(GUI_STASH + 20u), 0u);
+    expect_u32("wm_gettitle_text", memory[GUI_STROUT], 4u);
+    expect_u32("wm_gettitle_char", memory[GUI_STROUT + 1u], (uint32_t)'Z');
+    expect_u32("wm_refcon", get32(GUI_STASH + 24u), 0xCAFEu);
+    expect_u32("wm_record_kind", (uint32_t)gui_get16(record), 4u);
+    expect_u32("wm_record_port", get32(record + 82u) != 0u ? 1u : 0u, 1u);
+    expect_u32("wm_composite_row4", get32(GUI_STASH + 76u), 0x0FFFF000u);
+    expect_u32("wm_hidewindow", get32(GUI_STASH + 28u), 0u);
+    expect_u32("wm_hide_clear", get32(GUI_STASH + 80u), 0u);
+    expect_u32("wm_bad_window", get32(GUI_STASH + 32u), 0xFFFFFF9Bu);
+    expect_u32("wm_movewindow", get32(GUI_STASH + 36u), 0u);
+    expect_u32("wm_move_frame_l", (uint32_t)gui_get16(record + 26u), 20u);
+    expect_u32("wm_move_frame_t", (uint32_t)gui_get16(record + 24u), 8u);
+    expect_u32("wm_sizewindow", get32(GUI_STASH + 40u), 0u);
+    expect_u32("wm_size_frame_r", (uint32_t)gui_get16(record + 30u), 30u);
+    expect_u32("wm_size_frame_b", (uint32_t)gui_get16(record + 28u), 14u);
+    expect_u32("wm_reshow", get32(GUI_STASH + 112u), 0u);
+    expect_u32("wm_composite_moved", get32(GUI_STASH + 84u), 0x00000FFCu);
+    expect_u32("wm_findwindow", get32(GUI_STASH + 52u), 0u);
+    expect_u32("wm_findwindow_hit", get32(GUI_STASH + 56u), record);
+    expect_u32("wm_closewindow", get32(GUI_STASH + 44u), 0u);
+    expect_u32("wm_after_close", get32(GUI_STASH + 48u), 0xFFFFFF9Bu);
+    expect_u32("wm_close_clear", get32(GUI_STASH + 88u), 0u);
+    report("toolbox_wm", before);
+}
+
+static void test_toolbox_menu(void)
+{
+    static qrx_tb_t tb;
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+    unsigned gi;
+    uint32_t rc;
+    uint32_t handle;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("menu_mix_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("menu_register",
+               (uint32_t)qrx_mix_register(&mix, 0u, QRX_MIX_RAW,
+                                          qrx_tb_dispatch, &tb, 0),
+               (uint32_t)QRX_MIX_OK);
+    qrx_tb_init(&tb, &ppc, MM_ZONE_BASE, MM_ZONE_SIZE);
+    memset(&memory[GUI_FRAG], 0, 0x400u);
+    memset(&memory[GUI_STASH], 0, 80u);
+    gui_screen();
+    memset(&memory[GUI_MTOUT], 0, 0x20u);
+    memset(&memory[GUI_MTOUT2], 0, 0x20u);
+    memset(&memory[GUI_MTOUT3], 0, 0x20u);
+    gui_pstr(GUI_MT1, "File");
+    gui_pstr(GUI_MT2, "New");
+    gui_pstr(GUI_MT3, "Open");
+    gui_pstr(GUI_MT4, "Make");
+
+    gi = 0u;
+    GUI_E(ppc_addi(GUI_STASH_REG, 0, GUI_STASH));
+    GUI_TRAP(QRX_TB_MENU_INIT); GUI_ST(0);
+    /* NewMenu(128, "File") */
+    GUI_LI(4, 128); GUI_LI(5, GUI_MT1);
+    GUI_TRAP(QRX_TB_MENU_NEW); GUI_ST(4);
+    /* AppendMenu "New" and "Open". */
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4)); GUI_LI(5, GUI_MT2);
+    GUI_TRAP(QRX_TB_MENU_APPEND); GUI_ST(8);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4)); GUI_LI(5, GUI_MT3);
+    GUI_TRAP(QRX_TB_MENU_APPEND); GUI_ST(12);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4));
+    GUI_TRAP(QRX_TB_MENU_COUNT_ITEMS); GUI_ST(16);
+    /* Read item 1, replace it, read it again. */
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4)); GUI_LI(5, 1); GUI_LI(6, GUI_MTOUT);
+    GUI_TRAP(QRX_TB_MENU_GET_ITEM_TEXT); GUI_ST(20);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4)); GUI_LI(5, 1); GUI_LI(6, GUI_MT4);
+    GUI_TRAP(QRX_TB_MENU_SET_ITEM_TEXT); GUI_ST(116);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4)); GUI_LI(5, 1); GUI_LI(6, GUI_MTOUT2);
+    GUI_TRAP(QRX_TB_MENU_GET_ITEM_TEXT); GUI_ST(120);
+    /* Disable item 2 and check into the enableFlags of the menu record. */
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4)); GUI_LI(5, 2);
+    GUI_TRAP(QRX_TB_MENU_DISABLE_ITEM); GUI_ST(24);
+    /* Read the menu record the tool layer maintains: menuID and the two
+     * halves of enableFlags (offset 10 is not word aligned). */
+    GUI_E(ppc_lwz(11, GUI_STASH_REG, 4));
+    GUI_E(ppc_lwz(11, 11, 0));
+    GUI_E(ppc_lhz(3, 11, 0)); GUI_ST(132);
+    GUI_E(ppc_lhz(3, 11, 10)); GUI_ST(136);
+    GUI_E(ppc_lhz(3, 11, 12)); GUI_ST(140);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4)); GUI_LI(5, 1); GUI_LI(6, 1);
+    GUI_TRAP(QRX_TB_MENU_CHECK_ITEM); GUI_ST(28);
+    /* Menubar: insert the menu, count entries. */
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4)); GUI_LI(5, 0);
+    GUI_TRAP(QRX_TB_MENU_INSERT); GUI_ST(32);
+    GUI_TRAP(QRX_TB_MENU_GET_BAR); GUI_ST(36);
+    /* Delete item 1: counts and texts follow. */
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4)); GUI_LI(5, 1);
+    GUI_TRAP(QRX_TB_MENU_DELETE_ITEM); GUI_ST(40);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4));
+    GUI_TRAP(QRX_TB_MENU_COUNT_ITEMS); GUI_ST(44);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4)); GUI_LI(5, 1); GUI_LI(6, GUI_MTOUT3);
+    GUI_TRAP(QRX_TB_MENU_GET_ITEM_TEXT); GUI_ST(48);
+    /* Alerts dismiss with item 1; ModalDialog does the same. */
+    GUI_LI(4, 128); GUI_TRAP(QRX_TB_DM_ALERT); GUI_ST(52);
+    GUI_LI(4, 129); GUI_TRAP(QRX_TB_DM_NOTE_ALERT); GUI_ST(56);
+    GUI_LI(4, 0); GUI_LI(5, 0); GUI_TRAP(QRX_TB_DM_MODAL_DIALOG); GUI_ST(124);
+    /* Rejections: foreign menu handle. */
+    GUI_LI(4, 0x00007777u);
+    GUI_TRAP(QRX_TB_MENU_COUNT_ITEMS); GUI_ST(60);
+    GUI_LI(4, 0x00007777u); GUI_LI(5, 1);
+    GUI_TRAP(QRX_TB_MENU_DISABLE_ITEM); GUI_ST(64);
+    /* DisposeMenu drops the menu and its bar entry. */
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4));
+    GUI_TRAP(QRX_TB_MENU_DISPOSE); GUI_ST(68);
+    GUI_E(ppc_lwz(4, GUI_STASH_REG, 4));
+    GUI_TRAP(QRX_TB_MENU_COUNT_ITEMS); GUI_ST(72);
+    GUI_TRAP(QRX_TB_MENU_GET_BAR); GUI_ST(128);
+    GUI_E(PPC_BLR);
+
+    rc = (uint32_t)qrx_mix_call(&mix, GUI_FRAG, QRX_MIX_RAW_SIG, 0, &out,
+                                4000u);
+    expect_u32("menu_app_call", rc, (uint32_t)QRX_MIX_OK);
+    handle = get32(GUI_STASH + 4u);
+    expect_u32("menu_new", handle != 0u ? 1u : 0u, 1u);
+    expect_u32("menu_append1", get32(GUI_STASH + 8u), 0u);
+    expect_u32("menu_append2", get32(GUI_STASH + 12u), 0u);
+    expect_u32("menu_count", get32(GUI_STASH + 16u), 2u);
+    expect_u32("menu_getitem", get32(GUI_STASH + 20u), 0u);
+    expect_u32("menu_getitem_text", memory[GUI_MTOUT], 3u);
+    expect_u32("menu_getitem_char", memory[GUI_MTOUT + 1u], (uint32_t)'N');
+    expect_u32("menu_setitem", get32(GUI_STASH + 116u), 0u);
+    expect_u32("menu_setitem_text", memory[GUI_MTOUT2], 4u);
+    expect_u32("menu_setitem_char", memory[GUI_MTOUT2 + 1u], (uint32_t)'M');
+    expect_u32("menu_disable", get32(GUI_STASH + 24u), 0u);
+    expect_u32("menu_check", get32(GUI_STASH + 28u), 0u);
+    expect_u32("menu_enableflags_hi", get32(GUI_STASH + 136u), 0u);
+    expect_u32("menu_enableflags_lo", get32(GUI_STASH + 140u), 1u);
+    expect_u32("menu_menuid", get32(GUI_STASH + 132u), 128u);
+    expect_u32("menu_insert", get32(GUI_STASH + 32u), 0u);
+    expect_u32("menu_bar_count", get32(GUI_STASH + 36u), 1u);
+    expect_u32("menu_deleteitem", get32(GUI_STASH + 40u), 0u);
+    expect_u32("menu_count_after", get32(GUI_STASH + 44u), 1u);
+    expect_u32("menu_item_after", memory[GUI_MTOUT3], 4u);
+    expect_u32("menu_item_after_ch", memory[GUI_MTOUT3 + 1u], (uint32_t)'O');
+    expect_u32("menu_alert", get32(GUI_STASH + 52u), 1u);
+    expect_u32("menu_notealert", get32(GUI_STASH + 56u), 1u);
+    expect_u32("menu_modaldialog", get32(GUI_STASH + 124u), 1u);
+    expect_u32("menu_alert_id", tb.dm.last_alert_id, 129u);
+    expect_u32("menu_bad_count", get32(GUI_STASH + 60u), 0u);
+    expect_u32("menu_bad_disable", get32(GUI_STASH + 64u), 0xFFFFFFCEu);
+    expect_u32("menu_dispose", get32(GUI_STASH + 68u), 0u);
+    expect_u32("menu_count_disposed", get32(GUI_STASH + 72u), 0u);
+    expect_u32("menu_bar_after", get32(GUI_STASH + 128u), 0u);
+    report("toolbox_menu", before);
+}
+
+
+/* P2.2 step 4a: Text/Font Manager through the same sc seam.  The glyph set is
+ * fixed (public-domain 8x8), so the test can compare the pixels the layer
+ * wrote against the glyph rows byte for byte. */
+#define TX_INFO 0x2C40u
+#define TX_NAME 0x2C50u
+#define TX_FAM 0x2C60u
+#define TX_STR 0x2C70u
+#define TX_TEXT 0x2C80u
+#define TX_PT 0x2C90u
+#define TX_PT2 0x2CA0u
+
+static uint32_t tx_rev8(uint8_t v)
+{
+    uint32_t out = 0u;
+    unsigned i;
+
+    for (i = 0u; i < 8u; i++)
+        if (v & (1u << i))
+            out |= 1u << (7u - i);
+    return out;
+}
+
+static void test_toolbox_text(void)
+{
+    static qrx_tb_t tb;
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+    unsigned gi, row;
+    uint32_t rc;
+    const uint8_t *ga = qrx_text_glyph('A');
+    const uint8_t *gb = qrx_text_glyph('B');
+    const uint8_t *gc = qrx_text_glyph('C');
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("text_mix_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("text_register",
+               (uint32_t)qrx_mix_register(&mix, 0u, QRX_MIX_RAW,
+                                          qrx_tb_dispatch, &tb, 0),
+               (uint32_t)QRX_MIX_OK);
+    qrx_tb_init(&tb, &ppc, MM_ZONE_BASE, MM_ZONE_SIZE);
+    qrx_tb_set_screen(&tb, GUI_SCREEN);
+    memset(&memory[GUI_FRAG], 0, 0x400u);
+    gui_screen();
+    gui_pstr(TX_STR, "AB");
+    memory[TX_TEXT] = (uint8_t)'C';   /* DrawText reads raw bytes */
+    gui_pstr(TX_FAM, "chicago");
+
+    expect_u32("text_glyph_a", ga != NULL, 1u);
+    expect_u32("text_glyph_c", gc != NULL, 1u);
+    expect_u32("text_glyph_space", qrx_text_glyph(' ') != NULL, 1u);
+    expect_u32("text_glyph_control", qrx_text_glyph(0x1B) == NULL, 1u);
+
+    gi = 0u;
+    GUI_E(ppc_addi(GUI_STASH_REG, 0, GUI_STASH));
+    GUI_LI(4, GUI_SCREEN); GUI_TRAP(QRX_TB_QD_SET_PORT); GUI_ST(0);
+    GUI_TRAP(QRX_TB_TEXT_INIT_FONTS); GUI_ST(4);
+    GUI_LI(4, 0); GUI_TRAP(QRX_TB_TEXT_FONT); GUI_ST(8);
+    GUI_LI(4, 12); GUI_TRAP(QRX_TB_TEXT_SIZE); GUI_ST(12);
+    GUI_LI(4, 0); GUI_TRAP(QRX_TB_TEXT_FACE); GUI_ST(16);
+    GUI_LI(4, 1); GUI_TRAP(QRX_TB_TEXT_MODE); GUI_ST(20);
+    GUI_LI(4, TX_INFO); GUI_TRAP(QRX_TB_TEXT_FONT_INFO); GUI_ST(24);
+    GUI_LI(4, 0x41); GUI_TRAP(QRX_TB_TEXT_CHAR_WIDTH); GUI_ST(28);
+    GUI_LI(4, TX_STR); GUI_TRAP(QRX_TB_TEXT_STRING_WIDTH); GUI_ST(32);
+    GUI_LI2(4, 0x00010000u); GUI_TRAP(QRX_TB_TEXT_SPACE_EXTRA); GUI_ST(36);
+    GUI_LI(4, TX_STR); GUI_TRAP(QRX_TB_TEXT_STRING_WIDTH); GUI_ST(40);
+    GUI_LI(4, 0); GUI_TRAP(QRX_TB_TEXT_SPACE_EXTRA); GUI_ST(44);
+    /* Baseline at y = 7, pen at x = 0; "AB" then "C" through DrawText. */
+    GUI_LI(4, 0x00000007u); GUI_TRAP(QRX_TB_QD_MOVE_TO); GUI_ST(48);
+    GUI_LI(4, TX_STR); GUI_TRAP(QRX_TB_TEXT_DRAW_STRING); GUI_ST(52);
+    GUI_LI(4, TX_PT); GUI_TRAP(QRX_TB_QD_GET_PEN); GUI_ST(56);
+    GUI_LI(4, TX_TEXT); GUI_LI(5, 0); GUI_LI(6, 1);
+    GUI_TRAP(QRX_TB_TEXT_DRAW_TEXT); GUI_ST(60);
+    GUI_LI(4, TX_PT2); GUI_TRAP(QRX_TB_QD_GET_PEN); GUI_ST(64);
+    /* Rejections: size 0, unreadable Pascal string, unreadable font info. */
+    GUI_LI(4, 0); GUI_TRAP(QRX_TB_TEXT_SIZE); GUI_ST(68);
+    GUI_LI2(4, 0x000FFFF0u); GUI_TRAP(QRX_TB_TEXT_DRAW_STRING); GUI_ST(72);
+    GUI_LI2(4, 0x000FFFF0u); GUI_TRAP(QRX_TB_TEXT_STRING_WIDTH); GUI_ST(76);
+    GUI_LI2(4, 0x000FFFF0u); GUI_TRAP(QRX_TB_TEXT_FONT_INFO); GUI_ST(80);
+    GUI_LI(4, 4); GUI_TRAP(QRX_TB_TEXT_MODE); GUI_ST(84);
+    /* Font family name and reverse lookup. */
+    GUI_LI(4, 0); GUI_LI(5, TX_NAME); GUI_TRAP(QRX_TB_TEXT_GET_FONT_NAME);
+    GUI_ST(88);
+    GUI_LI(4, TX_FAM); GUI_LI(5, TX_FAM + 0x20u);
+    GUI_TRAP(QRX_TB_TEXT_GET_FNUM); GUI_ST(92);
+    GUI_TRAP(0xA8F0u); GUI_ST(96);
+    GUI_E(PPC_BLR);
+
+    rc = (uint32_t)qrx_mix_call(&mix, GUI_FRAG, QRX_MIX_RAW_SIG, 0, &out, 8000u);
+    expect_u32("text_app_call", rc, (uint32_t)QRX_MIX_OK);
+    expect_u32("text_setport", get32(GUI_STASH), 0u);
+    expect_u32("text_initfonts", get32(GUI_STASH + 4u), 0u);
+    expect_u32("text_font", get32(GUI_STASH + 8u), 0u);
+    expect_u32("text_size", get32(GUI_STASH + 12u), 0u);
+    expect_u32("text_face", get32(GUI_STASH + 16u), 0u);
+    expect_u32("text_mode", get32(GUI_STASH + 20u), 0u);
+    expect_u32("text_fontinfo", get32(GUI_STASH + 24u), 0u);
+    expect_u32("text_ascent", (uint32_t)gui_get16(TX_INFO), 7u);
+    expect_u32("text_descent", (uint32_t)gui_get16(TX_INFO + 2u), 1u);
+    expect_u32("text_widmax", (uint32_t)gui_get16(TX_INFO + 4u), 8u);
+    expect_u32("text_leading", (uint32_t)gui_get16(TX_INFO + 6u), 0u);
+    expect_u32("text_charwidth", get32(GUI_STASH + 28u), 8u);
+    expect_u32("text_stringwidth", get32(GUI_STASH + 32u), 16u);
+    expect_u32("text_spaceextra", get32(GUI_STASH + 36u), 0u);
+    expect_u32("text_stringwidth_extra", get32(GUI_STASH + 40u), 18u);
+    expect_u32("text_spaceextra_reset", get32(GUI_STASH + 44u), 0u);
+    expect_u32("text_moveto", get32(GUI_STASH + 48u), 0u);
+    expect_u32("text_drawstring", get32(GUI_STASH + 52u), 0u);
+    expect_u32("text_pen_after_string", (uint32_t)gui_get16(TX_PT), 16u);
+    expect_u32("text_drawtext", get32(GUI_STASH + 60u), 0u);
+    expect_u32("text_pen_after_text", (uint32_t)gui_get16(TX_PT2), 24u);
+    for (row = 0u; row < 8u; row++) {
+        expect_u32("text_row_a", memory[GUI_PIX + row * 4u],
+                   tx_rev8(ga[row]));
+        expect_u32("text_row_b", memory[GUI_PIX + row * 4u + 1u],
+                   tx_rev8(gb[row]));
+        expect_u32("text_row_c", memory[GUI_PIX + row * 4u + 2u],
+                   tx_rev8(gc[row]));
+    }
+    expect_u32("text_bad_size", get32(GUI_STASH + 68u), 0xFFFFFFCEu);
+    expect_u32("text_bad_string", get32(GUI_STASH + 72u), 0xFFFFFFCEu);
+    expect_u32("text_bad_width", get32(GUI_STASH + 76u), 0xFFFFFFCEu);
+    expect_u32("text_bad_info", get32(GUI_STASH + 80u), 0xFFFFFFCEu);
+    expect_u32("text_bad_mode", get32(GUI_STASH + 84u), 0xFFFFFFCEu);
+    expect_u32("text_fontname", get32(GUI_STASH + 88u), 0u);
+    expect_u32("text_fontname_len", memory[TX_NAME], 7u);
+    expect_u32("text_fontname_text", get32(TX_NAME + 1u), 0x43686963u);
+    expect_u32("text_getfnum", get32(GUI_STASH + 92u), 0u);
+    expect_u32("text_family", (uint32_t)gui_get16(TX_FAM + 0x20u), 0u);
+    expect_u32("text_unknown_trap", get32(GUI_STASH + 96u), 0xFFFFFFFFu);
+    report("toolbox_text", before);
+}
+
+/* P2.2 step 4b: Event Manager.  The harness sets mouse, keyboard, modifiers
+ * and ticks, the app posts and consumes records through the seam. */
+#define EV_REC 0x2D40u
+#define EV_REC2 0x2D60u
+#define EV_PT 0x2D80u
+#define EV_KEYS 0x2D90u
+#define EV_REC3 0x2DA0u
+
+static void test_toolbox_event(void)
+{
+    static qrx_tb_t tb;
+    qrx_mix_t mix;
+    mix_ctx_t ctx;
+    qrx_mix_result_t out;
+    unsigned before = failures;
+    unsigned gi, i;
+    uint32_t rc;
+
+    memset(&out, 0, sizeof(out));
+    expect_u32("event_mix_init", (uint32_t)mix_setup(&mix, &ctx),
+               (uint32_t)QRX_MIX_OK);
+    expect_u32("event_register",
+               (uint32_t)qrx_mix_register(&mix, 0u, QRX_MIX_RAW,
+                                          qrx_tb_dispatch, &tb, 0),
+               (uint32_t)QRX_MIX_OK);
+    qrx_tb_init(&tb, &ppc, MM_ZONE_BASE, MM_ZONE_SIZE);
+    qrx_ev_set_ticks(&tb.ev, 0x1000u);
+    qrx_ev_set_mouse(&tb.ev, 5, 7, 1);
+    qrx_ev_set_modifiers(&tb.ev, QRX_EV_CMD_KEY);
+    qrx_ev_set_key(&tb.ev, 0u, 1);
+    memset(&memory[GUI_FRAG], 0, 0x400u);
+    memset(&memory[EV_REC], 0, 0x60u);
+
+    gi = 0u;
+    GUI_E(ppc_addi(GUI_STASH_REG, 0, GUI_STASH));
+    GUI_TRAP(QRX_TB_EV_TICK_COUNT); GUI_ST(0);
+    GUI_TRAP(QRX_TB_EV_BUTTON); GUI_ST(4);
+    GUI_TRAP(QRX_TB_EV_STILL_DOWN); GUI_ST(8);
+    GUI_TRAP(QRX_TB_EV_WAIT_MOUSE_UP); GUI_ST(12);
+    GUI_LI(4, EV_PT); GUI_TRAP(QRX_TB_EV_GET_MOUSE); GUI_ST(16);
+    GUI_LI(4, EV_KEYS); GUI_TRAP(QRX_TB_EV_GET_KEYS); GUI_ST(20);
+    GUI_LI(4, QRX_EV_MOUSE_DOWN); GUI_LI(5, 0x1234u);
+    GUI_TRAP(QRX_TB_EV_POST); GUI_ST(24);
+    /* EventAvail with keyDownMask must not consume the mouseDown event. */
+    GUI_LI(4, QRX_EV_MASK_KEY_DOWN); GUI_LI(5, EV_REC3);
+    GUI_TRAP(QRX_TB_EV_AVAIL); GUI_ST(28);
+    GUI_LI(4, QRX_EV_MASK_EVERY); GUI_LI(5, EV_REC);
+    GUI_TRAP(QRX_TB_EV_AVAIL); GUI_ST(32);
+    GUI_LI(4, QRX_EV_MASK_EVERY); GUI_LI(5, EV_REC2);
+    GUI_TRAP(QRX_TB_EV_GET_NEXT); GUI_ST(36);
+    GUI_LI(4, QRX_EV_MASK_EVERY); GUI_LI(5, EV_REC3);
+    GUI_TRAP(QRX_TB_EV_GET_NEXT); GUI_ST(40);
+    GUI_LI(4, QRX_EV_KEY_DOWN); GUI_LI(5, 0x41u);
+    GUI_TRAP(QRX_TB_EV_POST); GUI_ST(44);
+    GUI_LI(4, QRX_EV_MOUSE_DOWN); GUI_LI(5, 0);
+    GUI_TRAP(QRX_TB_EV_POST); GUI_ST(48);
+    GUI_LI(4, 0); GUI_LI(5, QRX_EV_MASK_EVERY);
+    GUI_TRAP(QRX_TB_EV_FLUSH); GUI_ST(52);
+    GUI_LI(4, QRX_EV_MASK_EVERY); GUI_LI(5, EV_REC3);
+    GUI_TRAP(QRX_TB_EV_AVAIL); GUI_ST(56);
+    GUI_LI(4, 0); GUI_LI(5, 0); GUI_TRAP(QRX_TB_EV_POST); GUI_ST(60);
+    GUI_LI(4, QRX_EV_MASK_EVERY); GUI_LI2(5, 0x000FFFF0u);
+    GUI_TRAP(QRX_TB_EV_GET_NEXT); GUI_ST(64);
+    GUI_E(PPC_BLR);
+
+    rc = (uint32_t)qrx_mix_call(&mix, GUI_FRAG, QRX_MIX_RAW_SIG, 0, &out, 8000u);
+    expect_u32("event_app_call", rc, (uint32_t)QRX_MIX_OK);
+    expect_u32("event_tickcount", get32(GUI_STASH), 0x1000u);
+    expect_u32("event_button", get32(GUI_STASH + 4u), 1u);
+    expect_u32("event_stilldown", get32(GUI_STASH + 8u), 1u);
+    expect_u32("event_waitmouseup", get32(GUI_STASH + 12u), 1u);
+    expect_u32("event_getmouse", get32(GUI_STASH + 16u), 0u);
+    expect_u32("event_mouse_v", (uint32_t)gui_get16(EV_PT), 5u);
+    expect_u32("event_mouse_h", (uint32_t)gui_get16(EV_PT + 2u), 7u);
+    expect_u32("event_getkeys", get32(GUI_STASH + 20u), 0u);
+    expect_u32("event_keymap", memory[EV_KEYS], 0x80u);
+    expect_u32("event_post", get32(GUI_STASH + 24u), 1u);
+    expect_u32("event_avail_mask", get32(GUI_STASH + 28u), 0u);
+    expect_u32("event_avail_null_what", (uint32_t)gui_get16(EV_REC3), 0u);
+    expect_u32("event_avail", get32(GUI_STASH + 32u), 1u);
+    expect_u32("event_avail_what", (uint32_t)gui_get16(EV_REC), 1u);
+    expect_u32("event_avail_message", get32(EV_REC + 2u), 0x1234u);
+    expect_u32("event_getnext", get32(GUI_STASH + 36u), 1u);
+    expect_u32("event_getnext_when", get32(EV_REC2 + 6u), 0x1000u);
+    expect_u32("event_getnext_where_v", (uint32_t)gui_get16(EV_REC2 + 10u), 5u);
+    expect_u32("event_getnext_where_h", (uint32_t)gui_get16(EV_REC2 + 12u), 7u);
+    expect_u32("event_getnext_mods", (uint32_t)gui_get16(EV_REC2 + 14u), 0x0100u);
+    expect_u32("event_getnext_empty", get32(GUI_STASH + 40u), 0u);
+    expect_u32("event_null_when", get32(EV_REC3 + 6u), 0x1000u);
+    expect_u32("event_post_key", get32(GUI_STASH + 44u), 1u);
+    expect_u32("event_post_second", get32(GUI_STASH + 48u), 1u);
+    expect_u32("event_flush", get32(GUI_STASH + 52u), 0u);
+    expect_u32("event_after_flush", get32(GUI_STASH + 56u), 0u);
+    expect_u32("event_post_null", get32(GUI_STASH + 60u), 0u);
+    expect_u32("event_bad_record", get32(GUI_STASH + 64u), 0xFFFFFFCEu);
+
+    /* Queue bound and the API-level helpers. */
+    expect_u32("event_count_zero", qrx_ev_count(&tb.ev), 0u);
+    for (i = 0u; i < QRX_EV_QUEUE; i++)
+        expect_u32("event_post_fill", (uint32_t)qrx_ev_post(&tb.ev, 1, (int32_t)i), 1u);
+    expect_u32("event_post_full", (uint32_t)qrx_ev_post(&tb.ev, 1, 99), 0u);
+    expect_u32("event_count_full", qrx_ev_count(&tb.ev), QRX_EV_QUEUE);
+    qrx_ev_set_mouse(&tb.ev, 9, 11, 0);
+    qrx_ev_advance_ticks(&tb.ev, 5);
+    expect_u32("event_post_after", (uint32_t)qrx_ev_post(&tb.ev, 2, 0), 0u);
+    report("toolbox_event", before);
+}
+
+
+/* P2.3: the application runner.  A synthetic MacBinary application calls
+ * TickCount, then TEInit (not implemented), then Button (which must never run:
+ * the runner has to stop at the first missing trap). */
+#define APP_PEF_SIZE 320u
+#define APP_DATA_PAD 384u
+#define APP_RSRC_OFF (MACAPP_DATA_OFF + APP_DATA_PAD)
+#define APP_RSRC_LEN 82u
+#define APP_SIZE (APP_RSRC_OFF + APP_RSRC_LEN)
+
+static void apprun_build_app(uint8_t *img)
+{
+    static const uint32_t insns[10] = {
+        0x3C600000u, 0x6063A975u, 0x44000002u,   /* li r3,0xA975; sc */
+        0x3C600000u, 0x6063A9CCu, 0x44000002u,   /* li r3,0xA9CC; sc */
+        0x3C600000u, 0x6063A974u, 0x44000002u    /* li r3,0xA974; sc */
+    };
+    uint8_t *code = img + MACAPP_DATA_OFF;
+    uint8_t *rsrc = img + APP_RSRC_OFF;
+    unsigned i;
+
+    memset(img, 0, APP_SIZE);
+    img[1] = 7u;
+    memcpy(img + 2u, "QRXRun1", 7u);
+    pef_put32(img, 65u, 0x4150504Cu);       /* 'APPL' */
+    pef_put32(img, 69u, 0x51525852u);       /* 'QRXR' */
+    pef_put32(img, 83u, APP_PEF_SIZE);
+    pef_put32(img, 87u, APP_RSRC_LEN);
+    img[122] = 129u;
+    img[123] = 129u;
+
+    pef_put32(code, 0u, 0x4A6F7921u);       /* 'Joy!' */
+    pef_put32(code, 4u, 0x70656666u);       /* 'peff' */
+    pef_put32(code, 8u, 0x70777063u);       /* 'pwpc' */
+    pef_put32(code, 12u, 1u);
+    pef_put16(code, 32u, 2u);
+    pef_put16(code, 34u, 1u);
+    /* Section 0: code at 96, 64 bytes (TVector + ten instructions). */
+    pef_put32(code, 40u, 0xFFFFFFFFu);
+    pef_put32(code, 44u, 0x8000u);
+    pef_put32(code, 48u, 64u);
+    pef_put32(code, 52u, 64u);
+    pef_put32(code, 56u, 0u);
+    pef_put32(code, 60u, 96u);
+    code[64] = 0u;
+    code[66] = 2u;
+    /* Section 1: loader at 192. */
+    pef_put32(code, 68u, 0xFFFFFFFFu);
+    pef_put32(code, 72u, 0x9000u);
+    pef_put32(code, 76u, 80u);
+    pef_put32(code, 80u, 80u);
+    pef_put32(code, 84u, 0u);
+    pef_put32(code, 88u, 192u);
+    code[92] = 4u;
+    code[94] = 2u;
+
+    pef_put32(code, 96u, 0x8008u);          /* TVector entry */
+    pef_put32(code, 100u, 0u);              /* TVector TOC */
+    for (i = 0u; i < 10u; i++)
+        pef_put32(code, 104u + 4u * i, insns[i]);
+
+    pef_put32(code, 192u, 0u);
+    pef_put32(code, 200u, 0xFFFFFFFFu);
+    pef_put32(code, 208u, 0xFFFFFFFFu);
+    pef_put32(code, 232u, 74u);
+    pef_put32(code, 236u, 56u);
+    pef_put32(code, 244u, 1u);
+    pef_put32(code, 248u, 1u << 18);
+    pef_put32(code, 256u, 0u);
+    pef_put32(code, 260u, 8u);
+    pef_put16(code, 264u, 0u);
+    memcpy(code + 266u, "_main", 6u);
+
+    /* Resource fork: one 'cfrg' at id 0 pointing at the whole PEF. */
+    pef_put32(rsrc, 0u, 16u);
+    pef_put32(rsrc, 4u, 32u);
+    pef_put32(rsrc, 8u, 16u);
+    pef_put32(rsrc, 12u, 50u);
+    pef_put32(rsrc, 16u, 12u);
+    pef_put32(rsrc, 20u, 0u);
+    pef_put32(rsrc, 24u, 0u);
+    pef_put32(rsrc, 28u, APP_PEF_SIZE);
+    pef_put32(rsrc, 32u, 16u);
+    pef_put32(rsrc, 36u, 32u);
+    pef_put32(rsrc, 40u, 16u);
+    pef_put32(rsrc, 44u, 50u);
+    pef_put32(rsrc, 48u, 0u);
+    pef_put16(rsrc, 52u, 0u);
+    pef_put16(rsrc, 54u, 0u);
+    pef_put16(rsrc, 56u, 28u);
+    pef_put16(rsrc, 58u, 0u);
+    pef_put16(rsrc, 60u, 0u);
+    pef_put32(rsrc, 62u, 0x63667267u);      /* 'cfrg' */
+    pef_put16(rsrc, 66u, 0u);
+    pef_put16(rsrc, 68u, 10u);
+    pef_put16(rsrc, 70u, 0u);
+    pef_put16(rsrc, 72u, 0xFFFFu);
+    rsrc[74] = 0u;
+    pef_put16(img, 124u, macapp_crc(img, 124u));
+}
+
+static void test_apprun(void)
+{
+    static qrx_apprun_t run;
+    static uint8_t app[APP_SIZE];
+    uint8_t variant[APP_SIZE];
+    uint8_t garbage[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
+    unsigned before = failures;
+
+    memset(memory, 0, sizeof(memory));
+    qrx_ppc_init(&ppc, memory, (uint32_t)sizeof(memory));
+    apprun_build_app(app);
+
+    expect_u32("apprun_init",
+               (uint32_t)qrx_apprun_init(&run, &ppc, 0x0900u, 0x3000u, 0x4800u,
+                                         0x3E000u, 0x3A000u),
+               (uint32_t)QRX_APPRUN_OK);
+    expect_u32("apprun_load",
+               (uint32_t)qrx_apprun_load(&run, app, APP_SIZE, 0x10000u),
+               (uint32_t)QRX_APPRUN_OK);
+    expect_u32("apprun_tvector", run.tvector, 0x10000u);
+    expect_u32("apprun_entry", run.entry, 0x10008u);
+    expect_u32("apprun_toc", run.toc, 0u);
+
+    qrx_ev_set_ticks(&run.tb.ev, 0x1234u);
+    expect_u32("apprun_start",
+               (uint32_t)qrx_apprun_start(&run, 20000u),
+               (uint32_t)QRX_APPRUN_UNIMPLEMENTED);
+    expect_u32("apprun_missing_trap", run.unimplemented_trap, 0xA9CCu);
+    expect_u32("apprun_total", run.ntrace_total, 2u);
+    expect_u32("apprun_implemented", run.nimplemented, 1u);
+    expect_u32("apprun_trace0_trap", run.trace[0].trap, 0xA975u);
+    expect_u32("apprun_trace0_impl", run.trace[0].implemented, 1u);
+    expect_u32("apprun_trace0_selector", run.trace[0].selector, 0u);
+    expect_u32("apprun_trace0_result", run.trace[0].result, 0x1234u);
+    expect_u32("apprun_trace1_trap", run.trace[1].trap, 0xA9CCu);
+    expect_u32("apprun_trace1_impl", run.trace[1].implemented, 0u);
+
+    /* A separate second run: the 68k installer shape is refused, not run. */
+    memcpy(variant, app, sizeof(variant));
+    variant[MACAPP_DATA_OFF + 0u] = (uint8_t)'S';
+    variant[MACAPP_DATA_OFF + 1u] = (uint8_t)'T';
+    variant[MACAPP_DATA_OFF + 2u] = (uint8_t)'5';
+    variant[MACAPP_DATA_OFF + 3u] = (uint8_t)'0';
+    pef_put32(variant, APP_RSRC_OFF + 62u, 0x434F4445u);  /* 'CODE' */
+    pef_put16(variant, 124u, macapp_crc(variant, 124u));
+    expect_u32("apprun_68k_init",
+               (uint32_t)qrx_apprun_init(&run, &ppc, 0x0900u, 0x3000u, 0x4800u,
+                                         0x3E000u, 0x3A000u),
+               (uint32_t)QRX_APPRUN_OK);
+    expect_u32("apprun_68k",
+               (uint32_t)qrx_apprun_load(&run, variant, APP_SIZE, 0x10000u),
+               (uint32_t)QRX_APPRUN_ERR_68K);
+    expect_u32("apprun_garbage",
+               (uint32_t)qrx_apprun_load(&run, garbage, sizeof(garbage),
+                                         0x10000u),
+               (uint32_t)QRX_APPRUN_ERR_IMAGE);
+    report("apprun", before);
+}
+
+static void test_mixed_import_procinfo(void){
     qrx_mix_t mix;
     mix_ctx_t ctx;
     qrx_mix_result_t out;
@@ -4986,7 +6627,11 @@ int main(void)
     emit_failures = qrx_ppc_jit_emit_selftest();
     printf("JIT emit selftest: %s\n", emit_failures ? "FAIL" : "PASS");
     failures += emit_failures;
-#ifdef __AROS__
+#if defined(__AROS__) && defined(__m68k64__)
+    /* The JIT writes 68040 code; the 68100EC64's long mode needs a backend of its own. */
+    jit_code = NULL;
+    printf("JIT: skipped on m68k64 (no long mode backend yet)\n");
+#elif defined(__AROS__)
     jit_code = (uint8_t *)AllocVec(JIT_CODE_SIZE, MEMF_PUBLIC | MEMF_CLEAR);
     if (jit_code) {
         qrx_ppc_jit_init(&jit, jit_code, JIT_CODE_SIZE);
@@ -5024,14 +6669,26 @@ int main(void)
         test_jit_chain_bcctr();
     if (jit_code)
         test_jit_chain_indirect_not_taken();
+    if (jit_code)
         test_jit_chain_cache_2way();
+    if (jit_code)
         test_jit_chain_cache_thrash();
+    if (jit_code)
         test_jit_smc_midblock();
 #endif
     test_jit_faults();
     test_pef_loader();
     test_pef_reloc();
     test_macapp();
+    test_toolbox_mm();
+    test_toolbox_rm();
+    test_toolbox_fm();
+    test_toolbox_qd();
+    test_toolbox_wm();
+    test_toolbox_menu();
+    test_toolbox_text();
+    test_toolbox_event();
+    test_apprun();
     test_mixed_call();
     test_mixed_stack();
     test_mixed_fpu();

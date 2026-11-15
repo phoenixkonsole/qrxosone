@@ -296,7 +296,7 @@ if(QRX_ENABLE_MUSASHI)
   add_test(NAME core1_second_host_thread_atomics_and_faults COMMAND qrx68100_core1_tests)
   # 68100EC64: its 32-bit mode against Musashi's 68040. Musashi with no options the bus needs.
   add_library(qrx_ec64 STATIC full68k/qrx68100ec64.c full68k/qrx68100ec64_jit.c full68k/qrx68100ec64_machine.c
-    full68k/qrx_ec64_board.c full68k/qrx_ec64_boot.c)
+    full68k/qrx_ec64_board.c full68k/qrx_ec64_boot.c full68k/qrx_hostnet.c)
   target_include_directories(qrx_ec64 PUBLIC include)
   target_compile_options(qrx_ec64 PRIVATE -Wall -Wextra)
   add_executable(qrx_ec64_jit_tests tests/ec64_jit_tests.c)

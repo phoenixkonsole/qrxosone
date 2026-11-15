@@ -193,6 +193,36 @@ MUTATIONS = {
         "    if (cfrg->length > fork_size - cfrg->offset)",
         "    if (cfrg->length > fork_size)",
     ),
+    "mm_grow_copy": (
+        "qrx_mm_status_t qrx_mm_set_handle_size(",
+        "mm_copy(mm, fresh, data, mm->blocks[data_index].size);",
+        "mm_copy(mm, fresh, data, 0u);",
+    ),
+    "rm_get_id_gate": (
+        "rm_find(const qrx_rm_t *rm, uint32_t type, int16_t id)",
+        "        if (e->used && e->type == type && e->id == id)",
+        "        if (e->used && e->type == type && e->id != id)",
+    ),
+    "fm_geteof_plus": (
+        "static int32_t fm_dispatch_io(qrx_fm_t *fm, uint32_t param, uint32_t sel)",
+        "            fm_put32(fm, param + 20u, f->size);",
+        "            fm_put32(fm, param + 20u, f->size + 1u);",
+    ),
+    "qd_pat_always_set": (
+        "static int qd_pat_bit(const uint8_t *pat, int16_t h, int16_t v)",
+        "    return (pat[row] >> (7u - col)) & 1u;",
+        "    return 1;",
+    ),
+    "wm_composite_blank": (
+        "static void wm_composite(qrx_wm_t *wm)",
+        "                    qd_set_pixel(wm->ppc, &screen, sx, sy, 1);",
+        "                    qd_set_pixel(wm->ppc, &screen, sx, sy, 0);",
+    ),
+    "menu_flags_invert": (
+        "static void menu_write_record(qrx_menu_mgr_t *mmgr, int slot)",
+        "        if (m->enabled[i])",
+        "        if (!m->enabled[i])",
+    ),
     "register_raw_gate": (
         "qrx_mix_status_t qrx_mix_register(qrx_mix_t *mix, unsigned index,",
         "            return QRX_MIX_ERR_SIG;\n"
@@ -300,6 +330,12 @@ python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_rdcall_pi_err.c" 
 python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_idxpi.c" test_mixed_import_procinfo
 python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_rawcall.c" test_mixed_errors
 python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_macapp.c" test_macapp
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_tb.c" test_toolbox_mm
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_rm.c" test_toolbox_rm
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_fm.c" test_toolbox_fm
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_qd.c" test_toolbox_qd
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_wm.c" test_toolbox_wm
+python3 "$TMP/driver_rd.py" "$SRC/qrx_ppc_test.c" "$TMP/driver_menu.c" test_toolbox_menu
 
 build_variant()
 {
@@ -308,6 +344,7 @@ build_variant()
     local driver="${3:-$TMP/driver.c}"
     local mix_source="${4:-$SRC/qrx_mix.c}"
     local app_source="${5:-$SRC/qrx_macapp.c}"
+    local tb_source="${6:-$SRC/qrx_toolbox.c}"
     local elf="$TMP/$name.elf"
     local hunk="$TMP/$name.hunk"
     local hunk_out
@@ -317,7 +354,7 @@ build_variant()
     "$CC" -O2 -m68040 -fno-pic -fno-PIC -fno-optimize-sibling-calls \
         -I"$SRC" \
         "$SRC/qrx_ppc.c" "$SRC/qrx_ppc_fpu.c" "$SRC/qrx_pef.c" \
-        "$app_source" "$jit_source" "$mix_source" "$driver" -o "$elf" > "$TMP/$name.build.log" 2>&1
+        "$app_source" "$tb_source" "$jit_source" "$mix_source" "$driver" -o "$elf" > "$TMP/$name.build.log" 2>&1
     hunk_out="$("$ELF2HUNK" "$elf" "$hunk" 2>&1)"
     if printf '%s\n' "$hunk_out" | grep -q 'relocation(s) failed'; then
         echo "elf2hunk failed for $name" >&2
@@ -659,6 +696,96 @@ else
     survivors=$((survivors + 1))
 fi
 
+mm_mutant=mm_grow_copy
+python3 "$TMP/mutate.py" "$SRC/qrx_toolbox.c" "$TMP/$mm_mutant.c" "$mm_mutant"
+build_variant "$mm_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_tb.c" "$SRC/qrx_mix.c" "$SRC/qrx_macapp.c" "$TMP/$mm_mutant.c"
+run_variant "$mm_mutant"
+if grep -q '^toolbox_mm: FAIL$' "$TMP/$mm_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$mm_mutant"
+elif grep -q '^toolbox_mm: PASS$' "$TMP/$mm_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$mm_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no toolbox_mm result)\n' "$mm_mutant"
+    tail -20 "$TMP/$mm_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+rm_mutant=rm_get_id_gate
+python3 "$TMP/mutate.py" "$SRC/qrx_toolbox.c" "$TMP/$rm_mutant.c" "$rm_mutant"
+build_variant "$rm_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_rm.c" "$SRC/qrx_mix.c" "$SRC/qrx_macapp.c" "$TMP/$rm_mutant.c"
+run_variant "$rm_mutant"
+if grep -q '^toolbox_rm: FAIL$' "$TMP/$rm_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$rm_mutant"
+elif grep -q '^toolbox_rm: PASS$' "$TMP/$rm_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$rm_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no toolbox_rm result)\n' "$rm_mutant"
+    tail -20 "$TMP/$rm_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+fm_mutant=fm_geteof_plus
+python3 "$TMP/mutate.py" "$SRC/qrx_toolbox.c" "$TMP/$fm_mutant.c" "$fm_mutant"
+build_variant "$fm_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_fm.c" "$SRC/qrx_mix.c" "$SRC/qrx_macapp.c" "$TMP/$fm_mutant.c"
+run_variant "$fm_mutant"
+if grep -q '^toolbox_fm: FAIL$' "$TMP/$fm_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$fm_mutant"
+elif grep -q '^toolbox_fm: PASS$' "$TMP/$fm_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$fm_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no toolbox_fm result)\n' "$fm_mutant"
+    tail -20 "$TMP/$fm_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+qd_mutant=qd_pat_always_set
+python3 "$TMP/mutate.py" "$SRC/qrx_toolbox.c" "$TMP/$qd_mutant.c" "$qd_mutant"
+build_variant "$qd_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_qd.c" "$SRC/qrx_mix.c" "$SRC/qrx_macapp.c" "$TMP/$qd_mutant.c"
+run_variant "$qd_mutant"
+if grep -q '^toolbox_qd: FAIL$' "$TMP/$qd_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$qd_mutant"
+elif grep -q '^toolbox_qd: PASS$' "$TMP/$qd_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$qd_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no toolbox_qd result)\n' "$qd_mutant"
+    tail -20 "$TMP/$qd_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+wm_mutant=wm_composite_blank
+python3 "$TMP/mutate.py" "$SRC/qrx_toolbox.c" "$TMP/$wm_mutant.c" "$wm_mutant"
+build_variant "$wm_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_wm.c" "$SRC/qrx_mix.c" "$SRC/qrx_macapp.c" "$TMP/$wm_mutant.c"
+run_variant "$wm_mutant"
+if grep -q '^toolbox_wm: FAIL$' "$TMP/$wm_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$wm_mutant"
+elif grep -q '^toolbox_wm: PASS$' "$TMP/$wm_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$wm_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no toolbox_wm result)\n' "$wm_mutant"
+    tail -20 "$TMP/$wm_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
+menu_mutant=menu_flags_invert
+python3 "$TMP/mutate.py" "$SRC/qrx_toolbox.c" "$TMP/$menu_mutant.c" "$menu_mutant"
+build_variant "$menu_mutant" "$SRC/qrx_ppc_jit.c" "$TMP/driver_menu.c" "$SRC/qrx_mix.c" "$SRC/qrx_macapp.c" "$TMP/$menu_mutant.c"
+run_variant "$menu_mutant"
+if grep -q '^toolbox_menu: FAIL$' "$TMP/$menu_mutant.guest.log"; then
+    printf 'KILLED   %s\n' "$menu_mutant"
+elif grep -q '^toolbox_menu: PASS$' "$TMP/$menu_mutant.guest.log"; then
+    printf 'SURVIVED %s\n' "$menu_mutant"
+    survivors=$((survivors + 1))
+else
+    printf 'ERROR    %s (no toolbox_menu result)\n' "$menu_mutant"
+    tail -20 "$TMP/$menu_mutant.guest.log" || true
+    survivors=$((survivors + 1))
+fi
+
 cp -p "$BACKUP_QRXPPC" "$TREE/C/QRXPPC"
 cp -p "$BACKUP_STARTUP" "$STARTUP"
 rm -f "$GUEST_LOG"
@@ -670,7 +797,7 @@ if [ "$survivors" -ne 0 ]; then
 fi
 
 # The array holds the mutants that share the jit_widths_limit driver; the
-# eighteen single-mutant blocks below build their own driver.
-echo "mutation test PASS: $(( ${#mutants[@]} + 18 )) mutants killed"
+# twenty-four single-mutant blocks below build their own driver.
+echo "mutation test PASS: $(( ${#mutants[@]} + 24 )) mutants killed"
 shasum -a 256 "$STARTUP" "$TREE/C/QRXPPC"
 rm -rf "$TMP"

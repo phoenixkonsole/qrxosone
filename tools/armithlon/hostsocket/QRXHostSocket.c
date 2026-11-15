@@ -16,6 +16,15 @@
 #include <stdint.h>
 #include <string.h>
 
+#if defined(__m68k64__)
+/* AROS 64 on the 68100EC64: the board's host call register, see qrx_ec64_board.h */
+#define BOARD_ID_REG 0xFFFFFFFF00000000UL
+#define BOARD_HOST_CALL 0xFFFFFFFF00000400UL
+#define BOARD_MAGIC 0x5152584543363442UL
+typedef void *RPTR;          /* pointer results come back as pointers */
+#else
+typedef ULONG RPTR;          /* the stubs copy D0 to A0 */
+#endif
 #define DOOR_CALL_REG 0xFF00088Cu
 #define DOOR_MAGIC 0x51383644u
 #define DOOR_FEATURE_NATIVE_NET 1u
@@ -73,6 +82,10 @@ static int errno_of(uint32_t w)
 static int door_ok(void)
 {
     static int state;
+#if defined(__m68k64__)
+    if (!state) state = *(volatile uint64_t *)BOARD_ID_REG == BOARD_MAGIC ? 1 : -1;
+    return state > 0;
+#endif
     if (!state) {
         uint32_t magic, f;
         /* Whole 32-bit reads: a byte access to the door faults the emulator. */
@@ -91,7 +104,11 @@ static int net(uint32_t *q, uint32_t op)
     if (!door_ok()) { set_errno(E_NETDOWN); return -1; }
     q[0] = SVC_NET; q[1] = 0; q[2] = 0; q[3] = op;
     q[12] = UINT32_MAX; q[13] = 10050;
+#if defined(__m68k64__)
+    *(volatile uint64_t *)BOARD_HOST_CALL = (uint64_t)(uintptr_t)q;
+#else
     *(volatile uint32_t *)DOOR_CALL_REG = (uint32_t)(uintptr_t)q;
+#endif
     __asm__ volatile("" ::: "memory");
     if (q[12] == UINT32_MAX) { set_errno(errno_of(q[13])); return -1; }
     return (int)q[12];
@@ -300,38 +317,40 @@ ULONG c_CloseSocket(int s)
     g_open[s] = 0;
     return 0;
 }
-/* fd_set: 32-bit words, bit n of word n / 32, as on AROS */
-static int fd_isset(uint32_t *set, int n) { return set && (set[n >> 5] >> (n & 31)) & 1; }
-ULONG c_WaitSelect(int nfds, uint32_t *rd, uint32_t *wr, uint32_t *ex, uint32_t *tv, ULONG *sigmask)
+/* fd_set: words of a long (fd_mask), bit n % NB of word n / NB, as on AROS */
+#define NB ((int)(sizeof(unsigned long) * 8))
+#define WORD(n) ((n) / NB)
+#define BIT(n) (1UL << ((n) % NB))
+static int fd_isset(unsigned long *set, int n) { return set && (set[WORD(n)] & BIT(n)) != 0; }
+struct timeval_ { unsigned long secs, micro; };   /* AROS's timeval: two longs */
+ULONG c_WaitSelect(int nfds, unsigned long *rd, unsigned long *wr, unsigned long *ex, struct timeval_ *tv, ULONG *sigmask)
 {
-    uint32_t r_in[2] = {0, 0}, w_in[2] = {0, 0};
+    uint8_t r_in[MAXSOCK], w_in[MAXSOCK];
     if (nfds > MAXSOCK) nfds = MAXSOCK;
-    for (int i = 0; i < nfds; i++) {
-        if (fd_isset(rd, i)) r_in[i >> 5] |= 1u << (i & 31);
-        if (fd_isset(wr, i)) w_in[i >> 5] |= 1u << (i & 31);
-    }
+    for (int i = 0; i < nfds; i++) { r_in[i] = fd_isset(rd, i); w_in[i] = fd_isset(wr, i); }
     ULONG waitmask = sigmask ? *sigmask : 0;
-    ULONG limit = tv ? tv[0] * 50 + tv[1] / 20000 : 0xFFFFFFFFu;   /* in ticks */
+    ULONG limit = tv ? (ULONG)(tv->secs * 50 + tv->micro / 20000) : 0xFFFFFFFFu;   /* in ticks */
     for (ULONG ticks = 0;; ticks++) {
         int count = 0;
-        uint32_t r_out[2] = {0, 0}, w_out[2] = {0, 0};
+        uint8_t r_out[MAXSOCK], w_out[MAXSOCK];
         for (int i = 0; i < nfds; i++) {
-            uint32_t m = ((r_in[i >> 5] >> (i & 31)) & 1) | (((w_in[i >> 5] >> (i & 31)) & 1) << 1);
+            uint32_t m = (uint32_t)r_in[i] | ((uint32_t)w_in[i] << 1);
+            r_out[i] = w_out[i] = 0;
             if (!m) continue;
             if (bad(i)) { set_errno(E_BADF); return (ULONG)-1; }
             BLOCK(q);
             q[4] = (uint32_t)i; q[5] = m;
             int got = net(q, NET_POLL);
-            if (got < 0) got = m;   /* an error: let the call find it */
-            if (got & m & 1) { r_out[i >> 5] |= 1u << (i & 31); count++; }
-            if (got & m & 2) { w_out[i >> 5] |= 1u << (i & 31); count++; }
+            if (got < 0) got = (int)m;   /* an error: let the call find it */
+            if (got & (int)m & 1) { r_out[i] = 1; count++; }
+            if (got & (int)m & 2) { w_out[i] = 1; count++; }
         }
         ULONG sig = waitmask ? SetSignal(0, 0) & waitmask : 0;
         if (count || sig || ticks >= limit) {
             for (int i = 0; i < nfds; i++) {
-                if (rd) { uint32_t bit = 1u << (i & 31); if ((r_out[i >> 5] & bit)) rd[i >> 5] |= bit; else rd[i >> 5] &= ~bit; }
-                if (wr) { uint32_t bit = 1u << (i & 31); if ((w_out[i >> 5] & bit)) wr[i >> 5] |= bit; else wr[i >> 5] &= ~bit; }
-                if (ex) ex[i >> 5] &= ~(1u << (i & 31));
+                if (rd) { if (r_out[i]) rd[WORD(i)] |= BIT(i); else rd[WORD(i)] &= ~BIT(i); }
+                if (wr) { if (w_out[i]) wr[WORD(i)] |= BIT(i); else wr[WORD(i)] &= ~BIT(i); }
+                if (ex) ex[WORD(i)] &= ~BIT(i);
             }
             if (sigmask) { *sigmask = sig; if (sig) SetSignal(0, sig); }
             return (ULONG)count;
@@ -345,7 +364,7 @@ ULONG c_getdtablesize(void) { return MAXSOCK; }
 ULONG c_Errno(void) { return (ULONG)g_errno; }
 ULONG c_SetErrnoPtr(void *p, int size) { g_errno_ptr = p; g_errno_size = size; return 0; }
 static char g_ntoa[16];
-ULONG c_Inet_NtoA(ULONG in)
+RPTR c_Inet_NtoA(ULONG in)
 {
     char *p = g_ntoa;
     for (int i = 3; i >= 0; i--) {
@@ -356,7 +375,7 @@ ULONG c_Inet_NtoA(ULONG in)
         if (i) *p++ = '.';
     }
     *p = 0;
-    return (ULONG)(uintptr_t)g_ntoa;
+    return (RPTR)(uintptr_t)g_ntoa;
 }
 static int parse_ip(const char *cp, uint32_t *out)
 {
@@ -386,7 +405,7 @@ static char g_hname[256];
 static uint32_t g_haddr;
 static char *g_hlist[2], *g_halias[1];
 static struct hostent_ g_host;
-ULONG c_gethostbyname(const char *name)
+RPTR c_gethostbyname(const char *name)
 {
     uint32_t ip;
     if (!name) return 0;
@@ -396,13 +415,13 @@ ULONG c_gethostbyname(const char *name)
     else {
         BLOCK(q);
         q[5] = (uint32_t)(uintptr_t)g_hname;
-        if (net(q, NET_RESOLVE) < 0) { g_herrno = 1; return 0; }   /* HOST_NOT_FOUND */
+        if (net(q, NET_RESOLVE) < 0) { g_herrno = 1; return (RPTR)0; }   /* HOST_NOT_FOUND */
         g_haddr = q[14];
     }
     g_hlist[0] = (char *)&g_haddr; g_hlist[1] = NULL; g_halias[0] = NULL;
     g_host.h_name = g_hname; g_host.h_aliases = g_halias; g_host.h_addrtype = AF_INET_; g_host.h_length = 4;
     g_host.h_addr_list = g_hlist;
-    return (ULONG)(uintptr_t)&g_host;
+    return (RPTR)(uintptr_t)&g_host;
 }
 ULONG c_gethostname(char *name, int len)
 {
@@ -423,7 +442,7 @@ ULONG c_SocketBaseTagList(struct TagItem *tags)
         if (!(t->ti_Tag & TAG_USER)) continue;
         ULONG code = (t->ti_Tag >> SBTB_CODE) & SBTS_CODE;
         int set = t->ti_Tag & SBTF_SET, ref = t->ti_Tag & SBTF_REF;
-        ULONG *where = ref ? (ULONG *)t->ti_Data : (ULONG *)&t->ti_Data;
+        IPTR *where = ref ? (IPTR *)t->ti_Data : (IPTR *)&t->ti_Data;
         switch (code) {
         case SBTC_BREAKMASK: if (set) g_breakmask = *where; else *where = g_breakmask; break;
         case SBTC_ERRNO: if (set) g_errno = (int)*where; else *where = (ULONG)g_errno; break;
@@ -442,8 +461,16 @@ ULONG c_nothing(void) { return 0; }
 
 /* ---- the library */
 extern APTR qrx_hostsocket_vectors[];
+#if defined(__m68k64__)
+/* Vector functions are plain C functions; the base comes in A1, and there is only one */
+static struct Library *g_lib;
+struct Library *qrx_lib_open(void) { g_lib->lib_OpenCnt++; g_lib->lib_Flags &= ~LIBF_DELEXP; return g_lib; }
+ULONG qrx_lib_close(void) { if (g_lib->lib_OpenCnt) g_lib->lib_OpenCnt--; return 0; }
+ULONG qrx_lib_zero(void) { return 0; }
+#else
 struct Library *qrx_lib_open(struct Library *lib) { lib->lib_OpenCnt++; lib->lib_Flags &= ~LIBF_DELEXP; return lib; }
 ULONG qrx_lib_close(struct Library *lib) { if (lib->lib_OpenCnt) lib->lib_OpenCnt--; return 0; }
+#endif
 
 int main(void)
 {
@@ -454,6 +481,9 @@ int main(void)
     if (!door_ok()) { PutStr((CONST_STRPTR)"QRXHostSocket: no ARMithlon host network door\n"); return 5; }
     struct Library *lib = MakeLibrary(qrx_hostsocket_vectors, NULL, NULL, sizeof(struct Library), 0);
     if (!lib) { PutStr((CONST_STRPTR)"QRXHostSocket: no memory\n"); return 20; }
+#if defined(__m68k64__)
+    g_lib = lib;
+#endif
     lib->lib_Node.ln_Type = NT_LIBRARY;
     lib->lib_Node.ln_Name = (char *)"bsdsocket.library";
     lib->lib_IdString = (APTR)"bsdsocket.library 4.1 (QRX host sockets through ARMithlon)";

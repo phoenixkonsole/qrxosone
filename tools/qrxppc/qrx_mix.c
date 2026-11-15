@@ -417,6 +417,8 @@ static qrx_mix_status_t mix_run(qrx_mix_t *mix, uint32_t budget,
 
         memset(&extra, 0, sizeof(extra));
         p->cpu.gpr[3] = fn(ictx, &in, &extra);               /* D0 */
+        if (mix->stop_requested)
+            return QRX_MIX_STOP;
         if (sig) {
             switch (sig->ret) {
             case 'i':
@@ -440,6 +442,12 @@ static qrx_mix_status_t mix_run(qrx_mix_t *mix, uint32_t budget,
         if (left == 0u)
             return QRX_MIX_ERR_LIMIT;
     }
+}
+
+void qrx_mix_request_stop(qrx_mix_t *mix)
+{
+    if (mix)
+        mix->stop_requested = 1;
 }
 
 qrx_mix_status_t qrx_mix_sig_parse(qrx_mix_sig_t *sig, const char *params,
@@ -680,6 +688,7 @@ qrx_mix_status_t qrx_mix_call(qrx_mix_t *mix, uint32_t entry,
     if (mix->depth >= QRX_MIX_DEPTH_MAX)
         return QRX_MIX_ERR_ARG;
 
+    mix->stop_requested = 0;
     nested = mix->depth != 0u;
     top = nested ? p->cpu.gpr[1] : mix->sp_top;
     if (top < QRX_MIX_LINKAGE + 4u * words)

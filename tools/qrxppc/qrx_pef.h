@@ -13,9 +13,9 @@
 #include "qrx_ppc.h"
 
 #define QRX_PEF_MAX_SECTIONS 16
-#define QRX_PEF_MAX_EXPORTS 32
-#define QRX_PEF_MAX_IMPORTS 32
-#define QRX_PEF_MAX_LIBRARIES 8
+#define QRX_PEF_MAX_EXPORTS 256
+#define QRX_PEF_MAX_IMPORTS 512
+#define QRX_PEF_MAX_LIBRARIES 16
 #define QRX_PEF_MAX_RELOC_SECTIONS 16
 #define QRX_PEF_SECTION_STRIDE 0x1000u
 
@@ -127,6 +127,12 @@ uint32_t qrx_pef_section_address(const qrx_pef_t *pef, int index);
 /* Runtime address of the main transition vector (0 if the fragment has no
  * main symbol).  The entry point itself is the first word at that address. */
 uint32_t qrx_pef_main_tvector(const qrx_pef_t *pef);
+
+/* Runtime addresses of the fragment's init and term transition vectors, 0
+ * when the container has none.  CFM runs init after loading and term before
+ * unloading; both use the same two-word layout as the main vector. */
+uint32_t qrx_pef_init_tvector(const qrx_pef_t *pef);
+uint32_t qrx_pef_term_tvector(const qrx_pef_t *pef);
 
 /* Resolve one imported symbol.  library is the importing library name, or ""
  * when the container names none.  Returning 0 marks the import unresolved. */
