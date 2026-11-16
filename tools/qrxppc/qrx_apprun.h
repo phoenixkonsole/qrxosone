@@ -23,7 +23,7 @@
 #include "qrx_mix.h"
 
 #define QRX_APPRUN_TRACE 64u      /* most recent traps kept for inspection */
-#define QRX_APPRUN_MAX_IMPORTS 512u /* same ceiling as qrx_pef.h */
+#define QRX_APPRUN_MAX_IMPORTS 1024u /* same ceiling as qrx_pef.h */
 #define QRX_APPRUN_PSEUDO_TRAP 0x7E00u /* pseudo trap of an import stub */
 #define QRX_APPRUN_DETAIL 160u    /* explanation for a refusal or stop */
 

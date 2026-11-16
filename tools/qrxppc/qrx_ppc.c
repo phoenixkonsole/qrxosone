@@ -28,12 +28,23 @@
 #define UIMM (insn & 0xFFFFu)
 #define SIMM ((int32_t)(int16_t)(insn & 0xFFFFu))
 
+static int mem_allowed(qrx_ppc_t *p, uint32_t addr, uint32_t bytes,
+                       unsigned access)
+{
+    if (addr > p->mem.size || bytes > p->mem.size - addr ||
+        (p->access && !p->access(p->access_ctx, addr, bytes, access))) {
+        p->fault_addr = addr;
+        return 0;
+    }
+    return 1;
+}
+
 static int mem_read(qrx_ppc_t *p, uint32_t addr, unsigned bytes, uint32_t *out)
 {
     uint32_t v = 0;
     unsigned i;
 
-    if (bytes > 4 || addr > p->mem.size || bytes > p->mem.size - addr) {
+    if (bytes > 4 || !mem_allowed(p, addr, bytes, QRX_PPC_ACCESS_READ)) {
         p->fault_addr = addr;
         return 0;
     }
@@ -47,7 +58,7 @@ static int mem_write(qrx_ppc_t *p, uint32_t addr, unsigned bytes, uint32_t v)
 {
     unsigned i;
 
-    if (bytes > 4 || addr > p->mem.size || bytes > p->mem.size - addr) {
+    if (bytes > 4 || !mem_allowed(p, addr, bytes, QRX_PPC_ACCESS_WRITE)) {
         p->fault_addr = addr;
         return 0;
     }
@@ -74,7 +85,7 @@ static int mem_read64(qrx_ppc_t *p, uint32_t addr, uint64_t *out)
     uint64_t v = 0;
     unsigned i;
 
-    if (addr > p->mem.size || 8u > p->mem.size - addr) {
+    if (!mem_allowed(p, addr, 8u, QRX_PPC_ACCESS_READ)) {
         p->fault_addr = addr;
         return 0;
     }
@@ -88,7 +99,7 @@ static int mem_write64(qrx_ppc_t *p, uint32_t addr, uint64_t v)
 {
     unsigned i;
 
-    if (addr > p->mem.size || 8u > p->mem.size - addr) {
+    if (!mem_allowed(p, addr, 8u, QRX_PPC_ACCESS_WRITE)) {
         p->fault_addr = addr;
         return 0;
     }
@@ -322,8 +333,13 @@ qrx_ppc_status_t qrx_ppc_step(qrx_ppc_t *p)
     p->status = QRX_PPC_OK;
     p->fault_addr = 0;
 
-    if (!mem_read(p, pc0, 4, &insn))
+    if (!mem_allowed(p, pc0, 4u, QRX_PPC_ACCESS_EXEC))
         return fail_at(p, QRX_PPC_FAULT, pc0);
+    /* An execute-only segment need not also have read permission. */
+    insn = ((uint32_t)p->mem.data[pc0] << 24) |
+           ((uint32_t)p->mem.data[pc0 + 1u] << 16) |
+           ((uint32_t)p->mem.data[pc0 + 2u] << 8) |
+           (uint32_t)p->mem.data[pc0 + 3u];
 
     p->cpu.pc = pc0 + 4;
     op = insn >> 26;

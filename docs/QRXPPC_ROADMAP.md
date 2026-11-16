@@ -27,8 +27,27 @@ Priorität:
 
 1. PPC32-Integer und -FPU.
 2. Klassisches MacOS 9 mit Applikations-HLE.
-3. MacOS X nur als separater, ausdrücklich gegateter Forschungspfad.
+3. MacOS X als separater PPC-Mach-O-/Darwin-Pfad neben klassischem MacOS.
 4. AltiVec/G4-Vektorpfad erst nach belastbaren Integer-/FPU-Tests.
+
+### Mac-OS-X-Pfad: erster Mach-O-Prototyp
+
+Ein separater PPC32-Mach-O-Parser und Mapper (`qrx_macho.c`) erkennt dünne
+und universelle ausführbare Dateien, liest `LC_UNIXTHREAD` und bildet
+`LC_SEGMENT`-Daten begrenzt im Gastspeicher ab. Der Host-Inspector
+`qrx-mach [--map] <datei>` verarbeitet den PPC7400-Teil von QuickTime Player
+7.7; er meldet 17 Bibliothekskommandos und vorhandenes dyld. Auch ein
+AROS/m68k-Build ist in `tools/qrxppc/build.sh` integriert: `QRXMach` inspiziert
+Dateien und startet mit `--run` einen engen statischen PPC-Testfall;
+`QRXMachTest` prüft Parser, Segmentmapping und Prozessstart. Im isolierten
+ARMithlon-Gast lief ein synthetisches Programm mit Initialstack, `write` und
+`exit` sowie Fehlerpfaden mit 0 Testfehlern und Rückgabecode 0. Segmentbasierte
+R/W/X-Prüfungen schützen Interpreter und Syscall-Puffer; bei aktiver Prüfung
+fällt der JIT auf den Interpreter zurück. Dynamisches Linken, weitere
+Darwin-ABI-Funktionen, reguläres crt und Systembibliotheken fehlen weiterhin;
+QuickTime und Ableton laufen damit nicht. Framework-Funktionen werden anhand
+der tatsächlich getesteten Programme bedarfsorientiert analysiert und
+implementiert, statt eine vollständige Framework-Nachbildung vorauszusetzen.
 
 ## 2. Ausgangslage
 
@@ -529,6 +548,19 @@ PEF-Anwendung). `test_apprun` prüft den Weg im Gast: `TickCount` → `TEInit`
 (fehlt) → `Button` (wird nicht mehr erreicht), dazu 68k-Ablehnung und ein
 Nicht-MacBinary-Bild.
 
+Mixed-Mode-Grundlagen, Stand 2026-11-15: `NewRoutineDescriptor`,
+`NewFatRoutineDescriptor`, `DisposeRoutineDescriptor` und
+`CallUniversalProc` sind als HLE vorhanden (private Selektoren
+0xEE01–0xEE04). `CallUniversalProc` übersetzt registerbasierte ProcInfos mit
+bis zu vier Parametern, erkennt direkte Codeadressen und CFM-TVektoren und
+ruft das Ziel über die Brücke auf. Ein Host-Harness prüft direkten Aufruf,
+TVector, Fat-Deskriptor, Freigabe und die Ablehnung einer nicht
+registerbasierten ProcInfo. Acrobat Reader 4.0 kommt damit über den ersten
+fehlenden Import hinaus: zwei `NewRoutineDescriptor`-Aufrufe werden bedient,
+danach folgt ein app-interner PPC-Fehler (`this = -1`), der auch bei
+Rückgabe 0 auftritt. Nächste Schritte: stackbasierte/variadische ProcInfos,
+68k-Records ausführbar machen und Acrobats Begleitdateien bereitstellen.
+
 - PPC-„Hello World“ über die Test-ABI: als `macapp`-Suite vorhanden.
 - PPC-Toolbox-Programm mit Fenster und Text: Fenster- und Text-Slices sind
   einzeln abgenommen (`toolbox_wm`, `toolbox_text`); ein kombiniertes
@@ -751,14 +783,18 @@ abgenommen; die Bezeichnung „MacOS-HLE“ wird erst ab M7 verwendet.
 
 Der 68k-Pfad steht als Grundgerüst: `tools/qrxppc/qrx_m68k.c` lädt die
 `CODE`-Ressourcen einer klassischen Anwendung in einen flachen 16-MiB-Mac-
-Adressraum (Rückfall 8/4 MiB), kopiert `CODE` 0 als Jump-Table nach A5, legt
-die Segmente ab 0x100000 ab und führt sie auf dem Musashi-68020-Kern aus.
+Adressraum (Rückfall 8/4 MiB), legt die Segmente ab 0x100000 ab und führt sie
+auf dem Musashi-68020-Kern aus. Trägt `CODE` 0 einen vollständigen
+Near-Model-Kopf, wird die Sprungtabelle nach `A5 + CurJTOffset` kopiert, A5
+oberhalb der deklarierten Globals platziert und im ersten Eintrag gestartet.
 `QRX68KRun` protokolliert jeden A-Line-Trap; MemTop, Heap-Basis und die
 `NewPtr`-Grenze leiten sich aus der tatsächlich allokierten Blockgröße ab
 (`mem-kib` als optionales Argument, Rückfall 16 → 8 → 4 MiB; ein `mem-kib`
 über 16 MiB wird als erste Stufe versucht, nicht geklemmt); die HLE beantwortet `_LoadSeg`
-(0xA9F0), `_ExitToShell`, `_Gestalt`, `_GetZone`/`_SetZone` und
-`_NewPtr`/`_DisposePtr`, alles andere beendet den Lauf. Im Gast geprüft: ein
+(0xA9F0) nach klassischer Semantik (Segmentwort vom Stack, Eintrag über
+`PC−6`, Patchen auf `JMP abs.l` zu `Segmentbasis+4+Offset`), `_ExitToShell`,
+`_Gestalt`, `_GetZone`/`_SetZone` und `_NewPtr`/`_DisposePtr`, alles andere
+beendet den Lauf. Im Gast geprüft: ein
 synthetisches MacBinary-Programm bekommt `Gestalt` beantwortet und stoppt bei
 `TEInit` (0xA9CC, Exit 2); der LightWave-6.5-Installer lädt 15 Segmente und
 wird als VISE-gepackt abgelehnt (`ERR_PACKED`, Exit 4). Mit `mem-kib 4096`
@@ -780,6 +816,29 @@ mit `ADCR`. Der Loader erkennt beides und liefert `ERR_PACKED` samt Format
 melden. Nur einzelne Segmente sind ungepackt (StuffIt `CODE` 14 trägt einen
 4-Byte-Prolog `00000001`, danach `moveq #0,d3` / `nop` / `tst.l d3`); ein
 echter Installer-Lauf braucht also den Packer des jeweiligen Herstellers.
+
+Der klassische `CODE`-0-Einstieg für ungepackte Near-Model-Programme ist
+implementiert und auf Host und im ARMithlon-Gast geprüft. Ein synthetisches
+MacBinary hat zwei Sprungtabelleneinträge (Einstieg `CODE` 2, Cross-Segment-
+Aufruf `CODE` 1), beide Segmente mit 4-Byte-Kopf, in einer unsortierten
+Resource-Map. Beim Laden stehen A5 = 0x3000, Sprungtabelle = 0x3020,
+Einstieg = 0x3022; `CurrentA5` (0x0904) und `CurJTOffset` (0x0934) sind
+gesetzt. Der Lauf patcht beide Einträge auf `JMP abs.l` (Ziele 0x00100024 und
+0x00101044), die aufgerufene Routine schreibt 0x11111111 nach 0x3000 und
+liefert 0xA5A5A5A5, der Aufrufer prüft den Wert und beendet mit
+`ExitToShell`. Im Gast meldet `QRX68KRun` `2 segment(s), A5=0x00003000,
+entry=0x00003022`, zwei `_LoadSeg`-Traps und `exited (ExitToShell), 3 trap(s),
+3 implemented`; der Exit-Code ist in diesem Fall 0. Der Host-Test prüft
+zusätzlich die Ablehnung von Far Model (`0xFFFF`-Marker), ungültigen
+Sprungtabellengrößen, abgeschnittenen Tabellen, Einstiegs-Offsets außerhalb
+des Segments, fehlenden Einstiegssegmenten und falsch geformten Einträgen
+(`QRX_M68K_ERR_IMAGE`); ein VISE-gepacktes Segment wird trotz gültigem
+`CODE` 0 im Host-Test und im Gast (`rc=4`, `'CODE' resources are packed`)
+abgelehnt. Grenzen: nur Near Model,
+kein `_UnloadSeg`/Rückbau, keine Code-Heaps oder Segmentverschiebung; die
+Segmentkopf-Zähler werden nicht ausgewertet, gepatcht werden alle ungeladenen
+Einträge mit der Segment-ID. Ein vollständig ungepacktes reales 68k-Programm
+wurde noch nicht gestartet; der Nachweis ist synthetisch.
 
 `_SysEnvirons` (0xA090) ist implementiert: Version 2 in einen 14-Byte-
 SysEnvRec (System 8.1.0, Prozessor 68020, `hasFPU`/`hasColorQD` 1,
@@ -963,11 +1022,30 @@ sichtbare Titelhervorhebung (`_HiliteMenu` pflegt nur den Zustand),
 das Neuvermessen geänderter Itemtexte, weitere
 Scrap-Typen als `'TEXT'` und die Mac-Zeichensatz-Umwandlung.
 
-Nächste Schritte in dieser Reihenfolge: (1) einen ungepackten 68k-Test-App
-finden oder den VISE-/ADC-Packer implementieren, damit ein Segment real
-ausgeführt wird; (2) erst danach sind die PPC-Programme in den `SVCT`-Containern
-erreichbar. Die Dialog-Knöpfe sind bedienbar, ein Installer kann also seine
-Schaltflächen treffen.
+Acrobat Reader 4.05a aus dem bereitgestellten `reader_installer_4.05a.sit`
+(SHA-256 `07cf9f61d03986f5a5caa026004da4d063c2c97b6e2c176eb3d6cf945eac940c`)
+wurde schreibgeschützt untersucht. Der Installer (`APPL`/`VIS3`) hat einen
+`SVCT`-Datenfork und 26 `CODE`-Ressourcen: `CODE` 0 enthält eine Sprungtabelle,
+deren erster Eintrag auf ID 1002 verweist; 1000 und 1002 tragen keinen
+bekannten Packkopf, 23 andere positive IDs dagegen den VISE-Kopf. Ein `cfrg`
+wurde nicht gefunden. Die neuen Angaben zu Anzahl und niedrigster erkannter
+gepackter ID im 68k-Runner helfen, diesen Befund einzuordnen; sie stellen
+keinen Programmeinstieg fest und prüfen höchstens 64 `CODE`-Ressourcen.
+
+Im isolierten ARMithlon-Gast mit `QRXMoreMemory` meldete `QRX68KRun`:
+`VISE/InstallerMaker-packed 'CODE' resource (lowest CODE 1, 23 packed
+segment(s))`; `QRXAppRun` meldete `68k application: 'CODE' resources, no
+'cfrg'` und `68k application (no PEF fragment)`. Beide Runner lehnten die App
+vor Ausführung ab; der Gastlauf erreichte seinen Endmarker ohne gemeldeten
+CPU-Fault. Der Host-Test prüft VISE, ADC und die Zählung bei unsortierten
+Ressourcen. Das Originalarchiv und die produktive `Startup-Sequence` blieben
+bytegleich; temporäre Testkopien und Logs werden entfernt.
+
+Nächste Schritte bleiben: (1) einen vollständig ungepackten realen
+68k-Test-App finden oder einen überprüften VISE-/ADC-Decoder implementieren;
+(2) `SVCT` erschließen, bevor Aussagen über darin enthaltene PPC-Programme
+möglich sind. Dialog- und Installer-Kompatibilität
+ist weiterhin unvollständig; der Acrobat-Installer startet nicht.
 
 PPC-Stand gleichzeitig: die Gast-Suite `C:QRXPPC` läuft vollständig durch
 (`QRXPPC: 0 failure(s)`), inklusive `pef_loader`, `pef_reloc`, `apprun`,

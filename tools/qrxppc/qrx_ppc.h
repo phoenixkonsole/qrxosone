@@ -41,9 +41,19 @@ typedef struct {
     uint32_t size;
 } qrx_ppc_mem_t;
 
+/* Optional guest address policy. A NULL callback retains flat memory. JIT
+ * execution falls back to the interpreter while a callback is installed. */
+#define QRX_PPC_ACCESS_READ 1u
+#define QRX_PPC_ACCESS_WRITE 2u
+#define QRX_PPC_ACCESS_EXEC 4u
+typedef int (*qrx_ppc_access_fn)(void *ctx, uint32_t addr, uint32_t size,
+                                 unsigned access);
+
 typedef struct {
     qrx_ppc_state_t cpu;
     qrx_ppc_mem_t mem;
+    qrx_ppc_access_fn access;
+    void *access_ctx;
     uint32_t insns;
     uint32_t fault_addr;
     qrx_ppc_status_t status;

@@ -150,6 +150,167 @@ static void ar_put32(uint8_t *p, uint32_t v)
     p[3] = (uint8_t)v;
 }
 
+static void ar_put16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v >> 8);
+    p[1] = (uint8_t)v;
+}
+
+/* ---- Mixed Mode routine descriptors --------------------------------- */
+
+/* The descriptor layout is the one qrx_mix_rd_resolve() reads (qrx_mix.h):
+ * a 12-byte header and 20-byte records.  A normal descriptor carries one
+ * record; the "fat" form carries a 68k and a PPC record for the same entry.
+ * The record's procDescriptor stays the ProcPtr the application passed in;
+ * CallUniversalProc accepts both a code address and a CFM transition vector
+ * (entry word followed by the TOC). */
+#define AR_CALL_BUDGET 50000000u
+
+static uint32_t ar_rd_alloc(qrx_apprun_t *run, uint32_t proc,
+                            uint32_t proc_info, uint32_t proc_info_ppc,
+                            uint32_t isa, int fat)
+{
+    uint32_t addr = 0u;
+    uint32_t bytes = QRX_MIX_RD_HEADER +
+                     (fat ? 2u : 1u) * QRX_MIX_RD_RECORD;
+    uint8_t *p;
+
+    if (!run || !run->ppc || !run->ppc->mem.data ||
+        (isa != QRX_MIX_RD_ISA_68K && isa != QRX_MIX_RD_ISA_PPC))
+        return 0u;
+    if (qrx_mm_new_ptr(&run->tb.mm, bytes, 1, &addr) != QRX_MM_OK)
+        return 0u;
+    p = run->ppc->mem.data + addr;
+    ar_put16(p, QRX_MIX_RD_TRAP);
+    p[2] = (uint8_t)QRX_MIX_RD_VERSION;
+    p[3] = 0u;
+    ar_put32(p + 4u, 0u);
+    p[8] = 0u;
+    p[9] = 0u;
+    ar_put16(p + 10u, fat ? 1u : 0u);
+
+    p += QRX_MIX_RD_HEADER;
+    ar_put32(p, proc_info);
+    p[4] = 0u;
+    p[5] = (uint8_t)(fat ? QRX_MIX_RD_ISA_68K : isa);
+    ar_put16(p + 6u, 0u);
+    ar_put32(p + 8u, proc);
+    ar_put32(p + 12u, 0u);
+    ar_put32(p + 16u, 0u);
+
+    if (fat) {
+        p += QRX_MIX_RD_RECORD;
+        ar_put32(p, proc_info_ppc);
+        p[4] = 0u;
+        p[5] = QRX_MIX_RD_ISA_PPC;
+        ar_put16(p + 6u, 0u);
+        ar_put32(p + 8u, proc);
+        ar_put32(p + 12u, 0u);
+        ar_put32(p + 16u, 0u);
+    }
+    return addr;
+}
+
+static uint32_t ar_new_routine_descriptor(qrx_apprun_t *run, uint32_t proc,
+                                          uint32_t proc_info, uint32_t isa)
+{
+    return ar_rd_alloc(run, proc, proc_info, 0u, isa, 0);
+}
+
+static uint32_t ar_new_fat_routine_descriptor(qrx_apprun_t *run,
+                                              uint32_t proc,
+                                              uint32_t proc_info,
+                                              uint32_t proc_info_ppc,
+                                              uint32_t isa)
+{
+    return ar_rd_alloc(run, proc, proc_info, proc_info_ppc, isa, 1);
+}
+
+static uint32_t ar_dispose_routine_descriptor(qrx_apprun_t *run, uint32_t desc)
+{
+    if (!run || desc == 0u)
+        return 1u;
+    return (uint32_t)qrx_mm_dispose_ptr(&run->tb.mm, desc);
+}
+
+/* A CFM function pointer commonly names a transition vector: entry word and
+ * TOC.  A direct code address starts with a PPC instruction, which is either
+ * outside the loaded image or not a plausible aligned guest address. */
+static uint32_t ar_rd_entry(qrx_apprun_t *run, uint32_t proc, uint32_t *toc)
+{
+    uint32_t first = ar_get32(run->ppc, proc);
+    uint32_t second = ar_get32(run->ppc, proc + 4u);
+
+    *toc = run->toc;
+    if (proc != 0u && first >= 0x10000u && first < run->ppc->mem.size &&
+        (first & 3u) == 0u && second < run->ppc->mem.size &&
+        (second & 3u) == 0u) {
+        *toc = second;
+        return first;
+    }
+    return proc;
+}
+
+/* CallUniversalProc(UPP, ProcInfo, ...).  The caller's arguments arrived in
+ * r5.. after the import stub moved them; a register-based ProcInfo (up to the
+ * four parameters qrx_mix can describe) gives the target's placement.  The
+ * call is nested inside the running fragment, so the bridge saves and
+ * restores the caller's CPU state. */
+static uint32_t ar_call_universal_proc(qrx_apprun_t *run,
+                                       const qrx_mix_args_t *args,
+                                       qrx_mix_result_t *extra)
+{
+    uint32_t descriptor = args->gpr[1];
+    uint32_t proc_info = args->gpr[2];
+    qrx_mix_rd_t rd;
+    qrx_mix_rd_t pi;
+    qrx_mix_sig_t sig;
+    qrx_mix_args_t call;
+    qrx_mix_result_t result;
+    qrx_mix_status_t st;
+    uint32_t entry;
+    uint32_t toc;
+    unsigned i;
+
+    st = qrx_mix_rd_resolve(&run->mix, descriptor, QRX_MIX_RD_ISA_PPC, &rd);
+    if (st != QRX_MIX_OK) {
+        ar_set_detail(run, "CallUniversalProc: descriptor 0x%08X has no "
+                           "PPC record (status %d)",
+                      (unsigned)descriptor, (int)st);
+        return 0u;
+    }
+    memset(&pi, 0, sizeof(pi));
+    pi.proc_info = proc_info;
+    st = qrx_mix_rd_procinfo_sig(&pi, &sig);
+    if (st != QRX_MIX_OK) {
+        ar_set_detail(run, "CallUniversalProc: ProcInfo 0x%08X is not a "
+                           "supported register-based signature (status %d)",
+                      (unsigned)proc_info, (int)st);
+        return 0u;
+    }
+    if (sig.nparams > QRX_MIX_ARGS - 3u) {
+        ar_set_detail(run, "CallUniversalProc: %u parameters exceed the "
+                           "argument registers", sig.nparams);
+        return 0u;
+    }
+    memset(&call, 0, sizeof(call));
+    for (i = 0; i < sig.nparams; i++)
+        call.gpr[i] = args->gpr[3 + i];
+    call.gpr_count = sig.nparams;
+    entry = ar_rd_entry(run, rd.entry, &toc);
+    call.rtoc = toc;
+    memset(&result, 0, sizeof(result));
+    st = qrx_mix_call(&run->mix, entry, &sig, &call, &result, AR_CALL_BUDGET);
+    if (st != QRX_MIX_OK) {
+        ar_set_detail(run, "CallUniversalProc: target 0x%08X stopped "
+                           "(status %d)", (unsigned)entry, (int)st);
+        return 0u;
+    }
+    if (extra)
+        extra->fpr = result.fpr;
+    return result.gpr[0];
+}
+
 /* Import index in the loaded fragment; -1 when the name does not occur. */
 static int ar_import_index(qrx_apprun_t *run, const char *library,
                            const char *name)
@@ -463,10 +624,29 @@ static uint32_t ar_import(void *ctx, const qrx_mix_args_t *args,
 {
     qrx_apprun_t *run = (qrx_apprun_t *)ctx;
     uint32_t result;
-    int implemented;
+    int implemented = 1;
 
-    result = qrx_tb_dispatch(&run->tb, args, extra);
-    implemented = result != QRX_MM_UNKNOWN;
+    switch (args->gpr[0]) {
+    case QRX_APP_TRAP_NEW_ROUTINE_DESCRIPTOR:
+        result = ar_new_routine_descriptor(run, args->gpr[1], args->gpr[2],
+                                           args->gpr[3]);
+        break;
+    case QRX_APP_TRAP_NEW_FAT_ROUTINE_DESCRIPTOR:
+        result = ar_new_fat_routine_descriptor(run, args->gpr[1],
+                                               args->gpr[2], args->gpr[3],
+                                               args->gpr[4]);
+        break;
+    case QRX_APP_TRAP_CALL_UNIVERSAL_PROC:
+        result = ar_call_universal_proc(run, args, extra);
+        break;
+    case QRX_APP_TRAP_DISPOSE_ROUTINE_DESCRIPTOR:
+        result = ar_dispose_routine_descriptor(run, args->gpr[1]);
+        break;
+    default:
+        result = qrx_tb_dispatch(&run->tb, args, extra);
+        implemented = result != QRX_MM_UNKNOWN;
+        break;
+    }
     ar_log(run, args, result, implemented);
     if (!implemented) {
         run->unimplemented_trap = args->gpr[0];
@@ -513,8 +693,10 @@ static qrx_apprun_status_t ar_call(qrx_apprun_t *run, uint32_t entry,
                       (unsigned)run->ppc->cpu.gpr[3]);
         return QRX_APPRUN_ERR_IMPORT;
     case QRX_MIX_ERR_RUN:
-        ar_set_detail(run, "PPC fault at 0x%08X",
-                      (unsigned)run->ppc->fault_addr);
+        ar_set_detail(run, "PPC fault at 0x%08X (pc=0x%08X, lr=0x%08X)",
+                      (unsigned)run->ppc->fault_addr,
+                      (unsigned)run->ppc->cpu.pc,
+                      (unsigned)run->ppc->cpu.lr);
         return QRX_APPRUN_FAULT;
     case QRX_MIX_ERR_LIMIT:
         ar_set_detail(run, "instruction budget exhausted");

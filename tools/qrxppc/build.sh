@@ -7,7 +7,8 @@ SDK="$REPO/.build/qrx-sdk/bin"
 CC="$SDK/aros-gcc"
 ELF2HUNK="$SDK/elf2hunk"
 OUT="${1:-$REPO/.build/qrxppc}"
-TREE="$REPO/.build/bundle/SystemFull"
+# An isolated tree lets guest tests install tools without touching the bundle.
+TREE="${QRXPPC_INSTALL_TREE:-$REPO/.build/bundle/SystemFull}"
 
 if [ ! -x "$CC" ] || [ ! -x "$ELF2HUNK" ]; then
     echo "AROS SDK missing: $CC" >&2
@@ -66,6 +67,33 @@ if ! file "$OUT/QRXAppRun" | grep -q 'AmigaOS loadseg()ble executable/binary'; t
     exit 1
 fi
 
+# ---------------------------------------------------------------- PPC Mach-O prototype
+echo "  CC  QRXMach.elf"
+"$CC" -O2 -m68040 -fno-pic -fno-PIC -fno-optimize-sibling-calls \
+    -Itools/qrxppc tools/qrxppc/qrx_macho.c tools/qrxppc/qrx-mach.c \
+    tools/qrxppc/qrx_ppc.c tools/qrxppc/qrx_ppc_fpu.c \
+    -o "$OUT/QRXMach.elf"
+
+echo "  CC  QRXMachTest.elf"
+"$CC" -O2 -m68040 -fno-pic -fno-PIC -fno-optimize-sibling-calls \
+    -Itools/qrxppc tools/qrxppc/qrx_macho.c tools/qrxppc/test_macho.c \
+    tools/qrxppc/qrx_ppc.c tools/qrxppc/qrx_ppc_fpu.c tools/qrxppc/qrx_ppc_jit.c \
+    -o "$OUT/QRXMachTest.elf"
+
+for binary in QRXMach QRXMachTest; do
+    echo "  HUNK $binary"
+    hunk_out="$("$ELF2HUNK" "$OUT/$binary.elf" "$OUT/$binary" 2>&1)"
+    printf '%s\n' "$hunk_out"
+    if printf '%s\n' "$hunk_out" | grep -q 'relocation(s) failed'; then
+        echo "elf2hunk failed for $binary" >&2
+        exit 1
+    fi
+    if ! file "$OUT/$binary" | grep -q 'AmigaOS loadseg()ble executable/binary'; then
+        echo "$binary is not a loadseg()ble Hunk" >&2
+        exit 1
+    fi
+done
+
 # ---------------------------------------------------------------- 68k Mac runtime
 # QRX68KRun executes classic 68k MacOS applications on the Musashi 68020 core.
 # Musashi's generated opcode table is built here: it needs the A-line handler to
@@ -107,7 +135,9 @@ if [ -d "$TREE" ]; then
     cp "$OUT/QRXPPC" "$TREE/C/QRXPPC"
     cp "$OUT/QRXAppRun" "$TREE/C/QRXAppRun"
     cp "$OUT/QRX68KRun" "$TREE/C/QRX68KRun"
-    echo "  installed .build/bundle/SystemFull/C/QRXPPC, C/QRXAppRun, C/QRX68KRun"
+    cp "$OUT/QRXMach" "$TREE/C/QRXMach"
+    cp "$OUT/QRXMachTest" "$TREE/C/QRXMachTest"
+    echo "  installed QRXPPC, QRXAppRun, QRX68KRun, QRXMach and QRXMachTest in $TREE/C"
 fi
 
 # ---------------------------------------------------------------- host test

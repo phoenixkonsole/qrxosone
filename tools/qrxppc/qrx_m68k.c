@@ -8,6 +8,7 @@
  * (or refused) by the HLE table in qrx_m68k_dispatch().
  */
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "qrx_m68k.h"
@@ -214,6 +215,160 @@ void qrx_m68k_unload(qrx_m68k_t *m)
 
 /* ------------------------------------------------------------------- loading */
 
+/* Find a loaded 'CODE' segment by its resource ID. */
+static int find_segment(const qrx_m68k_t *m, uint32_t id, uint32_t *base,
+                        uint32_t *size)
+{
+    unsigned i;
+
+    for (i = 0; i < m->code_count; i++) {
+        if (m->seg[i].id == id) {
+            if (base)
+                *base = m->seg[i].base;
+            if (size)
+                *size = m->seg[i].size;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Put every unloaded jump table entry that names this segment into its loaded
+ * form: the segment number in the first word, then `JMP abs.l` to the routine.
+ * The routine sits at segment base + 4-byte near-model header + entry offset.
+ * Returns 1 when patched, 0 when the segment is unknown, -1 when the table is
+ * malformed (m->detail says why). */
+static int patch_jump_table(qrx_m68k_t *m, uint32_t id)
+{
+    uint32_t base, size, off, i;
+
+    if (!find_segment(m, id, &base, &size))
+        return 0;
+    for (i = 0; i + 8u <= m->jt_size; i += 8u) {
+        uint32_t e = m->jt + i;
+
+        if (rd16(m->mem, m->mem_size, e + 4u) != id ||
+            rd16(m->mem, m->mem_size, e + 2u) != 0x3F3Cu ||
+            rd16(m->mem, m->mem_size, e + 6u) !=
+                (0xA000u | QRX_M68K_TRAP_LOAD_SEG))
+            continue;
+        off = rd16(m->mem, m->mem_size, e);
+        if (off + 4u >= size) {
+            snprintf(m->detail, sizeof m->detail,
+                     "jump table entry %lu: offset 0x%lx lies outside CODE %lu",
+                     (unsigned long)(i / 8u), (unsigned long)off,
+                     (unsigned long)id);
+            return -1;
+        }
+        wr16(m->mem, m->mem_size, e, id);
+        m->mem[e + 2u] = 0x4Eu;          /* JMP abs.l */
+        m->mem[e + 3u] = 0xF9u;
+        wr32(m->mem, m->mem_size, e + 4u, base + 4u + off);
+    }
+    return 1;
+}
+
+/* Initialize the classic near-model startup from 'CODE' 0.  The four longwords
+ * give the A5 world sizes and the jump table position; the table itself is
+ * copied to A5 + jump table offset (CurJTOffset), and the application starts in
+ * the first entry, which pushes its segment and traps to _LoadSeg. */
+static qrx_m68k_status_t setup_code0(qrx_m68k_t *m, const uint8_t *d,
+                                     uint32_t len)
+{
+    uint32_t above, below, jt_size, jt_off, a5, i;
+
+    if (rd16(d, len, 0u) == 0xFFFFu) {
+        snprintf(m->detail, sizeof m->detail,
+                 "far-model 'CODE' 0 (0xFFFF marker) is not supported");
+        return QRX_M68K_ERR_IMAGE;
+    }
+    above = rd32(d, len, 0u);
+    below = rd32(d, len, 4u);
+    jt_size = rd32(d, len, 8u);
+    jt_off = rd32(d, len, 12u);
+    if (jt_size < 8u || (jt_size & 7u) != 0u || jt_size > 0xFFFFu) {
+        snprintf(m->detail, sizeof m->detail,
+                 "'CODE' 0 jump table size %lu is not a positive multiple of 8",
+                 (unsigned long)jt_size);
+        return QRX_M68K_ERR_IMAGE;
+    }
+    if (len < 16u + jt_size) {
+        snprintf(m->detail, sizeof m->detail,
+                 "'CODE' 0 is %lu bytes, shorter than its %lu-byte jump table",
+                 (unsigned long)len, (unsigned long)jt_size);
+        return QRX_M68K_ERR_IMAGE;
+    }
+    if (jt_off < 16u || jt_off > 0xFFFFu ||
+        jt_off + jt_size > QRX_M68K_A5_MAX - QRX_M68K_A5_BASE) {
+        snprintf(m->detail, sizeof m->detail,
+                 "'CODE' 0 jump table offset %lu does not fit the A5 world",
+                 (unsigned long)jt_off);
+        return QRX_M68K_ERR_IMAGE;
+    }
+    if (above < jt_off + jt_size) {
+        snprintf(m->detail, sizeof m->detail,
+                 "'CODE' 0 above-A5 size %lu does not hold the jump table",
+                 (unsigned long)above);
+        return QRX_M68K_ERR_IMAGE;
+    }
+
+    /* The globals live below A5; give the image its declared size instead of
+     * assuming that a fixed A5 base leaves room for them. */
+    a5 = (QRX_M68K_A5_BASE + below + 0xFFFu) & ~0xFFFu;
+    if (a5 < QRX_M68K_A5_BASE || a5 + above > m->mem_size ||
+        a5 + jt_off + jt_size > QRX_M68K_STACK_TOP) {
+        snprintf(m->detail, sizeof m->detail,
+                 "A5 world (0x%lx below, 0x%lx above A5) does not fit",
+                 (unsigned long)below, (unsigned long)above);
+        return QRX_M68K_ERR_MEM;
+    }
+    m->a5 = a5;
+    m->jt = a5 + jt_off;
+    m->jt_size = jt_size;
+    m->has_jt = 1;
+    memcpy(m->mem + m->jt, d + 16u, jt_size);
+    wr32(m->mem, m->mem_size, QRX_M68K_LM_CURRENT_A5, a5);
+    wr16(m->mem, m->mem_size, QRX_M68K_LM_CURJT_OFFSET, jt_off);
+
+    /* Until a segment is loaded its entries execute MOVE.W #segment,-(SP) and
+     * _LoadSeg; anything else is not a near-model table. */
+    for (i = 0u; i < jt_size; i += 8u) {
+        uint32_t e = m->jt + i;
+
+        if (rd16(m->mem, m->mem_size, e + 2u) != 0x3F3Cu ||
+            rd16(m->mem, m->mem_size, e + 4u) == 0u ||
+            rd16(m->mem, m->mem_size, e + 6u) !=
+                (0xA000u | QRX_M68K_TRAP_LOAD_SEG)) {
+            snprintf(m->detail, sizeof m->detail,
+                     "'CODE' 0 jump table entry %lu is not an unloaded "
+                     "segment call", (unsigned long)(i / 8u));
+            return QRX_M68K_ERR_IMAGE;
+        }
+    }
+
+    /* The program entry point is the first entry.  It must name a loaded
+     * segment and its offset must point past that segment's 4-byte header. */
+    {
+        uint32_t id = rd16(m->mem, m->mem_size, m->jt + 4u);
+        uint32_t off = rd16(m->mem, m->mem_size, m->jt);
+        uint32_t base, size;
+
+        if (!find_segment(m, id, &base, &size)) {
+            snprintf(m->detail, sizeof m->detail,
+                     "'CODE' 0 entry point names missing CODE %lu",
+                     (unsigned long)id);
+            return QRX_M68K_ERR_IMAGE;
+        }
+        if (off + 4u >= size) {
+            snprintf(m->detail, sizeof m->detail,
+                     "'CODE' 0 entry point offset 0x%lx lies outside "
+                     "CODE %lu", (unsigned long)off, (unsigned long)id);
+            return QRX_M68K_ERR_IMAGE;
+        }
+    }
+    return QRX_M68K_OK;
+}
+
 qrx_m68k_status_t qrx_m68k_load(qrx_m68k_t *m, const uint8_t *image,
                                 uint32_t size)
 {
@@ -252,13 +407,31 @@ qrx_m68k_status_t qrx_m68k_load_limited(qrx_m68k_t *m, const uint8_t *image,
         return QRX_M68K_ERR_NO_CODE;
     /* A packed installer cannot run here: report it instead of stopping at the
      * first word of the header, which would look like a missing Toolbox trap. */
-    for (i = 0; i < found; i++) {
-        const char *kind;
-        if (res[i].id <= 0)
-            continue;
-        kind = packed_code(res[i].data, res[i].len);
-        if (kind) {
-            strcpy(m->detail, kind);
+    {
+        const char *first_kind = NULL;
+        int first_id = 0;
+        unsigned packed_count = 0u;
+
+        /* Resource maps need not be ordered by ID. Report the lowest packed
+         * segment and the total, rather than the first map entry encountered. */
+        for (i = 0; i < found; i++) {
+            const char *kind;
+
+            if (res[i].id <= 0)
+                continue;
+            kind = packed_code(res[i].data, res[i].len);
+            if (!kind)
+                continue;
+            packed_count++;
+            if (!first_kind || res[i].id < first_id) {
+                first_kind = kind;
+                first_id = res[i].id;
+            }
+        }
+        if (first_kind) {
+            snprintf(m->detail, sizeof m->detail,
+                     "%s (lowest CODE %d, %u packed segment(s))",
+                     first_kind, first_id, packed_count);
             return QRX_M68K_ERR_PACKED;
         }
     }
@@ -330,14 +503,27 @@ qrx_m68k_status_t qrx_m68k_load_limited(qrx_m68k_t *m, const uint8_t *image,
     if (m->code_count == 0u)
         return QRX_M68K_ERR_NO_CODE;
 
-    /* A5 world: CODE 0 holds the jump table that far calls go through. */
+    /* A5 world: 'CODE' 0 holds the near-model jump table.  Images that carry a
+     * full header start through it; the two-byte synthetic fixtures used by the
+     * host tests have no header and keep starting at the first segment. */
     m->a5 = QRX_M68K_A5_BASE;
+    m->entry = m->seg[0].base;
     for (i = 0; i < found; i++) {
+        qrx_m68k_status_t st;
+
         if (res[i].id != 0)
             continue;
-        if (res[i].len > QRX_M68K_A5_MAX - QRX_M68K_A5_BASE)
-            return QRX_M68K_ERR_MEM;
-        memcpy(m->mem + m->a5, res[i].data, res[i].len);
+        if (res[i].len >= 16u) {
+            st = setup_code0(m, res[i].data, res[i].len);
+            if (st != QRX_M68K_OK)
+                return st;
+            m->entry = m->jt + 2u;
+        } else {
+            if (res[i].len > QRX_M68K_A5_MAX - QRX_M68K_A5_BASE)
+                return QRX_M68K_ERR_MEM;
+            memcpy(m->mem + m->a5, res[i].data, res[i].len);
+            wr32(m->mem, m->mem_size, QRX_M68K_LM_CURRENT_A5, m->a5);
+        }
         break;
     }
 
@@ -362,7 +548,6 @@ qrx_m68k_status_t qrx_m68k_load_limited(qrx_m68k_t *m, const uint8_t *image,
     wr32(m->mem, m->mem_size, 0x0108u, m->mem_size);        /* MemTop */
     wr32(m->mem, m->mem_size, 0x010Cu, m->mem_size - 0x1000u); /* BufPtr */
 
-    m->entry = m->seg[0].base;
     m->sp = QRX_M68K_STACK_TOP;
     return QRX_M68K_OK;
 }
@@ -2793,24 +2978,51 @@ static int dispatch(qrx_m68k_t *m, uint32_t trap, uint32_t pc)
     uint32_t result = d0;
 
     switch (trap) {
-    case 0x9F0u: {          /* _LoadSeg: pop offset/segment, jump into it */
+    case QRX_M68K_TRAP_LOAD_SEG: {   /* classic near-model segment call */
         uint32_t sp = m68k_get_reg(NULL, M68K_REG_A7);
-        uint32_t off = rd16(m->mem, m->mem_size, sp);
-        uint32_t seg = rd16(m->mem, m->mem_size, sp + 2u);
-        unsigned i;
-        for (i = 0; i < m->code_count; i++) {
-            if (m->seg[i].id == seg) {
-                m68k_set_reg(M68K_REG_A7, sp + 4u);
-                m68k_set_reg(M68K_REG_PC, m->seg[i].base + off);
-                trace_trap(m, trap, pc, d0, a0, m->seg[i].base + off, 1);
-                return 1;
-            }
+        uint32_t seg = rd16(m->mem, m->mem_size, sp);
+        uint32_t entry = pc >= 6u ? pc - 6u : 0u;
+        uint32_t off, base = 0u, target;
+        int patched;
+
+        /* The caller reached us through the last six bytes of a jump table
+         * entry, so the entry starts six bytes before the trap word. */
+        if (!m->has_jt || entry < m->jt || entry >= m->jt + m->jt_size ||
+            ((entry - m->jt) & 7u) != 0u ||
+            rd16(m->mem, m->mem_size, entry + 2u) != 0x3F3Cu ||
+            rd16(m->mem, m->mem_size, entry + 4u) != seg ||
+            rd16(m->mem, m->mem_size, entry + 6u) != (0xA000u | trap)) {
+            trace_trap(m, trap, pc, d0, a0, 0u, 0);
+            m->stop_trap = trap;
+            strcpy(m->detail, m->has_jt
+                   ? "segment loader: _LoadSeg was not called through its "
+                     "jump table entry"
+                   : "segment loader: no near-model 'CODE' 0 jump table");
+            g_stop = QRX_M68K_ERR_RUN;
+            return 0;
         }
-        trace_trap(m, trap, pc, d0, a0, 0u, 0);
-        m->stop_trap = trap;
-        strcpy(m->detail, "segment loader: unknown segment");
-        g_stop = QRX_M68K_UNIMPLEMENTED;
-        return 0;
+        /* Read the routine offset before patching: the patch replaces the
+         * entry's first word with the segment number. */
+        off = rd16(m->mem, m->mem_size, entry);
+        patched = patch_jump_table(m, seg);
+        if (patched <= 0) {
+            if (patched == 0)
+                snprintf(m->detail, sizeof m->detail,
+                         "segment loader: unknown CODE %lu",
+                         (unsigned long)seg);
+            trace_trap(m, trap, pc, d0, a0, 0u, 0);
+            m->stop_trap = trap;
+            g_stop = QRX_M68K_ERR_RUN;
+            return 0;
+        }
+        find_segment(m, seg, &base, 0);
+        target = base + 4u + off;
+        /* MOVE.W #segment,-(SP) pushed one word; the routine returns to the
+         * caller's return address. */
+        m68k_set_reg(M68K_REG_A7, sp + 2u);
+        m68k_set_reg(M68K_REG_PC, entry + 2u);
+        trace_trap(m, trap, pc, d0, a0, target, 1);
+        return 1;
     }
     case QRX_M68K_TRAP_GESTALT:      /* 0xA1AD */
         result = hle_gestalt(m, d0, a0);

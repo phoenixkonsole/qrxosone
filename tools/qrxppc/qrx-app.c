@@ -23,11 +23,14 @@
 
 #include "qrx_apprun.h"
 
-#define APP_MEM_SIZE (4u * 1024u * 1024u)
+#define APP_MEM_MIN (4u * 1024u * 1024u)
+#define APP_MEM_MAX (128u * 1024u * 1024u)
 #define APP_ZONE_BASE 0x1000u
-#define APP_ZONE_SIZE 0x8000u
 #define APP_GLUE 0x0800u
-#define APP_LOAD_BASE 0x10000u
+/* The toolbox zone grows up to the fragment load address, which sits above it
+ * so that large applications (Acrobat Reader, 4.5 MB of PEF) fit. */
+#define APP_LOAD_BASE 0x00100000u
+#define APP_ZONE_SIZE (APP_LOAD_BASE - APP_ZONE_BASE)
 
 static void put32(uint8_t *p, uint32_t v)
 {
@@ -157,6 +160,7 @@ int main(int argc, char **argv)
     uint32_t dlen = 0;
     uint32_t rlen = 0;
     uint8_t *mem = 0;
+    uint32_t mem_size = APP_MEM_MIN;
     qrx_ppc_t ppc;
     static qrx_apprun_t run;
     qrx_apprun_status_t st;
@@ -187,7 +191,19 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    mem = (uint8_t *)AllocVec(APP_MEM_SIZE, MEMF_PUBLIC | MEMF_CLEAR);
+    /* Give the fragment room for its code/data sections plus a heap.  Small
+     * apps keep the old 4 MiB; large ones ask for image + 16 MiB (up to the
+     * 128 MiB cap), and fall back to the minimum if the guest cannot give it. */
+    if (image_len + (16u * 1024u * 1024u) > mem_size) {
+        mem_size = (image_len + (16u * 1024u * 1024u) + 0xFFFFFu) & ~0xFFFFFu;
+        if (mem_size > APP_MEM_MAX)
+            mem_size = APP_MEM_MAX;
+    }
+    mem = (uint8_t *)AllocVec(mem_size, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!mem && mem_size > APP_MEM_MIN) {
+        mem_size = APP_MEM_MIN;
+        mem = (uint8_t *)AllocVec(mem_size, MEMF_PUBLIC | MEMF_CLEAR);
+    }
     if (!mem) {
         PutStr((STRPTR)"QRXAppRun: no guest memory\n");
         FreeVec(image);
@@ -195,12 +211,14 @@ int main(int argc, char **argv)
         if (rsrc) FreeVec(rsrc);
         return 1;
     }
-    qrx_ppc_init(&ppc, mem, APP_MEM_SIZE);
+    Printf((STRPTR)"QRXAppRun: %lu KiB guest memory\n",
+           (unsigned long)(mem_size / 1024u));
+    qrx_ppc_init(&ppc, mem, mem_size);
 
     Printf((STRPTR)"QRXAppRun: %s (%lu bytes)\n", (STRPTR)argv[1],
            (unsigned long)image_len);
     st = qrx_apprun_init(&run, &ppc, APP_ZONE_BASE, APP_ZONE_SIZE, APP_GLUE,
-                         APP_MEM_SIZE - 0x1000u, APP_MEM_SIZE - 0x8000u);
+                         mem_size - 0x1000u, mem_size - 0x8000u);
     if (st != QRX_APPRUN_OK) {
         Printf((STRPTR)"QRXAppRun: init failed: %s\n",
                (STRPTR)qrx_apprun_strerror(st));

@@ -1520,7 +1520,8 @@ int qrx_ppc_jit_run_block(qrx_ppc_jit_t *jit, qrx_ppc_t *ppc,
     uint32_t stale = 0;
     qrx_ppc_jit_block_t *block;
 
-    if (!jit || !ppc || budget == 0 || ppc->cpu.pc == 0)
+    /* Generated blocks do not enforce the optional address policy. */
+    if (!jit || !ppc || ppc->access || budget == 0 || ppc->cpu.pc == 0)
         return 0;
 
     for (i = 0; i < jit->nblocks; i++) {
@@ -1586,7 +1587,7 @@ int qrx_ppc_jit_run_block(qrx_ppc_jit_t *jit, qrx_ppc_t *ppc,
 qrx_ppc_status_t qrx_ppc_run_jit(qrx_ppc_t *ppc, qrx_ppc_jit_t *jit,
                                  uint32_t max_insns)
 {
-    if (!jit)
+    if (!jit || (ppc && ppc->access))
         return qrx_ppc_run(ppc, max_insns);
 
     ppc->insns = 0;

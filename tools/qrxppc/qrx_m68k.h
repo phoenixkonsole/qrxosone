@@ -26,6 +26,8 @@
 #define QRX_M68K_DETAIL 160u
 #define QRX_M68K_A5_BASE 0x00002000u   /* jump table and application globals */
 #define QRX_M68K_A5_MAX 0x00010000u    /* space reserved for the A5 world */
+#define QRX_M68K_LM_CURRENT_A5 0x00000904u  /* low memory: register A5 */
+#define QRX_M68K_LM_CURJT_OFFSET 0x00000934u /* low memory: jump table offset */
 #define QRX_M68K_EXIT_STUB 0x00001000u /* TRAP #0: the application returned */
 #define QRX_M68K_STACK_TOP 0x00080000u /* stack grows down from here */
 #define QRX_M68K_CODE_BASE 0x00100000u /* first segment */
@@ -393,6 +395,9 @@ typedef struct {
     uint32_t a5;
     uint32_t entry;
     uint32_t sp;
+    uint32_t jt;             /* near-model jump table in the A5 world */
+    uint32_t jt_size;
+    uint8_t has_jt;          /* 'CODE' 0 carried a usable near-model table */
     uint32_t heap;           /* next NewPtr address */
     uint32_t heap_end;       /* first address NewPtr may not hand out */
     /* Blocks handed back by DisposeControl/KillControls; NewPtr reuses them

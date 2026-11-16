@@ -21,6 +21,15 @@
 #define QRX_STUB_DIRECT 0u
 #define QRX_STUB_INDIRECT 1u
 
+/* Mixed Mode entry points have no A-line trap of their own.  The runner
+ * serves them directly with these private selectors, before the trap is
+ * handed to qrx_tb_dispatch().  They stay outside the 0xA000..0xAFFF Toolbox
+ * range, so a real A-line trap can never be mistaken for one of them. */
+#define QRX_APP_TRAP_NEW_ROUTINE_DESCRIPTOR 0xEE01u
+#define QRX_APP_TRAP_CALL_UNIVERSAL_PROC 0xEE02u
+#define QRX_APP_TRAP_DISPOSE_ROUTINE_DESCRIPTOR 0xEE03u
+#define QRX_APP_TRAP_NEW_FAT_ROUTINE_DESCRIPTOR 0xEE04u
+
 typedef struct {
     const char *library;
     const char *name;

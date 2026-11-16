@@ -170,6 +170,75 @@ Damit ist Mid-Block-SMC abgedeckt. Offen sind ISA-Tags und
 Seitengenerationen, FPU-JIT und AltiVec. Die Roadmap führt diese Punkte als offene
 P1.4-Arbeit.
 
+## Mach-O-Prototyp (Mac OS X, PPC32)
+
+`tools/qrxppc/qrx_macho.c` ist ein von PEF getrennter Loader-Prototyp. Er
+wählt aus einem big-endian 32-Bit-Fat-Container den ersten PPC-Slice oder liest
+ein dünnes PPC32-`MH_EXECUTE`. Er prüft die Load-Command-Grenzen, die
+`LC_SEGMENT`-Datei- und VM-Bereiche sowie den `PPC_THREAD_STATE` aus
+`LC_UNIXTHREAD`; dessen PC muss in ausführbaren, dateigestützten Segmentdaten
+liegen. `qrx_macho_map()` kopiert Segmente an ihre festen VM-Adressen, füllt
+BSS mit Null und überspringt unzugängliche Reservierungen wie `__PAGEZERO`.
+Vor dem ersten Schreibzugriff werden Gastgrenzen und Segmentüberlappungen
+geprüft. Die Quelldatei muss bis zum Mapping unverändert verfügbar bleiben und
+darf den Gastspeicher nicht überlappen.
+
+Der Inspector und der begrenzte Runner lassen sich auf dem Host bauen:
+
+```sh
+cc -std=c99 -O2 tools/qrxppc/qrx_macho.c tools/qrxppc/qrx-mach.c \
+  tools/qrxppc/qrx_ppc.c tools/qrxppc/qrx_ppc_fpu.c -lm -o qrx-mach
+./qrx-mach --map /pfad/zum/Mach-O
+./qrx-mach --run /pfad/zum/statischen-testprogramm
+```
+
+`--map` bildet die Segmente testweise in höchstens 128 MiB temporärem Speicher
+ab; ohne Option werden nur Metadaten ausgegeben. `test_macho.c` deckt PPC-/Fat-
+Auswahl, Trunkierung, fehlerhafte Commands, Nullfüllung und die atomare
+Ablehnung von Überlappungen und zu wenig Speicher ab. Der reale QuickTime
+Player 7.7 (PPC7400-Slice) wurde auf dem Host inspiziert und abgebildet:
+Einstieg `0x31e0`, fünf Segmente, 17 Dylib-Kommandos und ein dynamischer
+Linker. `tools/qrxppc/build.sh` baut den Inspector als `C:QRXMach` und den
+synthetischen Test als `C:QRXMachTest`. Letzterer lief im isolierten
+ARMithlon-68040-Gast mit `Mach-O prototype: 0 failure(s)` und Rückgabecode 0;
+der Test prüft Parser und Segmentmapping, nicht die Ausführung einer App.
+Für isolierte Installationen kann `QRXPPC_INSTALL_TREE` auf eine Kopie des
+Systembaums gesetzt werden.
+
+`--run` startet ausschließlich den begrenzten statischen Testpfad im
+PPC-Interpreter. Er bildet Segmente ab und legt einen 16-Byte-ausgerichteten
+Initialstack mit `argc=1`, `argv[0]="qrxmach"` sowie leeren `env`- und
+`apple`-Listen an. `r1` zeigt auf `argc`; alle übrigen Register werden auf
+null gesetzt. BSD-`sc` unterstützt nur `write` (Nummer 4, ausschließlich fd 1/2)
+und `exit` (Nummer 1). `write` liefert die Bytezahl beziehungsweise EBADF,
+EFAULT oder EIO in `r3` und setzt bei Fehlern `CR0.SO`; unbekannte Syscalls,
+sonstige Traps und abgelaufenes Instruktionsbudget stoppen den Runner.
+
+Für den Mach-O-Start gelten die `initprot`-Rechte der Segmente: Der Interpreter
+prüft bei jedem Instruktionsabruf und jedem Integer-/FPU-Speicherzugriff den
+gesamten Bereich auf Ausführ-, Lese- beziehungsweise Schreibrecht. Der Stack
+ist les- und schreibbar, aber nicht ausführbar; nicht zugeordnete Bereiche und
+`__PAGEZERO` sind unzugänglich. Auch `write`-Puffer müssen vollständig in
+einem lesbaren Segment oder im Stack liegen, sonst folgt `EFAULT`. Segmente
+einschließlich reservierter Bereiche dürfen sich nicht überlagern. Ein
+Zugriff über eine Segmentgrenze wird derzeit auch dann abgelehnt, wenn das
+Nachbarsegment dieselben Rechte besitzt. Wenn eine Zugriffskontrolle aktiv
+ist, benutzt der JIT den Interpreter; generierter Code umgeht die Kontrolle
+nicht.
+
+Der synthetische Mach-O-Test lädt `argv[0]` über `r1`, schreibt es und endet
+mit Exit-Code 1 (`argc`). Im isolierten ARMithlon-68040-Gast bestehen dieser
+Ablauf und die Schutztests für Lücken, `__PAGEZERO`, Code, Stack, FPU und
+Syscall-Puffer (`QRXMachTest`, 0 Fehler). Der Runner weist unter anderem
+dyld-/Dylib-Kommandos, unbekannte Load Commands,
+Segment-Sections, nichtleere zusätzliche Thread-Zustände und gesetzte
+Mach-O-Flags ausdrücklich zurück. Das ist ein eingeschränkter Prozessstart,
+kein allgemeiner Darwin-Loader: Dyld, Relokationen, Imports, reguläres crt,
+weitere Systemaufrufe, vollständige VM-/Seitentabellen-Semantik, Frameworks,
+AltiVec und ein echter Prozess-/Dateideskriptorkontext fehlen. Die Kontrolle
+ist segmentbasiert und weder eine vollständige Speicherverwaltung noch eine
+Sicherheits-Sandbox; QuickTime und Ableton lassen sich damit nicht starten.
+
 ## PEF-Container (P2.1, Lesepfad)
 
 `tools/qrxppc/qrx_pef.c` liest PEF-Container (`Joy!peff`) für `pwpc`:
@@ -469,11 +538,13 @@ Das Kommando `QRXAppRun <app> [resource-fork]` liest die Dateien über
 AmigaDOS, baut bei getrennten Forks ein MacBinary-Bild im Speicher (Version 0,
 ohne CRC) und gibt Trace und Ergebnis aus. Exit-Codes: 0 = `main` kehrte
 zurück, 2 = erster nicht implementierter Trap, 3 = keine PEF-Anwendung,
-1 = anderer Halt. Der Runner belegt 4 MiB Gast-speicher, Zone ab 0x1000
-(32 KiB), Glue bei 0x800, Ladeadresse 0x10000, Stack am oberen Ende.
+1 = anderer Halt. Der Runner belegt mindestens 4 MiB Gast-Speicher; für
+große Fragmente wächst die Belegung auf Image + 16 MiB (höchstens 128 MiB).
+Die Zone reicht von 0x1000 bis zur Ladeadresse 0x100000, Glue liegt bei
+0x800, der Stack am oberen Ende.
 
 Importe löst `tools/qrxppc/qrx_appstub.c` über eine Namens→Trap-Tabelle auf,
-die aus `docs/QRXPPC_EXPANDER_IMPORTS.md` entsteht (66 Symbole: 54 direkt,
+die aus `docs/QRXPPC_EXPANDER_IMPORTS.md` entsteht (70 Symbole: 58 direkt,
 12 indirekt). Für jeden Import baut der Runner einen Stub im Gast-Speicher:
 zwei Wörter TVector (Einsprung, Kopie des App-TOC), dann `li r0,0`, acht
 `mr`-Kopien (`r3…r10` → `r4…r11`), `lis`/`ori r3,<Trap>`, `sc`, `blr`. Ein
@@ -484,6 +555,20 @@ beim ersten solchen Aufruf mit `QRX_APPRUN_UNIMPLEMENTED` und der Meldung
 `missing import <Bibliothek>::<Symbol>`; `qrx_apprun_missing_import()` nennt
 Bibliothek und Symbol, `QRXAppRun` gibt zusätzlich die Stub-Zahlen aus
 (direkt, indirekt, ohne HLE).
+
+Die Mixed-Mode-Einstiege `NewRoutineDescriptor`,
+`NewFatRoutineDescriptor`, `DisposeRoutineDescriptor` und
+`CallUniversalProc` werden über die privaten Selektoren 0xEE01–0xEE04
+bedient, also außerhalb des A-Line-Toolbox-Bereichs. `NewRoutineDescriptor`
+legt einen `RoutineDescriptor` im 2-Byte-gepackten Format aus `qrx_mix.h` in
+der Zone ab (ein Record, ISA 68k oder PPC); die Fat-Variante erzeugt zwei
+Records für dieselbe Adresse. `DisposeRoutineDescriptor` gibt den Block über
+den Memory Manager frei. `CallUniversalProc` löst den PPC-Record auf,
+akzeptiert eine direkte Codeadresse oder einen CFM-Transition-Vektor
+(Einsprungwort + TOC) und ruft das Ziel über die Brücke auf. Übersetzt werden
+nur registerbasierte ProcInfos mit höchstens vier Parametern; eine
+stackbasierte oder variadische ProcInfo wird abgelehnt, der Aufruf liefert 0
+und `run->detail` nennt den Grund.
 
 ## System-HLE: Gestalt und Zone
 
@@ -518,6 +603,19 @@ beiliegenden ISO (APPL/STi0, Daten `ST50…`, Resource-Fork mit `CODE`) wird als
 `68k application: 'CODE' resources, no 'cfrg'` abgelehnt (Exit 3). `test_apprun`
 in `qrx_ppc_test.c` prüft zusätzlich TVector-/TOC-Übernahme, Trace-Inhalt,
 den 68k-Fall und die Ablehnung eines Nicht-MacBinary-Bildes.
+
+Acrobat Reader 4.0 (PPC-PEF, 800 Importe) läuft nach dem Laden bis zu zwei
+Aufrufen von `NewRoutineDescriptor` (beide ISA PPC, ProcInfos 0x000003C0 und
+0x000FFFC0) und erhält gültige Deskriptoren; danach endet der Lauf in einem
+PPC-Fehler in App-Code (`this = -1`, PC 0x00136658). Derselbe Fehler tritt
+auf, wenn `NewRoutineDescriptor` einen Nullzeiger liefert — er hängt also
+nicht von der Mixed-Mode-HLE ab, sondern von Acrobats weiterem Startcode
+(vermutlich fehlende Begleitdateien oder ein noch offener Toolbox-Pfad).
+`CallUniversalProc` wird von Acrobat vor diesem Punkt nicht aufgerufen.
+Ein synthetisches PEF im Gast prüft den vollständigen Weg: `NewRoutineDescriptor`
+liefert einen Deskriptor (0x1004), `CallUniversalProc` ruft damit eine
+PPC-Routine auf, die 42 zurückgibt, und `main` kehrt nach zwei Traps mit
+Exit 0 zurück.
 
 Größtes reales Fragment: das PPC-Engine-Paket aus dem `ST50`-Installer des
 ISO. `unar` packt den Datenfork von `StuffIt Expander™` aus (381116 Bytes,
@@ -572,25 +670,35 @@ Heap-Ende 0x3FF00000, `NewPtr(0x1000)` = 0x20000000, beide enden mit
 Anwendungszone. Alle vom Emulator gemeldeten
 Adressen beziehen sich auf die Größe, die tatsächlich allokiert wurde:
 Low Memory ab 0, `MemTop` (0x0108) = `mem_size`, `BufPtr` (0x010C) =
-`mem_size` − 0x1000; A5-Welt ab 0x2000 (dort liegt die Kopie von `CODE` 0, der
-Jump-Table); Ausstiegs-Stub bei 0x1000 (`ILLEGAL`); Stack wächst von 0x80000
-nach unten; Segmente beginnen bei 0x100000 und werden seitenweise
+`mem_size` − 0x1000; Ausstiegs-Stub bei 0x1000 (`ILLEGAL`); Stack wächst von
+0x80000 nach unten; Segmente beginnen bei 0x100000 und werden seitenweise
 hintereinander gelegt, sie müssen unterhalb der Heap-Basis enden; die
 Heap-Basis ist `mem_size / 2`, `NewPtr` darf bis `mem_size` − 1 MiB
-ausgeben.
+ausgeben. Ohne klassischen `CODE`-0-Kopf liegt die A5-Welt bei 0x2000 (dort
+steht die Kopie der 2-Byte-Fixtures). Mit Near-Model-Kopf wird A5 so hoch
+gelegt, dass die deklarierte `below A5`-Größe darunter Platz hat:
+`A5 = align4k(0x2000 + below)`. Die Sprungtabelle steht bei
+`A5 + CurJTOffset`; `CurrentA5` (0x0904) und `CurJTOffset` (0x0934) werden
+entsprechend gesetzt.
 
 Laden: `qrx_m68k_load()` wertet den Resource-Fork aus (Resource-Map:
 Typ-Liste, 8-Byte-Typ-Einträge, 12-Byte-Referenzen, Datenoffsets relativ zum
-Datenbereich), sammelt alle `CODE`-Ressourcen und kopiert `CODE` 0 nach A5
-sowie `CODE` 1..n als Segmente. Der Einstieg ist der Beginn von `CODE` 1;
-`main` kehrt über einen `ILLEGAL`-Stub zurück, den der Trap-Callback als
-„main returned“ wertet. `QRX68KRun` gibt Segmente, A5 und Einstieg aus.
+Datenbereich), sammelt alle `CODE`-Ressourcen und kopiert `CODE` 1..n als
+Segmente. Trägt `CODE` 0 einen vollständigen Near-Model-Kopf (vier Longwörter:
+`above A5`, `below A5`, Sprungtabellengröße, -offset), so wird die Tabelle nach
+`A5 + Offset` kopiert und der Einstieg ist die erste Tabellenposition
+(`Einstieg+2`, also `MOVE.W #segment,-(SP)`/`_LoadSeg`). Der erste Eintrag muss
+auf ein geladenes Segment und einen Offset innerhalb seines Codes zeigen.
+Bilder ohne vollen Kopf (die 2-Byte-Fixtures der Host-Tests) starten weiterhin
+am Beginn des ersten Segments. `main` kehrt über einen `ILLEGAL`-Stub zurück,
+den der Trap-Callback als „main returned“ wertet. `QRX68KRun` gibt Segmente,
+A5 und Einstieg aus.
 
 HLE-Tabelle (68k-ABI, Argumente in D0/A0 bzw. auf dem Stack):
 
 | Trap | Name | Verhalten |
 | --- | --- | --- |
-| `0xA9F0` | `_LoadSeg` | liest Segment/Offset vom Stack, springt in das Segment |
+| `0xA9F0` | `_LoadSeg` | klassischer Near-Model-Aufruf: Segmentnummer als Wort vom Stack, Eintrag über `PC−6`; alle ungeladenen Einträge dieses Segments werden zu Segmentnummer + `JMP abs.l` auf `Segmentbasis+4+Offset` gepatcht, dann wird der `JMP` ausgeführt |
 | `0xA9F4` | `_ExitToShell` | beendet den Lauf mit `EXITED` |
 | `0xA1AD` | `_Gestalt` | `'thds'`=0, `'sysv'`=0x810, `'vers'`=0x10000, `'os  '`=0, `'addr'`= 1 bei `MemTop` > 16 MiB (sonst 0), sonst -5551; Antwortzeiger wird geprüft |
 | `0xA11A`/`0xA11B` | `_GetZone`/`_SetZone` | Zone = Heap-Basis, `SetZone` = `noErr` |
@@ -662,6 +770,33 @@ Verifiziert im Gast (`C:QRX68KRun`): ein synthetisches MacBinary-Programm ruft
 `Gestalt` (`'sysv'`, Ergebnis 0, Wert 0x810 an der Antwortadresse) und danach
 `TEInit`; der Lauf stoppt bei `0xA9CC`.
 
+Klassischer `CODE`-0-Einstieg (Near Model), Host und Gast geprüft: Ein
+synthetisches Programm hat zwei Sprungtabelleneinträge (Einstieg `CODE` 2,
+Cross-Segment-Aufruf `CODE` 1), beide Segmente mit 4-Byte-Kopf, in einer
+unsortierten Resource-Map (`CODE` 2 vor `CODE` 1). Beim Laden stehen A5 =
+0x3000, Sprungtabelle = 0x3020, Einstieg = 0x3022, `CurrentA5` = 0x3000,
+`CurJTOffset` = 32. Der Lauf patcht beide Einträge (`0002 4EF9 …`,
+`0001 4EF9 …`), ruft `CODE` 1 über `JSR` auf die zweite Tabellenposition auf,
+die Routine schreibt 0x11111111 nach 0x3000 und liefert 0xA5A5A5A5, der
+Aufrufer schreibt den Wert nach 0x3004 und beendet mit `ExitToShell`. Im
+ARMithlon-Gast meldet `QRX68KRun` `2 segment(s), A5=0x00003000,
+entry=0x00003022`, zwei `_LoadSeg`-Traps mit Zielen 0x00100024 und 0x00101044
+sowie `exited (ExitToShell), 3 trap(s), 3 implemented`; der Runner-Exit-Code
+ist in diesem Fall 0, der Gast endet nach seinem Endmarker. Dieselbe Fixture
+mit VISE-Kopf in `CODE` 1 wird im Gast mit `'CODE' resources are packed` /
+`VISE/InstallerMaker-packed 'CODE' resource (lowest CODE 1, 1 packed
+segment(s))` und rc=4 abgelehnt, bevor Code läuft. Der Host-Test
+lehnt außerdem Far Model (`0xFFFF`-Marker), Sprungtabellengrößen, die kein
+positives Vielfaches von 8 sind, abgeschnittene Tabellen, Einstiegs-Offsets
+außerhalb des Segments, fehlende Einstiegssegmente und Einträge ohne
+`MOVE.W #segment`/`_LoadSeg`-Form mit `QRX_M68K_ERR_IMAGE` ab; ein
+VISE-gepacktes Segment bleibt trotz gültigem `CODE` 0 `ERR_PACKED`.
+Nicht implementiert: Far Model, `_UnloadSeg`/Rückbau der Einträge,
+Code-Heaps, Verschieben von Segmenten und das Auswerten der
+Segmentkopf-Zähler (gepatcht werden alle ungeladenen Einträge mit dieser
+Segment-ID). Ein vollständig ungepacktes reales 68k-Programm wurde damit noch
+nicht gestartet; der Nachweis ist ein synthetisches Near-Model-Programm.
+
 Reale Installer sind **nicht** ausführbar, weil ihre `CODE`-Ressourcen
 gepackt sind: VISE/InstallerMaker (LightWave 6.5, 15 Segmente) stellt jeder
 Ressource einen 16-Byte-Kopf voran (`A89F 000C`, CRC, entpackte Größe 0x5FA,
@@ -669,12 +804,37 @@ gepackte Größe = Ressourcenlänge), Aladdins ADC-Packer (StuffIt Expander 5.5)
 beginnt mit `ADCR`. Beide Rumpfbereiche sind kein 68k-Code (geprüft mit
 Disassemblierung ab Offset 4/8/12/16). Der Loader erkennt die Köpfe in
 `packed_code()` und liefert `QRX_M68K_ERR_PACKED` mit dem Format in
-`m.detail`; `QRX68KRun` gibt „`CODE` resources are packed“ plus Format aus und
-endet mit Exit 4. Im Gast belegt: LightWave meldet
+`m.detail`; `QRX68KRun` gibt „`CODE` resources are packed“ plus Format, die
+niedrigste erkannte gepackte `CODE`-ID und die Anzahl erkannter gepackter
+Segmente aus und endet mit Exit 4. Die niedrigste ID ist nicht notwendigerweise
+der Programmeinstieg; die Zählung umfasst höchstens die 64 erfassten
+`CODE`-Ressourcen. Im Gast belegt: LightWave meldet
 „VISE/InstallerMaker-packed 'CODE' resource“, StuffIt
 „Aladdin ADC-packed 'CODE' resource“, jeweils rc=4. Ungepackte Segmente gibt
 es daneben auch (StuffIt `CODE` 14: 4-Byte-Prolog `00000001`, dann
 `moveq #0,d3`), sie sind aber kein vollständiges Programm.
+
+Acrobat Reader 4.05a, schreibgeschützt untersucht: Das vom Nutzer bereitgestellte
+`reader_installer_4.05a.sit` (SHA-256
+`07cf9f61d03986f5a5caa026004da4d063c2c97b6e2c176eb3d6cf945eac940c`)
+enthält einen Installer mit Finder-Typ/Creator `APPL`/`VIS3`, einem 5.626.922
+Byte großen `SVCT`-Datenfork und einem 438.033 Byte großen Resource-Fork
+(SHA-256 `df78e5cc1328adc447ce3cbce8df0d6ac2e542d5ad5f8ef6f5936084a1073719`).
+Der Resource-Fork enthält 26 `CODE`-Ressourcen: `CODE` 0 als Sprungtabelle,
+23 als VISE-gepackt erkannte positive IDs sowie die zwei nicht mit diesem
+Packkopf versehenen IDs 1000 und 1002. Die erste Sprungtabellenposition in
+`CODE` 0 nennt ID 1002; der Loader wertet diese Tabelle seit dem
+Near-Model-Einstieg aus, verweigert den Installer aber weiterhin wegen der
+gepackten Segmente. Kein `cfrg`-Resource ist vorhanden;
+`SVCT` wurde nicht entpackt, daher ist über eventuell darin enthaltene
+PPC-Programme keine Aussage möglich. Im isolierten ARMithlon-Gast meldet
+`QRX68KRun` `VISE/InstallerMaker-packed 'CODE' resource (lowest CODE 1, 23
+packed segment(s))`; `QRXAppRun` meldet `68k application: 'CODE' resources,
+no 'cfrg'` und verweigert den Start. Beide Antworten sind Ablehnungen vor der
+Ausführung, keine erfolgreiche Installation. Der gezielte Host-Test prüft
+VISE, ADC und zwei gepackte IDs in unsortierter Resource-Map. Ein Decoder für
+VISE/ADC fehlt weiterhin; der ungepackte Near-Model-Einstieg wird inzwischen
+ausgeführt, was an Acrobat ohne Decoder aber nichts ändert.
 
 Speicherbudget, im Gast und auf dem Host geprüft (Testprogramm: `Gestalt`,
 `NewPtr(0x1000)`, `GetZone`, `NewPtr(0xFFFF0)`, dann `SysEnvirons`):
@@ -1019,13 +1179,10 @@ lässt sich nicht mehr freigeben. Control-Records, Dialog-Record samt
 Item-Tabelle und Fenster-Record gehen wirklich an den Heap zurück;
 `_DisposePtr` kann das nicht, weil der Trap keine Größe mitbringt, und
 `_GetWindow`/`_NewWindow` aus 'WIND'-Ressourcen gibt es nicht. Die `CODE`-Ressourcen
-der Installer tragen Prologe (Aladdin: 8 Byte `00000001`+CRC, VISE/Think:
-`A89F 000C`+12 Byte), die der Mac-Segment-Loader überspringt — dieser Prolog
-wird noch nicht erkannt, deshalb beginnt der Lauf bei `0xA89F`. Und die
-eigentlichen PPC-Programme in den `.sit`-Archiven liegen in
-InstallerMaker-/VISE-Containern (`SVCT`, Entropie 7,98): sie werden erst
-erreichbar, wenn der Installer selbst läuft, also Resource-/File-Manager-HLE,
-Dialog-/Event-Pfad und die Prolog-Erkennung stehen.
+der untersuchten Installer können gepackt sein: Die VISE- und ADC-Packköpfe
+werden erkannt und vor der Ausführung abgelehnt, aber nicht dekomprimiert.
+`SVCT`-Installer-Payloads sind nicht erschlossen; ob und welche PPC-Programme
+sie enthalten, ist ohne Decoder oder laufenden Installer nicht belegt.
 
 
 ## Mixed Mode (P1.5)

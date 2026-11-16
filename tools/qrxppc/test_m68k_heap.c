@@ -2159,6 +2159,10 @@ static void packed_case(uint8_t *fork, uint32_t len)
     if (st != QRX_M68K_ERR_PACKED) {
         printf("FAIL packed VISE: load = %s\n", qrx_m68k_status_name(st));
         failures++;
+    } else if (strcmp(m.detail, "VISE/InstallerMaker-packed 'CODE' resource "
+                                "(lowest CODE 1, 1 packed segment(s))") != 0) {
+        printf("FAIL packed VISE detail: %s\n", m.detail);
+        failures++;
     } else {
         printf("packed VISE header: refused with ERR_PACKED ok\n");
     }
@@ -2169,9 +2173,383 @@ static void packed_case(uint8_t *fork, uint32_t len)
     if (st != QRX_M68K_ERR_PACKED) {
         printf("FAIL packed ADC: load = %s\n", qrx_m68k_status_name(st));
         failures++;
+    } else if (strcmp(m.detail, "Aladdin ADC-packed 'CODE' resource "
+                                "(lowest CODE 1, 1 packed segment(s))") != 0) {
+        printf("FAIL packed ADC detail: %s\n", m.detail);
+        failures++;
     } else {
         printf("packed ADC header: refused with ERR_PACKED ok\n");
     }
+
+    /* Real resource maps can list CODE 1001 ahead of CODE 1. Both must be
+     * counted, and the diagnostic must not depend on map ordering. */
+    {
+        uint8_t segment[sizeof code1];
+        uint8_t image[1024];
+        test_res_t extra;
+        uint32_t image_len, map_off, type_list, refs;
+
+        memset(segment, 0, sizeof segment);
+        wr32(segment, 0xA89F000Cu);
+        wr32(segment + 8u, sizeof segment * 2u);
+        wr32(segment + 12u, sizeof segment);
+        extra.type = 0x434F4445u;
+        extra.id = 1;
+        extra.data = segment;
+        extra.len = sizeof segment;
+        image_len = build_fork_ex(image, sizeof image, segment, sizeof segment,
+                                  &extra, 1u);
+        if (image_len == 0u) {
+            printf("FAIL packed unordered CODE fixture\n");
+            failures++;
+            return;
+        }
+        map_off = rd32(image + 4u);
+        type_list = map_off + rd16(image + map_off + 24u);
+        refs = type_list + rd16(image + type_list + 8u);
+        wr16(image + refs + 12u, 1001u);
+        /* Include the third reference in the first CODE type list; the
+         * builder's extra type is renamed to keep CODE unique in the map. */
+        wr16(image + type_list + 6u, 2u);
+        wr32(image + type_list + 10u, 0x54455354u); /* 'TEST' */
+        st = qrx_m68k_load(&m, image, image_len);
+        if (st != QRX_M68K_ERR_PACKED ||
+            strcmp(m.detail, "VISE/InstallerMaker-packed 'CODE' resource "
+                             "(lowest CODE 1, 2 packed segment(s))") != 0) {
+            printf("FAIL packed unordered CODE: %s (%s)\n",
+                   qrx_m68k_status_name(st), m.detail);
+            failures++;
+        } else {
+            printf("packed unordered CODE: first ID and count ok\n");
+        }
+    }
+}
+
+/* ---------------------------------------------------------------- CODE 0 */
+
+/* Near-model startup fixture.  'CODE' 0 carries two jump table entries: entry 0
+ * starts CODE 2, which calls entry 1 (CODE 1) across segments.  The called
+ * routine leaves a marker and returns a value; the caller checks the value and
+ * exits, or reaches an unimplemented trap when a jump went to the wrong place.
+ * Both segments have the 4-byte near-model header; the four bytes before each
+ * routine hold an unimplemented trap, so a loader that forgets the header (and
+ * lands four bytes early) fails instead of running through NOP padding. */
+
+#define CODE0_A5 0x00003000u
+#define CODE0_JT 0x00003020u
+
+static const uint8_t code0_seg1[] = {
+    0x23, 0xFC, 0x11, 0x11, 0x11, 0x11, 0x00, 0x00, 0x30, 0x00,
+    0x20, 0x3C, 0xA5, 0xA5, 0xA5, 0xA5,
+    0x4E, 0x75
+};
+
+static const uint8_t code0_seg2[] = {
+    0x4E, 0xB9, 0x00, 0x00, 0x30, 0x2A,  /* jsr $302a: entry 1 + 2 */
+    0x23, 0xC0, 0x00, 0x00, 0x30, 0x04,  /* move.l d0,$3004 */
+    0x0C, 0x80, 0xA5, 0xA5, 0xA5, 0xA5,  /* cmp.l #$a5a5a5a5,d0 */
+    0x67, 0x00, 0x00, 0x04,              /* beq.w over the trap */
+    0xA9, 0xCC,                          /* _TEInit (not implemented) */
+    0xA9, 0xF4                           /* _ExitToShell */
+};
+
+static uint32_t make_segment(uint8_t *out, uint32_t cap, const uint8_t *code,
+                             uint32_t len, uint32_t at)
+{
+    uint32_t total = 4u + at + len, i;
+
+    if (total > cap || at < 4u || (at & 1u) != 0u)
+        return 0u;
+    memset(out, 0, total);
+    wr16(out, 0u);                         /* first jump table entry */
+    wr16(out + 2u, 1u);                    /* entry count */
+    for (i = 4u; i < 4u + at; i += 2u)
+        wr16(out + i, 0x4E71u);            /* NOP filler */
+    wr16(out + at, 0xA9CCu);               /* guard before the routine */
+    memcpy(out + 4u + at, code, len);
+    return total;
+}
+
+static uint32_t make_code0(uint8_t *out, uint32_t cap)
+{
+    if (cap < 32u)
+        return 0u;
+    wr32(out, 0x3D0u);                     /* above A5 */
+    wr32(out + 4u, 0x40u);                 /* below A5 */
+    wr32(out + 8u, 16u);                   /* jump table size */
+    wr32(out + 12u, 32u);                  /* jump table offset */
+    wr16(out + 16u, 0x20u);                /* entry 0: CODE 2, offset $20 */
+    wr16(out + 18u, 0x3F3Cu);
+    wr16(out + 20u, 2u);
+    wr16(out + 22u, 0xA9F0u);
+    wr16(out + 24u, 0x40u);                /* entry 1: CODE 1, offset $40 */
+    wr16(out + 26u, 0x3F3Cu);
+    wr16(out + 28u, 1u);
+    wr16(out + 30u, 0xA9F0u);
+    return 32u;
+}
+
+/* Build a fork whose map lists CODE 1/2 in the given order; the jump table
+ * always names ID 2 as the entry segment. */
+static uint32_t build_classic_fork(uint8_t *out, uint32_t cap, const uint8_t *c0,
+                                   uint32_t c0len, const uint8_t *s1,
+                                   uint32_t s1len, const uint8_t *s2,
+                                   uint32_t s2len, int reverse)
+{
+    const uint32_t data_off = 0x0100u;
+    struct {
+        int16_t id;
+        const uint8_t *d;
+        uint32_t len;
+        uint32_t off;
+    } r[3];
+    uint32_t dlen = 0u, refs_at, type_list_len, map_off, map_len, total, i;
+    unsigned order[3] = { 0u, 1u, 2u };
+    uint8_t *map, *tl, *ref;
+
+    r[0].id = 0; r[0].d = c0; r[0].len = c0len;
+    r[1].id = 1; r[1].d = s1; r[1].len = s1len;
+    r[2].id = 2; r[2].d = s2; r[2].len = s2len;
+    if (reverse) {
+        order[1] = 2u;
+        order[2] = 1u;
+    }
+    for (i = 0u; i < 3u; i++) {
+        r[i].off = dlen;
+        dlen += 4u + r[i].len;
+    }
+    refs_at = 2u + 8u;                     /* one type, three references */
+    type_list_len = refs_at + 3u * 12u;
+    map_off = data_off + dlen;
+    map_len = 28u + type_list_len;
+    total = map_off + map_len;
+    if (total > cap)
+        return 0u;
+    memset(out, 0, total);
+    wr32(out, data_off);
+    wr32(out + 4u, map_off);
+    wr32(out + 8u, dlen);
+    wr32(out + 12u, map_len);
+    for (i = 0u; i < 3u; i++) {
+        wr32(out + data_off + r[i].off, r[i].len);
+        memcpy(out + data_off + r[i].off + 4u, r[i].d, r[i].len);
+    }
+    map = out + map_off;
+    wr32(map, data_off);
+    wr32(map + 4u, map_off);
+    wr32(map + 8u, dlen);
+    wr32(map + 12u, map_len);
+    wr16(map + 24u, 28u);
+    wr16(map + 26u, (uint16_t)(28u + type_list_len));
+    tl = map + 28u;
+    wr16(tl, 0u);
+    wr32(tl + 2u, 0x434F4445u);            /* 'CODE' */
+    wr16(tl + 6u, 2u);                     /* three resources */
+    wr16(tl + 8u, (uint16_t)refs_at);
+    ref = tl + refs_at;
+    for (i = 0u; i < 3u; i++) {
+        uint32_t off = r[order[i]].off;
+
+        wr16(ref, (uint16_t)r[order[i]].id);
+        wr16(ref + 2u, 0xFFFFu);
+        ref[5] = (uint8_t)(off >> 16);
+        ref[6] = (uint8_t)(off >> 8);
+        ref[7] = (uint8_t)off;
+        ref += 12u;
+    }
+    return total;
+}
+
+static uint32_t code0_fixture(uint8_t *out, uint32_t cap)
+{
+    uint8_t c0[32], s1[128], s2[128];
+    uint32_t l1, l2;
+
+    if (make_code0(c0, sizeof c0) == 0u)
+        return 0u;
+    l1 = make_segment(s1, sizeof s1, code0_seg1, sizeof code0_seg1, 0x40u);
+    l2 = make_segment(s2, sizeof s2, code0_seg2, sizeof code0_seg2, 0x20u);
+    if (l1 == 0u || l2 == 0u)
+        return 0u;
+    return build_classic_fork(out, cap, c0, sizeof c0, s1, l1, s2, l2, 1);
+}
+
+static uint32_t segment_base(const qrx_m68k_t *m, uint32_t id)
+{
+    unsigned i;
+
+    for (i = 0u; i < m->code_count; i++)
+        if (m->seg[i].id == id)
+            return m->seg[i].base;
+    return 0u;
+}
+
+static void expect_code0_error(const char *what, const uint8_t *img,
+                               uint32_t len, qrx_m68k_status_t want,
+                               const char *needle)
+{
+    static qrx_m68k_t m;
+    qrx_m68k_status_t st;
+
+    if (len == 0u) {
+        printf("FAIL CODE 0 %s: could not build the fixture\n", what);
+        failures++;
+        return;
+    }
+    qrx_m68k_unload(&m);
+    st = qrx_m68k_load(&m, img, len);
+    if (st != want || strstr(m.detail, needle) == NULL) {
+        printf("FAIL CODE 0 %s: %s (%s), expected %s\n", what,
+               qrx_m68k_status_name(st), m.detail,
+               qrx_m68k_status_name(want));
+        failures++;
+    } else {
+        printf("CODE 0 %s: refused with %s ok\n", what,
+               qrx_m68k_status_name(st));
+    }
+}
+
+/* The classic near-model entry point: 'CODE' 0's jump table lives in the A5
+ * world, starts in the first entry, and patches entries to JMP when the
+ * segment arrives through _LoadSeg. */
+static void code0_case(void)
+{
+    uint8_t c0[32], s1[128], s2[128], image[1024], bad[1024];
+    uint32_t l1, l2, len, badlen, base1, base2, loads = 0u, i;
+    static qrx_m68k_t m;
+    qrx_m68k_status_t st;
+    int before = failures;
+
+    l1 = make_segment(s1, sizeof s1, code0_seg1, sizeof code0_seg1, 0x40u);
+    l2 = make_segment(s2, sizeof s2, code0_seg2, sizeof code0_seg2, 0x20u);
+    len = code0_fixture(image, sizeof image);
+    if (l1 == 0u || l2 == 0u || len == 0u) {
+        printf("FAIL CODE 0: could not build the fixture\n");
+        failures++;
+        return;
+    }
+
+    qrx_m68k_unload(&m);
+    st = qrx_m68k_load(&m, image, len);
+    if (st != QRX_M68K_OK) {
+        printf("FAIL CODE 0: load = %s (%s)\n", qrx_m68k_status_name(st),
+               m.detail);
+        failures++;
+        return;
+    }
+    if (!m.has_jt || m.a5 != CODE0_A5 || m.jt != CODE0_JT ||
+        m.entry != CODE0_JT + 2u) {
+        printf("FAIL CODE 0: A5=0x%08X jt=0x%08X entry=0x%08X has_jt=%u\n",
+               m.a5, m.jt, m.entry, (unsigned)m.has_jt);
+        failures++;
+    }
+    if (rd32(m.mem + 0x0904u) != m.a5)
+        fail(16u * 1024u * 1024u, "CurrentA5", rd32(m.mem + 0x0904u), m.a5);
+    if (rd16(m.mem + 0x0934u) != 32u)
+        fail(16u * 1024u * 1024u, "CurJTOffset", rd16(m.mem + 0x0934u), 32u);
+    /* The map lists CODE 2 ahead of CODE 1; the entry still is CODE 2. */
+    if (m.code_count != 2u || m.seg[0].id != 2u || m.seg[1].id != 1u) {
+        printf("FAIL CODE 0: segments are not loaded in map order\n");
+        failures++;
+    }
+
+    st = qrx_m68k_start(&m, 2000000u);
+    if (st != QRX_M68K_EXITED) {
+        printf("FAIL CODE 0: run = %s (%s), trap 0x%04X\n",
+               qrx_m68k_status_name(st), m.detail,
+               0xA000u | m.stop_trap);
+        for (i = 0u; i < m.ntrace; i++)
+            printf("  trap 0x%04X pc=0x%06X d0=0x%08X -> 0x%08X %s\n",
+                   0xA000u | m.trace[i].trap, m.trace[i].pc, m.trace[i].d0,
+                   m.trace[i].result,
+                   m.trace[i].implemented ? "ok" : "MISSING");
+        printf("  marker=0x%08X value=0x%08X\n", rd32(m.mem + 0x3000u),
+               rd32(m.mem + 0x3004u));
+        failures++;
+        return;
+    }
+    if (rd32(m.mem + 0x3000u) != 0x11111111u)
+        fail(16u * 1024u * 1024u, "cross-segment marker",
+             rd32(m.mem + 0x3000u), 0x11111111u);
+    if (rd32(m.mem + 0x3004u) != 0xA5A5A5A5u)
+        fail(16u * 1024u * 1024u, "cross-segment return value",
+             rd32(m.mem + 0x3004u), 0xA5A5A5A5u);
+
+    base1 = segment_base(&m, 1u);
+    base2 = segment_base(&m, 2u);
+    if (base1 == 0u || base2 == 0u) {
+        printf("FAIL CODE 0: lost a segment after loading\n");
+        failures++;
+    } else {
+        if (rd16(m.mem + m.jt) != 2u ||
+            m.mem[m.jt + 2u] != 0x4Eu || m.mem[m.jt + 3u] != 0xF9u ||
+            rd32(m.mem + m.jt + 4u) != base2 + 4u + 0x20u) {
+            printf("FAIL CODE 0: entry 0 was not patched to a JMP\n");
+            failures++;
+        }
+        if (rd16(m.mem + m.jt + 8u) != 1u ||
+            m.mem[m.jt + 10u] != 0x4Eu || m.mem[m.jt + 11u] != 0xF9u ||
+            rd32(m.mem + m.jt + 12u) != base1 + 4u + 0x40u) {
+            printf("FAIL CODE 0: entry 1 was not patched to a JMP\n");
+            failures++;
+        }
+    }
+    for (i = 0u; i < m.ntrace; i++) {
+        if (m.trace[i].trap == QRX_M68K_TRAP_LOAD_SEG && m.trace[i].implemented)
+            loads++;
+    }
+    if (loads != 2u) {
+        printf("FAIL CODE 0: %u _LoadSeg call(s), expected 2\n", loads);
+        failures++;
+    }
+
+    /* Malformed headers and tables are refused before anything executes. */
+    make_code0(c0, sizeof c0);
+    wr16(c0, 0xFFFFu);
+    badlen = build_classic_fork(bad, sizeof bad, c0, 32u, s1, l1, s2, l2, 1);
+    expect_code0_error("far model", bad, badlen, QRX_M68K_ERR_IMAGE,
+                       "far-model 'CODE' 0");
+
+    make_code0(c0, sizeof c0);
+    wr32(c0 + 8u, 12u);
+    badlen = build_classic_fork(bad, sizeof bad, c0, 32u, s1, l1, s2, l2, 1);
+    expect_code0_error("jump table size", bad, badlen, QRX_M68K_ERR_IMAGE,
+                       "positive multiple of 8");
+
+    make_code0(c0, sizeof c0);
+    badlen = build_classic_fork(bad, sizeof bad, c0, 24u, s1, l1, s2, l2, 1);
+    expect_code0_error("truncated table", bad, badlen, QRX_M68K_ERR_IMAGE,
+                       "shorter than its 16-byte jump table");
+
+    make_code0(c0, sizeof c0);
+    wr16(c0 + 16u, 0x1000u);
+    badlen = build_classic_fork(bad, sizeof bad, c0, 32u, s1, l1, s2, l2, 1);
+    expect_code0_error("entry offset", bad, badlen, QRX_M68K_ERR_IMAGE,
+                       "entry point offset");
+
+    make_code0(c0, sizeof c0);
+    wr16(c0 + 20u, 99u);
+    badlen = build_classic_fork(bad, sizeof bad, c0, 32u, s1, l1, s2, l2, 1);
+    expect_code0_error("missing entry segment", bad, badlen, QRX_M68K_ERR_IMAGE,
+                       "missing CODE 99");
+
+    make_code0(c0, sizeof c0);
+    wr16(c0 + 26u, 0x1234u);
+    badlen = build_classic_fork(bad, sizeof bad, c0, 32u, s1, l1, s2, l2, 1);
+    expect_code0_error("bad table entry", bad, badlen, QRX_M68K_ERR_IMAGE,
+                       "jump table entry 1");
+
+    /* A packed segment stays refused even when 'CODE' 0 is well formed. */
+    memcpy(bad, image, len);
+    wr32(bad + 0x0128u, 0xA89F000Cu);
+    wr32(bad + 0x012Cu, 0x11223344u);
+    wr32(bad + 0x0130u, 2u * l1);
+    wr32(bad + 0x0134u, l1);
+    expect_code0_error("packed segment", bad, len, QRX_M68K_ERR_PACKED,
+                       "VISE/InstallerMaker-packed 'CODE' resource");
+
+    printf("CODE 0 near-model entry: %s\n",
+           failures == before ? "cross-segment call ok" : "FAILED");
 }
 
 int main(int argc, char **argv)
@@ -2183,6 +2561,53 @@ int main(int argc, char **argv)
     if (len == 0u) {
         printf("FAIL: could not build the test image\n");
         return 1;
+    }
+    if (argc == 2 && strcmp(argv[1], "--packed-check") == 0) {
+        packed_case(fork, len);
+        if (failures != 0) {
+            printf("packed CODE test: %d failure(s)\n", failures);
+            return 1;
+        }
+        printf("packed CODE test: 0 failure(s)\n");
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "--code0-check") == 0) {
+        code0_case();
+        if (failures != 0) {
+            printf("CODE 0 test: %d failure(s)\n", failures);
+            return 1;
+        }
+        printf("CODE 0 test: 0 failure(s)\n");
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--code0-macbin") == 0) {
+        static uint8_t img[1024];
+        static uint8_t mb[128 + 1024];
+        uint32_t ilen = code0_fixture(img, (uint32_t)sizeof img);
+        char path[512];
+        FILE *out;
+
+        if (ilen == 0u) {
+            printf("FAIL: could not build the CODE 0 image\n");
+            return 1;
+        }
+        memset(mb, 0, sizeof mb);
+        mb[1] = 9;
+        memcpy(mb + 2, "Code0Test", 9);
+        memcpy(mb + 65, "APPL", 4);
+        memcpy(mb + 69, "qRXA", 4);
+        wr32(mb + 87, ilen);
+        memcpy(mb + 128, img, ilen);
+        snprintf(path, sizeof path, "%s/Code0Test.mb", argv[2]);
+        out = fopen(path, "wb");
+        if (!out) {
+            printf("FAIL: cannot write %s\n", path);
+            return 1;
+        }
+        fwrite(mb, 1, 128u + ilen, out);
+        fclose(out);
+        printf("wrote %s (%u bytes)\n", path, 128u + ilen);
+        return 0;
     }
     if (argc > 1) {
         /* Write the File Manager program as a MacBinary for guest runs. */
@@ -2293,6 +2718,7 @@ int main(int argc, char **argv)
     one_case(fork, len, 8u * 1024u * 1024u, 0);
     one_case(fork, len, 4u * 1024u * 1024u, 0);
     refuse_case(fork, len, 2u * 1024u * 1024u);
+    code0_case();
     packed_case(fork, len);
     sysenv_case(16u * 1024u * 1024u);
     sysenv_case(64u * 1024u * 1024u);
