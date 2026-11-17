@@ -43,11 +43,42 @@ Dateien und startet mit `--run` einen engen statischen PPC-Testfall;
 ARMithlon-Gast lief ein synthetisches Programm mit Initialstack, `write` und
 `exit` sowie Fehlerpfaden mit 0 Testfehlern und Rückgabecode 0. Segmentbasierte
 R/W/X-Prüfungen schützen Interpreter und Syscall-Puffer; bei aktiver Prüfung
-fällt der JIT auf den Interpreter zurück. Dynamisches Linken, weitere
-Darwin-ABI-Funktionen, reguläres crt und Systembibliotheken fehlen weiterhin;
-QuickTime und Ableton laufen damit nicht. Framework-Funktionen werden anhand
-der tatsächlich getesteten Programme bedarfsorientiert analysiert und
-implementiert, statt eine vollständige Framework-Nachbildung vorauszusetzen.
+fällt der JIT auf den Interpreter zurück.
+
+Stand 2026-11-16, M9 (Mach-O/dyld-Testprogramm) erreicht, noch keine GUI:
+`qrx_dyld.c` bindet die Zeigertabellen eines klassisch gelinkten PPC-Binaries
+(`__la_symbol_ptr`, `__nl_symbol_ptr`) vor dem Start. Dazu liest der Parser
+jetzt Sections sowie `LC_SYMTAB`/`LC_DYSYMTAB` (inklusive indirekter
+Symboltabelle) und die Dylib-Namen. Jeder undefinierte Symbolverweis wird
+gegen eine Host-Tabelle aufgelöst und erhält einen 12-Byte-Trampolin im
+Gastspeicher (`li r0, 0x4000|selector` / `sc` / `blr`), der in die
+Host-Dispatch geht; definierte Symbole werden mit ihrer eigenen VM-Adresse
+eingetragen. Unaufgelöste Symbole lassen den Ladevorgang scheitern, statt
+später undefiniert zu springen. Ein synthetisches dynamisches Testprogramm
+läuft auf Host und im ARMithlon-Gast (76 bzw. alle Mach-Tests grün);
+QuickTime Player 7.7 wird vollständig geparst (5 Segmente, 30 Sections, 17
+Dylibs, 4698 Symbole) und meldet **709 unaufgelöste Imports**, erstes
+`_AbsoluteDeltaToNanoseconds`. Das ist die aktuelle, messbare Grenze: ohne
+AppKit/Carbon/CoreFoundation-Implementierungen startet keine echte
+Mac-OS-X-App. 64-Bit-Stand 2026-11-16: QRXMach/QRXMachTest/QRXPPC/QRXAppRun/
+QRX68KRun wurden mit dem Tor-Worktree-m68k64-clang für den 2-Kern-EC64-SMP-Gast
+übersetzt (`tools/qrxppc/build64.sh ...`, Sysroot AROS-64, ELF-Image via
+mkffsimg; kein elf2hunk nötig). Alle Suiten grün im Gast: Mach-O-Prototyp
+(inkl. dyn-Bindung) und 36 QRXPPC-Tests. Ein m68k64-Backendfehler: mit
+`-O2` wurde `toolbox_mm` fehlgeschlagen (einzelne MM-Funktionen bei -O2
+falsch übersetzt, allein in qrx_toolbox.c), mit `-O1` bestand die Datei;
+`-O0` crasht den Backend. Deswegen kompiliert `build64.sh` genau diese Datei
+mit `-O1`. QRXDesktop: 64-bit neu gebaut und im Bundle, startet aber noch
+nicht — `graphics.library`/`intuition.library` (für m68k64 nachgebaut)
+faulten im Init (Bus Fault in `Utility_66_SetMem`); danach fehlt ein
+Framebuffer-Treiber für m68k64.
+
+Dynamisches Linken im eigentlichen Sinn (Relokationen, Bind-Opcodes,
+Two-Level-Namespace, Weak Symbols, Lazy Binding, Objective-C-Laufzeit),
+reguläres crt und Systembibliotheken fehlen weiterhin; QuickTime und Ableton
+laufen damit nicht. Framework-Funktionen werden anhand der tatsächlich
+getesteten Programme bedarfsorientiert analysiert und implementiert, statt
+eine vollständige Framework-Nachbildung vorauszusetzen.
 
 ## 2. Ausgangslage
 
@@ -644,7 +675,7 @@ erfolgreicher QuickTime-DMG-Mount ist noch kein MacOS-X-Launcher.
 | M6 | Mixed Mode | 68k↔PPC-Aufrufe und Trap-Rückkehr |
 | M7 | MacOS-9-Minimum | PPC-Toolbox-Fenster zeichnet und beendet sauber |
 | M8 | MacOS-9-App | QuickTime/LightWave-Test mit lizenzierten Medien |
-| M9 | MacOS-X-Loader | Mach-O/dyld-Testprogramm, noch keine GUI |
+| M9 | MacOS-X-Loader | **erreicht 2026-11-16**: dynamisches Testprogramm mit gebundenen Zeigertabellen; QuickTime parst vollständig, 709 Imports offen |
 | M10 | MacOS-X-App | QuickTime 7.7 als separater, messbarer Forschungserfolg |
 
 M0 bis M3 sind **Voraussetzungen** für die PPC-Arbeit. M4 bis M6 dürfen parallel

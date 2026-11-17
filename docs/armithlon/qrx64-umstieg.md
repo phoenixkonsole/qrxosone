@@ -79,6 +79,127 @@ Nicht geprüft:
 - Andere Spiele, DirectDraw und x87-lastiger Code. Gleitkomma läuft als Soft-Float.
 - Die Geschwindigkeit: Das Bild lag innerhalb einer Laufzeit von 25 Minuten vor, für 16 Sekunden virtuelle Zeit. Wann genau, ist nicht gemessen. Der EC64 ist ein Interpreter, darin läuft der x86-Interpreter, und Gleitkomma wird in Software gerechnet.
 
+## Stand 2026-11-16: 64-Bit-Bundle und Mac-Pfad
+
+Geprüft in dieser Umgebung:
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| `launch64` (EC64, 2 Kerne, 2048 MB, `QRXOS64.img`) | Bootet bis `[EC64] 2 cores, ... disk in RAM` |
+| `qrx_ec64_tests` (Interpreter, SMP/CAS über 4 GB) | `all checks passed` |
+| `qrx_ec64_jit_tests 3000` | 71947 Instruktionen, 0 Abweichungen zum Interpreter |
+| `qrx_ec64_board_tests`, `qrx_ec64_diff_tests` | 0 Fehler (nur Abdeckungshinweise) |
+
+Der Mac-Pfad (`qrx_macho.c`, `qrx_dyld.c`, `qrx_ppc.c`) ist reiner C-Code ohne
+68k-Abhängigkeit und damit für `m68k64` übersetzbar, liegt aber noch nicht im
+64-Bit-Bundle. Dafür fehlen zwei Dinge, die hier nicht vorhanden sind:
+
+1. Der `m68k64-clang`-Wrapper (`tc/bin/clang`, siehe
+   `tools/armithlon/aros-qrx/README.md`) samt `libclang_rt.builtins-m68k64.a`.
+2. Ein AROS-64-SDK-Baum (`bin/native-m68k64/AROS/Development`) als Sysroot.
+
+Ohne beides lässt sich kein 64-Bit-`QRXPPC`/`QRXMach` erzeugen; ein Ersatz
+wäre eine Behauptung. Der PPC-JIT (`qrx_ppc_jit.c`) erzeugt außerdem
+68040-Code und braucht für Long Mode ein eigenes Backend; bis dahin läuft der
+Mach-Pfad dort im Interpreter (`ppc->access` erzwingt das bereits).
+
+## QRXDesktop auf 64-Bit (2026-11-16)
+
+Geprüft auf dem 2-Kern-EC64-Gast (Headless, `econsole-startup`):
+
+- Die vorhandene QRXDesktop ist 32-bit (HUNK/ELF32). Neu für m68k64 gebaut
+  aus `.build/qrx-desktop/qrx_desktop.armithlon.c` (Build selbst fehlerfrei,
+  nur Warnungen) → `C:QRXDesktop` (ELF64) im Bundle.
+- Vorher: kein Start, stiller Abbruch. `main()` kehrt mit rc=20 zurück, wenn
+  `intuition.library`/`graphics.library`/`dos.library` nicht öffnen.
+  Probe im Gast: alle Desktop-Libraries fehlten.
+- Nachgebaut für m68k64 (Tor-Build): `gmake kernel-graphics kernel-intuition
+  kernel-oop` — bauen sauber. `icon`/`cybergraphics` scheitern am zlib-Port
+  (implicit-int unter aktuellem clang); beide sind für QRXDesktop optional.
+- Jetzt: `OpenLibrary("graphics.library")` faultet im Init mit Bus Fault
+  (`Utility_66_SetMem`, Zieladresse im Kernel-Text). Gleiches für Intuition.
+  Das ist ein AROS-64-Init-Bug in graphics, kein QRXDesktop-Bug.
+  (Ein einzelner solcher Fault war nicht reproduzierbar; danach kehrt
+  Graphics sauber mit MISSING zurück, solange gfx.hidd fehlt.)
+- Nachgebaut für m68k64: `kernel-hidd kernel-hidd-gfx
+  kernel-hidd-gfx-headlessgfx`. Ein Compile-Bug im Headless-Treiber
+  (IPTR→Pointer-Return, `-Werror`) ist im Tor-AROS-Baum gefixt:
+  `ReturnPtr(..., OOP_Object *, o)` in `headlessgfx_bitmapclass.c`.
+  Die drei `.hidd` liegen in `System64/Devs/Drivers/`.
+- Lade-Reihenfolge (Kettenfehler gefunden): `hiddclass.hidd` registriert
+  `hwclass`; `gfx.hidd` braucht sie als Superklasse, sonst
+  `METADBG no-superptr`. Korrekt: hiddclass → gfx → headless → graphics.
+- Aktueller Blocker: `hiddclass.hidd` faultet deterministisch im eigenen
+  Init (Bus Fault, PC 0x266C6E, zweimal identisch) während OOP-
+  Klassenaufbau/Method-Dispatch; D0 enthält String-Fragmente („etho“).
+
+  **Debug-Befund 2026-11-16 (Tor-Worktree, EC64 SMP, m68k64):** Minimaler
+  OOP-Test (`oophidd`: eigene HIDD-Klasse via HiddMeta, `my_get(0x1234)=4242`)
+  PASS -> OOP/HIDD-Dispatch mit 64-bit-IPTR funktioniert; Pointer sind auf
+  m68k64 64-bit (`sizeof IFMethod=16`, IPTR=8, ptr=8), die ABI-
+  Mismatch-Hypothese ist damit widerlegt. Reine C-Mimikrys der
+  Iterateifs-Schleife (1 TU, 3 Ebenen, getrennte TUs, -O1/-O2) laufen im
+  Gast korrekt. Der Hang repro: `oophidd3` (Kette Hidd/HW/HWRoot wie
+  `hiddclass`) hängt in `get_info_on_ifs` (inline in
+  `hiddmeta_allocdisptabs`): `while (meta_iterateifs(...))` kehrt nie mit
+  NULL zurück. Instrumentierung (Trap-Prints in `hiddmeta_iterateifs`) +
+  DEBUG-Build funktionieren; Clean -O2/-O1 hängen, -O0 crasht, Fence/
+  Clobber-Fence/Dummy-Call ändern nichts. Hand-verifizierter -O2-Codegen
+  von `hiddmeta_iterateifs`, `HIDD_DoMethod`, `privatestubs` und
+  `hiddmeta_allocdisptabs` ist korrekt (inkl. `movn`=flagloses Copy,
+  Gast-Probe PASS, weite Branches PASS, exakte Loop-Backedge PASS);
+  Interpreter==JIT. Schluss: kein AROS-ABI-Bug, sondern der bekannte
+  m68k64-clang-Backend-Codegen-Fehler (wie `qrx_toolbox.c` -O2) bzw. eine
+  EC64-Engine-Kante, die nur durch genau diese Instruktionsmischung
+  getriggert wird.
+
+  **Metaprobe-Befund (2026-11-16, vor MyHWRoot-Erzeugung):** `metaprobe2`
+  gedruckt: `numinterfaces=1` (korrekt, kein Datenkorrupt), `mid_fresh=
+  0x402 == cached_ob_M_meta_iterateifs` (Offset 1152 in IntOOPBase), aber
+  der Direkt-Dispatch `OOP_DoMethod(MyHW, {mid=0x402})` erreicht im
+  Clean-Build NICHT `hiddmeta_iterateifs`, sondern Meta::New
+  (`basemeta_new`): METADBG no-instsize, NULL-Rückgabe, `iterval` unverändert.
+  Im Debug/Instrumentierungs-Build erreicht derselbe Dispatch
+  `hiddmeta_iterateifs` (ITER-Trace). Metaclass-Objekt: `mc+56 cl_DoMethod=
+  0x2647d2`, `MyHW+56=0x263c86` (verschieden); `mc+40 InstOffset=112`.
+  Der exakte mmake-Build-Befehl für `hiddmetaclass.o` (inkl. `-fno-common`,
+  `__OOP_NOLIBBASE__`, `-include oop_deflibdefs.h`) reproduziert das
+  Build-`.text` byteidentisch; mein handverifiziertes -S ist also das
+  laufende Code. Isolation: exakte Loop-Backedge-Asm-Probe (movem/jsr/
+  Stack-Args/cmpi/movn/beq-far) -> 99 PASS; `movn` flaglos PASS (11); weit
+  `beq` PASS (5); Pattern/Chain (1 TU, 3 Ebenen, getrennte TUs, -O1/-O2)
+  PASS; Interpreter==JIT. Schluss: Kein AROS-ABI/State-Bug (Werte exakt);
+  der Dispatch in `hiddmetaclass.o`
+  geht fehl (Clean -O2/-O1 Hang, -O0 Backend-Crash, nur echte Calls/Trap in
+  `hiddmeta_iterateifs` maskieren; Fence/Clobber/Dummy-Call ändern nichts).
+  Die EC64 führt isoliert alle Instruktionsmuster korrekt aus; der
+  verbleibende Fehler sitzt im m68k64-clang-Codegen von `hiddmetaclass.o`
+  (Backend), Engine nur insofern, als ihre Ausführung gegen dieses Codegen
+  bei der Dispatch-Auflösung fehlschlägt.
+  **IntCallMethod/Meta-Coerce Probe-Befund (2026-11-16, korrigierte
+  Nachrichten-Struktur):** `metaprobe5` nutzt jetzt die echte
+  `P_meta_iterateifs`-Struktur aus `private.h` (`OOP_MethodID` = 32-bit).
+  Instrumentierte Build-Werte: `mid_fresh=0x402`, `cached=0x402`;
+  `MCDBG *msg=0x402, mid=0x2, ifid=0x400, hashmask=0x2,
+  directptr=0xcb150/0xd41e0, bucket=..., MCFNDBG fn=0x263be0` und
+  `ITERDBG idx=0/1, numif=1` — d.h. der Bucket `InterfaceID=0x400`
+  liefert als `MethodTable[2]` die echte `hiddmeta_iterateifs`.
+  Clean -O2 mit derselben korrigierten Probe crasht bereits beim ersten
+  `OOP_NewObject` in `NEWOBJDBG cl/o`: `classPtr=0xd89f8`,
+  `o=0x265104` (Code-Bereich) statt instrumentiert `o=0xcb0a8`
+  (Heap-Objekt). Die Gästetabellen-Readings (Meta-Bucket
+  `MethodTable[2]`, `directptr`) sind in beiden Builds gleich
+  (`fn2`= iterateifs-Adresse); der falsche Wert ist also kein
+  Tabelleninhalt, sondern der kompilierte Dispatch/pRoot_New-Pfad liest/
+  gibt in clean -O2 einen falschen Operanden/Return (`o=0x265104`).
+  Damit ist der Fehler auf den m68k64-clang-Codegen im OOP-Dispatch-Pfad
+  eingegrenzt; die EC64 führt die isolierten Instruktionsmuster korrekt
+  aus, und nur die Clean-O2-Register/Stack-Allokation im Dispatch
+  (IntCallMethod/Meta_Coerce/basemetaclass New) kippt.
+
+- Danach fehlt ohnehin noch ein Framebuffer-Treiber (input/console)
+  für m68k64, sonst kein Screen/Workbench.
+
 ## Reihenfolge
 
 1. **Classic:** Das 32-Bit-System als eigene Instanz in der 64-Bit-Maschine starten, mit gemeinsamem HostFS und Fenster auf dem Mac. Setzt voraus, dass der EC64 im Emulator läuft. Das ist Sache der AROS-64-Arbeit auf `claude/tor-browser-aros68k-343c56`.

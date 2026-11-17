@@ -205,14 +205,46 @@ der Test prüft Parser und Segmentmapping, nicht die Ausführung einer App.
 Für isolierte Installationen kann `QRXPPC_INSTALL_TREE` auf eine Kopie des
 Systembaums gesetzt werden.
 
-`--run` startet ausschließlich den begrenzten statischen Testpfad im
-PPC-Interpreter. Er bildet Segmente ab und legt einen 16-Byte-ausgerichteten
-Initialstack mit `argc=1`, `argv[0]="qrxmach"` sowie leeren `env`- und
-`apple`-Listen an. `r1` zeigt auf `argc`; alle übrigen Register werden auf
-null gesetzt. BSD-`sc` unterstützt nur `write` (Nummer 4, ausschließlich fd 1/2)
-und `exit` (Nummer 1). `write` liefert die Bytezahl beziehungsweise EBADF,
-EFAULT oder EIO in `r3` und setzt bei Fehlern `CR0.SO`; unbekannte Syscalls,
-sonstige Traps und abgelaufenes Instruktionsbudget stoppen den Runner.
+`--run` startet einen begrenzten Prozess im PPC-Interpreter. Er bildet Segmente
+ab und legt einen 16-Byte-ausgerichteten Initialstack mit `argc=1`,
+`argv[0]="qrxmach"` sowie leeren `env`- und `apple`-Listen an. `r1` zeigt auf
+`argc`; alle übrigen Register werden auf null gesetzt. BSD-`sc` unterstützt nur
+`write` (Nummer 4, ausschließlich fd 1/2) und `exit` (Nummer 1). `write`
+liefert die Bytezahl beziehungsweise EBADF, EFAULT oder EIO in `r3` und setzt
+bei Fehlern `CR0.SO`; unbekannte Syscalls, sonstige Traps und abgelaufenes
+Instruktionsbudget stoppen den Runner.
+
+### Gebundene Zeigertabellen (M9)
+
+`tools/qrxppc/qrx_dyld.c` ersetzt für klassisch gelinkte PPC-Binaries den
+dyld-Ladeschritt, soweit er ohne Relokationen auskommt. Vor dem Start werden
+`__nl_symbol_ptr`- und `__la_symbol_ptr`-Sections über die indirekte
+Symboltabelle aus `LC_DYSYMTAB` aufgelöst:
+
+- Ein definiertes Symbol (`N_SECT`) wird mit seiner eigenen VM-Adresse in den
+  Zeiger geschrieben, wie es die Linker-Stubs für bildinterne Zeiger erwarten.
+- Ein undefiniertes Symbol (`N_UNDF`) wird gegen eine Host-Tabelle geprüft. Pro
+  Import entsteht einmalig ein 12-Byte-Trampolin im Gastspeicher
+  (`li r0, 0x4000|selector`, `sc`, `blr`); alle Zeiger desselben Imports teilen
+  es sich. Der Selektorbereich 0x4001–0x4FFF ist von den BSD-Syscall-Nummern
+getrennt.
+- Bleibt ein Symbol unaufgelöst, scheitert der Ladevorgang mit Name und Anzahl;
+  es wird kein undefinierter Sprung ausgeführt.
+
+Die Trampolin-Region und das Prozess-`errno`-Wort liegen in einem eigenen
+Bereich zwischen Segmenten und Stack. Er ist les- und ausführbar, aber nicht
+schreibbar; er darf kein Segment und keinen Stack überlappen. Host-Aufrufe sind
+`write`, `exit`, `___error` und `strlen`; Fehler setzen `errno` und liefern
+`-1` mit `CR0.SO`.
+
+Grenzen: keine Relokationen, keine Bind-Opcodes, kein Two-Level-Namespace,
+keine Weak Symbols, kein Lazy Binding, keine Objective-C-Laufzeit und kein
+Framework-Laden. Der Parser akzeptiert `LC_SYMTAB`/`LC_DYSYMTAB`,
+Dylib-Kommandos und reine Metadaten-Kommandos (`LC_UUID`, `LC_CODE_SIGNATURE`,
+`LC_FUNCTION_STARTS` usw.); alles andere disqualifiziert den dynamischen Pfad.
+QuickTime Player 7.7 parst vollständig (5 Segmente, 30 Sections, 17 Dylibs,
+4698 Symbole), meldet aber 709 unaufgelöste Imports (erstes
+`_AbsoluteDeltaToNanoseconds`) und startet daher nicht.
 
 Für den Mach-O-Start gelten die `initprot`-Rechte der Segmente: Der Interpreter
 prüft bei jedem Instruktionsabruf und jedem Integer-/FPU-Speicherzugriff den
@@ -229,15 +261,21 @@ nicht.
 Der synthetische Mach-O-Test lädt `argv[0]` über `r1`, schreibt es und endet
 mit Exit-Code 1 (`argc`). Im isolierten ARMithlon-68040-Gast bestehen dieser
 Ablauf und die Schutztests für Lücken, `__PAGEZERO`, Code, Stack, FPU und
-Syscall-Puffer (`QRXMachTest`, 0 Fehler). Der Runner weist unter anderem
-dyld-/Dylib-Kommandos, unbekannte Load Commands,
-Segment-Sections, nichtleere zusätzliche Thread-Zustände und gesetzte
-Mach-O-Flags ausdrücklich zurück. Das ist ein eingeschränkter Prozessstart,
-kein allgemeiner Darwin-Loader: Dyld, Relokationen, Imports, reguläres crt,
-weitere Systemaufrufe, vollständige VM-/Seitentabellen-Semantik, Frameworks,
-AltiVec und ein echter Prozess-/Dateideskriptorkontext fehlen. Die Kontrolle
-ist segmentbasiert und weder eine vollständige Speicherverwaltung noch eine
-Sicherheits-Sandbox; QuickTime und Ableton lassen sich damit nicht starten.
+Syscall-Puffer (`QRXMachTest`, 0 Fehler). Der statische Pfad weist Dylib-/Dyld-Kommandos,
+unbekannte Load Commands, Segment-Sections, nichtleere zusätzliche
+Thread-Zustände und gesetzte Mach-O-Flags ausdrücklich zurück; der dynamische
+Pfad verlangt zusätzlich Symbol- und indirekte Symboltabelle. Das ist ein
+eingeschränkter Prozessstart, kein allgemeiner Darwin-Loader: Relokationen,
+reguläres crt, weitere Systemaufrufe, vollständige VM-/Seitentabellen-Semantik,
+Frameworks, AltiVec und ein echter Prozess-/Dateideskriptorkontext fehlen. Die
+Kontrolle ist segmentbasiert und weder eine vollständige Speicherverwaltung
+noch eine Sicherheits-Sandbox; QuickTime und Ableton lassen sich damit nicht
+starten.
+
+`qrx_macho_t` ist mit Sections, Symboltabelle und Dylib-Namen groß (rund 24
+KiB). `qrx_macho_parse()` schreibt deshalb direkt in die Ausgabestruktur, und
+Aufrufer mit kleinem Stack (68k-Gast) halten sie statisch. Ein Fehlschlag lässt
+den Inhalt undefiniert.
 
 ## PEF-Container (P2.1, Lesepfad)
 

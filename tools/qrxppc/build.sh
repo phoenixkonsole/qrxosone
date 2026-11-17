@@ -70,15 +70,15 @@ fi
 # ---------------------------------------------------------------- PPC Mach-O prototype
 echo "  CC  QRXMach.elf"
 "$CC" -O2 -m68040 -fno-pic -fno-PIC -fno-optimize-sibling-calls \
-    -Itools/qrxppc tools/qrxppc/qrx_macho.c tools/qrxppc/qrx-mach.c \
-    tools/qrxppc/qrx_ppc.c tools/qrxppc/qrx_ppc_fpu.c \
+    -Itools/qrxppc tools/qrxppc/qrx_macho.c tools/qrxppc/qrx_dyld.c \
+    tools/qrxppc/qrx-mach.c tools/qrxppc/qrx_ppc.c tools/qrxppc/qrx_ppc_fpu.c \
     -o "$OUT/QRXMach.elf"
 
 echo "  CC  QRXMachTest.elf"
 "$CC" -O2 -m68040 -fno-pic -fno-PIC -fno-optimize-sibling-calls \
-    -Itools/qrxppc tools/qrxppc/qrx_macho.c tools/qrxppc/test_macho.c \
-    tools/qrxppc/qrx_ppc.c tools/qrxppc/qrx_ppc_fpu.c tools/qrxppc/qrx_ppc_jit.c \
-    -o "$OUT/QRXMachTest.elf"
+    -Itools/qrxppc tools/qrxppc/qrx_macho.c tools/qrxppc/qrx_dyld.c \
+    tools/qrxppc/test_macho.c tools/qrxppc/qrx_ppc.c tools/qrxppc/qrx_ppc_fpu.c \
+    tools/qrxppc/qrx_ppc_jit.c -o "$OUT/QRXMachTest.elf"
 
 for binary in QRXMach QRXMachTest; do
     echo "  HUNK $binary"

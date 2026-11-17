@@ -1,4 +1,7 @@
-/* Inspect or run a restricted static PPC32 Mach-O executable. */
+/* Inspect or run a restricted static or dynamically bound PPC32 Mach-O
+ * executable.  Undefined symbols are resolved against a small list of host
+ * calls; an unresolved symbol stops the run instead of trapping later. */
+#include "qrx_dyld.h"
 #include "qrx_macho.h"
 
 #include <stdio.h>
@@ -7,6 +10,7 @@
 
 #define MAX_GUEST_MEMORY (128u * 1024u * 1024u)
 #define STACK_SIZE (64u * 1024u)
+#define TRAMPOLINE_SIZE (8u * 1024u)
 #define RUN_BUDGET 1000000u
 
 static int write_output(void *ctx, uint32_t fd, const uint8_t *bytes, uint32_t len)
@@ -88,13 +92,19 @@ int main(int argc, char **argv)
             if (end > required)
                 required = end;
         }
-        if (run && !image.static_start_supported) {
+        if (run && !image.static_start_supported &&
+            !image.dynamic_start_supported) {
             fprintf(stderr, "process stopped: unsupported dynamic or non-synthetic image\n");
             free(data);
             return 1;
         }
-        if (run)
-            required = ((required + 15u) & ~(uint64_t)15u) + STACK_SIZE;
+        if (run) {
+            uint64_t aligned = (required + 15u) & ~(uint64_t)15u;
+            uint64_t extra = image.dynamic_start_supported
+                                 ? (uint64_t)TRAMPOLINE_SIZE + STACK_SIZE
+                                 : (uint64_t)STACK_SIZE;
+            required = aligned + extra;
+        }
         if (required == 0u || required > MAX_GUEST_MEMORY) {
             fprintf(stderr, "mapping exceeds prototype guest memory limit (%u bytes)\n",
                     (unsigned)MAX_GUEST_MEMORY);
@@ -109,20 +119,42 @@ int main(int argc, char **argv)
         }
         if (run) {
             qrx_macho_run_result_t result;
-            qrx_macho_run_status_t rs = qrx_macho_run(
-                &image, memory, (uint32_t)required,
-                (uint32_t)required - STACK_SIZE, RUN_BUDGET,
-                write_output, NULL, &result);
+            qrx_macho_run_status_t rs;
+            qrx_macho_dynamic_t dyn;
+            int dynamic = image.dynamic_start_supported;
+            uint32_t stack_base = (uint32_t)required - STACK_SIZE;
+
+            if (dynamic) {
+                dyn.imports = qrx_dyld_default_imports;
+                dyn.import_count = qrx_dyld_default_import_count;
+                dyn.trampoline_base = stack_base - TRAMPOLINE_SIZE;
+                dyn.trampoline_size = TRAMPOLINE_SIZE;
+                rs = qrx_macho_run_dynamic(&image, memory, (uint32_t)required,
+                                           stack_base, RUN_BUDGET,
+                                           write_output, NULL, &dyn, &result);
+            } else {
+                rs = qrx_macho_run(&image, memory, (uint32_t)required,
+                                   stack_base, RUN_BUDGET, write_output, NULL,
+                                   &result);
+            }
             free(memory);
             if (rs != QRX_MACHO_RUN_EXITED) {
                 fprintf(stderr, "process stopped: %s (pc=0x%08x, fault=0x%08x, syscall=%u)\n",
                         qrx_macho_run_status_string(rs), (unsigned)result.pc,
                         (unsigned)result.fault_addr, (unsigned)result.syscall);
+                if (result.imports_unresolved) {
+                    fprintf(stderr, "  %u unresolved import(s), first: %s\n",
+                            (unsigned)result.imports_unresolved,
+                            result.missing_import);
+                }
                 free(data);
                 return 1;
             }
-            printf("process exited: %u (%u instructions)\n",
+            printf("process exited: %u (%u instructions",
                    (unsigned)result.exit_code, (unsigned)result.instructions);
+            if (dynamic)
+                printf(", %u import(s) bound", (unsigned)result.imports_bound);
+            puts(")");
             free(data);
             return (int)result.exit_code;
         }
@@ -136,7 +168,14 @@ int main(int argc, char **argv)
         printf("Mapped segments in %u bytes of temporary guest memory.\n",
                (unsigned)required);
     }
-    puts("No dyld, general Darwin ABI, or relocation.");
+    if (image.dynamic_start_supported) {
+        for (i = 0; i < image.dylib_name_count; i++)
+            printf("import: %s\n", image.dylibs[i].name);
+        printf("Imports bindable: %u of the %u default host calls\n",
+               (unsigned)qrx_dyld_default_import_count,
+               (unsigned)qrx_dyld_default_import_count);
+    }
+    puts("No dyld: pointer sections are bound, no relocation or lazy binding.");
     free(data);
     return 0;
 }
