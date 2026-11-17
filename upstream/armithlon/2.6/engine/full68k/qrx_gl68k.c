@@ -1067,6 +1067,9 @@ static void run_op(QGL *g, unsigned id, const uint8_t *a, const uint8_t *end)
 void qrx_gl68k_service(uint8_t *ram, uint64_t ram_size, uint8_t *q)
 {
     QGL *g = &G;
+    /* On the 68100EC64 each core is a host thread: the current context follows the caller. */
+    if (g->cur && CGLGetCurrentContext() != g->cur->cgl)
+        CGLSetCurrentContext(g->cur->cgl);
     g->ram = ram;
     g->ram_size = ram_size;
     g->ret = 0;

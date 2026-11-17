@@ -200,6 +200,47 @@ Geprüft auf dem 2-Kern-EC64-Gast (Headless, `econsole-startup`):
 - Danach fehlt ohnehin noch ein Framebuffer-Treiber (input/console)
   für m68k64, sonst kein Screen/Workbench.
 
+## Stand 2026-11-17: Bild, Ton, Netz und 3D auf QRX OS One 64
+
+Der Blocker vom 16.11. war der Compiler, nicht AROS: m68k64 gab Zeiger in A0 und Ganzzahlen in D0
+zurück. AROS ruft OOP-Methoden und Bibliotheksvektoren aber über Prototypen mit der jeweils anderen
+Art auf (auf x86-64 ist beides RAX). Das falsche `o=0x265104` war der Inhalt des anderen Registers.
+Jetzt liefert m68k64-clang jeden einzelnen 64-Bit-Rückgabewert in D0 *und* A0 (ec64-llvm,
+`-mllvm -m68k64-dual-return`, Standard an). Alle Toolchain-Tests laufen ohne Fehler, und AROS 64
+ist damit komplett neu übersetzt.
+
+Geprüft auf 2 Kernen, ohne Fenster, mit `--capture`/`--audio-wav`, und im Mac-Fenster:
+
+- **Bild:** `ec64gfx.hidd` (vesagfx auf dem Framebuffer der Platine, 1024x768x24) mit graphics,
+  layers, Intuition, input/keyboard/gameport, console, con-handler und cybergraphics im Kickstart.
+  QRXDesktop startet aus der Startup-Sequence.
+- **Eingabe:** Das Fenster meldet Maus und Modifier; `C:EC64Input` setzt das in Amiga-Rohtasten und
+  Zeigerereignisse für input.device um.
+- **Ton:** Ein Audio-Ring der Platine ($500, 48 kHz Stereo) geht über CoreAudio. qrx-win32 mischt
+  DirectSound und waveOut selbst (`win32/sound_ec64.c`, ganzzahlig, die EC64 hat keine FPU).
+  `wavetest.exe` ergibt 1,0 s Ton bei 439 Hz.
+- **Netz:** `QRXHostSocket` (bsdsocket.library über HOST_CALL Dienst 4) wird beim Start geladen.
+- **3D:** HOST_CALL Dienst 8 ist die GL-Tür (`qrx_gl68k.c`), mit einer Sperre für mehrere Kerne.
+  `C:EC64GLDemo` zeigt einen beleuchteten Würfel, gerendert über Metal ("Apple M1, 2.1 Metal").
+- **Mac:** QRX68KRun, QRXAppRun, QRXMach, QRXMachTest und QRXPPC (`tools/qrxppc/build64.sh`) liegen
+  in C:.
+
+Gefundene und behobene Fehler: Ohne Chip-RAM blockierte `AllocBitMap` für planare Bitmaps in einer
+Spinlock-Selbstblockade; der Kernel markiert jetzt allen RAM zusätzlich als `MEMF_CHIP`. Kickstart-Module
+mit `stdlib.library` (auf der Disk) starteten beim Kaltstart still nicht; sie linken jetzt `stdc.static`.
+Ohne Skript stand die Uhr von qrx-win32, sobald ein Programm nur schlief; ohne `-s` gilt jetzt die
+Echtzeit.
+
+Offen:
+
+- Der JIT-Fehler beim Fflush-Test (Abbruch bei 847872 Bytes) besteht weiter. Er tritt ohne JIT und
+  mit `QRX_EC64_JIT_OFF=1` nicht auf, wohl aber mit `0x2` oder `0x20` allein. Der Zufallstest
+  (200000 Programme) findet ihn nicht.
+- qrx-win32 läuft auf 64 Bit noch ohne eigenes Fenster (headless). Der Ton und die Uhr funktionieren.
+  Als Nächstes kommt `backend_aros.c` auf cybergraphics.
+- `asl.library` braucht die Katalog-Erzeugung, zlib die `zconf.h`. Der Kernel-Test von ec64-llvm hängt
+  etwa einmal in 300 Läufen in seinem eigenen Konsolen-Lock, auch ohne JIT.
+
 ## Reihenfolge
 
 1. **Classic:** Das 32-Bit-System als eigene Instanz in der 64-Bit-Maschine starten, mit gemeinsamem HostFS und Fenster auf dem Mac. Setzt voraus, dass der EC64 im Emulator läuft. Das ist Sache der AROS-64-Arbeit auf `claude/tor-browser-aros68k-343c56`.

@@ -1,6 +1,12 @@
 /* The ARMithlon 68100EC64 board's devices, see qrx_ec64_board.h */
 #include "qrx_ec64_board.h"
 #include "qrx_hostnet.h"
+#ifdef __APPLE__
+#include "qrx_gl68k.h"
+#include <pthread.h>
+/* One GL stream at a time: the contexts belong to whichever core's thread calls. */
+static pthread_mutex_t gl_lock = PTHREAD_MUTEX_INITIALIZER;
+#endif
 #include <string.h>
 #include <time.h>
 
@@ -56,6 +62,14 @@ static void host_call(qec64_board *b, uint64_t addr)
 {
     if (addr >= b->ram_size || b->ram_size - addr < 17 * 4 || (addr & 3)) return;
     uint8_t *q = b->ram + addr;
+#ifdef __APPLE__
+    if (be32(q) == QEC64_HOST_GL) {
+        pthread_mutex_lock(&gl_lock);
+        qrx_gl68k_service(b->ram, b->ram_size, q);
+        pthread_mutex_unlock(&gl_lock);
+        return;
+    }
+#endif
     uint32_t a[13];
     for (unsigned i = 0; i < 13; i++) a[i] = be32(q + 16 + i * 4);
     if (be32(q) != QEC64_HOST_NET) return;
@@ -63,6 +77,35 @@ static void host_call(qec64_board *b, uint64_t addr)
     if (!net_args_ok(b, op, a)) { a[8] = UINT32_MAX; a[9] = 10014; }
     else qrx_hostnet_call(op, a, b->ram);
     for (unsigned i = 8; i < 13; i++) put_be32(q + 16 + i * 4, a[i]);
+}
+/* The ring is single producer (the guest, under its own lock) and single consumer (the audio thread). */
+static unsigned audio_queued(const qec64_board *b)
+{
+    return (__atomic_load_n(&b->audio_write, __ATOMIC_ACQUIRE) - __atomic_load_n(&b->audio_read, __ATOMIC_ACQUIRE)) % QEC64_AUDIO_RING;
+}
+static uint32_t audio_go(qec64_board *b)
+{
+    uint64_t n = b->audio_frames, addr = b->audio_addr;
+    if (n > QEC64_AUDIO_RING || addr >= b->ram_size || n * 4 > b->ram_size - addr) return 0;
+    unsigned room = QEC64_AUDIO_RING - 1 - audio_queued(b);
+    if (n > room) n = room;
+    unsigned w = __atomic_load_n(&b->audio_write, __ATOMIC_RELAXED);
+    for (uint64_t i = 0; i < n; i++) b->audio_ring[(w + i) % QEC64_AUDIO_RING] = be32(b->ram + addr + i * 4);
+    __atomic_store_n(&b->audio_write, (unsigned)((w + n) % QEC64_AUDIO_RING), __ATOMIC_RELEASE);
+    return (uint32_t)n;
+}
+size_t qec64_board_pull_audio(qec64_board *b, int16_t *out, size_t n)
+{
+    unsigned r = __atomic_load_n(&b->audio_read, __ATOMIC_RELAXED);
+    unsigned have = audio_queued(b);
+    if (n > have) n = have;
+    for (size_t i = 0; i < n; i++) {
+        uint32_t f = b->audio_ring[(r + i) % QEC64_AUDIO_RING];
+        out[i * 2] = (int16_t)(f >> 16);
+        out[i * 2 + 1] = (int16_t)f;
+    }
+    __atomic_store_n(&b->audio_read, (unsigned)((r + n) % QEC64_AUDIO_RING), __ATOMIC_RELEASE);
+    return n;
 }
 bool qec64_board_mmio(qec64_cpu *c, uint64_t addr, unsigned size, bool write, uint64_t *value)
 {
@@ -103,6 +146,32 @@ bool qec64_board_mmio(qec64_cpu *c, uint64_t addr, unsigned size, bool write, ui
     case QEC64_HOST_CALL:
         if (!write || size != 8) return false;
         host_call(b, *value); return true;
+    case QEC64_AUDIO_ADDR:
+        if (size != 8) return false;
+        if (write) b->audio_addr = *value; else *value = b->audio_addr;
+        return true;
+    case QEC64_AUDIO_FRAMES:
+        if (size != 4) return false;
+        if (write) b->audio_frames = (uint32_t)*value; else *value = b->audio_frames;
+        return true;
+    case QEC64_AUDIO_GO:
+        if (size != 4) return false;
+        if (write) b->audio_taken = audio_go(b); else *value = b->audio_taken;
+        return true;
+    case QEC64_AUDIO_QUEUED:
+        if (write || size != 4) return false;
+        *value = audio_queued(b); return true;
+    case QEC64_AUDIO_RATE:
+        if (write || size != 4) return false;
+        *value = 48000; return true;
+    case QEC64_HOST_FEATURES:
+        if (write || size != 4) return false;
+#ifdef __APPLE__
+        *value = QEC64_FEATURE_NET | QEC64_FEATURE_GL;
+#else
+        *value = QEC64_FEATURE_NET;
+#endif
+        return true;
     case QEC64_CLOCK_UNIX:
         if (write || size != 8) return false;
         *value = (uint64_t)time(NULL); return true;

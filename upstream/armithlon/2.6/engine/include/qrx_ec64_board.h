@@ -4,6 +4,7 @@
  * long mode only). Registers are big endian like everything else; an access of the wrong size or to
  * an unknown register is a bus fault. See docs/armithlon/68100ec64.md, "ARMithlon board". */
 #include "qrx68100ec64.h"
+#include <stddef.h>
 #include <stdint.h>
 
 #define QEC64_BOARD_ID          0x0000u  /* .q read: "QRXEC64B" */
@@ -23,8 +24,8 @@
 
 /* Keyboard and mouse for drivers: one event per read, 0 when there is none.
  * Bits 31-24 kind (1 key down, 2 key up, 3 mouse move, 4 button), for keys 23-16 the macOS virtual
- * key code (no Amiga raw key mapping yet), for moves 23-12 x and 11-0 y, for buttons 23-16 the
- * button and 0 down. */
+ * key code (the guest maps it to Amiga raw keys), for moves 23-12 x and 11-0 y in framebuffer pixels,
+ * for buttons 23-16 the button (0 left, 1 right, 2 middle) and bit 0 set while it is pressed. */
 #define QEC64_INPUT_EVENT       0x0200u  /* .l read */
 #define QEC64_INPUT_KEY_DOWN    1u
 #define QEC64_INPUT_KEY_UP      2u
@@ -42,6 +43,22 @@
  * must lie in RAM below 4 GB, else the call fails with the Winsock error 10014 (bad address). */
 #define QEC64_HOST_CALL         0x0400u  /* .q write */
 #define QEC64_HOST_NET          4u
+/* Service 8 is OpenGL 2.1 (qrx_gl68k.c, guest library tools/qrxgl68k): [3] 1, [4..5] the address of
+ * the command stream (high, low word), [6] its size in bytes; the last call's result in [8..9]. */
+#define QEC64_HOST_GL           8u
+#define QEC64_HOST_FEATURES     0x0408u  /* .l read: the services the host has */
+#define QEC64_FEATURE_NET       1u
+#define QEC64_FEATURE_GL        2u
+
+/* Sound: 48 kHz stereo, 16 bit. A frame is one big endian 32-bit word, left << 16 | right. The guest
+ * writes the address and count of a run of frames, then GO queues them on the host's ring; frames that
+ * do not fit are dropped, so a driver reads QUEUED first and keeps it near its target. */
+#define QEC64_AUDIO_ADDR        0x0500u  /* .q */
+#define QEC64_AUDIO_FRAMES      0x0508u  /* .l, at most QEC64_AUDIO_RING */
+#define QEC64_AUDIO_GO          0x050Cu  /* .l write: queue; read: frames taken by the last GO */
+#define QEC64_AUDIO_QUEUED      0x0510u  /* .l read: frames waiting to be played */
+#define QEC64_AUDIO_RATE        0x0514u  /* .l read: 48000 */
+#define QEC64_AUDIO_RING        65536u
 
 typedef struct qec64_board {
     uint8_t *ram;
@@ -52,6 +69,11 @@ typedef struct qec64_board {
     /* input events from the window to the guest */
     uint32_t events[256];
     volatile unsigned ev_head, ev_tail;
+    /* sound from the guest to the host's audio output */
+    uint64_t audio_addr;
+    uint32_t audio_frames, audio_taken;
+    unsigned audio_read, audio_write;
+    uint32_t audio_ring[QEC64_AUDIO_RING];
 } qec64_board;
 
 void qec64_board_init(qec64_board *b, uint8_t *ram, uint64_t ram_size);
@@ -59,6 +81,8 @@ void qec64_board_init(qec64_board *b, uint8_t *ram, uint64_t ram_size);
 bool qec64_board_mmio(qec64_cpu *c, uint64_t addr, unsigned size, bool write, uint64_t *value);
 /* From the window's thread */
 void qec64_board_push_event(qec64_board *b, uint32_t event);
+/* From the audio output's thread: up to n frames as host endian 16-bit stereo, returns how many */
+size_t qec64_board_pull_audio(qec64_board *b, int16_t *out, size_t n);
 /* The framebuffer as the display should show it now; 0 while the console is shown */
 int qec64_board_framebuffer(const qec64_board *b, const uint8_t **pixels, uint32_t *w, uint32_t *h,
                             uint32_t *stride, uint32_t *format);

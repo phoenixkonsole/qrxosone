@@ -1034,12 +1034,15 @@ static uint64_t now_ms(qwin *w) { return w->be->now(w); }
 static int ds_host(qwin *w, dxobj *b, uint32_t op, uint32_t arg);
 static uint32_t ds_host_pos(qwin *w, dxobj *b, int *playing);
 #define DOOR_SVC_SOUND 1u
+/* The Mac mixes behind the door; on the 68100EC64 board sound_ec64.c mixes the same voices. */
+#define SND_ON(w) ((w)->cpu.door || qw_ec64_sound_ok())
+static int snd_call(qwin *w, uint32_t *q) { return w->cpu.door ? x86_door_call(&w->cpu, q) : qw_ec64_sound(w, q); }
 enum { DS_START = 1, DS_STOP, DS_SET, DS_POS, DS_FREE };
 static uint32_t play_pos(qwin *w, dxobj *b)
 {
     uint64_t el;
     uint32_t adv;
-    if (w->cpu.door && !b->primbuf) { int on = 0; uint32_t p = ds_host_pos(w, b, &on); b->playing = on; return p; }
+    if (SND_ON(w) && !b->primbuf) { int on = 0; uint32_t p = ds_host_pos(w, b, &on); b->playing = on; return p; }
     if (!b->playing || !b->size) return b->pos0;
     el = now_ms(w) - b->t0;
     adv = (uint32_t)(el * (uint64_t)(b->bps ? b->bps : 22050) / 1000u);
@@ -1052,18 +1055,18 @@ static uint32_t play_pos(qwin *w, dxobj *b)
 static int ds_host(qwin *w, dxobj *b, uint32_t op, uint32_t arg)
 {
     static uint32_t q[16];
-    if (!w->cpu.door || b->primbuf) return 0;   /* the primary buffer is the mix itself, not a voice */
+    if (!SND_ON(w) || b->primbuf) return 0;   /* the primary buffer is the mix itself, not a voice */
     q[0] = DOOR_SVC_SOUND; q[3] = op; q[4] = (uint32_t)idx_of(b); q[5] = b->mem; q[6] = b->size;
     q[7] = b->freq ? b->freq : b->rate; q[8] = b->chans; q[9] = b->bits;
     q[10] = (uint32_t)b->vol; q[11] = (uint32_t)b->pan; q[12] = (uint32_t)b->looping; q[13] = arg; q[14] = 0;
-    if (!x86_door_call(&w->cpu, q)) return 0;
+    if (!snd_call(w, q)) return 0;
     return 1;
 }
 static uint32_t ds_host_pos(qwin *w, dxobj *b, int *playing)
 {
     static uint32_t q[16];
     q[0] = DOOR_SVC_SOUND; q[3] = DS_POS; q[4] = (uint32_t)idx_of(b); q[14] = 0; q[15] = 0;
-    if (!x86_door_call(&w->cpu, q)) { *playing = 0; return 0; }
+    if (!snd_call(w, q)) { *playing = 0; return 0; }
     *playing = (int)q[15];
     return q[14];
 }
@@ -1071,10 +1074,10 @@ static uint32_t ds_host_pos(qwin *w, dxobj *b, int *playing)
 int qw_ds_voice(qwin *w, uint32_t op, uint32_t voice, uint32_t mem, uint32_t size, uint32_t rate, uint32_t ch, uint32_t bits, int loop, uint32_t arg, uint32_t *pos, int *playing)
 {
     static uint32_t q[16];
-    if (!w->cpu.door) return 0;
+    if (!SND_ON(w)) return 0;
     q[0] = DOOR_SVC_SOUND; q[3] = op; q[4] = voice; q[5] = mem; q[6] = size;
     q[7] = rate; q[8] = ch; q[9] = bits; q[10] = 0; q[11] = 0; q[12] = (uint32_t)loop; q[13] = arg; q[14] = 0; q[15] = 0;
-    if (!x86_door_call(&w->cpu, q)) return 0;
+    if (!snd_call(w, q)) return 0;
     if (pos) *pos = q[14];
     if (playing) *playing = (int)q[15];
     return 1;

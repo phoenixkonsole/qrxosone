@@ -21,6 +21,6 @@ chmod +x "$OUT/cc64"
 bash "$HERE/qmath/build-qmath.sh" "$OUT/cc64" "$(dirname "$CLANG")/llvm-ar" "$OUT" -O2
 "$OUT/cc64" -O2 -std=gnu99 -Wall -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function \
     -DQRX_NO_AROS_BACKEND -o "$OUT/qrx-win32" "$HERE/core/qrx86core.c" \
-    "$HERE"/win32/{hle,ne,pe,kernel,user,gdi,ansi,files,dx,extra,threads,compat,net,dplay,backend_headless,qrx_win32_main}.c \
+    "$HERE"/win32/{hle,ne,pe,kernel,user,gdi,ansi,files,dx,extra,threads,compat,net,dplay,sound_ec64,backend_headless,qrx_win32_main}.c \
     "$OUT/libqmath.a"
 echo "qrx-win32 for m68k64: $OUT/qrx-win32"

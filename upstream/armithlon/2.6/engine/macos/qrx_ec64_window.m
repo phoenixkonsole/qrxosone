@@ -1,5 +1,6 @@
 /* The Mac window of the 68100EC64 machine, see qrx_ec64_window.h */
 #import <Cocoa/Cocoa.h>
+#import <AudioToolbox/AudioToolbox.h>
 #include "qrx_ec64_window.h"
 #include <pthread.h>
 
@@ -13,6 +14,36 @@ static BOOL closed;
 static pthread_mutex_t pending_lock = PTHREAD_MUTEX_INITIALIZER;
 static NSMutableData *pending;          /* console text not shown yet */
 static uint32_t shown_frames = UINT32_MAX;
+/* The board's sound ring, drained by CoreAudio at 48 kHz */
+static AudioQueueRef audio_queue;
+static void audio_callback(void *opaque, AudioQueueRef q, AudioQueueBufferRef buffer)
+{
+    (void)opaque;
+    size_t frames = buffer->mAudioDataBytesCapacity / 4u;
+    qec64_board *b = board;
+    size_t got = b ? qec64_board_pull_audio(b, (int16_t *)buffer->mAudioData, frames) : 0;
+    if (got < frames) memset((int16_t *)buffer->mAudioData + got * 2u, 0, (frames - got) * 4u);
+    buffer->mAudioDataByteSize = (UInt32)(frames * 4u);
+    AudioQueueEnqueueBuffer(q, buffer, 0, NULL);
+}
+static void audio_open(void)
+{
+    AudioStreamBasicDescription fmt = {0};
+    fmt.mSampleRate = 48000; fmt.mFormatID = kAudioFormatLinearPCM;
+    fmt.mFormatFlags = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked;
+    fmt.mBytesPerPacket = fmt.mBytesPerFrame = 4; fmt.mFramesPerPacket = 1;
+    fmt.mChannelsPerFrame = 2; fmt.mBitsPerChannel = 16;
+    if (AudioQueueNewOutput(&fmt, audio_callback, NULL, NULL, kCFRunLoopCommonModes, 0, &audio_queue) != noErr) {
+        fprintf(stderr, "[EC64] no audio output\n");
+        audio_queue = NULL;
+        return;
+    }
+    for (int i = 0; i < 3; i++) {
+        AudioQueueBufferRef buf;
+        if (AudioQueueAllocateBuffer(audio_queue, 1024u * 4u, &buf) == noErr) audio_callback(NULL, audio_queue, buf);
+    }
+    AudioQueueStart(audio_queue, NULL);
+}
 
 @interface QEC64Console : NSTextView
 @end
@@ -32,7 +63,62 @@ static uint32_t shown_frames = UINT32_MAX;
 {
     if (board) qec64_board_push_event(board, (QEC64_INPUT_KEY_UP << 24) | ((uint32_t)e.keyCode << 16));
 }
+- (void)flagsChanged:(NSEvent *)e
+{
+    /* modifiers come without keyDown: Shift, Control, Option, Command, Caps Lock by their key codes */
+    static const struct { unsigned short key; NSEventModifierFlags flag; } mods[] = {
+        {56, NSEventModifierFlagShift}, {60, NSEventModifierFlagShift}, {59, NSEventModifierFlagControl},
+        {62, NSEventModifierFlagControl}, {58, NSEventModifierFlagOption}, {61, NSEventModifierFlagOption},
+        {55, NSEventModifierFlagCommand}, {54, NSEventModifierFlagCommand}, {57, NSEventModifierFlagCapsLock}};
+    for (unsigned i = 0; i < sizeof mods / sizeof mods[0]; i++)
+        if (mods[i].key == e.keyCode && board) {
+            unsigned kind = (e.modifierFlags & mods[i].flag) ? QEC64_INPUT_KEY_DOWN : QEC64_INPUT_KEY_UP;
+            qec64_board_push_event(board, (kind << 24) | ((uint32_t)e.keyCode << 16));
+        }
+}
 - (BOOL)acceptsFirstResponder { return YES; }
+@end
+
+/* The guest's screen: the pointer in framebuffer pixels, buttons 0 left, 1 right, 2 middle */
+@interface QEC64Picture : NSImageView
+@end
+@implementation QEC64Picture
+- (void)updateTrackingAreas
+{
+    for (NSTrackingArea *a in self.trackingAreas) [self removeTrackingArea:a];
+    [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:self.bounds
+        options:NSTrackingMouseMoved | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect owner:self userInfo:nil]];
+    [super updateTrackingAreas];
+}
+- (void)sendMove:(NSEvent *)e
+{
+    NSImage *img = self.image;
+    if (!board || !img) return;
+    NSSize is = img.size, vs = self.bounds.size;
+    if (is.width < 1 || is.height < 1) return;
+    double scale = fmin(vs.width / is.width, vs.height / is.height);
+    double ox = (vs.width - is.width * scale) / 2, oy = (vs.height - is.height * scale) / 2;
+    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    double x = (p.x - ox) / scale, y = is.height - (p.y - oy) / scale;
+    if (x < 0) x = 0; if (y < 0) y = 0;
+    if (x > is.width - 1) x = is.width - 1; if (y > is.height - 1) y = is.height - 1;
+    qec64_board_push_event(board, (QEC64_INPUT_MOVE << 24) | ((uint32_t)x & 0xFFF) << 12 | ((uint32_t)y & 0xFFF));
+}
+- (void)sendButton:(unsigned)b down:(BOOL)down event:(NSEvent *)e
+{
+    [self sendMove:e];
+    if (board) qec64_board_push_event(board, (QEC64_INPUT_BUTTON << 24) | (b << 16) | (down ? 1u : 0u));
+}
+- (void)mouseMoved:(NSEvent *)e { [self sendMove:e]; }
+- (void)mouseDragged:(NSEvent *)e { [self sendMove:e]; }
+- (void)rightMouseDragged:(NSEvent *)e { [self sendMove:e]; }
+- (void)mouseDown:(NSEvent *)e { [self sendButton:0 down:YES event:e]; }
+- (void)mouseUp:(NSEvent *)e { [self sendButton:0 down:NO event:e]; }
+- (void)rightMouseDown:(NSEvent *)e { [self sendButton:1 down:YES event:e]; }
+- (void)rightMouseUp:(NSEvent *)e { [self sendButton:1 down:NO event:e]; }
+- (void)otherMouseDown:(NSEvent *)e { [self sendButton:2 down:YES event:e]; }
+- (void)otherMouseUp:(NSEvent *)e { [self sendButton:2 down:NO event:e]; }
+- (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 @end
 
 @interface QEC64Delegate : NSObject <NSWindowDelegate>
@@ -76,7 +162,7 @@ int qec64_window_open(const char *title, qec64_board *b, const qec64_window_inpu
         console.textColor = [NSColor colorWithCalibratedWhite:0.92 alpha:1];
         console.autoresizingMask = NSViewWidthSizable;
         scroller.documentView = console;
-        picture = [[NSImageView alloc] initWithFrame:r];
+        picture = [[QEC64Picture alloc] initWithFrame:r];
         picture.imageScaling = NSImageScaleProportionallyUpOrDown;
         picture.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         picture.hidden = YES;
@@ -89,6 +175,7 @@ int qec64_window_open(const char *title, qec64_board *b, const qec64_window_inpu
         [window makeFirstResponder:console];
         [NSApp activateIgnoringOtherApps:YES];
         [NSApp finishLaunching];
+        audio_open();
         return 1;
     }
 }
@@ -171,6 +258,7 @@ int qec64_window_pump(void)
 void qec64_window_close(void)
 {
     @autoreleasepool {
+        if (audio_queue) { AudioQueueStop(audio_queue, true); AudioQueueDispose(audio_queue, true); audio_queue = NULL; }
         if (!closed) [window close];
         window = nil;
         board = NULL;

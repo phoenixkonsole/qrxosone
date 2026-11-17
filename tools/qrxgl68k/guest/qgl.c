@@ -18,6 +18,19 @@ uint32_t *qgl_cur, *qgl_lim;
 static uint32_t *stream, stream_words;
 static uint32_t block[32] __attribute__((aligned(16)));
 
+#if defined(__m68k64__)
+/* QRX OS One 64: the 68100EC64 board's HOST_CALL register (qrx_ec64_board.h) takes the block. */
+#define BOARD_Q(off) (*(volatile uint64_t *)(0xFFFFFFFF00000000ull + (off)))
+#define BOARD_L(off) (*(volatile uint32_t *)(0xFFFFFFFF00000000ull + (off)))
+int qgl_available(void)
+{
+    static int state;
+    if (!state)
+        state = BOARD_Q(0) == 0x5152584543363442ull && (BOARD_L(0x408) & 2u) ? 1 : -1;
+    return state > 0;
+}
+static void door_call(void) { BOARD_Q(0x400) = (uint64_t)(unsigned long)block; }
+#else
 int qgl_available(void)
 {
     static int state;
@@ -34,6 +47,8 @@ int qgl_available(void)
     }
     return state > 0;
 }
+static void door_call(void) { DOOR_CALL_REG = (uint32_t)(unsigned long)block; }
+#endif
 
 /* Runs what is in the stream. The engine leaves the last call's result in the block. */
 static unsigned long long run(void)
@@ -41,11 +56,12 @@ static unsigned long long run(void)
     unsigned long long r = 0;
     if (stream && qgl_cur != stream && qgl_available()) {
         block[0] = SVC_GL; block[1] = 0; block[2] = 0; block[3] = 1;
-        block[4] = 0; block[5] = (uint32_t)(unsigned long)stream;
+        block[4] = (uint32_t)((unsigned long long)(unsigned long)stream >> 32);
+        block[5] = (uint32_t)(unsigned long)stream;
         block[6] = (uint32_t)((char *)qgl_cur - (char *)stream);
         block[8] = 0; block[9] = 0;
         __asm__ volatile("" ::: "memory");
-        DOOR_CALL_REG = (uint32_t)(unsigned long)block;
+        door_call();
         __asm__ volatile("" ::: "memory");
         r = ((unsigned long long)block[8] << 32) | block[9];
     }

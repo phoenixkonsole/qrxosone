@@ -38,7 +38,7 @@ static inline uint32_t *qgl_put(unsigned n)
 static inline uint32_t qgl_f2u(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 static inline uint32_t *qgl_d(uint32_t *q, double d) { memcpy(q, &d, 8); return q + 2; }
 static inline uint32_t *qgl_64(uint32_t *q, unsigned long long v) { q[0] = (uint32_t)(v >> 32); q[1] = (uint32_t)v; return q + 2; }
-static inline uint32_t *qgl_ptr(uint32_t *q, const void *p) { q[0] = 0; q[1] = (uint32_t)(unsigned long)p; return q + 2; }
+static inline uint32_t *qgl_ptr(uint32_t *q, const void *p) { q[0] = (uint32_t)((unsigned long long)(unsigned long)p >> 32); q[1] = (uint32_t)(unsigned long)p; return q + 2; }
 static inline uint32_t *qgl_inline(uint32_t *q, const void *p, unsigned bytes)
 {
     *q++ = bytes;

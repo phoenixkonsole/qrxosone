@@ -517,4 +517,8 @@ int headless_set_script(qwin *w, const char *path);
 #define WS_EX_STATICEDGE 0x00020000u
 #define WS_EX_DLGMODALFRAME 0x00000001u
 
+/* sound_ec64.c: DirectSound and waveOut voices mixed for the 68100EC64 board */
+void qw_ec64_mix(qwin *w);
+int qw_ec64_sound(qwin *w, uint32_t *q);
+int qw_ec64_sound_ok(void);
 #endif

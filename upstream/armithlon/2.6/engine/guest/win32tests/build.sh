@@ -10,6 +10,7 @@ $CC "$HERE/glidetest.c" -o "$OUT/glidetest.exe" -lwinmm
 $CC -DD3DV=9 "$HERE/d3dtest.c" -o "$OUT/d3d9test.exe" -lwinmm
 $CC -DD3DV=8 "$HERE/d3dtest.c" -o "$OUT/d3d8test.exe" -lwinmm
 $CC "$HERE/nettest.c" -o "$OUT/nettest.exe" -lwsock32
+$CC "$HERE/wavetest.c" -o "$OUT/wavetest.exe" -lwinmm
 $CC "$HERE/dptest.c" -o "$OUT/dptest.exe" -ldplayx -ldxguid -lwinmm
 $CC -DD3DV=7 "$HERE/d3d7test.c" -o "$OUT/d3d7test.exe" -lddraw -ldxguid -lwinmm
 $CC -DD3DV=5 "$HERE/d3d7test.c" -o "$OUT/d3d5test.exe" -lddraw -ldxguid -lwinmm

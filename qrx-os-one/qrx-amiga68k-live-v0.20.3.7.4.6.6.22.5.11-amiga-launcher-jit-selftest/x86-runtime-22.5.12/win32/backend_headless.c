@@ -104,13 +104,30 @@ static uint64_t hl_ipms(void)       /* QRX_HL_IPMS: other CPU/clock ratios (e.g.
     if (!v) { const char *e = getenv("QRX_HL_IPMS"); v = e && strtoul(e, NULL, 0) ? strtoul(e, NULL, 0) : HL_IPMS; }
     return v;
 }
+/* Without a script nothing drives the clock but the program, and one that only sleeps would wait
+ * forever: then time is the real time, as on QRX OS One 64 where this is the only backend. */
+#if defined(__m68k64__)
+static uint64_t real_ms(void) { return *(volatile uint64_t *)0xFFFFFFFF00000300ull / 1000u; }   /* board clock */
+#else
+#include <time.h>
+static uint64_t real_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (uint64_t)t.tv_sec * 1000u + (uint64_t)t.tv_nsec / 1000000u; }
+#endif
 static void hl_tick(qwin *w)
 {
+    if (!g_hl.script) {
+        static uint64_t base;
+        uint64_t r = real_ms();
+        if (!base) base = r - g_hl.now;
+        if (r - base > g_hl.now) g_hl.now = r - base;
+        qw_ec64_mix(w);
+        return;
+    }
     uint64_t ipms = hl_ipms(), d = (x86_icount(&w->cpu) - g_hl.ic) / ipms;
     if (!d) return;
     g_hl.ic += d * ipms;
     g_hl.now += d;
     g_hl.pending = g_hl.pending > d ? g_hl.pending - d : 0;
+    qw_ec64_mix(w);
 }
 static uint64_t hl_now(qwin *w) { hl_tick(w); return g_hl.now; }
 

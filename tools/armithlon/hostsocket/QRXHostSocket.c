@@ -465,8 +465,9 @@ extern APTR qrx_hostsocket_vectors[];
 /* Vector functions are plain C functions; the base comes in A1, and there is only one */
 static struct Library *g_lib;
 struct Library *qrx_lib_open(void) { g_lib->lib_OpenCnt++; g_lib->lib_Flags &= ~LIBF_DELEXP; return g_lib; }
-ULONG qrx_lib_close(void) { if (g_lib->lib_OpenCnt) g_lib->lib_OpenCnt--; return 0; }
-ULONG qrx_lib_zero(void) { return 0; }
+/* Close and Expunge return a BPTR, a pointer on AROS 64: it comes back in A0, not D0 */
+void *qrx_lib_close(void) { if (g_lib->lib_OpenCnt) g_lib->lib_OpenCnt--; return NULL; }
+void *qrx_lib_zero(void) { return NULL; }
 #else
 struct Library *qrx_lib_open(struct Library *lib) { lib->lib_OpenCnt++; lib->lib_Flags &= ~LIBF_DELEXP; return lib; }
 ULONG qrx_lib_close(struct Library *lib) { if (lib->lib_OpenCnt) lib->lib_OpenCnt--; return 0; }

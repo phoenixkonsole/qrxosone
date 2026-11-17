@@ -13,6 +13,7 @@
  *     --map FILE       "address name" of every function of the kickstart
  *     --stats          instructions and instructions per second per core at the end
  *     --capture FILE   the board's framebuffer at the end as a PPM, if it is on
+ *     --audio-wav FILE without a window: play the board's sound into a WAV file in real time
  *
  * The system ends the run with a value through the test console's end register; 0x101 and 0x102
  * (a reboot) load and start it again with " rebooted" added to the command line, as a reset would.
@@ -129,6 +130,37 @@ static char *unescape(const char *e)
     return s;
 }
 
+/* --audio-wav: drains the board's sound ring at 48 kHz, as the Mac's audio output would, into a file */
+typedef struct { qec64_board *board; FILE *f; } wav_out;
+static void wav_header(FILE *f, uint32_t frames)
+{
+    uint32_t bytes = frames * 4u;
+    uint8_t h[44] = "RIFF\0\0\0\0WAVEfmt \x10\0\0\0\x01\0\x02\0\x80\xbb\0\0\0\xee\x02\0\x04\0\x10\0data";
+    uint32_t riff = 36 + bytes;
+    memcpy(h + 4, &riff, 4);
+    memcpy(h + 40, &bytes, 4);
+    fseek(f, 0, SEEK_SET);
+    fwrite(h, 1, 44, f);
+    fseek(f, 0, SEEK_END);
+}
+static void *wav_writer(void *arg)
+{
+    wav_out *w = arg;
+    int16_t pcm[480 * 2];
+    uint32_t frames = 0;
+    wav_header(w->f, 0);
+    for (;;) {
+        struct timespec ts = { 0, 10 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+        size_t n = qec64_board_pull_audio(w->board, pcm, 480);
+        if (n < 480) memset(pcm + n * 2, 0, (480 - n) * 4);   /* an underrun plays as silence */
+        fwrite(pcm, 4, 480, w->f);
+        frames += 480;
+        if (frames % 48000 == 0) { wav_header(w->f, frames); fflush(w->f); }
+    }
+    return NULL;
+}
+
 int main(int argc, char **argv)
 {
     unsigned cores = 2;
@@ -138,6 +170,7 @@ int main(int argc, char **argv)
     const char *modules[MAX_MODULES];
     unsigned nmodules = 0;
     char cmdline[400] = "econsole", *input = NULL;
+    const char *wav_path = NULL;
     int disk_write = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -154,6 +187,7 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--map") && i + 1 < argc) map_path = argv[++i];
         else if (!strcmp(a, "--stats")) show_stats = 1;
         else if (!strcmp(a, "--capture") && i + 1 < argc) capture_path = argv[++i];
+        else if (!strcmp(a, "--audio-wav") && i + 1 < argc) wav_path = argv[++i];
         else if (a[0] == '-') { fprintf(stderr, "unknown option %s\n", a); return 2; }
         else if (!kernel) kernel = a;
         else if (nmodules < MAX_MODULES) modules[nmodules++] = a;
@@ -197,6 +231,12 @@ int main(int argc, char **argv)
         qec64_machine_set_mmio(m, qec64_board_mmio, board);
         qec64_machine_console_sink(m, console_out, NULL);
         if (input) qec64_machine_console_input(m, input, strlen(input));
+        static wav_out wav;
+        if (wav_path && !use_window && boot == 0) {
+            wav.board = board;
+            wav.f = fopen(wav_path, "wb");
+            if (wav.f) { pthread_t w; pthread_create(&w, NULL, wav_writer, &wav); }
+        }
         pthread_t reader;
         if (use_stdin && !use_window && boot == 0) pthread_create(&reader, NULL, stdin_reader, m);
 
