@@ -24,7 +24,19 @@ cp ../tc/lib/generic/libclang_rt.builtins-m68k64.a bin/native-m68k64/AROS/Develo
 gmake kernel-battclock-native-m68k64-qrx kernel-battclock-quick       # the board's host clock
 gmake workbench-libs-uuid-quick workbench-libs-iffparse-quick workbench-libs-locale-quick
 gmake workbench-c-quick workbench-c-sh-quick workbench-c-private-quick  # AROS/C: 107 commands
+# The screen: graphics, Intuition and the board's framebuffer driver (ec64gfx.hidd, from vesagfx)
+gmake kernel-oop kernel-graphics kernel-intuition kernel-hidd kernel-hidd-gfx kernel-layers kernel-keymap
+gmake kernel-input-quick kernel-console-quick kernel-keyboard-quick kernel-gameport-quick kernel-fs-con-quick
+gmake kernel-hidd-input kernel-hidd-kbd kernel-hidd-mouse kernel-hidd-ec64gfx-quick workbench-libs-cgfx-quick
+gmake workbench-libs-gadtools-quick workbench-libs-workbench workbench-libs-diskfont-quick
 ```
+
+The compiler must return a single 64-bit value in D0 and A0 (ec64-llvm, `m68k64-dual-return`): AROS
+calls OOP methods and library vectors through prototypes with the other kind of result. A tree built
+with an older compiler is rebuilt from scratch (delete the objects and archives under
+`bin/native-m68k64/gen` first). Kickstart modules link `stdc.static`, not `stdlib.library`, which is on
+disk and missing at cold start; `build-qrxos64.sh` puts the graphics modules into the kickstart. The
+kernel marks all RAM as chip RAM as well: graphics allocates planar bitmaps there.
 
 Programs build with the SDK: `clang --sysroot bin/native-m68k64/AROS/Development -O2 -o hello hello.c`,
 with the build's `bin/darwin-aarch64/tools` (collect-aros) in `PATH`. The clang driver links
