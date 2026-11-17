@@ -147,13 +147,469 @@ static int sh_mem_pct(void)
     if (!tot) return 0;
     return (int)(100 - (ULONG)((UQUAD)freem * 100 / tot));
 }
-static int sh_net_up(void)
+/* The engine's network: 0 direct, 1 Tor, 2 WireGuard, 3 offline, -1 unknown; *up while traffic flows */
+static int sh_net_state(int *up)
 {
-    int up;
-    Forbid();
-    up = FindName(&SysBase->LibList, "bsdsocket.library") != NULL;
-    Permit();
-    return up;
+    static ULONG q[32] __attribute__((aligned(16)));
+    memset(q, 0, sizeof q);
+    q[0] = 4; q[3] = 22;                       /* network service, QRX_NET_STATUS */
+#if defined(__m68k64__)
+    if (sh_board < 0) sh_sample();
+    if (!sh_board) return -1;
+    *(volatile UQUAD *)0xFFFFFFFF00000400UL = (UQUAD)(IPTR)q;
+#else
+    if (*(volatile ULONG *)0xFF000880UL != 0x51383644UL) return -1;
+    *(volatile ULONG *)0xFF00088CUL = (ULONG)(IPTR)q;
+#endif
+    __asm__ volatile("" ::: "memory");            /* the host wrote q */
+    if (q[12] == 0xFFFFFFFFUL) return -1;
+    *up = (int)q[15];
+    return (int)q[14];
+}
+
+/* ---------------------------------------------------------------- users and the encrypted HOME:
+ * The engine's vault (host call service 9, qrx_vault.c) keeps the users and their home images on
+ * the Mac, AES-256-XTS encrypted; the first user is the admin. Before the desktop starts the shell
+ * asks for a login (or, on the first start, for the admin account), then mounts the user's volume
+ * (qrxdisk.device unit 1) as HOME: and formats it the first time. Only QRX OS One 64 has unit 1. */
+#include <libraries/expansion.h>
+#include <dos/filehandler.h>
+#include <resources/filesysres.h>
+#include <proto/expansion.h>
+#define SH_V_STATUS 1
+#define SH_V_LIST 2
+#define SH_V_CREATE 3
+#define SH_V_LOGIN 4
+#define SH_V_LOGOUT 5
+#define SH_V_READ 6
+#define SH_V_PASSWD 8
+#define SH_V_RESET 9
+#define SH_V_DELETE 10
+static ULONG sh_vq[32] __attribute__((aligned(16)));
+static char sh_vtext[512];
+static char sh_user[32];
+static int sh_user_admin;
+/* a[8] of the call; a[9] in *err; -1 without the service */
+static LONG sh_vault(ULONG op, const char *text, ULONG a0, ULONG buf, ULONG len, ULONG *err)
+{
+#if defined(__m68k64__)
+    if (sh_board < 0) sh_sample();
+    if (!sh_board) return -1;
+    memset(sh_vq, 0, sizeof sh_vq);
+    sh_vq[0] = 9; sh_vq[3] = op; sh_vq[4] = a0;
+    if (text) {
+        strncpy(sh_vtext, text, sizeof sh_vtext - 1);
+        sh_vtext[sizeof sh_vtext - 1] = 0;
+        sh_vq[5] = (ULONG)(IPTR)sh_vtext; sh_vq[6] = strlen(sh_vtext);
+    } else { sh_vq[5] = buf; sh_vq[6] = len; }
+    *(volatile UQUAD *)0xFFFFFFFF00000400UL = (UQUAD)(IPTR)sh_vq;
+    __asm__ volatile("" ::: "memory");            /* the host wrote sh_vq */
+    if (err) *err = sh_vq[13];
+    {
+        LONG r = (LONG)sh_vq[12];
+        memset(sh_vtext, 0, sizeof sh_vtext);      /* passwords do not stay in guest memory */
+        return r;
+    }
+#else
+    (void)op; (void)text; (void)a0; (void)buf; (void)len; (void)err;
+    return -1;
+#endif
+}
+
+/* ---- a small modal form: fields (secret ones show dots), an optional list, buttons */
+struct sh_field { const char *label; char v[64]; int secret; };
+struct sh_formdef {
+    const char *title, *note;
+    struct sh_field *f; int nf;
+    char (*rows)[48]; int nrows, *sel;
+    const char **buttons; int nb;
+    char msg[96]; ULONG msg_color;
+    int autosubmit;               /* tests: press the first button at once */
+};
+#define SH_FORM_W 520
+static int sh_form_h(struct sh_formdef *d) { return 92 + d->nf * 54 + (d->rows ? 22 * (d->nrows ? d->nrows : 1) + 16 : 0) + 74; }
+static void sh_form_draw(struct Window *w, struct sh_formdef *d, int focus)
+{
+    struct RastPort *rp = w->RPort;
+    int H = sh_form_h(d), y, i;
+    sh_fill(rp, 0, 0, SH_FORM_W, H, SH_PANEL);
+    sh_fill(rp, 0, 0, SH_FORM_W, 4, SH_ACCENT);
+    sh_text(rp, 28, 24, SH_TEXT, d->title, SH_FORM_W - 56);
+    if (d->note) sh_text(rp, 28, 48, SH_DIM, d->note, SH_FORM_W - 56);
+    y = 80;
+    for (i = 0; i < d->nf; i++, y += 54) {
+        char shown[72];
+        int n = (int)strlen(d->f[i].v), k;
+        sh_text(rp, 28, y, SH_DIM, d->f[i].label, 0);
+        sh_round(rp, 28, y + 16, SH_FORM_W - 56, 28, SH_BG);
+        if (i == focus) sh_fill(rp, 28, y + 42, SH_FORM_W - 56, 2, SH_ACCENT);
+        if (d->f[i].secret) { for (k = 0; k < n && k < 64; k++) shown[k] = '*'; shown[k] = 0; }
+        else snprintf(shown, sizeof shown, "%s", d->f[i].v);
+        if (i == focus) strcat(shown, "_");
+        sh_text(rp, 40, y + 23, SH_TEXT, shown, SH_FORM_W - 80);
+    }
+    if (d->rows) {
+        if (!d->nrows) sh_text(rp, 28, y, SH_DIM, "No users", 0);
+        for (i = 0; i < d->nrows; i++) {
+            if (d->sel && *d->sel == i) sh_round(rp, 24, y + i * 22 - 3, SH_FORM_W - 48, 21, SH_HOVER);
+            sh_text(rp, 36, y + i * 22, SH_TEXT, d->rows[i], SH_FORM_W - 72);
+        }
+    }
+    if (d->msg[0]) sh_text(rp, 28, H - 64, d->msg_color ? d->msg_color : SH_BAD, d->msg, SH_FORM_W - 56);
+    {
+        int x = SH_FORM_W - 28;
+        for (i = d->nb - 1; i >= 0; i--) {
+            int bw = sh_textw(rp, d->buttons[i]) + 28;
+            x -= bw;
+            sh_round(rp, x, H - 42, bw, 30, i == 0 ? SH_ACCENT : SH_HOVER);
+            sh_text_c(rp, x + bw / 2, H - 34, 0xFFFFFFFFu, d->buttons[i], 0);
+            x -= 10;
+        }
+    }
+}
+static int sh_form_button_at(struct Window *w, struct sh_formdef *d, int mx, int my)
+{
+    int H = sh_form_h(d), x = SH_FORM_W - 28, i;
+    if (my < H - 42 || my >= H - 12) return -1;
+    for (i = d->nb - 1; i >= 0; i--) {
+        int bw = sh_textw(w->RPort, d->buttons[i]) + 28;
+        x -= bw;
+        if (mx >= x && mx < x + bw) return i;
+        x -= 10;
+    }
+    return -1;
+}
+/* Opens, runs until a button, closes. Returns the button; Escape is the last one. 'busy' is drawn
+ * as the message after a button and before the caller's work (Argon2id takes a moment). */
+static int sh_form_run(struct sh_formdef *d, const char *busy)
+{
+    int H = sh_form_h(d), focus = 0, result = -1;
+    struct Window *w = OpenWindowTags(NULL, g_screen_borrowed ? WA_PubScreen : WA_CustomScreen, (IPTR)g_screen,
+                                      WA_Left, (g_screen_width - SH_FORM_W) / 2, WA_Top, (g_screen_height - H) / 2,
+                                      WA_Width, SH_FORM_W, WA_Height, H, WA_Borderless, TRUE, WA_SmartRefresh, TRUE,
+                                      WA_Activate, TRUE, WA_RMBTrap, TRUE,
+                                      WA_IDCMP, IDCMP_MOUSEBUTTONS | IDCMP_VANILLAKEY | IDCMP_REFRESHWINDOW, TAG_DONE);
+    if (!w) return -1;
+    sh_form_draw(w, d, focus);
+    if (d->autosubmit) result = 0;
+    while (result < 0) {
+        struct IntuiMessage *m;
+        WaitPort(w->UserPort);
+        while (result < 0 && (m = (struct IntuiMessage *)GetMsg(w->UserPort))) {
+            ULONG cls = m->Class;
+            UWORD code = m->Code;
+            int mx = m->MouseX, my = m->MouseY;
+            ReplyMsg((struct Message *)m);
+            if (cls == IDCMP_REFRESHWINDOW) { BeginRefresh(w); EndRefresh(w, TRUE); }
+            else if (cls == IDCMP_VANILLAKEY) {
+                if (code == 27 && d->nb > 1) result = d->nb - 1;
+                else if (code == 13) { if (focus < d->nf - 1) focus++; else result = 0; }
+                else if (code == 9 && d->nf) focus = (focus + 1) % d->nf;
+                else if (d->nf) {
+                    char *v = d->f[focus].v;
+                    int n = (int)strlen(v);
+                    if (code == 8) { if (n) v[n - 1] = 0; }
+                    else if (code >= 32 && code < 127 && n < 62) { v[n] = (char)code; v[n + 1] = 0; }
+                }
+            } else if (cls == IDCMP_MOUSEBUTTONS && code == SELECTDOWN) {
+                int i, b = sh_form_button_at(w, d, mx, my);
+                if (b >= 0) result = b;
+                for (i = 0; i < d->nf; i++) if (my >= 80 + i * 54 + 16 && my < 80 + i * 54 + 44) focus = i;
+                if (d->rows && d->sel) {
+                    int y0 = 80 + d->nf * 54, r = (my - y0 + 3) / 22;
+                    if (my >= y0 - 3 && r >= 0 && r < d->nrows) *d->sel = r;
+                }
+            }
+            if (result < 0) sh_form_draw(w, d, focus);
+        }
+    }
+    if (busy) {
+        snprintf(d->msg, sizeof d->msg, "%s", busy);
+        d->msg_color = SH_DIM;
+        sh_form_draw(w, d, -1);
+        d->msg[0] = 0;
+    }
+    CloseWindow(w);
+    return result;
+}
+static void sh_forget(struct sh_field *f, int n)
+{
+    int i;
+    for (i = 0; i < n; i++) memset(f[i].v, 0, sizeof f[i].v);
+}
+
+/* ---- HOME: on qrxdisk.device unit 1, formatted the first time */
+static void sh_mount_home(ULONG sectors)
+{
+#if defined(__m68k64__)
+    struct DosList *dl = LockDosList(LDF_DEVICES | LDF_READ);
+    struct Library *ExpansionBase;
+    IPTR *pp;
+    struct DosEnvec *de;
+    struct DeviceNode *dn;
+    static UBYTE first[512] __attribute__((aligned(16)));
+    int found = FindDosEntry(dl, (STRPTR)"HOME", LDF_DEVICES) != NULL;
+    UnLockDosList(LDF_DEVICES | LDF_READ);
+    if (found || !sectors) return;
+    if (!(ExpansionBase = OpenLibrary((STRPTR)"expansion.library", 0))) return;
+    pp = AllocMem(sizeof(IPTR) * 4 + sizeof(struct DosEnvec), MEMF_PUBLIC | MEMF_CLEAR);
+    if (pp) {
+        pp[0] = (IPTR)"HOME";
+        pp[1] = (IPTR)"qrxdisk.device";
+        pp[2] = 1;
+        pp[3] = 0;
+        de = (struct DosEnvec *)&pp[4];
+        de->de_TableSize = DE_BOOTBLOCKS;
+        de->de_SizeBlock = 512 / 4;
+        de->de_Surfaces = 1;
+        de->de_SectorPerBlock = 1;
+        de->de_BlocksPerTrack = 32;
+        de->de_Reserved = 2;
+        de->de_LowCyl = 0;
+        de->de_HighCyl = sectors / 32 - 1;
+        de->de_NumBuffers = 64;
+        de->de_BufMemType = MEMF_PUBLIC;
+        de->de_MaxTransfer = 0x00100000;
+        de->de_Mask = (IPTR)~0;
+        de->de_DosType = 0x444F5301;
+        dn = MakeDosNode(pp);
+        if (dn) {
+            /* the Fast File System from FileSystem.resource, as AddBootNode() would find it */
+            struct FileSysResource *fsr = OpenResource((STRPTR)FSRNAME);
+            struct FileSysEntry *fse;
+            if (fsr)
+                ForeachNode(&fsr->fsr_FileSysEntries, fse)
+                    if (fse->fse_DosType == 0x444F5301) {
+                        dn->dn_SegList = fse->fse_SegList;
+                        dn->dn_GlobalVec = fse->fse_GlobalVec;
+                        if (fse->fse_StackSize) dn->dn_StackSize = fse->fse_StackSize;
+                        break;
+                    }
+            AddDosNode(0, ADNF_STARTPROC, dn);
+        }
+    }
+    CloseLibrary(ExpansionBase);
+    /* a new volume is all zeros: give it a file system */
+    if (sh_vault(SH_V_READ, NULL, 0, (ULONG)(IPTR)first, 1, NULL) == 1 && memcmp(first, "DOS", 3)) {
+        Inhibit((STRPTR)"HOME:", DOSTRUE);
+        Format((STRPTR)"HOME:", (STRPTR)"Home", 0x444F5301);
+        Inhibit((STRPTR)"HOME:", DOSFALSE);
+    }
+    {
+        BPTR l = Lock((STRPTR)"HOME:", ACCESS_READ);
+        if (l) {
+            BPTR d;
+            UnLock(l);
+            if ((d = CreateDir((STRPTR)"HOME:Documents"))) UnLock(d);
+            if ((d = CreateDir((STRPTR)"HOME:Pictures"))) UnLock(d);
+        }
+    }
+#else
+    (void)sectors;
+#endif
+}
+
+/* SYS:QRX/logintest (tests): "name\npassword", filled in and submitted once */
+static int sh_login_test(struct sh_field *f)
+{
+    char t[140];
+    BPTR fh = Open((STRPTR)"SYS:QRX/logintest", MODE_OLDFILE);
+    LONG n;
+    char *e;
+    if (!fh) return 0;
+    n = Read(fh, t, sizeof t - 1);
+    Close(fh);
+    t[n > 0 ? n : 0] = 0;
+    if (!(e = strchr(t, '\n'))) return 0;
+    *e++ = 0;
+    snprintf(f[0].v, sizeof f[0].v, "%s", t);
+    if (strchr(e, '\n')) *strchr(e, '\n') = 0;
+    snprintf(f[1].v, sizeof f[1].v, "%s", e);
+    return 1;
+}
+static void sh_login(void)
+{
+    ULONG err = 0;
+    LONG users = sh_vault(SH_V_STATUS, NULL, 0, 0, 0, &err);
+    int test_used = 0;
+    if (users < 0 || err == 9) return;                 /* no vault: one user as before */
+    if (sh_vq[14]) {                                   /* already logged in: the desktop came back */
+        sh_mount_home(sh_vq[16]);
+        return;
+    }
+    for (;;) {
+        static const char *create_b[] = { "Create" }, *login_b[] = { "Log in", "Shut down" };
+        struct sh_field f[4];
+        struct sh_formdef d;
+        char text[200];
+        LONG r;
+        memset(f, 0, sizeof f);
+        memset(&d, 0, sizeof d);
+        users = sh_vault(SH_V_STATUS, NULL, 0, 0, 0, NULL);
+        f[0].label = "Name";
+        f[1].label = "Password"; f[1].secret = 1;
+        d.f = f;
+        if (!test_used && sh_login_test(f)) { d.autosubmit = 1; test_used = 1; }
+        if (users == 0) {
+            d.title = "Welcome to QRX OS One";
+            d.note = "Create the main account. It is the administrator.";
+            f[2].label = "Password again"; f[2].secret = 1;
+            f[3].label = "Encrypted home size (MB)";
+            snprintf(f[3].v, sizeof f[3].v, "1024");
+            if (d.autosubmit) { snprintf(f[2].v, sizeof f[2].v, "%s", f[1].v); snprintf(f[3].v, sizeof f[3].v, "64"); }
+            d.nf = 4; d.buttons = create_b; d.nb = 1;
+            for (;;) {
+                sh_form_run(&d, "Creating the encrypted home...");
+                if (strcmp(f[1].v, f[2].v)) { snprintf(d.msg, sizeof d.msg, "The passwords differ."); d.autosubmit = 0; continue; }
+                if (strlen(f[1].v) < 4) { snprintf(d.msg, sizeof d.msg, "At least 4 characters, please."); d.autosubmit = 0; continue; }
+                snprintf(text, sizeof text, "%s\n%s\nadmin\n%s", f[0].v, f[1].v, f[3].v);
+                r = sh_vault(SH_V_CREATE, text, 0, 0, 0, &err);
+                memset(text, 0, sizeof text);
+                if (r == 0) break;
+                snprintf(d.msg, sizeof d.msg, err == 1 ? "Names: letters, digits, - and _; 16 MB or more." : "The account could not be created (%lu).", (unsigned long)err);
+                d.autosubmit = 0;
+            }
+        } else {
+            d.title = "QRX OS One";
+            d.note = "Log in to your encrypted home.";
+            d.nf = 2; d.buttons = login_b; d.nb = 2;
+        }
+        for (;;) {
+            if (users != 0) {
+                int b = sh_form_run(&d, "Unlocking...");
+                if (b == 1) { launch_native("C:Shutdown"); continue; }
+            }
+            snprintf(text, sizeof text, "%s\n%s", f[0].v, f[1].v);
+            r = sh_vault(SH_V_LOGIN, text, 0, 0, 0, &err);
+            memset(text, 0, sizeof text);
+            if (r != -1) {
+                snprintf(sh_user, sizeof sh_user, "%s", f[0].v);
+                sh_user_admin = (int)sh_vq[15];
+                sh_forget(f, 4);
+                SetVar((STRPTR)"USER", (STRPTR)sh_user, -1, GVF_GLOBAL_ONLY);
+                sh_mount_home((ULONG)r);
+                return;
+            }
+            memset(f[1].v, 0, sizeof f[1].v);
+            snprintf(d.msg, sizeof d.msg, "Wrong name or password.");
+            d.autosubmit = 0;
+            users = 1;
+        }
+    }
+}
+/* the file system writes its buffers and lets go of the volume */
+static void sh_flush_home(void)
+{
+    if (sh_user[0]) Inhibit((STRPTR)"HOME:", DOSTRUE);
+}
+static void sh_logout(void)
+{
+    sh_flush_home();
+    sh_vault(SH_V_LOGOUT, NULL, 0, 0, 0, NULL);
+    ColdReboot();           /* nothing of the old session stays in memory or in a cache */
+}
+
+/* ---- the Users panel: everyone changes their password; admins add, reset and delete users */
+static const char *sh_verr(ULONG e)
+{
+    switch (e) {
+    case 1: return "Check the entries (names: letters, digits, - _).";
+    case 2: return "That name is taken.";
+    case 3: return "No such user.";
+    case 4: return "Wrong password.";
+    case 5: return "Only an administrator can do that.";
+    default: return "That did not work.";
+    }
+}
+static void sh_users_panel(void)
+{
+    static char rows[32][48];
+    static char list[32 * 48];
+    int sel = -1;
+    char msg[96] = "";
+    ULONG msgc = 0;
+    for (;;) {
+        static const char *admin_b[] = { "New user", "Reset", "Delete", "My password", "Close" };
+        static const char *user_b[] = { "My password", "Close" };
+        struct sh_formdef d;
+        LONG n = sh_vault(SH_V_LIST, NULL, 0, (ULONG)(IPTR)list, sizeof list - 1, NULL);
+        int nrows = 0, b;
+        char *p = list;
+        if (n < 0) return;
+        list[n] = 0;
+        while (*p && nrows < 32) {
+            char *e = strchr(p, '\n'), *sp;
+            if (e) *e = 0;
+            sp = strchr(p, ' ');
+            if (sp) *sp = 0;
+            snprintf(rows[nrows], sizeof rows[0], "%s%s%s", p, sp && !strcmp(sp + 1, "admin") ? "  (admin)" : "",
+                     !strcmp(p, sh_user) ? "  - you" : "");
+            nrows++;
+            if (!e) break;
+            p = e + 1;
+        }
+        memset(&d, 0, sizeof d);
+        d.title = "Users";
+        d.note = sh_user_admin ? "The first user is always the administrator." : "Your account";
+        d.rows = rows; d.nrows = nrows; d.sel = &sel;
+        if (sh_user_admin) { d.buttons = admin_b; d.nb = 5; } else { d.buttons = user_b; d.nb = 2; }
+        snprintf(d.msg, sizeof d.msg, "%s", msg);
+        d.msg_color = msgc;
+        msg[0] = 0; msgc = 0;
+        b = sh_form_run(&d, NULL);
+        if (!sh_user_admin) b += 3;
+        if (b == 4 || b < 0) return;
+        {
+            struct sh_field f[3];
+            struct sh_formdef e;
+            static const char *ok_b[] = { "OK", "Cancel" };
+            char name[48] = "", text[200];
+            ULONG err = 0;
+            LONG r = -1;
+            memset(f, 0, sizeof f);
+            memset(&e, 0, sizeof e);
+            e.f = f; e.buttons = ok_b; e.nb = 2;
+            if ((b == 1 || b == 2) && sel < 0) { snprintf(msg, sizeof msg, "Pick a user first."); continue; }
+            if (sel >= 0) { snprintf(name, sizeof name, "%s", rows[sel]); if (strchr(name, ' ')) *strchr(name, ' ') = 0; }
+            if (b == 0) {
+                e.title = "New user"; e.nf = 3;
+                f[0].label = "Name"; f[1].label = "Password"; f[1].secret = 1;
+                f[2].label = "Home size (MB), add ' admin' for an administrator";
+                snprintf(f[2].v, sizeof f[2].v, "512");
+                if (sh_form_run(&e, "Creating the encrypted home...") != 0) continue;
+                {
+                    char size[64];
+                    int adm = strstr(f[2].v, "admin") != NULL;
+                    snprintf(size, sizeof size, "%lu", strtoul(f[2].v, NULL, 10));
+                    snprintf(text, sizeof text, "%s\n%s\n%s\n%s", f[0].v, f[1].v, adm ? "admin" : "user", size);
+                }
+                r = sh_vault(SH_V_CREATE, text, 0, 0, 0, &err);
+            } else if (b == 1) {
+                e.title = "Reset password"; e.note = name; e.nf = 1;
+                f[0].label = "New password"; f[0].secret = 1;
+                if (sh_form_run(&e, "Working...") != 0) continue;
+                snprintf(text, sizeof text, "%s\n%s", name, f[0].v);
+                r = sh_vault(SH_V_RESET, text, 0, 0, 0, &err);
+            } else if (b == 2) {
+                static const char *del_b[] = { "Delete", "Cancel" };
+                e.title = "Delete this user and their home?"; e.note = name; e.nf = 0; e.buttons = del_b;
+                if (sh_form_run(&e, NULL) != 0) continue;
+                r = sh_vault(SH_V_DELETE, name, 0, 0, 0, &err);
+                sel = -1;
+            } else if (b == 3) {
+                e.title = "Change my password"; e.nf = 2;
+                f[0].label = "Current password"; f[0].secret = 1;
+                f[1].label = "New password"; f[1].secret = 1;
+                if (sh_form_run(&e, "Working...") != 0) continue;
+                snprintf(text, sizeof text, "%s\n%s", f[0].v, f[1].v);
+                r = sh_vault(SH_V_PASSWD, text, 0, 0, 0, &err);
+            }
+            memset(text, 0, sizeof text);
+            sh_forget(f, 3);
+            if (r == -1) snprintf(msg, sizeof msg, "%s", sh_verr(err));
+            else { snprintf(msg, sizeof msg, "Done."); msgc = SH_GOOD; }
+        }
+    }
 }
 
 /* ---------------------------------------------------------------- windows of the screen */
@@ -258,6 +714,8 @@ static const struct sh_app sh_apps[] = {
     { "QRX Drive",  "*files",               0xFFF59E0Bu, "QD" },
     { "Overview",   "*overview",            0xFF8B5CF6u, "OV" },
     { "About",      "C:QRXInfo",            0xFF3B82F6u, "i"  },
+    { "Network",    "C:QRXNetwork",         0xFF059669u, "NW" },
+    { "Users",      "*users",               0xFF0F766Eu, "US" },
     { "Writer",     "QRX:C/QRXWriter",      0xFF2563EBu, "W"  },
     { "Sheet",      "QRX:C/QRXSpreadsheet", 0xFF16A34Au, "S"  },
     { "Presenter",  "QRX:C/QRXPresenter",   0xFFEA580Cu, "P"  },
@@ -298,7 +756,8 @@ static void sh_check_apps(void)
     int i;
     for (i = 0; i < SH_NAPPS; i++) {
         const char *c = sh_apps[i].cmd;
-        if (c[0] == '*') sh_app_ok[i] = 1;
+        if (!strcmp(c, "*users")) sh_app_ok[i] = sh_vault(SH_V_STATUS, NULL, 0, 0, 0, NULL) >= 0;   /* QRX OS One 64 only */
+        else if (c[0] == '*') sh_app_ok[i] = 1;
         else {
             BPTR l = Lock((STRPTR)c, ACCESS_READ);
             sh_app_ok[i] = l != 0;
@@ -313,6 +772,7 @@ static void sh_run_app(int i)
     if (!strcmp(c, "*terminal")) { if (g_terminal) sh_focus(g_terminal); }
     else if (!strcmp(c, "*files")) open_filemanager(g_files_path);
     else if (!strcmp(c, "*overview")) sh_overview_open();
+    else if (!strcmp(c, "*users")) sh_users_panel();
     else if (!strcmp(c, "*apps")) {
         BPTR l = Lock((STRPTR)"APPS:", ACCESS_READ);
         if (l) { UnLock(l); open_filemanager("APPS:"); } else open_filemanager("SYS:");
@@ -388,7 +848,12 @@ static void sh_draw_bar(void)
     snprintf(s, sizeof s, "RAM %d%%", sh_mem_pct());
     sh_bar_module(rp, x, 70, s, SH_WARN);
     x += 76;
-    sh_bar_module(rp, x, 50, sh_net_up() ? "NET" : "OFF", sh_net_up() ? SH_ACCENT : SH_BAD);
+    {
+        int up = 0, st = sh_net_state(&up);
+        const char *label = st == 1 ? "TOR" : st == 2 ? "VPN" : st == 3 ? "OFF" : "NET";
+        ULONG c = st == 3 ? SH_BAD : (st == 1 || st == 2) ? (up ? SH_GOOD : SH_WARN) : SH_ACCENT;
+        sh_bar_module(rp, x, 50, label, c);
+    }
     x += 56;
     DateStamp(&ds);
     {
@@ -496,8 +961,12 @@ static void sh_draw_menu(void)
     sh_fill(rp, 0, SH_MENU_H - 60, SH_MENU_W, 60, SH_PANEL2);
     sh_round(rp, 24, SH_MENU_H - 46, 32, 32, SH_ACCENT);
     sh_text_c(rp, 40, SH_MENU_H - 34, 0xFFFFFFFFu, "Q", 0);
-    sh_text(rp, 66, SH_MENU_H - 34, SH_TEXT, "QRX User", 0);
+    sh_text(rp, 66, SH_MENU_H - 34, SH_TEXT, sh_user[0] ? sh_user : "QRX User", 0);
     if (sh_power_open) {
+        if (sh_user[0]) {
+            sh_round(rp, SH_MENU_W - 356, SH_MENU_H - 48, 80, 36, SH_ACCENT);
+            sh_text_c(rp, SH_MENU_W - 316, SH_MENU_H - 34, 0xFFFFFFFFu, "Log out", 76);
+        }
         sh_round(rp, SH_MENU_W - 268, SH_MENU_H - 48, 80, 36, SH_BAD);
         sh_text_c(rp, SH_MENU_W - 228, SH_MENU_H - 34, 0xFFFFFFFFu, "Shut down", 76);
         sh_round(rp, SH_MENU_W - 180, SH_MENU_H - 48, 80, 36, SH_WARN);
@@ -576,8 +1045,9 @@ static void sh_menu_message(struct IntuiMessage *m)
         if (my >= SH_MENU_H - 48 && my < SH_MENU_H - 12) {
             if (!sh_power_open && mx >= SH_MENU_W - 60 && mx < SH_MENU_W - 24) { sh_power_open = 1; sh_draw_menu(); return; }
             if (sh_power_open) {
-                if (mx >= SH_MENU_W - 268 && mx < SH_MENU_W - 188) { sh_menu_close(); launch_native("C:Shutdown"); return; }
-                if (mx >= SH_MENU_W - 180 && mx < SH_MENU_W - 100) { sh_menu_close(); ColdReboot(); return; }
+                if (sh_user[0] && mx >= SH_MENU_W - 356 && mx < SH_MENU_W - 276) { sh_menu_close(); sh_logout(); return; }
+                if (mx >= SH_MENU_W - 268 && mx < SH_MENU_W - 188) { sh_menu_close(); sh_flush_home(); launch_native("C:Shutdown"); return; }
+                if (mx >= SH_MENU_W - 180 && mx < SH_MENU_W - 100) { sh_menu_close(); sh_flush_home(); ColdReboot(); return; }
                 if (mx >= SH_MENU_W - 92 && mx < SH_MENU_W - 24) { sh_power_open = 0; sh_draw_menu(); return; }
             }
         }
@@ -840,6 +1310,7 @@ static void sh_tick(void)
     if (sh_test[0] && sh_ticks == 40) {
         if (!strcmp(sh_test, "menu")) sh_menu_open();
         else if (!strcmp(sh_test, "overview")) sh_overview_open();
+        else if (!strcmp(sh_test, "users")) { sh_test[0] = 0; sh_users_panel(); }
         else if (!strncmp(sh_test, "wallpaper ", 10)) qrx_shell_set_wallpaper(sh_test + 10);
         else if (!strcmp(sh_test, "peek")) { sh_collect(); sh_bar_layout(); sh_hover = 0; sh_hover_ticks = 2; sh_peek_open(0); }
     }
@@ -851,6 +1322,7 @@ static void qrx_shell_open(void)
 {
     if (!g_screen || sh_bar) return;
     sh_sample();
+    sh_login();
     sh_bar = OpenWindowTags(NULL, g_screen_borrowed ? WA_PubScreen : WA_CustomScreen, (IPTR)g_screen, WA_Left, 0, WA_Top, g_screen_height - SH_BAR_H,
                             WA_Width, g_screen_width, WA_Height, SH_BAR_H, WA_Borderless, TRUE, WA_SmartRefresh, TRUE,
                             WA_RMBTrap, TRUE, WA_ReportMouse, TRUE,

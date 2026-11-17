@@ -1385,6 +1385,7 @@ enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
     uint64_t left = max;
     c->status = QEC64_RUNNING;
     while (left) {
+        if (c->gate) { c->gate(c); j->last_exit = NULL; }
         if (!c->m64 || c->waiting || pending_irq(c)) {
             j->last_exit = NULL;
             uint64_t before = c->instructions;
@@ -1408,7 +1409,7 @@ enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
             if (fl != j->flushes) site = NULL;
         }
         if (verify_on()) site = NULL;                    /* each block on its own */
-        if (site && b->code && !(jit_off() & 0x800)) {   /* chain the exit that brought us here */
+        if (site && b->code && !(jit_off() & 0x800) && !c->gate) {   /* chain the exit that brought us here */
             int64_t dist = b->body - site;
 #if defined(__APPLE__)
             pthread_jit_write_protect_np(0);

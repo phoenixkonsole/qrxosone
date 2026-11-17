@@ -2,6 +2,7 @@
  * signals them for the first time: then they take over its VBR and the stack it named. */
 #include "qrx68100ec64.h"
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -108,6 +109,97 @@ uint64_t qec64_machine_idle(qec64_cpu *c, uint64_t max_us)
     pthread_mutex_unlock(&m->lock);
     return now_us() - start;
 }
+/* ---- Global Forbid()/Disable() for AROS SMP.
+ * AROS keeps Forbid() and Disable() per core: on another core other tasks go on, and Amiga code
+ * that protects shared lists with Forbid() breaks once tasks run on more than one core. Here the
+ * machine makes them global. Each core's TLS (A8, arch/m68k64-native/kernel/tls.h) holds its
+ * IDNestCnt and TDNestCnt; a core in user state with either >= 0 owns the machine, and the other
+ * cores stop before their next block until it lets go. Exceptions:
+ *  - a core in supervisor state (interrupts, the scheduler) is never stopped and never owns;
+ *  - a core holding a kernel spinlock (the TLS byte at 31 counts them) runs on until it lets go,
+ *    or the owner could wait for that lock forever;
+ *  - a core with an interrupt to take takes it (Forbid() does not stop interrupts on the Amiga);
+ *  - the owner waits at most GF_ACK_US for the others, a stopped core at most GF_PAUSE_US: a
+ *    program that waits in Forbid() for another core slows down instead of hanging.
+ * On with QRX_EC64_GFORBID=1, and with QRX_EC64_SMP_SPREAD (tasks on all cores) unless
+ * QRX_EC64_GFORBID=0. */
+#define TLS_IDNEST 28
+#define TLS_TDNEST 29
+#define TLS_SPINS 31
+#define GF_ACK_US 5000u
+#define GF_PAUSE_US 50000u
+static int gf_owner = -1;
+static uint32_t gf_stopped;                    /* cores that are standing in gf_gate */
+static uint64_t gf_acquired, gf_ack_timeouts, gf_pause_timeouts;
+static void gf_nap(void)
+{
+    struct timespec t = { 0, 20000 };
+    nanosleep(&t, NULL);
+}
+static bool gf_irq(const qec64_cpu *c)
+{
+    uint32_t p = __atomic_load_n(&c->pending, __ATOMIC_RELAXED);
+    if (!p) return false;
+    unsigned level = 31u - (unsigned)__builtin_clz(p);
+    return level > c->ipl || level == 7;
+}
+static bool gf_tls(const qec64_cpu *c, int *spins)
+{
+    uint64_t t = c->a[8];
+    *spins = 0;
+    if (!t || t + 40 > c->ram_size) return false;
+    *spins = c->ram[t + TLS_SPINS];
+    return (int8_t)c->ram[t + TLS_IDNEST] >= 0 || (int8_t)c->ram[t + TLS_TDNEST] >= 0;
+}
+static void gf_gate(qec64_cpu *c)
+{
+    qec64_machine *m = c->machine;
+    int id = (int)c->core_id;
+    for (;;) {
+        int spins, want = !c->supervisor && gf_tls(c, &spins);
+        int o = __atomic_load_n(&gf_owner, __ATOMIC_ACQUIRE);
+        if (o == id) {
+            if (!want && !c->supervisor) __atomic_store_n(&gf_owner, -1, __ATOMIC_RELEASE);
+            return;
+        }
+        if (o >= 0) {
+            if (c->supervisor || spins || gf_irq(c)) return;
+            /* stand still until the owner is done */
+            uint64_t until = now_us() + GF_PAUSE_US;
+            __atomic_fetch_or(&gf_stopped, 1u << id, __ATOMIC_SEQ_CST);
+            while (__atomic_load_n(&gf_owner, __ATOMIC_ACQUIRE) == o && !m->stopping && !gf_irq(c)) {
+                if (now_us() > until) { gf_pause_timeouts++; break; }
+                gf_nap();
+            }
+            __atomic_fetch_and(&gf_stopped, ~(1u << id), __ATOMIC_SEQ_CST);
+            if (__atomic_load_n(&gf_owner, __ATOMIC_ACQUIRE) == o) return;   /* timed out or interrupted */
+            continue;
+        }
+        if (!want) return;
+        int none = -1;
+        if (!__atomic_compare_exchange_n(&gf_owner, &none, id, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) continue;
+        gf_acquired++;
+        /* the others reach a block boundary, or sleep, or are not running yet */
+        uint64_t until = now_us() + GF_ACK_US;
+        for (unsigned k = 0; k < m->cores; k++) {
+            if ((int)k == id) continue;
+            qec64_cpu *o2 = &m->cpu[k];
+            while (__atomic_load_n(&o2->started, __ATOMIC_ACQUIRE) && !o2->waiting && !o2->supervisor &&
+                   !(__atomic_load_n(&gf_stopped, __ATOMIC_ACQUIRE) >> k & 1) && !m->stopping) {
+                if (now_us() > until) { gf_ack_timeouts++; break; }
+                gf_nap();
+            }
+        }
+        return;
+    }
+}
+/* A core going to sleep (STOP) gives the machine back */
+static void gf_sleep(qec64_cpu *c)
+{
+    int id = (int)c->core_id;
+    __atomic_compare_exchange_n(&gf_owner, &id, -1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+}
+
 static void *core_thread(void *arg)
 {
     qec64_cpu *c = arg;
@@ -129,6 +221,7 @@ static void *core_thread(void *arg)
         }
         if (st == QEC64_RUNNING) continue;
         if (st == QEC64_WAITING) {
+            if (c->gate) gf_sleep(c);
             pthread_mutex_lock(&m->lock);
             /* Ask again under the lock: a signal between the run and here must not be missed. */
             while (!__atomic_load_n(&c->pending, __ATOMIC_SEQ_CST) && !m->stopping) {
@@ -172,6 +265,12 @@ qec64_machine *qec64_machine_new(uint8_t *ram, uint64_t ram_size, unsigned cores
         c->on_console = on_console;
         c->on_console_in = on_console_in;
     }
+    {
+        const char *g = getenv("QRX_EC64_GFORBID"), *sp = getenv("QRX_EC64_SMP_SPREAD");
+        bool on = g ? atoi(g) != 0 : (sp && atoi(sp) != 0);
+        if (on && cores > 1)
+            for (unsigned i = 0; i < cores; i++) m->cpu[i].gate = gf_gate;
+    }
     const char *jit = getenv("QRX_EC64_JIT");
     if ((!jit || strcmp(jit, "0")) && qec64_jit_map_new(ram_size, &m->code_map, &m->code_gen))
         for (unsigned i = 0; i < cores; i++) { m->cpu[i].code_map = m->code_map; m->cpu[i].code_gen = m->code_gen; }
@@ -179,6 +278,9 @@ qec64_machine *qec64_machine_new(uint8_t *ram, uint64_t ram_size, unsigned cores
 }
 void qec64_machine_free(qec64_machine *m)
 {
+    if (m->cpu[0].gate)
+        fprintf(stderr, "[EC64] global Forbid: %llu times, %llu waits for a core cut short, %llu stops cut short\n",
+                (unsigned long long)gf_acquired, (unsigned long long)gf_ack_timeouts, (unsigned long long)gf_pause_timeouts);
     for (unsigned i = 0; i < m->cores; i++) qec64_jit_free(&m->cpu[i]);
     free(m->code_map);
     free(m->code_gen);

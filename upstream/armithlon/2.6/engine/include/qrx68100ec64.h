@@ -69,6 +69,9 @@ struct qec64_cpu {
     void *jit;
     uint8_t *code_map;
     uint32_t *code_gen;
+    /* Called before every block when set (the machine's global Forbid, see
+     * qrx68100ec64_machine.c); blocks are then not chained, so it really is every block. */
+    void (*gate)(qec64_cpu *self);
 };
 #define QEC64_CODE_SHIFT 8
 

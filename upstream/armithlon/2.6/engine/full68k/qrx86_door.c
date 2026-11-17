@@ -1,4 +1,6 @@
 #include "qrx86_door.h"
+#include "qrx_netpolicy.h"
+#include "qrx_vault.h"
 #include "qrx_hostmidi.h"
 void qrx_host_set_pointer(uint32_t index);
 #include "qrx_hostnet.h"
@@ -284,7 +286,7 @@ static void midi_service(QRXFullCPU *c,uint8_t *q){
 static void net_service(QRXFullCPU *c,uint8_t *q){
     uint32_t a[13]={0};
     for(unsigned i=0;i<12;i++)a[i]=rd32(q+16+i*4u);
-    if(rd32(q+12)==QRX_NET_RANDOM&&(uint64_t)a[1]+a[2]>c->vm.ram.size){wr32(q+16+8*4u,UINT32_MAX);return;}
+    if((rd32(q+12)==QRX_NET_RANDOM||rd32(q+12)==QRX_NET_CONFIG)&&(uint64_t)a[1]+a[2]>c->vm.ram.size){wr32(q+16+8*4u,UINT32_MAX);return;}
     qrx_hostnet_call(rd32(q+12),a,c->ram_owned);
     /* The 13th word only for the clock: older guests have room for 12 */
     for(unsigned i=8;i<(rd32(q+12)==QRX_NET_TIME?13u:12u);i++)wr32(q+16+i*4u,a[i]);
@@ -381,6 +383,14 @@ static void service_call(QRXFullCPU *c,uint32_t block){
     if(svc==4&&!rd32(q+8)){net_service(c,q);return;}
     /* OpenGL for native 68k programs. */
     if(svc==8){qrx_gl68k_service(c->ram_owned,c->vm.ram.size,q);return;}
+    /* Users and their encrypted home volumes. */
+    if(svc==QRX_VAULT_SERVICE){
+        uint32_t a[13];
+        for(unsigned i=0;i<13;i++)a[i]=rd32(q+16+i*4u);
+        qrx_vault_call(rd32(q+12),a,c->ram_owned,c->vm.ram.size);
+        for(unsigned i=8;i<13;i++)wr32(q+16+i*4u,a[i]);
+        return;
+    }
     shadow_sync(c,rd32(q+8),rd32(q+4));
     if(svc==1)sound_service(c,q);
     else if(svc==2)api_service(c,q);
@@ -485,6 +495,7 @@ static bool door_write(QRXFullCPU *c,uint32_t addr,unsigned n,uint32_t value){
 }
 void qrx86_door_attach(QRXFullCPU *c){
     x86_init(&host);
+    (void)qrx_net_mode();          /* Tor or WireGuard start with the machine */
     c->door_read=door_read;c->door_write=door_write;
 }
 void qrx86_door_report(void){

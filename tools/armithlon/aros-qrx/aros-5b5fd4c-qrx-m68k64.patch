@@ -4469,10 +4469,10 @@ index 00000000..56f9b178
 +}
 diff --git a/arch/m68k64-native/kernel/spintrylock.c b/arch/m68k64-native/kernel/spintrylock.c
 new file mode 100644
-index 00000000..6ffd3368
+index 00000000..7f8e567e
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/spintrylock.c
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,54 @@
 +/*
 +    Copyright (C) 2026, The AROS Development Team. All rights reserved.
 +
@@ -4485,6 +4485,7 @@ index 00000000..6ffd3368
 +#include <aros/types/spinlock_s.h>
 +
 +#include <kernel_base.h>
++#include "tls.h"
 +
 +#include <proto/kernel.h>
 +
@@ -4497,7 +4498,10 @@ index 00000000..6ffd3368
 +        old = SPINLOCK_UNLOCKED;
 +        if (__atomic_compare_exchange_n(&lock->lock, &old, SPINLOCKF_WRITE, 0,
 +                                        __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
++        {
++            TLS_PTR_GET()->SpinLocks++;
 +            return lock;
++        }
 +        return NULL;
 +    }
 +
@@ -4505,7 +4509,10 @@ index 00000000..6ffd3368
 +        return NULL;
 +    if (__atomic_compare_exchange_n(&lock->lock, &old, old + 1, 0,
 +                                    __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
++    {
++        TLS_PTR_GET()->SpinLocks++;
 +        return lock;
++    }
 +    return NULL;
 +}
 +
@@ -4522,10 +4529,10 @@ index 00000000..6ffd3368
 +}
 diff --git a/arch/m68k64-native/kernel/spinunlock.c b/arch/m68k64-native/kernel/spinunlock.c
 new file mode 100644
-index 00000000..fca324a3
+index 00000000..2a01170d
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/spinunlock.c
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,36 @@
 +/*
 +    Copyright (C) 2026, The AROS Development Team. All rights reserved.
 +
@@ -4538,6 +4545,7 @@ index 00000000..fca324a3
 +#include <aros/types/spinlock_s.h>
 +
 +#include <kernel_base.h>
++#include "tls.h"
 +
 +#include <proto/kernel.h>
 +
@@ -4549,6 +4557,10 @@ index 00000000..fca324a3
 +
 +    unsigned int v = __atomic_load_n(&lock->lock, __ATOMIC_RELAXED);
 +
++    {
++        tls_t *t = TLS_PTR_GET();
++        if (t->SpinLocks) t->SpinLocks--;
++    }
 +    lock->s_Owner = NULL;
 +    if (v & SPINLOCKF_WRITE)
 +        __atomic_store_n(&lock->lock, SPINLOCK_UNLOCKED, __ATOMIC_RELEASE);
@@ -4665,10 +4677,10 @@ index 00000000..76e71e17
 +}
 diff --git a/arch/m68k64-native/kernel/tls.h b/arch/m68k64-native/kernel/tls.h
 new file mode 100644
-index 00000000..ffbe814c
+index 00000000..6fff1266
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/tls.h
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,69 @@
 +#ifndef ASM_TLS_H
 +#define ASM_TLS_H
 +
@@ -4693,7 +4705,8 @@ index 00000000..ffbe814c
 +    BYTE                IDNestCnt;
 +    BYTE                TDNestCnt;
 +    UBYTE               CPUNumber;      /* MOVEC $80E is privileged, so it is kept here */
-+    UBYTE               pad;
++    UBYTE               SpinLocks;      /* kernel spinlocks this core holds; the machine's global
++                                           Forbid does not stop a core that holds one */
 +    UWORD               Quantum;        /* Time slice of this core, in VBlank ticks */
 +    UWORD               Elapsed;        /* What is left of it for the running task */
 +    ULONG               SuperDepth;     /* Exceptions this core is in (the boot counts as one):
@@ -6937,10 +6950,10 @@ index 00000000..0533704e
 +##end cdefprivate
 diff --git a/arch/m68k64-native/qrx/qrxdisk/qrxdisk_device.c b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_device.c
 new file mode 100644
-index 00000000..f175f470
+index 00000000..e20a5f6e
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_device.c
-@@ -0,0 +1,328 @@
+@@ -0,0 +1,413 @@
 +/*
 +    Copyright (C) 2026, The AROS Development Team. All rights reserved.
 +
@@ -6948,7 +6961,10 @@ index 00000000..f175f470
 +
 +    The boot loader puts a disk image (512-byte blocks) at the top of RAM, outside the memory it
 +    gives to exec, and names it on the kernel command line as qrxdisk=<address>,<size> in hex.
-+    Unit 0 reads and writes it. At init the device adds a boot node DH0: for it, with the
++    Unit 0 reads and writes it. Unit 1 is the logged-in user's home volume, an image on the Mac
++    encrypted with AES-256-XTS; the engine's vault service (host call service 9) decrypts and
++    encrypts every sector, and the keys never come into guest memory. QRXDesktop logs in and
++    mounts it as HOME:. At init the device adds a boot node DH0: for it, with the
 +    Fast File System (afs.handler), which dosboot then mounts and boots from. The FAT handler of
 +    this AROS snapshot does not convert all its little-endian fields, so it does not work on a
 +    big-endian CPU.
@@ -6988,6 +7004,35 @@ index 00000000..f175f470
 +    NSCMD_DEVICEQUERY,
 +    0
 +};
++
++/* ---- the vault service: the board's HOST_CALL, the network service's block layout */
++#define EC64_BOARD          0xFFFFFFFF00000000UL
++#define EC64_MAGIC          0x5152584543363442UL
++#define VAULT_SERVICE       9
++#define VAULT_STATUS        1
++#define VAULT_READ          6
++#define VAULT_WRITE         7
++#define VAULT_CHUNK         128         /* sectors per call through the bounce buffer */
++
++static ULONG vault_call(LIBBASETYPEPTR base, ULONG op, ULONG a0, ULONG a1, ULONG a2, ULONG a3, ULONG *a12)
++{
++    ULONG *q;
++    int i;
++
++    if (*(volatile UQUAD *)EC64_BOARD != EC64_MAGIC)
++        return 0xFFFFFFFF;
++    if (!base->qd_Req)
++        base->qd_Req = AllocMem(32 * sizeof(ULONG), MEMF_PUBLIC | MEMF_CLEAR);
++    if (!(q = base->qd_Req))
++        return 0xFFFFFFFF;
++    for (i = 0; i < 32; i++) q[i] = 0;
++    q[0] = VAULT_SERVICE; q[3] = op;
++    q[4] = a0; q[5] = a1; q[6] = a2; q[7] = a3;
++    *(volatile UQUAD *)(EC64_BOARD + 0x400) = (UQUAD)(IPTR)q;
++    __asm__ volatile("" ::: "memory");      /* the host wrote q[] and the buffer */
++    if (a12) *a12 = q[16];
++    return q[12];
++}
 +
 +static UQUAD parse_hex(const char **s)
 +{
@@ -7087,6 +7132,23 @@ index 00000000..f175f470
 +
 +static int GM_UNIQUENAME(Open)(LIBBASETYPEPTR base, struct IORequest *io, ULONG unitnum, ULONG flags)
 +{
++    if (unitnum == 1)
++    {
++        ULONG sectors = 0;
++
++        /* only while somebody is logged in */
++        if (vault_call(base, VAULT_STATUS, 0, 0, 0, 0, &sectors) == 0xFFFFFFFF || !sectors)
++        {
++            io->io_Error = IOERR_OPENFAIL;
++            return FALSE;
++        }
++        if (!base->qd_Bounce)
++            base->qd_Bounce = AllocMem(VAULT_CHUNK * BLOCK_SIZE, MEMF_31BIT | MEMF_PUBLIC);
++        base->qd_VaultSize = (UQUAD)sectors * BLOCK_SIZE;
++        io->io_Unit = &base->qd_VaultUnit;
++        io->io_Error = 0;
++        return TRUE;
++    }
 +    if (unitnum != 0 || !base->qd_Image)
 +    {
 +        io->io_Error = IOERR_OPENFAIL;
@@ -7107,11 +7169,47 @@ index 00000000..f175f470
 +ADD2OPENDEV(GM_UNIQUENAME(Open), 0)
 +ADD2CLOSEDEV(GM_UNIQUENAME(Close), 0)
 +
++/* The home volume: the host decrypts into the buffer, or encrypts from it */
++static BYTE vault_transfer(LIBBASETYPEPTR base, struct IOExtTD *iotd, UQUAD offset, BOOL write)
++{
++    ULONG len = iotd->iotd_Req.io_Length, done = 0;
++    UBYTE *data = iotd->iotd_Req.io_Data;
++
++    iotd->iotd_Req.io_Actual = 0;
++    if ((offset | len) & (BLOCK_SIZE - 1))
++        return IOERR_BADADDRESS;
++    if (offset > base->qd_VaultSize || len > base->qd_VaultSize - offset)
++        return TDERR_SeekError;
++    while (done < len)
++    {
++        UQUAD sector = (offset + done) / BLOCK_SIZE;
++        UBYTE *at = data + done;
++        BOOL direct = (IPTR)at + VAULT_CHUNK * BLOCK_SIZE < 0x100000000UL;
++        ULONG n = (len - done) / BLOCK_SIZE;
++
++        if (n > VAULT_CHUNK) n = VAULT_CHUNK;
++        if (!direct && !base->qd_Bounce)
++            return TDERR_NoMem;
++        if (!direct && write)
++            CopyMem(at, base->qd_Bounce, n * BLOCK_SIZE);
++        if (vault_call(base, write ? VAULT_WRITE : VAULT_READ, (ULONG)sector, (ULONG)(IPTR)(direct ? at : base->qd_Bounce),
++                       n, (ULONG)(sector >> 32), NULL) != n)
++            return write ? TDERR_WriteProt : TDERR_NotSpecified;
++        if (!direct && !write)
++            CopyMem(base->qd_Bounce, at, n * BLOCK_SIZE);
++        done += n * BLOCK_SIZE;
++    }
++    iotd->iotd_Req.io_Actual = len;
++    return 0;
++}
++
 +/* Reads and writes are copies, so every command is done at once */
 +static BYTE transfer(LIBBASETYPEPTR base, struct IOExtTD *iotd, UQUAD offset, BOOL write)
 +{
 +    ULONG len = iotd->iotd_Req.io_Length;
 +
++    if (iotd->iotd_Req.io_Unit == &base->qd_VaultUnit)
++        return vault_transfer(base, iotd, offset, write);
 +    iotd->iotd_Req.io_Actual = 0;
 +    if ((offset | len) & (BLOCK_SIZE - 1))
 +        return IOERR_BADADDRESS;
@@ -7167,7 +7265,7 @@ index 00000000..f175f470
 +    case TD_GETGEOMETRY:
 +    {
 +        struct DriveGeometry *dg = (struct DriveGeometry *)io->io_Data;
-+        ULONG blocks = base->qd_Size / BLOCK_SIZE;
++        ULONG blocks = (io->io_Unit == &base->qd_VaultUnit ? base->qd_VaultSize : base->qd_Size) / BLOCK_SIZE;
 +
 +        if (io->io_Length < sizeof(struct DriveGeometry))
 +        {
@@ -7220,7 +7318,7 @@ index 00000000..f175f470
 +        break;
 +
 +    case TD_GETNUMTRACKS:
-+        io->io_Actual = base->qd_Size / BLOCK_SIZE / BLOCKS_PER_TRACK;
++        io->io_Actual = (io->io_Unit == &base->qd_VaultUnit ? base->qd_VaultSize : base->qd_Size) / BLOCK_SIZE / BLOCKS_PER_TRACK;
 +        break;
 +
 +    case TD_ADDCHANGEINT:
@@ -7271,10 +7369,10 @@ index 00000000..f175f470
 +}
 diff --git a/arch/m68k64-native/qrx/qrxdisk/qrxdisk_intern.h b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_intern.h
 new file mode 100644
-index 00000000..6ce05fd5
+index 00000000..8055c61b
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_intern.h
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,20 @@
 +#ifndef QRXDISK_INTERN_H
 +#define QRXDISK_INTERN_H
 +
@@ -7287,6 +7385,11 @@ index 00000000..6ce05fd5
 +    struct Unit     qd_Unit;
 +    UBYTE          *qd_Image;       /* the disk image the boot loader put in RAM */
 +    UQUAD           qd_Size;        /* its size in bytes, a multiple of 512 */
++    struct Unit     qd_VaultUnit;   /* unit 1: the logged-in user's encrypted home on the Mac */
++    UQUAD           qd_VaultSize;
++    UBYTE          *qd_Bounce;
++    ULONG          *qd_Req;         /* the host call block; not on the stack: over-aligned locals
++                                       break the m68k64 backend's frames */      /* for buffers above 4 GB: the host service takes 32-bit addresses */
 +};
 +
 +#endif

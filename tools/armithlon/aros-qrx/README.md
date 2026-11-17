@@ -29,6 +29,12 @@ gmake kernel-oop kernel-graphics kernel-intuition kernel-hidd kernel-hidd-gfx ke
 gmake kernel-input-quick kernel-console-quick kernel-keyboard-quick kernel-gameport-quick kernel-fs-con-quick
 gmake kernel-hidd-input kernel-hidd-kbd kernel-hidd-mouse kernel-hidd-ec64gfx-quick workbench-libs-cgfx-quick
 gmake workbench-libs-gadtools-quick workbench-libs-workbench workbench-libs-diskfont-quick
+# zlib: the fetched port has an empty zconf.h; take zconf.h.in, with unistd.h and stdarg.h on
+gmake zlib-fetch
+Z=bin/native-m68k64/Ports/zlib/zlib; cp $Z/zconf.h.in $Z/zconf.h
+sed -i '' 's|^#ifdef HAVE_UNISTD_H .*|#if 1|; s|^#ifdef HAVE_STDARG_H .*|#if 1|' $Z/zconf.h
+gmake linklibs-z-static workbench-libs-z-quick                       # libz.static.a, z1.library
+gmake workbench-libs-asl-catalogs workbench-libs-coolimages-quick workbench-libs-asl-quick
 ```
 
 The compiler must return a single 64-bit value in D0 and A0 (ec64-llvm, `m68k64-dual-return`): AROS
@@ -43,8 +49,9 @@ with the build's `bin/darwin-aarch64/tools` (collect-aros) in `PATH`. The clang 
 `libclang_rt.builtins-m68k64.a` for soft float. If a quick target stops with "Error 20" while
 generating includes, create its `include/{proto,clib,defines,inline}` directories under `gen/` once.
 
-The `-quick` targets build only the module: their full targets also pull in libpng, zlib and other
-workbench libraries, which do not build for this target yet.
+The `-quick` targets build only the module: their full targets also pull in other workbench parts,
+some of which (AROSTCP) do not build for this target yet. asl.library needs its catalog strings
+first (`workbench-libs-asl-catalogs`).
 
 ## Boot on the reference machine
 

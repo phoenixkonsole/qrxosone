@@ -1,8 +1,10 @@
 /* The ARMithlon 68100EC64 board's devices, see qrx_ec64_board.h */
 #include "qrx_ec64_board.h"
 #include "qrx_hostnet.h"
+#include "qrx_netpolicy.h"
 #ifdef __APPLE__
 #include "qrx_gl68k.h"
+#include "qrx_vault.h"
 #include <pthread.h>
 /* One GL stream at a time: the contexts belong to whichever core's thread calls. */
 static pthread_mutex_t gl_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -23,6 +25,7 @@ void qec64_board_init(qec64_board *b, uint8_t *ram, uint64_t ram_size)
     b->ram_size = ram_size;
     b->cores = 1;
     b->start_us = clock_us();
+    (void)qrx_net_mode();          /* Tor or WireGuard start with the machine: up by the time the guest asks */
     snprintf(b->host_cpu, sizeof b->host_cpu, "unknown");
 #ifdef __APPLE__
     size_t len = sizeof b->host_cpu - 1;
@@ -62,7 +65,7 @@ static int net_args_ok(const qec64_board *b, uint32_t op, const uint32_t *a)
 {
     uint64_t lim = b->ram_size < UINT64_C(0x100000000) ? b->ram_size : UINT64_C(0x100000000);
     switch (op) {
-    case 6: case 7: case 8: case 9: case 18: case 19:   /* send, recv, sendto, recvfrom, hostname, random */
+    case 6: case 7: case 8: case 9: case 18: case 19: case 21:   /* send, recv, sendto, recvfrom, hostname, random, config */
         return (uint64_t)a[1] + a[2] <= lim;
     case 17: {                                           /* resolve: a string */
         for (uint64_t p = a[1]; p < lim && p < (uint64_t)a[1] + 1024; p++) if (!b->ram[p]) return 1;
@@ -85,6 +88,12 @@ static void host_call(qec64_board *b, uint64_t addr)
 #endif
     uint32_t a[13];
     for (unsigned i = 0; i < 13; i++) a[i] = be32(q + 16 + i * 4);
+    if (be32(q) == QRX_VAULT_SERVICE) {          /* users and their encrypted homes; checks its own buffers */
+        uint64_t lim = b->ram_size < UINT64_C(0x100000000) ? b->ram_size : UINT64_C(0x100000000);
+        qrx_vault_call(be32(q + 12), a, b->ram, lim);
+        for (unsigned i = 8; i < 13; i++) put_be32(q + 16 + i * 4, a[i]);
+        return;
+    }
     if (be32(q) != QEC64_HOST_NET) return;
     uint32_t op = be32(q + 12);
     if (!net_args_ok(b, op, a)) { a[8] = UINT32_MAX; a[9] = 10014; }

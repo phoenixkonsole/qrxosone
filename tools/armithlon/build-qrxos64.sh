@@ -42,13 +42,17 @@ for m in Libs/oop.library Devs/Drivers/hiddclass.hidd Devs/Drivers/gfx.hidd Libs
     basename "$m" >> "$K/modules.txt"
 done
 cp "$ENGINE" "$APP/MacOS/qrx64-engine"
+# Tor and WireGuard for the guests (tools/armithlon/qrxnetd, cargo build --release); the engine
+# starts it from its own directory. Without it the Tor and VPN modes have no network at all.
+NETD="${QRX_NETD_BIN:-$REPO/tools/armithlon/qrxnetd/target/release/qrxnetd}"
+if [ -x "$NETD" ]; then cp "$NETD" "$APP/MacOS/qrxnetd"; else echo "qrxnetd not built: Tor and VPN modes stay offline"; fi
 
 T="$BU/System64"
 rm -rf "$T"
 mkdir -p "$T/C" "$T/Libs" "$T/S" "$T/X86"
 echo m68k64 > "$T/AROS.boot"
 cp "$A"/C/* "$T/C/"
-for l in crt stdlib m locale iffparse uuid gadtools workbench diskfont asl; do
+for l in crt stdlib m locale iffparse uuid gadtools workbench diskfont asl z1; do
     [ -f "$A/Libs/$l.library" ] && cp "$A/Libs/$l.library" "$T/Libs/"
 done
 cp "$QW" "$T/C/qrx-win32"

@@ -9,5 +9,10 @@
 /* a[10] Unix seconds, a[11] microseconds: the host's clock. The guest has no battery clock.
  * a[12] the host's offset from UTC in seconds, east positive. a has 13 words. */
 #define QRX_NET_TIME 20u
+/* a[1] guest address, a[2] length: new network settings (key = value lines, see qrxnetd); the
+ * engine saves them and starts or stops Tor or WireGuard. */
+#define QRX_NET_CONFIG 21u
+/* a[10] 0 direct, 1 Tor, 2 WireGuard; a[11] 1 when the guest can reach the network */
+#define QRX_NET_STATUS 22u
 void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram);
 #endif

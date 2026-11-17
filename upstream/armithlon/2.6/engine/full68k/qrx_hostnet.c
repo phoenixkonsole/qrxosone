@@ -1,6 +1,8 @@
 /* TCP and UDP for guest programs, on the host's sockets. Everything is non-blocking; a guest
  * call that has to wait polls from the guest side. Reached through door service 4. */
 #include "qrx_hostnet.h"
+#include "qrx_netpolicy.h"
+#include "qrx_vault.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -22,6 +24,32 @@ enum { NET_SOCKET = 1, NET_BIND, NET_LISTEN, NET_ACCEPT, NET_CONNECT, NET_SEND, 
        NET_POLL, NET_CLOSE, NET_SHUTDOWN, NET_SETOPT, NET_GETOPT, NET_SOCKNAME, NET_PEERNAME, NET_RESOLVE, NET_HOSTNAME };
 static int fds[MAXSOCK];
 static bool used[MAXSOCK];
+/* Tor/WireGuard (qrx_netpolicy.h): a stream socket whose SOCKS reply is still coming, its reply so
+ * far, the error it ended with, where it was meant to go; datagram sockets, which may not leave */
+static bool socks_wait[MAXSOCK], dgram[MAXSOCK];
+static uint8_t socks_buf[MAXSOCK][QRX_SOCKS_REPLY];
+static uint8_t socks_have[MAXSOCK];
+static int sock_err[MAXSOCK];
+static uint32_t peer_ip[MAXSOCK], peer_port[MAXSOCK];
+static bool loopback(uint32_t ip) { return (ip >> 24) == 127; }
+/* Advances a pending SOCKS connection: 1 connected, 0 still waiting, -1 failed (sock_err set) */
+static int socks_step(int s, int fd)
+{
+    if (!socks_wait[s]) return 1;
+    while (socks_have[s] < QRX_SOCKS_REPLY) {
+        ssize_t n = read(fd, socks_buf[s] + socks_have[s], QRX_SOCKS_REPLY - socks_have[s]);
+        if (n > 0) { socks_have[s] += (uint8_t)n; continue; }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return 0;
+        socks_wait[s] = false;
+        sock_err[s] = ECONNREFUSED;
+        return -1;
+    }
+    int r = qrx_net_socks_reply(socks_buf[s], socks_have[s]);
+    socks_wait[s] = false;
+    if (r == 1) return 1;
+    sock_err[s] = -r;
+    return -1;
+}
 
 static uint32_t wsa_of(int e)
 {
@@ -91,10 +119,29 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
         int type = a[0 + 0] == 2 ? SOCK_DGRAM : SOCK_STREAM;
         int nfd = socket(AF_INET, type, 0);
         if (nfd < 0) { result(a, -1); return; }
-        result(a, guest_slot(nfd));
+        int s = guest_slot(nfd);
+        if (s >= 0) { dgram[s] = type == SOCK_DGRAM; socks_wait[s] = false; sock_err[s] = 0; peer_ip[s] = peer_port[s] = 0; }
+        result(a, s);
         return;
     }
+    case QRX_NET_CONFIG:
+        /* the whole system's network: only an admin, once there are users */
+        if (!qrx_vault_admin_or_unset()) { a[8] = UINT32_MAX; a[9] = 10013; return; }   /* WSAEACCES */
+        result(a, qrx_net_configure((const char *)ram + a[1], a[2]));
+        return;
+    case QRX_NET_STATUS:
+        a[10] = (uint32_t)qrx_net_mode();
+        a[11] = (uint32_t)qrx_net_ready();
+        a[8] = 0;
+        return;
     case NET_RESOLVE: {
+        if (qrx_net_mode() > 0) {         /* the name through the tunnel too: no DNS from the Mac */
+            uint32_t ip;
+            if (qrx_net_resolve((const char *)ram + a[1], &ip)) { a[8] = UINT32_MAX; a[9] = 11001; return; }
+            a[10] = ip;
+            a[8] = 0;
+            return;
+        }
         struct hostent *h = gethostbyname((const char *)ram + a[1]);
         if (!h || h->h_length != 4) { a[8] = UINT32_MAX; a[9] = 11001; return; }
         uint32_t ip;
@@ -133,7 +180,8 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
     case NET_BIND: {
         int one = 1;
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-        addr_make(&sa, a[1], a[2]);
+        /* through a tunnel nothing listens on the Mac's own addresses */
+        addr_make(&sa, qrx_net_mode() > 0 ? 0x7F000001u : a[1], a[2]);
         result(a, bind(fd, (struct sockaddr *)&sa, sizeof sa));
         break;
     }
@@ -143,20 +191,50 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
         if (nfd < 0) { result(a, -1); break; }
         a[10] = ntohl(sa.sin_addr.s_addr);
         a[11] = ntohs(sa.sin_port);
-        result(a, guest_slot(nfd));
+        {
+            int s = guest_slot(nfd);
+            if (s >= 0) { dgram[s] = false; socks_wait[s] = false; sock_err[s] = 0; peer_ip[s] = a[10]; peer_port[s] = a[11]; }
+            result(a, s);
+        }
         break;
     }
     case NET_CONNECT:
+        if (qrx_net_mode() > 0 && !loopback(a[1])) {
+            /* through qrxnetd: the socket becomes the Unix stream with the SOCKS request sent */
+            if (dgram[a[0]]) { errno = ENETUNREACH; result(a, -1); break; }
+            int nfd = qrx_net_socks_connect(a[1], (uint16_t)a[2]);
+            if (nfd < 0) { result(a, -1); break; }
+            dup2(nfd, fd);
+            close(nfd);
+            fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+#ifdef SO_NOSIGPIPE
+            { int one = 1; setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one); }
+#endif
+            socks_wait[a[0]] = true;
+            socks_have[a[0]] = 0;
+            sock_err[a[0]] = 0;
+            peer_ip[a[0]] = a[1]; peer_port[a[0]] = a[2];
+            errno = EINPROGRESS;
+            result(a, -1);
+            break;
+        }
         addr_make(&sa, a[1], a[2]);
+        peer_ip[a[0]] = a[1]; peer_port[a[0]] = a[2];
         result(a, connect(fd, (struct sockaddr *)&sa, sizeof sa));
         break;
-    case NET_SEND: result(a, send(fd, ram + a[1], a[2], (a[3] & 1u) ? MSG_OOB : 0)); break;
+    case NET_SEND:
+        if (socks_step((int)a[0], fd) <= 0) { errno = sock_err[a[0]] ? ENOTCONN : EWOULDBLOCK; result(a, -1); break; }
+        result(a, send(fd, ram + a[1], a[2], (a[3] & 1u) ? MSG_OOB : 0));
+        break;
     case NET_RECV: {
+        if (socks_step((int)a[0], fd) <= 0) { errno = sock_err[a[0]] ? ENOTCONN : EWOULDBLOCK; result(a, -1); break; }
         ssize_t n = recv(fd, ram + a[1], a[2], (a[3] & 2u) ? MSG_PEEK : 0);
         result(a, n);
         break;
     }
     case NET_SENDTO:
+        /* UDP does not go through Tor, nor through this tunnel: it does not leave at all */
+        if (qrx_net_mode() > 0 && !loopback(a[4])) { errno = ENETUNREACH; result(a, -1); break; }
         addr_make(&sa, a[4], a[5]);
         result(a, sendto(fd, ram + a[1], a[2], 0, (struct sockaddr *)&sa, sizeof sa));
         break;
@@ -168,6 +246,11 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
     }
     case NET_POLL: {
         /* mask: 1 readable, 2 writable, 4 exception, 8 report bytes readable in a[10] */
+        if (socks_wait[a[0]]) {
+            int st = socks_step((int)a[0], fd);
+            if (st == 0) { a[8] = 0; a[9] = 0; if (a[1] & 8u) a[10] = 0; break; }   /* still connecting */
+            if (st < 0) { a[8] = (a[1] & 2u) ? 2u : 0u; a[9] = wsa_of(sock_err[a[0]]); break; }
+        }
         struct pollfd p = { fd, 0, 0 };
         if (a[1] & 1u) p.events |= POLLIN;
         if (a[1] & 2u) p.events |= POLLOUT;
@@ -190,6 +273,8 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
     case NET_CLOSE:
         close(fd);
         used[a[0]] = false;
+        socks_wait[a[0]] = false;
+        sock_err[a[0]] = 0;
         a[8] = 0;
         break;
     case NET_SHUTDOWN: result(a, shutdown(fd, a[1] == 0 ? SHUT_RD : a[1] == 1 ? SHUT_WR : SHUT_RDWR)); break;
@@ -207,8 +292,9 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
         int v = 0;
         socklen_t vl = sizeof v;
         if (a[1] == 0xFFFFu && a[2] == 0x1007) {     /* SO_ERROR */
-            getsockopt(fd, SOL_SOCKET, SO_ERROR, &v, &vl);
-            if (v) v = (int)wsa_of(v);
+            if (sock_err[a[0]]) { v = (int)wsa_of(sock_err[a[0]]); sock_err[a[0]] = 0; }
+            else getsockopt(fd, SOL_SOCKET, SO_ERROR, &v, &vl);
+            if (v && v < 10000) v = (int)wsa_of(v);
         } else if (a[1] == 0xFFFFu && a[2] == 0x1008) {   /* SO_TYPE */
             getsockopt(fd, SOL_SOCKET, SO_TYPE, &v, &vl);
             v = v == SOCK_DGRAM ? 2 : 1;
@@ -218,6 +304,12 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
         break;
     }
     case NET_SOCKNAME: case NET_PEERNAME: {
+        if (qrx_net_mode() > 0) {         /* a tunnel's socket is a Unix stream: report the guest's view */
+            a[10] = op == NET_PEERNAME ? peer_ip[a[0]] : 0x7F000001u;
+            a[11] = op == NET_PEERNAME ? peer_port[a[0]] : 0;
+            a[8] = 0;
+            break;
+        }
         int r = op == NET_SOCKNAME ? getsockname(fd, (struct sockaddr *)&sa, &sl) : getpeername(fd, (struct sockaddr *)&sa, &sl);
         if (r == 0) { a[10] = ntohl(sa.sin_addr.s_addr); a[11] = ntohs(sa.sin_port); }
         result(a, r);
