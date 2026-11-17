@@ -51,6 +51,7 @@ static struct MsgPort *sh_tport;
 static struct timerequest *sh_treq;
 static int sh_timer_open, sh_timer_busy;
 struct Library *DataTypesBase;
+static int sh_rescreen_note;      /* other windows keep the screen from following the host window */
 
 /* ---------------------------------------------------------------- pens */
 static struct { ULONG argb; LONG pen; } sh_pens[48];
@@ -406,6 +407,8 @@ static void sh_draw_bar(void)
         snprintf(s, sizeof s, "%02ld:%02ld  %02ld.%02ld.", (long)ds.ds_Minute / 60, (long)ds.ds_Minute % 60, days + 1, m + 1);
     }
     sh_bar_module(rp, x, 118, s, SH_ACCENT2);
+    if (sh_rescreen_note)
+        sh_text(rp, sh_mod_x - 230, 15, SH_WARN, "close windows to fit the screen", 220);
 }
 static int sh_bar_hit(int mx)
 {
@@ -721,6 +724,92 @@ static void sh_bar_message(struct IntuiMessage *m)
     }
 }
 
+/* ---------------------------------------------------------------- guest tools: the display follows the host window
+ * The host tells the size of its window's inside (EC64 board $130, ARMithlon door +$14). Once it
+ * has stayed the same for a second, the largest mode that fits becomes the Workbench screen's mode:
+ * the desktop lets go of the screen and SetIPrefs() changes it. QRX OS One 64's Intuition does that in
+ * place with all windows open (SMC_INPLACE); the 32-bit one closes and opens the screen, which
+ * windows of other programs prevent, so there this waits until they are closed. */
+#include <intuition/iprefs.h>
+#include <graphics/displayinfo.h>
+#define SESSION_RESCREEN 9
+static ULONG sh_view_last, sh_view_done;
+static struct IScreenModePrefs sh_newmode;
+static ULONG sh_host_view(void)
+{
+#if defined(__m68k64__)
+    if (sh_board < 0) sh_sample();
+    return sh_board ? SH_BOARD_L(0x130) : 0;
+#else
+    static int door = -1;
+    if (door < 0) {
+        ULONG magic = *(volatile ULONG *)0xFF000880UL, f = 0;
+        door = 0;
+        if (magic == 0x51383644UL) { f = *(volatile ULONG *)0xFF000890UL; door = (f & 4) != 0; }
+    }
+    return door ? *(volatile ULONG *)0xFF000894UL : 0;
+#endif
+}
+/* The largest mode with at least 15 bits that fits into w x h; INVALID_ID when none */
+static ULONG sh_best_mode(int w, int h, int *mw, int *mh)
+{
+    ULONG id = INVALID_ID, best = INVALID_ID;
+    long best_area = 0;
+    while ((id = NextDisplayInfo(id)) != INVALID_ID) {
+        struct DimensionInfo di;
+        int dw, dh;
+        if (!GetDisplayInfoData(NULL, (UBYTE *)&di, sizeof di, DTAG_DIMS, id)) continue;
+        if (di.MaxDepth < 15) continue;
+        dw = di.Nominal.MaxX - di.Nominal.MinX + 1;
+        dh = di.Nominal.MaxY - di.Nominal.MinY + 1;
+        if (dw > w || dh > h || dw < 640 || dh < 400) continue;
+        if ((long)dw * dh > best_area) { best_area = (long)dw * dh; best = id; *mw = dw; *mh = dh; }
+    }
+    return best;
+}
+static int sh_foreign_windows(void)
+{
+    int n = 0;
+    struct Window *w;
+    ULONG lock = LockIBase(0);
+    for (w = g_screen->FirstWindow; w; w = w->NextWindow)
+        if (!sh_is_ours(w) && w != g_terminal && w != g_files) n++;
+    UnlockIBase(lock);
+    return n;
+}
+static void sh_follow_host(void)
+{
+    ULONG v = sh_host_view();
+    int vw = (int)(v >> 16), vh = (int)(v & 0xFFFF), mw = 0, mh = 0;
+    ULONG mode;
+    if (!v || !g_screen_borrowed) { sh_view_last = v; return; }
+    if (v != sh_view_last) { sh_view_last = v; return; }     /* not stable yet */
+    if (v == sh_view_done) return;
+    mode = sh_best_mode(vw, vh, &mw, &mh);
+    if (mode == INVALID_ID || (mw == g_screen->Width && mh == g_screen->Height)) { sh_view_done = v; sh_rescreen_note = 0; return; }
+#if !defined(__m68k64__)
+    /* QRX OS One 64's Intuition changes the screen in place (SMC_INPLACE); elsewhere it must close it */
+    if (sh_foreign_windows()) { sh_rescreen_note = 1; return; }   /* again once they are closed */
+#endif
+    sh_rescreen_note = 0;
+    sh_view_done = v;
+    sh_newmode.smp_DisplayID = mode;
+    sh_newmode.smp_Width = (UWORD)mw;
+    sh_newmode.smp_Height = (UWORD)mh;
+    sh_newmode.smp_Depth = g_screen_depth > 8 ? g_screen_depth : 24;
+#if defined(__m68k64__)
+    sh_newmode.smp_Control = 0x8000;         /* SMC_INPLACE: the windows of other programs stay */
+#else
+    sh_newmode.smp_Control = 0;
+#endif
+    g_session_action = SESSION_RESCREEN;
+}
+/* From the desktop's main loop once its windows are closed and the screen let go */
+static void qrx_shell_rescreen(void)
+{
+    SetIPrefs(&sh_newmode, sizeof sh_newmode, IPREFS_TYPE_SCREENMODE);
+}
+
 /* ---------------------------------------------------------------- the timer: clock, load, hover, hot corner */
 static void sh_timer_send(ULONG micro)
 {
@@ -747,7 +836,7 @@ static void sh_tick(void)
         if (++sh_hover_ticks == 2 && sh_peek_index != sh_hover) sh_peek_open(sh_hover);
     }
     if (sh_peek && strcmp(sh_test, "peek") && (py < g_screen_height - SH_BAR_H - SH_PEEK_H - 10 || sh_hover < 0)) sh_peek_close();
-    if (sh_ticks % 4 == 0) { sh_sample(); sh_draw_bar(); }
+    if (sh_ticks % 4 == 0) { sh_sample(); sh_draw_bar(); sh_follow_host(); }
     if (sh_test[0] && sh_ticks == 40) {
         if (!strcmp(sh_test, "menu")) sh_menu_open();
         else if (!strcmp(sh_test, "overview")) sh_overview_open();

@@ -136,10 +136,21 @@ static void release_all_keys(void)
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 @end
 
+static void report_size(void)
+{
+    if (!board || !window) return;
+    NSSize v = window.contentView.bounds.size, sc = (window.screen ?: NSScreen.mainScreen).frame.size;
+    board->host_view = (uint32_t)v.width << 16 | ((uint32_t)v.height & 0xFFFF);
+    board->host_screen = (uint32_t)sc.width << 16 | ((uint32_t)sc.height & 0xFFFF);
+}
 @interface QEC64Delegate : NSObject <NSWindowDelegate>
 @end
 @implementation QEC64Delegate
 - (void)windowWillClose:(NSNotification *)n { closed = YES; qrx_keycapture_focus(NO); }
+/* The guest's display follows the window (QRXDesktop picks a matching mode): its inside in points */
+- (void)windowDidResize:(NSNotification *)n { report_size(); }
+- (void)windowDidEnterFullScreen:(NSNotification *)n { report_size(); }
+- (void)windowDidExitFullScreen:(NSNotification *)n { report_size(); }
 - (void)windowDidBecomeKey:(NSNotification *)n { qrx_keycapture_focus(YES); }
 - (void)windowDidResignKey:(NSNotification *)n { qrx_keycapture_focus(NO); release_all_keys(); }
 @end
@@ -191,7 +202,9 @@ int qec64_window_open(const char *title, qec64_board *b, const qec64_window_inpu
         [window makeKeyAndOrderFront:nil];
         [window makeFirstResponder:console];
         [NSApp activateIgnoringOtherApps:YES];
+        window.collectionBehavior |= NSWindowCollectionBehaviorFullScreenPrimary;
         [NSApp finishLaunching];
+        report_size();
         audio_open();
         return 1;
     }

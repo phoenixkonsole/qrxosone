@@ -243,9 +243,8 @@ Offen:
 
 ## Stand 2026-11-17 (Nachmittag): Desktop-Shell, echtes SMP, Eingabe
 
-- **SMP verteilt jetzt:** Neue Tasks durften bisher nur auf dem erzeugenden Kern laufen (AROS-Standard),
-  also lief fast alles auf Kern 0. Auf der EC64 bekommen sie alle Kerne. Zwei Rechenschleifen brauchen
-  zusammen 40 s statt 78 s.
+- **SMP verteilt** (am Abend wieder zurückgenommen, siehe unten): Neue Tasks bekamen alle Kerne.
+  Zwei Rechenschleifen brauchten zusammen 40 s statt 78 s.
 - **Konsole verhungerte das System:** econsole wartete mit `Reschedule()` auf Tasten, über der Priorität
   normaler Programme. Solange eine Shell auf Eingabe wartete, liefen QRXDesktop und qrx-win32 nicht.
   Jetzt wartet sie 10 ms über timer.device.
@@ -279,6 +278,31 @@ Offen:
 
 Offen: der seltene Hänger mit mehreren Kernen (etwa einer von acht Läufen, auch ohne Schlafen im
 Leerlauf), der JIT-Fehler zwischen den Blöcken, asl.library und zlib.
+
+## Stand 2026-11-17 (Abend): Guest Tools, In-Place-Umschaltung, SMP-Befund
+
+- **Die Auflösung folgt dem Mac-Fenster.**
+  - Das EC64-Fenster meldet seine Innengröße und die Größe des Mac-Bildschirms (Platine $130, $134).
+    In Classic meldet es die Fenstergröße über die Tür (+$14, Feature-Bit 4).
+  - `ec64gfx.hidd` bietet zwölf gängige Modi plus die Mac-Bildschirmgröße an.
+  - QRXDesktop wählt nach einer Sekunde Ruhe den größten passenden Modus. `C:OpenWB` startet gleich
+    im passenden Modus.
+- **Intuition schaltet an Ort und Stelle um** (`rom/intuition/qrxresizescreen.c`, über `SetIPrefs` mit
+  `smp_Control` `0x8000`).
+  - Die Layer werden versteckt, Bitmap und Root-Layer getauscht und die Layer wieder gezeigt.
+  - Fenster und RastPorts bleiben dieselben Objekte, auch Fenster anderer Programme.
+  - Die alte Bitmap wird erst beim nächsten Umschalten freigegeben, weil der Mauszeiger sie noch
+    kurz nutzt.
+  - Geprüft: 6 von 6 Läufen mit Uhr und QRXInfo offen, von 1024×768 auf 1440×900.
+- **Classic:** Die Shell schaltet dort nur um, wenn keine fremden Fenster offen sind. Classic hat die
+  alte Intuition und muss den Bildschirm schließen. Das ist nur gebaut, nicht getestet: Ohne Fenster
+  bricht Classic an einem Fensterregister ab.
+- **SMP-Befund:** `Forbid()` wirkt in AROS nur auf dem eigenen Kern. AROS hält Tasks deshalb auf dem
+  Kern, der sie erzeugt hat. Verteilt man sie, brechen Bibliotheken, die sich mit `Forbid()` schützen.
+  Daher kamen die seltenen Hänger und die Abstürze unter Last. Die Verteilung ist deshalb aus und nur
+  noch mit `QRX_EC64_SMP_SPREAD=1` (Platine $3C0) einschaltbar.
+  Für echtes SMP fehlt ein `Forbid()` über alle Kerne: Der Kern mit `Forbid` hält die anderen
+  an, bis `Permit`.
 
 ## Reihenfolge
 

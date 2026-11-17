@@ -14,6 +14,8 @@
  *     --stats          instructions and instructions per second per core at the end
  *     --capture FILE   the board's framebuffer at the end as a PPM, if it is on
  *     --audio-wav FILE without a window: play the board's sound into a WAV file in real time
+ *     --host-view [T:]WxH  without a window: the host window's size the guest sees (after T seconds),
+ *                      as when the window is resized or goes full screen; also sets the host screen
  *
  * The system ends the run with a value through the test console's end register; 0x101 and 0x102
  * (a reboot) load and start it again with " rebooted" added to the command line, as a reset would.
@@ -130,6 +132,18 @@ static char *unescape(const char *e)
     return s;
 }
 
+/* --host-view T:WxH: the window changes its size after T seconds */
+typedef struct { qec64_board *board; double t; uint32_t size; } view_at;
+static void *view_later(void *arg)
+{
+    view_at *v = arg;
+    struct timespec ts = { (time_t)v->t, (long)((v->t - (time_t)v->t) * 1e9) };
+    nanosleep(&ts, NULL);
+    v->board->host_view = v->size;
+    if ((v->size >> 16) > (v->board->host_screen >> 16)) v->board->host_screen = v->size;
+    return NULL;
+}
+
 /* --audio-wav: drains the board's sound ring at 48 kHz, as the Mac's audio output would, into a file */
 typedef struct { qec64_board *board; FILE *f; } wav_out;
 static void wav_header(FILE *f, uint32_t frames)
@@ -170,7 +184,8 @@ int main(int argc, char **argv)
     const char *modules[MAX_MODULES];
     unsigned nmodules = 0;
     char cmdline[400] = "econsole", *input = NULL;
-    const char *wav_path = NULL;
+    const char *wav_path = NULL, *views[4];
+    int n_views = 0;
     int disk_write = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -188,6 +203,7 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--stats")) show_stats = 1;
         else if (!strcmp(a, "--capture") && i + 1 < argc) capture_path = argv[++i];
         else if (!strcmp(a, "--audio-wav") && i + 1 < argc) wav_path = argv[++i];
+        else if (!strcmp(a, "--host-view") && i + 1 < argc && n_views < 4) views[n_views++] = argv[++i];
         else if (a[0] == '-') { fprintf(stderr, "unknown option %s\n", a); return 2; }
         else if (!kernel) kernel = a;
         else if (nmodules < MAX_MODULES) modules[nmodules++] = a;
@@ -232,6 +248,19 @@ int main(int argc, char **argv)
         qec64_machine_set_mmio(m, qec64_board_mmio, board);
         qec64_machine_console_sink(m, console_out, NULL);
         if (input) qec64_machine_console_input(m, input, strlen(input));
+        if (!use_window && boot == 0) for (int v = 0; v < n_views; v++) {
+            static view_at va[4];
+            unsigned w = 0, h = 0;
+            double t = 0;
+            const char *spec = views[v], *colon = strchr(spec, ':');
+            if (colon) { t = atof(spec); spec = colon + 1; }
+            if (sscanf(spec, "%ux%u", &w, &h) != 2) continue;
+            va[v] = (view_at){ board, t, (uint32_t)w << 16 | h };
+            if (t <= 0) { board->host_view = board->host_screen = va[v].size; continue; }
+            if (!board->host_screen) board->host_screen = va[v].size;
+            pthread_t th;
+            pthread_create(&th, NULL, view_later, &va[v]);
+        }
         static wav_out wav;
         if (wav_path && !use_window && boot == 0) {
             wav.board = board;

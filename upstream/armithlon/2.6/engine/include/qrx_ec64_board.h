@@ -18,6 +18,8 @@
 #define QEC64_FB_STRIDE         0x0110u  /* .l, bytes per line */
 #define QEC64_FB_FORMAT         0x0114u  /* .l, QEC64_FB_FMT_* */
 #define QEC64_FB_ENABLE         0x0118u  /* .l, 1 shows the framebuffer */
+#define QEC64_HOST_VIEW         0x0130u  /* .l read: the host window's inside, width << 16 | height, in points; 0 headless */
+#define QEC64_HOST_SCREEN       0x0134u  /* .l read: the host's screen, width << 16 | height, in points */
 #define QEC64_FB_FRAMES         0x011Cu  /* .l, write: a frame is done (counted); read: the count */
 #define QEC64_FB_FMT_RGB565     2u       /* big endian 16 bit */
 #define QEC64_FB_FMT_XRGB32     5u       /* big endian 32 bit, the top byte unused */
@@ -41,6 +43,7 @@
 #define QEC64_IDLE_US           0x0320u  /* .q read at +8*n: microseconds core n slept in IDLE, n < 8 */
 #define QEC64_RAM_SIZE          0x0360u  /* .q read: guest RAM in bytes */
 #define QEC64_UPTIME_US         0x0368u  /* .q read: microseconds since the machine started */
+#define QEC64_SMP_SPREAD        0x03C0u  /* .l read: 1 lets new tasks run on every core (QRX_EC64_SMP_SPREAD=1) */
 #define QEC64_HOST_CPU          0x0380u  /* 64 bytes read as .q: the host CPU's name, ASCII, 0 padded */
 
 /* Host services: a write of a request's RAM address runs it before the write returns. The request is
@@ -72,6 +75,8 @@ typedef struct qec64_board {
     /* the framebuffer registers, read by the display */
     volatile uint64_t fb_addr;
     volatile uint32_t fb_width, fb_height, fb_stride, fb_format, fb_enable, fb_frames;
+    /* the host window, for the guest's display to follow (written by the window) */
+    volatile uint32_t host_view, host_screen;
     /* input events from the window to the guest */
     uint32_t events[256];
     volatile unsigned ev_head, ev_tail;

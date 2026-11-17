@@ -430,6 +430,20 @@ patch('''    save_preferences();
     qrx_look_port_close();''','''    qrx_shell_close();
     save_preferences();
     qrx_look_port_close();''')
+# Guest tools: a new screen mode for the host window's size; the desktop leaves, the mode changes,
+# the desktop comes back on the new Workbench screen.
+patch('''            g_session_action == SESSION_WHDLOAD ||''','''            g_session_action == SESSION_WHDLOAD ||
+            g_session_action == SESSION_RESCREEN ||''')
+patch('''        action = g_session_action;
+        qrx_close_runtime_screen();
+''','''        action = g_session_action;
+        qrx_close_runtime_screen();
+
+        if (action == SESSION_RESCREEN) {
+            qrx_shell_rescreen();
+            continue;
+        }
+''')
 (out/'qrx_desktop.armithlon.c').write_text(s)
 for f in ('qrx_icons.c','qrx_wicon.h','ipfs-drive.c','qrx_shell.c'):shutil.copy(extra/f,out/f)
 # QRX OS One 64: QRX_CC64 is the m68k64 compiler with the AROS 64 sysroot (cc64 of build-ec64.sh)

@@ -147,6 +147,9 @@ bool qec64_board_mmio(qec64_cpu *c, uint64_t addr, unsigned size, bool write, ui
         if (size != 4) return false;
         if (write) __atomic_fetch_add(&b->fb_frames, 1u, __ATOMIC_RELEASE); else *value = b->fb_frames;
         return true;
+    case QEC64_HOST_VIEW: case QEC64_HOST_SCREEN:
+        if (write || size != 4) return false;
+        *value = off == QEC64_HOST_VIEW ? b->host_view : b->host_screen; return true;
     case QEC64_INPUT_EVENT:
         if (write || size != 4) return false;
         *value = take_event(b); return true;
@@ -205,6 +208,12 @@ bool qec64_board_mmio(qec64_cpu *c, uint64_t addr, unsigned size, bool write, ui
     case QEC64_RAM_SIZE:
         if (write || size != 8) return false;
         *value = b->ram_size; return true;
+    case QEC64_SMP_SPREAD: {
+        static int spread = -1;
+        if (write || size != 4) return false;
+        if (spread < 0) spread = getenv("QRX_EC64_SMP_SPREAD") && atoi(getenv("QRX_EC64_SMP_SPREAD")) != 0;
+        *value = (uint64_t)spread; return true;
+    }
     case QEC64_UPTIME_US:
         if (write || size != 8) return false;
         *value = clock_us() - b->start_us; return true;

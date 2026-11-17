@@ -6,6 +6,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import "qrx_metal_renderer.h"
 #import "qrx_keycapture.h"
+#include "../full68k/qrx86_door.h"
 #include "qrx_hostgpu.h"
 #include "qrx_aros_window.h"
 #include <stdatomic.h>
@@ -202,6 +203,11 @@ static uint8_t keysDown[128];
 - (void)rightMouseUp:(NSEvent*)e{[self button:e down:NO];}
 @end
 static QRXAROSView *view;
+static void report_view_size(void){
+ if(!view)return;
+ NSSize v=view.bounds.size;
+ qrx_host_view_size=(uint32_t)v.width<<16|((uint32_t)v.height&0xFFFFu);
+}
 @interface QRXAROSDelegate : NSObject<NSWindowDelegate>
 @end
 @implementation QRXAROSDelegate
@@ -209,6 +215,10 @@ static QRXAROSView *view;
 /* Games hold keys: Mission Control and the like stay off while the guest has the keyboard, and
  * nothing stays pressed when it loses it. */
 - (void)windowDidBecomeKey:(NSNotification*)n{qrx_keycapture_focus(YES);}
+/* Guest tools: the window's inside in points, read by the guest through the door (+20) */
+- (void)windowDidResize:(NSNotification*)n{report_view_size();}
+- (void)windowDidEnterFullScreen:(NSNotification*)n{report_view_size();}
+- (void)windowDidExitFullScreen:(NSNotification*)n{report_view_size();}
 - (void)windowDidResignKey:(NSNotification*)n{qrx_keycapture_focus(NO);[view releaseAllKeys];}
 - (void)quit:(id)sender{running=NO;}
 - (void)showApps:(id)sender{
@@ -284,6 +294,7 @@ int qrx_aros_window_open(QRXVM *vm,size_t ramBytes){@autoreleasepool{
  view=[[QRXAROSView alloc]initWithFrame:NSMakeRect(0,0,1024,768)];view.guestWidth=1024;view.guestHeight=768;
  view.wantsLayer=YES;
  window.contentView=view;window.acceptsMouseMovedEvents=YES;delegate=[QRXAROSDelegate new];window.delegate=delegate;
+ window.collectionBehavior|=NSWindowCollectionBehaviorFullScreenPrimary;report_view_size();
  guestVM=vm;diskPreferences=[[NSBundle mainBundle].bundleIdentifier isEqualToString:@"org.qrxosone.armithlon.aros"]?[NSUserDefaults standardUserDefaults]:[[NSUserDefaults alloc]initWithSuiteName:@"org.qrxosone.armithlon.aros"];
  NSString *defaultPath=[[[NSBundle mainBundle]bundlePath].stringByDeletingLastPathComponent stringByAppendingPathComponent:@"Apps"];
  [[NSFileManager defaultManager]createDirectoryAtPath:defaultPath withIntermediateDirectories:YES attributes:nil error:nil];

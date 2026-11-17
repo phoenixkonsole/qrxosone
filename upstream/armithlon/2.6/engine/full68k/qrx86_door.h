@@ -12,6 +12,10 @@
 #define QRX86_DOOR_FEATURE_NATIVE_NET UINT32_C(1)
 /* Service 8: OpenGL 2.1 for native 68k programs (qrx_gl68k.c). */
 #define QRX86_DOOR_FEATURE_GL UINT32_C(2)
+/* +20 reads the host window's inside, width << 16 | height in points, for the guest's display to
+ * follow it (QRXDesktop's guest tools); 0 without a window. */
+#define QRX86_DOOR_FEATURE_HOST_VIEW UINT32_C(4)
+extern volatile uint32_t qrx_host_view_size;
 void qrx86_door_attach(QRXFullCPU *c);
 void qrx86_door_report(void);
 #endif

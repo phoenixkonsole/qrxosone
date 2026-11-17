@@ -469,9 +469,11 @@ static void door_run(QRXFullCPU *c,uint32_t req){
         if(ms>8.0)fprintf(stderr,"[STALL] x86 quantum %.1f ms, %u instructions\n",ms,executed);
     }
 }
+volatile uint32_t qrx_host_view_size;
 static bool door_read(QRXFullCPU *c,uint32_t addr,unsigned n,uint32_t *out){
     if(addr==QRX86_DOOR_BASE&&n==4){*out=QRX86_DOOR_MAGIC;return true;}
-    if(addr==QRX86_DOOR_BASE+16u&&n==4){*out=QRX86_DOOR_FEATURE_NATIVE_NET|QRX86_DOOR_FEATURE_GL;return true;}
+    if(addr==QRX86_DOOR_BASE+16u&&n==4){*out=QRX86_DOOR_FEATURE_NATIVE_NET|QRX86_DOOR_FEATURE_GL|(qrx_host_view_size?QRX86_DOOR_FEATURE_HOST_VIEW:0);return true;}
+    if(addr==QRX86_DOOR_BASE+20u&&n==4){*out=qrx_host_view_size;return true;}
     /* Reading the size register opens the RAM above the boot-visible 32 MiB. */
     if(addr==QRX86_DOOR_BASE+8u&&n==4){*out=(uint32_t)qrx_full_show_high_ram(c);return true;}
     return false;
