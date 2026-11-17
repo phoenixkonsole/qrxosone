@@ -11,6 +11,7 @@
  * qrxdisk=<address>,<size> to the command line for qrxdisk.device. Its contents stay over a reboot;
  * with $QRXBOOT_DISK_WRITE set they are written back to the file at the end. */
 #include "qrx68100ec64.h"
+#include "qrx_ec64_board.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -185,6 +186,9 @@ static long long boot(int argc, char **argv, double seconds, unsigned cores, con
            LOAD, kernel_end, start, tags, ram_size >> 20, cores);
     fflush(stdout);
     qec64_machine *m = qec64_machine_new(ram, ram_size, cores);
+    static qec64_board board;           /* the emulator's devices: the clock for battclock.resource */
+    qec64_board_init(&board, ram, ram_size);
+    qec64_machine_set_mmio(m, qec64_board_mmio, &board);
     static char out[1 << 20];
     unsigned who = 0;
     qec64_machine_console(m, out, sizeof out - 1);
