@@ -295,6 +295,7 @@ static uint64_t ar_now(qwin *w)
     static uint64_t base;
     uint64_t t = ar_clock(w);
     if (!base) base = t - 60000u;
+    qw_ec64_mix(w);                 /* QRX OS One 64: keep the board's sound ring filled */
     return t - base;
 }
 
@@ -323,6 +324,8 @@ static int vk_of_raw(UWORD code, int ch)
     return 0;
 }
 
+/* The virtual key each raw key went down as, so its release names the same key */
+static uint8_t g_down_vk[128];
 static int translate(qwin *w, struct IntuiMessage *im, qevent *ev)
 {
     bew *b = (bew *)im->IDCMPWindow->UserData;
@@ -357,14 +360,17 @@ static int translate(qwin *w, struct IntuiMessage *im, qevent *ev)
         case MIDDLEUP: ev->type = QE_MOUSEUP; ev->button = 3; return 1;
         }
         return 0;
-    case IDCMP_INACTIVEWINDOW:                      /* key releases now go elsewhere */
-        memset(w->keystate, 0, sizeof(w->keystate));
-        return 0;
+    case IDCMP_INACTIVEWINDOW: {                    /* key releases now go elsewhere: let go of all */
+        int vk;
+        for (vk = 1; vk < 256; vk++)
+            if (w->keystate[vk] & 0x80) { w->keystate[vk] = 0; qw_dinput_key(w, vk, 0); }
+        memset(g_down_vk, 0, sizeof(g_down_vk));
+        return 0; }
     case IDCMP_RAWKEY: {
         struct InputEvent ie;
         char buf[8];
         LONG n;
-        static uint8_t down_vk[128];
+        uint8_t *down_vk = g_down_vk;
         UWORD raw = im->Code & 0x7F;
         memset(&ie, 0, sizeof(ie));
         ie.ie_Class = IECLASS_RAWKEY;
@@ -413,6 +419,8 @@ static int ar_wait(qwin *w, uint32_t timeout, qevent *ev)
             continue;
         }
         if (!timeout) return 0;
+        /* While sound plays, wake often enough to mix: the board's ring holds about 85 ms. */
+        if (qw_ec64_playing() && timeout > 20) timeout = 20;
         {
             ULONG sigs = (1UL << g_port->mp_SigBit) | SIGBREAKF_CTRL_C, got;
             if (g_topen) {

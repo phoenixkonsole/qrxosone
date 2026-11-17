@@ -517,8 +517,13 @@ int headless_set_script(qwin *w, const char *path);
 #define WS_EX_STATICEDGE 0x00020000u
 #define WS_EX_DLGMODALFRAME 0x00000001u
 
+/* user.c: take waiting input before a direct query of the keys */
+void qw_input_poll(qwin *w);
+/* dx.c: a key change for DirectInput's buffered keyboard data */
+void qw_dinput_key(qwin *w, int vk, int down);
 /* sound_ec64.c: DirectSound and waveOut voices mixed for the 68100EC64 board */
 void qw_ec64_mix(qwin *w);
 int qw_ec64_sound(qwin *w, uint32_t *q);
 int qw_ec64_sound_ok(void);
+int qw_ec64_playing(void);
 #endif

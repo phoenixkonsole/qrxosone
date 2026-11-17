@@ -72,6 +72,13 @@ struct qec64_cpu {
 };
 #define QEC64_CODE_SHIFT 8
 
+/* QRX_EC64_JIT_VERIFY=1 (qrx68100ec64_jit.c): the interpreter's RAM writes with their old contents,
+ * so a block can run in both and the two results be compared. Per thread; NULL is off. Device
+ * accesses, CAS and TAS count as side effects: such a block is not run twice. */
+typedef struct { uint64_t addr; uint8_t n; uint8_t old[8]; } qec64_undo;
+extern __thread qec64_undo *qec64_undo_log;
+extern __thread unsigned qec64_undo_n, qec64_undo_cap, qec64_side_effects;
+
 /* Like qec64_run, but long mode code runs translated to AArch64 where the JIT can. Falls back to
  * qec64_run without code_map, outside long mode and on other hosts. */
 enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max);
@@ -104,6 +111,9 @@ size_t qec64_machine_console_push(qec64_machine *m, const char *s, size_t n);
 /* The devices at QEC64_MMIO_BASE for every core; qec64_machine_user() gives back user. */
 void qec64_machine_set_mmio(qec64_machine *m, bool (*fn)(qec64_cpu *, uint64_t, unsigned, bool, uint64_t *), void *user);
 void *qec64_machine_user(const qec64_cpu *c);
+/* From a device on core c's thread: sleep until an interrupt is pending for c, its timer is due,
+ * or max_us passed. Returns the microseconds slept. The idle task's way to stop spinning. */
+uint64_t qec64_machine_idle(qec64_cpu *c, uint64_t max_us);
 /* Ends qec64_machine_run() from another thread, as the time limit would. */
 void qec64_machine_stop(qec64_machine *m);
 /* Starts core 0 at pc, in 32-bit mode as after reset, and waits for the end: a halt, or a failure on

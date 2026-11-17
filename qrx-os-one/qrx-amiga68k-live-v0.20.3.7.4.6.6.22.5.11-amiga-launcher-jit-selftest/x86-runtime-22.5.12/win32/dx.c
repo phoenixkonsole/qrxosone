@@ -69,6 +69,7 @@ typedef struct dxobj {
     uint8_t prevkeys[256];
     uint32_t event;                  /* SetEventNotification handle */
     uint8_t prevbtn[3];
+    uint32_t kq_read;                /* keyboard: the next entry of g_kq this device reports */
 } dxobj;
 #define DX_MAX 1024
 int qw_dd_mode_bpp;                 /* the mode the program last set: GDI answers for it too */
@@ -1215,6 +1216,20 @@ static uint8_t vk2dik(int vk)
     default: return 0;
     }
 }
+/* Every key change, in order, as DirectInput's buffer holds them: comparing states between two
+ * polls loses a key pressed and let go in between (a shot, a tap on the arrows). */
+#define KQ_SIZE 256u
+static struct { uint8_t dik, state; uint32_t time; } g_kq[KQ_SIZE];
+static uint32_t g_kq_write;
+static uint64_t now_ms(qwin *w);
+void qw_dinput_key(qwin *w, int vk, int down)
+{
+    uint8_t d = vk2dik(vk);
+    uint32_t i = g_kq_write % KQ_SIZE;
+    if (!d) return;
+    g_kq[i].dik = d; g_kq[i].state = down ? 0x80 : 0; g_kq[i].time = (uint32_t)now_ms(w);
+    g_kq_write++;
+}
 static void kbd_state(qwin *w, uint8_t *k)
 {
     int vk;
@@ -1233,7 +1248,7 @@ FN(dv_QueryInterface) {
 FN(dv_SetEventNotification) { dxobj *d = ob(w, a[0], OB_DID); if (d) d->event = a[1]; return DD_OK; }
 static int dev_pending(qwin *w, dxobj *d)
 {
-    if (d->kind == 1) { uint8_t k[256]; kbd_state(w, k); return memcmp(k, d->prevkeys, sizeof(k)) != 0; }
+    if (d->kind == 1) return d->kq_read != g_kq_write;
     return w->mouse_x != d->lastx || w->mouse_y != d->lasty ||
            (w->keystate[1] & 0x80) != d->prevbtn[0] || (w->keystate[2] & 0x80) != d->prevbtn[1] || (w->keystate[4] & 0x80) != d->prevbtn[2];
 }
@@ -1259,6 +1274,7 @@ FN(di_CreateDevice) {                    /* (this, guid, pp, outer) */
     if (i < 0) return E_FAIL_;
     g_o[i].kind = kind;
     g_o[i].lastx = w->mouse_x; g_o[i].lasty = w->mouse_y;
+    g_o[i].kq_read = g_kq_write;
     WR32(a[2], g_o[i].guest);
     return DD_OK;
 }
@@ -1270,6 +1286,7 @@ FN(dv_GetCapabilities) { dxobj *d = ob(w, a[0], OB_DID); if (!d) return DDERR_IN
 FN(dv_ok) { UNUSED; return DD_OK; }
 FN(dv_GetDeviceState) {                  /* (this, size, data) */
     dxobj *d = ob(w, a[0], OB_DID);
+    qw_input_poll(w);
     if (!d) return DDERR_INVALIDPARAMS;
     if (d->kind == 1) {
         uint8_t k[256];
@@ -1293,6 +1310,7 @@ FN(dv_GetDeviceData) {                   /* (this, objsize, data, inout, flags):
     uint8_t k[256];
     int i;
     if (!d) return DDERR_INVALIDPARAMS;
+    qw_input_poll(w);
     if (d->kind != 1) {                              /* mouse: DIMOFS_X 0, _Y 4, _BUTTON0.. 12.. */
         int dx = w->mouse_x - d->lastx, dy = w->mouse_y - d->lasty, b;
         t = (uint32_t)now_ms(w);
@@ -1309,19 +1327,22 @@ FN(dv_GetDeviceData) {                   /* (this, objsize, data, inout, flags):
         if (a[3]) WR32(a[3], n);
         return DD_OK;
     }
-    kbd_state(w, k);
-    t = (uint32_t)now_ms(w);
-    for (i = 0; i < 256 && n < max; i++) {
-        if (k[i] == d->prevkeys[i]) continue;
-        if (a[2]) {
-            uint32_t e = a[2] + n * sz;
-            WR32(e, (uint32_t)i); WR32(e + 4, k[i]); WR32(e + 8, t); WR32(e + 12, n);
+    (void)k; (void)i; (void)t;
+    {
+        uint32_t r = d->kq_read, over = 0;
+        if (g_kq_write - r > KQ_SIZE) { r = g_kq_write - KQ_SIZE; over = 1; }   /* the oldest are gone */
+        for (; r != g_kq_write && n < max; r++) {
+            uint32_t q = r % KQ_SIZE;
+            if (a[2]) {
+                uint32_t e = a[2] + n * sz;
+                WR32(e, g_kq[q].dik); WR32(e + 4, g_kq[q].state); WR32(e + 8, g_kq[q].time); WR32(e + 12, r);
+            }
+            n++;
         }
-        if (!(a[4] & 1)) d->prevkeys[i] = k[i];          /* DIGDD_PEEK keeps the events */
-        n++;
+        if (!(a[4] & 1)) d->kq_read = r;                  /* DIGDD_PEEK keeps the events */
+        if (a[3]) WR32(a[3], n);
+        return over ? 1u : DD_OK;                         /* DI_BUFFEROVERFLOW */
     }
-    if (a[3]) WR32(a[3], n);
-    return DD_OK;
 }
 FN(x_DirectInputCreateA) {               /* (hinst, version, pp, outer) */
     int i = obj_new(w, OB_DI, VT_DI);

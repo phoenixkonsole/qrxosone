@@ -5,6 +5,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import "qrx_metal_renderer.h"
+#import "qrx_keycapture.h"
 #include "qrx_hostgpu.h"
 #include "qrx_aros_window.h"
 #include <stdatomic.h>
@@ -205,6 +206,10 @@ static QRXAROSView *view;
 @end
 @implementation QRXAROSDelegate
 - (BOOL)windowShouldClose:(NSWindow*)w{running=NO;return YES;}
+/* Games hold keys: Mission Control and the like stay off while the guest has the keyboard, and
+ * nothing stays pressed when it loses it. */
+- (void)windowDidBecomeKey:(NSNotification*)n{qrx_keycapture_focus(YES);}
+- (void)windowDidResignKey:(NSNotification*)n{qrx_keycapture_focus(NO);[view releaseAllKeys];}
 - (void)quit:(id)sender{running=NO;}
 - (void)showApps:(id)sender{
  if(mountedAppsPath)[[NSWorkspace sharedWorkspace]openURL:[NSURL fileURLWithPath:mountedAppsPath]];
@@ -545,7 +550,7 @@ int qrx_aros_window_pump(void){@autoreleasepool{
  while((event=[NSApp nextEventMatchingMask:NSEventMaskAny untilDate:limit inMode:NSDefaultRunLoopMode dequeue:YES])){
   if(!(event.type==NSEventTypeApplicationDefined&&event.subtype==QRX_REFRESH_EVENT)){
    double te=CACurrentMediaTime();
-   [NSApp sendEvent:event];
+   if(!qrx_keycapture_take(event,window,view))[NSApp sendEvent:event];
    te=(CACurrentMediaTime()-te)*1000.0;
    if(te>slowEventMs){slowEventMs=te;slowEventType=(int)event.type;}
   }

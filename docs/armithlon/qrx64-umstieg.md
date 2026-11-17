@@ -241,6 +241,45 @@ Offen:
 - `asl.library` braucht die Katalog-Erzeugung, zlib die `zconf.h`. Der Kernel-Test von ec64-llvm hängt
   etwa einmal in 300 Läufen in seinem eigenen Konsolen-Lock, auch ohne JIT.
 
+## Stand 2026-11-17 (Nachmittag): Desktop-Shell, echtes SMP, Eingabe
+
+- **SMP verteilt jetzt:** Neue Tasks durften bisher nur auf dem erzeugenden Kern laufen (AROS-Standard),
+  also lief fast alles auf Kern 0. Auf der EC64 bekommen sie alle Kerne. Zwei Rechenschleifen brauchen
+  zusammen 40 s statt 78 s.
+- **Konsole verhungerte das System:** econsole wartete mit `Reschedule()` auf Tasten, über der Priorität
+  normaler Programme. Solange eine Shell auf Eingabe wartete, liefen QRXDesktop und qrx-win32 nicht.
+  Jetzt wartet sie 10 ms über timer.device.
+- **Leerlauf messbar:** Der Leerlauf-Task schreibt das Platinen-Register IDLE ($318). Die Platine zählt daraus
+  die Leerlaufzeit je Kern ($320+8n), dazu Kernzahl ($31C), RAM ($360), Laufzeit ($368) und Host-CPU ($380).
+  Schlafen im Leerlauf (`QRX_EC64_IDLE_SLEEP=1`) spart Mac-CPU, zeigte aber Hänger und einmal eine
+  Ausnahme in `core_Switch`. Es bleibt deshalb aus.
+- **QRXInfo:** „Über QRX OS One“ mit OS, Prozessor, Host, Speicher, Display, Ton, Netz, 3D, Laufzeit
+  und live der Last je Kern. `QRXInfo TEXT` gibt dasselbe in der Shell aus. Gibt es auch für Classic.
+- **Desktop-Shell** (`tools/armithlon/desktop/qrx_shell.c`, über `build-desktop.py`):
+  - Taskleiste im Stil von polybar: QRX-Home-Knopf, Übersicht-Knopf, ein Knopf je Fenster mit
+    Live-Vorschau beim Zeigen, Module für CPU je Kern, RAM, Netz und Uhr. Sie kommt nach vorn, wenn der
+    Zeiger den unteren Rand berührt.
+  - Home-Menü wie in Windows 11: angeheftete Apps (nur vorhandene), Suche durch Tippen, Ein/Aus mit
+    Herunterfahren und Neustart.
+  - Übersicht wie Exposé: über den Knopf oder die Ecke oben links. Ein Klick holt das Fenster nach vorn.
+  - Hintergrund per Rechtsklick auf ein Bild im QRX Drive. PNG, BMP und PPM liest die Shell selbst,
+    JPEG, GIF und ILBM liest sie über Datatypes, wo es sie gibt (Classic).
+  - Der Desktop ist jetzt immer ein Backdrop-Fenster, er verdeckt keine Programme mehr.
+  - `C:OpenWB` öffnet den Workbench-Bildschirm vor QRXDesktop.
+- **qrx-win32 auf 64 Bit mit Fenster** (AROS-Backend über cybergraphics), Ton auch dort.
+- **Eingabe (Classic und 64 Bit):**
+  - Solange ein ARMithlon-Fenster aktiv ist, sind die globalen Kurzbefehle von macOS aus. Ctrl+Pfeil öffnete
+    Mission Control bzw. App-Exposé.
+  - Cmd-Kombinationen und ihr keyUp gehen an den Gast, Cmd+Q bleibt beim Mac.
+  - qrx-win32: DirectInput liefert eine echte Ereignis-Warteschlange; direkte Tastenabfragen holen
+    wartende Eingaben vorher ab; ein Loslassen geht nicht mehr verloren.
+- **JIT:** Der Prüfmodus `QRX_EC64_JIT_VERIFY=1` vergleicht jeden Block mit dem Interpreter. Damit lief
+  Fflush bitgenau durch, ohne einen abweichenden Block. Der Fehler liegt also zwischen den Blöcken
+  (Verkettung, Budget, Interrupt-Zeitpunkt), nicht in der Übersetzung.
+
+Offen: der seltene Hänger mit mehreren Kernen (etwa einer von acht Läufen, auch ohne Schlafen im
+Leerlauf), der JIT-Fehler zwischen den Blöcken, asl.library und zlib.
+
 ## Reihenfolge
 
 1. **Classic:** Das 32-Bit-System als eigene Instanz in der 64-Bit-Maschine starten, mit gemeinsamem HostFS und Fenster auf dem Mac. Setzt voraus, dass der EC64 im Emulator läuft. Das ist Sache der AROS-64-Arbeit auf `claude/tor-browser-aros68k-343c56`.

@@ -1,8 +1,55 @@
 diff --git a/arch/all-native/econsole/econsole.c b/arch/all-native/econsole/econsole.c
-index 21e84100..9579e980 100644
+index 21e84100..54d70958 100644
 --- a/arch/all-native/econsole/econsole.c
 +++ b/arch/all-native/econsole/econsole.c
-@@ -183,6 +183,10 @@ const struct econsole_file *econsole_file_of(BSTR bname, SIPTR *errcode)
+@@ -11,6 +11,7 @@
+ #include <dos/stdio.h>
+ 
+ #include <exec/resident.h>
++#include <devices/timer.h>
+ #include <graphics/modeid.h>
+ #include <utility/tagitem.h>
+ #include <libraries/expansion.h>
+@@ -51,6 +52,29 @@ struct econsole_file {
+     SIPTR (*ef_ExamineFH)(struct FileInfoBlock *fib, SIPTR *actual);
+ };
+ 
++/* Waiting for a key: a timer tick of 10 ms through timer.device, exec only (the handler has no
++ * DOSBase). Polling with Reschedule() starved every program below the handler's priority. */
++static void econsole_nap(void)
++{
++    static struct MsgPort *port;
++    static struct timerequest *tr;
++    static int state;                   /* 0 untried, 1 ready, -1 none: fall back to Reschedule */
++    if (state == 0) {
++        state = -1;
++        port = CreateMsgPort();
++        if (port) {
++            tr = (struct timerequest *)CreateIORequest(port, sizeof(*tr));
++            if (tr && !OpenDevice("timer.device", UNIT_MICROHZ, (struct IORequest *)tr, 0))
++                state = 1;
++        }
++    }
++    if (state < 0) { Reschedule(); return; }
++    tr->tr_node.io_Command = TR_ADDREQUEST;
++    tr->tr_time.tv_secs = 0;
++    tr->tr_time.tv_micro = 10000;
++    DoIO((struct IORequest *)tr);
++}
++
+ SIPTR Raw_Read(APTR buff, SIPTR len, SIPTR *err)
+ {
+     SIPTR actual = 0;
+@@ -60,7 +84,7 @@ SIPTR Raw_Read(APTR buff, SIPTR len, SIPTR *err)
+     while (actual < len) {
+         LONG c = RawMayGetChar();
+         if (c < 0) {
+-            Reschedule();
++            econsole_nap();
+             continue;
+         }
+ 
+@@ -183,6 +207,10 @@ const struct econsole_file *econsole_file_of(BSTR bname, SIPTR *errcode)
      else
          file++;
  
@@ -1714,10 +1761,10 @@ index 00000000..ce40b7ef
 +}
 diff --git a/arch/m68k64-native/exec/exec_idle.c b/arch/m68k64-native/exec/exec_idle.c
 new file mode 100644
-index 00000000..0dc7c4ea
+index 00000000..026444f9
 --- /dev/null
 +++ b/arch/m68k64-native/exec/exec_idle.c
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,30 @@
 +/*
 +    Copyright (C) 2023, The AROS Development Team. All rights reserved.
 +*/
@@ -1743,7 +1790,9 @@ index 00000000..0dc7c4ea
 +    {
 +        /* forever */
 +        D(bug("[IDLE:%02d] CPU has idled for %d seconds..\n", cpunum, GetIntETask(thisTask)->iet_CpuTime.tv_sec));
-+        asm volatile("nop");    /* user state: STOP is privileged, so the idle task spins */
++        /* User state may not STOP. The 68100EC64 board's IDLE register puts the core to sleep
++         * until an interrupt (at most 1 ms) and counts the time, which QRXInfo shows as load. */
++        *(volatile ULONG *)0xFFFFFFFF00000318UL = 1;
 +    } while(1);
 +}
 diff --git a/arch/m68k64-native/exec/exec_platform.h b/arch/m68k64-native/exec/exec_platform.h
@@ -5133,10 +5182,10 @@ index 00000000..136b74f7
 +#endif /* VESAGFX_BITMAP_H */
 diff --git a/arch/m68k64-native/qrx/ec64gfx/vesagfx_bitmapclass.c b/arch/m68k64-native/qrx/ec64gfx/vesagfx_bitmapclass.c
 new file mode 100644
-index 00000000..bfe0ddd9
+index 00000000..80171bab
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/vesagfx_bitmapclass.c
-@@ -0,0 +1,217 @@
+@@ -0,0 +1,219 @@
 +/*
 +    Copyright (C) 1995-2018, The AROS Development Team. All rights reserved.
 +
@@ -5275,6 +5324,7 @@ index 00000000..bfe0ddd9
 +                    if (data->DAC)
 +                        DACLoad(XSD(cl), data->DAC, 0, 256);
 +                }
++                ec64ShowBitmap(&XSD(cl)->data, data, data->disp);
 +                break;
 +            }
 +        }
@@ -5295,6 +5345,7 @@ index 00000000..bfe0ddd9
 +        if (data->disp)
 +        {
 +            LOCK_FRAMEBUFFER(XSD(cl));
++            ec64ShowBitmap(&XSD(cl)->data, data, TRUE);     /* scrolled: direct no more */
 +            vesaDoRefreshArea(&XSD(cl)->data, data, 0, 0, data->width, data->height);
 +            UNLOCK_FRAMEBUFFER(XSD(cl));
 +        }
@@ -5870,10 +5921,10 @@ index 00000000..2677e8dc
 +#endif /* VESAGFX_INTERN_H */
 diff --git a/arch/m68k64-native/qrx/ec64gfx/vesagfx_support.c b/arch/m68k64-native/qrx/ec64gfx/vesagfx_support.c
 new file mode 100644
-index 00000000..83eba692
+index 00000000..6aff3d8d
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/vesagfx_support.c
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,192 @@
 +/*
 +    Copyright (C) 1995-2025, The AROS Development Team. All rights reserved.
 +
@@ -5934,9 +5985,38 @@ index 00000000..83eba692
 +    return TRUE;
 +}
 +
++/* A full-size 32-bit bitmap at offset 0,0 is shown by pointing the board at its own pixels: every
++ * drawing is on the screen at once, also from code that writes the bitmap without UpdateRect, and
++ * nothing has to be copied. Other bitmaps go through the copy into the framebuffer. */
++void ec64ShowBitmap(struct HWData *hwdata, struct VESAGfxBitMapData *data, BOOL visible)
++{
++    if (visible && data->VideoData && data->bytesperpix == 4 && !data->xoffset && !data->yoffset &&
++        data->width >= hwdata->width && data->height >= hwdata->height)
++    {
++        hwdata->direct = data->VideoData;
++        BOARD_Q(FB_ADDR) = (UQUAD)(IPTR)data->VideoData;
++        BOARD(FB_STRIDE) = data->bytesperline;
++    }
++    else
++    {
++        if (!visible && hwdata->direct != data->VideoData)
++            return;
++        hwdata->direct = NULL;
++        BOARD_Q(FB_ADDR) = (UQUAD)(IPTR)hwdata->framebuffer;
++        BOARD(FB_STRIDE) = hwdata->bytesperline;
++    }
++    BOARD(FB_ENABLE) = 1;
++    BOARD(FB_FRAMES) = 1;
++}
++
 +void vesaDoRefreshArea(struct HWData *hwdata, struct VESAGfxBitMapData *data,
 +                       LONG x1, LONG y1, LONG x2, LONG y2)
 +{
++    if (hwdata->direct && hwdata->direct == data->VideoData)
++    {
++        BOARD(FB_FRAMES) = 1;
++        return;
++    }
 +    UBYTE *src, *dst;
 +    ULONG srcmod, dstmod;
 +    LONG y, w, h, sx, sy;
@@ -6039,10 +6119,10 @@ index 00000000..83eba692
 +}
 diff --git a/arch/m68k64-native/qrx/ec64gfx/vesagfx_support.h b/arch/m68k64-native/qrx/ec64gfx/vesagfx_support.h
 new file mode 100644
-index 00000000..033b0adb
+index 00000000..953b0f94
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/vesagfx_support.h
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,48 @@
 +#ifndef VESAGFX_SUPPORT_H
 +#define VESAGFX_SUPPORT_H
 +
@@ -6072,6 +6152,7 @@ index 00000000..033b0adb
 +    BOOL	 owned;
 +    UBYTE	 palettewidth;
 +    UBYTE	 DAC[768];
++    UBYTE	*direct;	/* the visible bitmap's pixels when the board shows them directly */
 +    /* Used by PCI scanning routine */
 +    OOP_AttrBase pciDeviceAttrBase;
 +};
@@ -6085,6 +6166,7 @@ index 00000000..033b0adb
 +BOOL initVesaGfxHW(struct HWData *);
 +void DACLoad(struct VESAGfx_staticdata *, UBYTE *, unsigned char, int);
 +void ClearBuffer(struct HWData *data);
++void ec64ShowBitmap(struct HWData *hwdata, struct VESAGfxBitMapData *data, BOOL visible);
 +void vesaDoRefreshArea(struct HWData *hwdata, struct VESAGfxBitMapData *data,
 +		       LONG x1, LONG y1, LONG x2, LONG y2);
 +
@@ -7664,6 +7746,28 @@ index cad0d0ba..f4f9102f 100644
              Forbid();
  
          EXEC_SPINLOCK_LOCK(lock, NULL, mode);
+diff --git a/rom/exec/exec_util.c b/rom/exec/exec_util.c
+index 5da6d785..d15b945c 100644
+--- a/rom/exec/exec_util.c
++++ b/rom/exec/exec_util.c
+@@ -142,7 +142,17 @@ Exec_InitETask(struct Task *task, struct Task *parent, struct ExecBase *SysBase)
+     if (PrivExecBase(SysBase)->IntFlags & EXECF_CPUAffinity)
+     {
+         IntETask(et)->iet_CpuAffinity = KrnAllocCPUMask();
++#if defined(__m68k64__)
++        /* QRX OS One 64: a new task may run on every core. With only the creating core, nearly
++         * everything stays on the boot core (all of it starts there) and the others idle. */
++        {
++            ULONG i, n = KrnGetCPUCount();
++            for (i = 0; i < n; i++)
++                KrnGetCPUMask(i, IntETask(et)->iet_CpuAffinity);
++        }
++#else
+         KrnGetCPUMask(cpunum, IntETask(et)->iet_CpuAffinity);
++#endif
+ 
+         D(bug("[EXEC:ETask] Init: CPU #%d, mask %08x\n", cpunum, IntETask(et)->iet_CpuAffinity);)
+     }
 diff --git a/rom/exec/exec_util.h b/rom/exec/exec_util.h
 index 6d7149c3..10fb551e 100644
 --- a/rom/exec/exec_util.h

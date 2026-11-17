@@ -7,14 +7,27 @@
 /* One GL stream at a time: the contexts belong to whichever core's thread calls. */
 static pthread_mutex_t gl_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stdio.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 
+static uint64_t clock_us(void);
 void qec64_board_init(qec64_board *b, uint8_t *ram, uint64_t ram_size)
 {
     memset(b, 0, sizeof *b);
     b->ram = ram;
     b->ram_size = ram_size;
+    b->cores = 1;
+    b->start_us = clock_us();
+    snprintf(b->host_cpu, sizeof b->host_cpu, "unknown");
+#ifdef __APPLE__
+    size_t len = sizeof b->host_cpu - 1;
+    if (sysctlbyname("machdep.cpu.brand_string", b->host_cpu, &len, NULL, 0)) snprintf(b->host_cpu, sizeof b->host_cpu, "Apple");
+#endif
 }
 
 void qec64_board_push_event(qec64_board *b, uint32_t event)
@@ -172,10 +185,41 @@ bool qec64_board_mmio(qec64_cpu *c, uint64_t addr, unsigned size, bool write, ui
         *value = QEC64_FEATURE_NET;
 #endif
         return true;
+    case QEC64_IDLE: {
+        /* The idle task writes this in a loop. The time between two such writes close together is
+         * idle time. Sleeping here (QRX_EC64_IDLE_SLEEP=1) spares the host but still exposes an
+         * SMP race in AROS 64, so by default the core keeps spinning. */
+        static int sleep_on = -1;
+        if (!write || size != 4) return false;
+        if (sleep_on < 0) sleep_on = getenv("QRX_EC64_IDLE_SLEEP") != NULL;
+        unsigned id = c->core_id < 8 ? c->core_id : 7;
+        if (sleep_on) { b->idle_us[id] += qec64_machine_idle(c, 1000); return true; }
+        uint64_t now = clock_us(), last = b->idle_last[id];
+        if (last && now - last < 500) b->idle_us[id] += now - last;
+        b->idle_last[id] = now;
+        return true;
+    }
+    case QEC64_CORES:
+        if (write || size != 4) return false;
+        *value = b->cores; return true;
+    case QEC64_RAM_SIZE:
+        if (write || size != 8) return false;
+        *value = b->ram_size; return true;
+    case QEC64_UPTIME_US:
+        if (write || size != 8) return false;
+        *value = clock_us() - b->start_us; return true;
     case QEC64_CLOCK_UNIX:
         if (write || size != 8) return false;
         *value = (uint64_t)time(NULL); return true;
     default:
+        if (!write && size == 8 && off >= QEC64_IDLE_US && off < QEC64_IDLE_US + 64 && !(off & 7)) {
+            *value = b->idle_us[(off - QEC64_IDLE_US) / 8]; return true;
+        }
+        if (!write && size == 8 && off >= QEC64_HOST_CPU && off < QEC64_HOST_CPU + 64 && !(off & 7)) {
+            uint64_t v = 0;
+            for (unsigned i = 0; i < 8; i++) v = v << 8 | (uint8_t)b->host_cpu[off - QEC64_HOST_CPU + i];
+            *value = v; return true;
+        }
         return false;
     }
 }

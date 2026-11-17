@@ -1286,6 +1286,97 @@ static uint64_t pending_irq(qec64_cpu *c)
     return level > c->ipl || level == 7;
 }
 
+/* QRX_EC64_JIT_VERIFY=1: every block runs in the interpreter first; its RAM writes are undone, the
+ * translation runs from the same state, and both results must agree. The first block that does
+ * not is reported with both states, and the run stops. Slow; for finding JIT bugs. */
+static int verify_on(void)
+{
+    static int v = -1;
+    if (v < 0) v = getenv("QRX_EC64_JIT_VERIFY") != NULL;
+    return v;
+}
+static void verify_report(const qec64_cpu *s0, const qec64_cpu *si, const qec64_cpu *sj, const Block *b, const char *what)
+{
+    fprintf(stderr, "[EC64 JIT VERIFY] core %u block %llx (%u instructions): %s\n", s0->core_id,
+            (unsigned long long)b->pc, b->count, what);
+    fprintf(stderr, "  code:");
+    for (unsigned i = 0; i < 48 && b->pc + i * 2 + 1 < s0->ram_size; i++)
+        fprintf(stderr, " %02x%02x", s0->ram[b->pc + i * 2], s0->ram[b->pc + i * 2 + 1]);
+    fprintf(stderr, "\n");
+    for (unsigned r = 0; r < 16; r++) {
+        if (si->d[r] != sj->d[r] || si->d[r] != s0->d[r] || r < 8)
+            fprintf(stderr, "  d%-2u before %016llx interp %016llx jit %016llx%s\n", r, (unsigned long long)s0->d[r],
+                    (unsigned long long)si->d[r], (unsigned long long)sj->d[r], si->d[r] != sj->d[r] ? "  <--" : "");
+    }
+    for (unsigned r = 0; r < 16; r++) {
+        if (si->a[r] != sj->a[r] || r < 8)
+            fprintf(stderr, "  a%-2u before %016llx interp %016llx jit %016llx%s\n", r, (unsigned long long)s0->a[r],
+                    (unsigned long long)si->a[r], (unsigned long long)sj->a[r], si->a[r] != sj->a[r] ? "  <--" : "");
+    }
+    fprintf(stderr, "  pc before %llx interp %llx jit %llx; ccr before %02x interp %02x jit %02x\n",
+            (unsigned long long)s0->pc, (unsigned long long)si->pc, (unsigned long long)sj->pc, s0->ccr, si->ccr, sj->ccr);
+}
+/* One block both ways. Returns 1 when the block was handled (the core is in the interpreter's state
+ * and *n has the instructions run), 0 when it must run normally. */
+static int verify_block(qec64_cpu *c, Block *b, uint64_t *n, enum qec64_status *st)
+{
+    static __thread qec64_undo log[4096];
+    static __thread uint8_t now[4096][8];
+    qec64_cpu s0 = *c;
+    uint32_t gen0 = __atomic_load_n(c->code_gen, __ATOMIC_ACQUIRE);
+    qec64_undo_log = log; qec64_undo_n = 0; qec64_undo_cap = 4096; qec64_side_effects = 0;
+    *st = qec64_run(c, b->count);
+    qec64_undo_log = NULL;
+    *n = c->instructions - s0.instructions;
+    /* Not comparable: something happened that must not happen twice, or that changes the code,
+     * or the interpreter took an interrupt or stopped. Keep the interpreter's result. */
+    if (*st != QEC64_RUNNING || qec64_side_effects || __atomic_load_n(c->code_gen, __ATOMIC_ACQUIRE) != gen0 ||
+        *n != b->count || c->supervisor != s0.supervisor || c->ipl != s0.ipl || c->waiting)
+        return 1;
+    qec64_cpu si = *c;
+    unsigned nw = qec64_undo_n;
+    for (unsigned i = 0; i < nw; i++) memcpy(now[i], c->ram + log[i].addr, log[i].n);
+    for (unsigned i = nw; i-- > 0;) memcpy(c->ram + log[i].addr, log[i].old, log[i].n);
+    *c = s0;
+    Jit *j = c->jit;
+    uint64_t done = ((uint64_t (*)(qec64_cpu *, uint64_t))(void *)b->code)(c, 0);
+    j->last_exit = NULL;
+    c->instructions += done;
+    if (done < b->count) {                       /* left early: the interpreter finishes the block */
+        enum qec64_status s2 = qec64_run(c, b->count - done);
+        if (s2 != QEC64_RUNNING || c->supervisor != s0.supervisor) {
+            /* an interrupt came in between: take the interpreter's result */
+            for (unsigned i = 0; i < nw; i++) memcpy(c->ram + log[i].addr, now[i], log[i].n);
+            *c = si;
+            return 1;
+        }
+    }
+    qec64_cpu sj = *c;
+    const char *bad = NULL;
+    if (memcmp(si.d, sj.d, sizeof si.d) || memcmp(si.a, sj.a, sizeof si.a)) bad = "registers differ";
+    else if (si.pc != sj.pc) bad = "pc differs";
+    else if ((si.ccr & 0x1F) != (sj.ccr & 0x1F)) bad = "flags differ";
+    for (unsigned i = 0; !bad && i < nw; i++)
+        if (memcmp(c->ram + log[i].addr, now[i], log[i].n)) {
+            static char m[96];
+            snprintf(m, sizeof m, "memory at %llx differs", (unsigned long long)log[i].addr);
+            bad = m;
+        }
+    if (bad) {
+        if (si.pending != s0.pending || sj.pending != s0.pending) {   /* an interrupt arrived meanwhile */
+            for (unsigned i = 0; i < nw; i++) memcpy(c->ram + log[i].addr, now[i], log[i].n);
+            *c = si;
+            return 1;
+        }
+        verify_report(&s0, &si, &sj, b, bad);
+        static int reports;
+        if (++reports >= (getenv("QRX_EC64_JIT_VERIFY_MAX") ? atoi(getenv("QRX_EC64_JIT_VERIFY_MAX")) : 1)) abort();
+        for (unsigned i = 0; i < nw; i++) memcpy(c->ram + log[i].addr, now[i], log[i].n);
+        *c = si;
+    }
+    return 1;
+}
+
 enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
 {
     if (!c->code_map || !c->m64) return qec64_run(c, max);
@@ -1316,6 +1407,7 @@ enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
             b = translate(c, j, pc);
             if (fl != j->flushes) site = NULL;
         }
+        if (verify_on()) site = NULL;                    /* each block on its own */
         if (site && b->code && !(jit_off() & 0x800)) {   /* chain the exit that brought us here */
             int64_t dist = b->body - site;
 #if defined(__APPLE__)
@@ -1337,6 +1429,14 @@ enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
             uint64_t before = c->instructions;
             enum qec64_status st = qec64_run(c, 1);
             uint64_t n = c->instructions - before;
+            left = n >= left ? 0 : left - (n ? n : 1);
+            if (st != QEC64_RUNNING) return st;
+            continue;
+        }
+        if (__builtin_expect(verify_on(), 0)) {
+            uint64_t n = 0;
+            enum qec64_status st = QEC64_RUNNING;
+            verify_block(c, b, &n, &st);
             left = n >= left ? 0 : left - (n ? n : 1);
             if (st != QEC64_RUNNING) return st;
             continue;

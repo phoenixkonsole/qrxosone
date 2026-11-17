@@ -2,6 +2,7 @@
 #import <Cocoa/Cocoa.h>
 #import <AudioToolbox/AudioToolbox.h>
 #include "qrx_ec64_window.h"
+#import "qrx_keycapture.h"
 #include <pthread.h>
 
 static qec64_board *board;
@@ -45,6 +46,22 @@ static void audio_open(void)
     AudioQueueStart(audio_queue, NULL);
 }
 
+/* Keys the guest sees as held, by macOS key code: let go when the window loses the keyboard */
+static uint8_t keys_down[128];
+static void key_event(unsigned kind, unsigned code)
+{
+    if (code < 128) {
+        if (kind == QEC64_INPUT_KEY_DOWN) keys_down[code] = 1;
+        else if (!keys_down[code]) return;     /* an up without a down */
+        else keys_down[code] = 0;
+    }
+    if (board) qec64_board_push_event(board, (kind << 24) | (code << 16));
+}
+static void release_all_keys(void)
+{
+    for (unsigned k = 0; k < 128; k++) if (keys_down[k]) key_event(QEC64_INPUT_KEY_UP, k);
+}
+
 @interface QEC64Console : NSTextView
 @end
 @implementation QEC64Console
@@ -52,7 +69,7 @@ static void audio_open(void)
 {
     NSString *s = e.characters;
     unsigned short k = e.keyCode;
-    if (board) qec64_board_push_event(board, (QEC64_INPUT_KEY_DOWN << 24) | ((uint32_t)k << 16));
+    if (!e.isARepeat) key_event(QEC64_INPUT_KEY_DOWN, k);   /* a repeat is no new press */
     if (!input.typed || !s.length) return;
     if (k == 36 || k == 76) { input.typed(input.ctx, "\n", 1); return; }       /* Return, Enter */
     if (k == 51) { input.typed(input.ctx, "\b", 1); return; }                   /* Delete */
@@ -61,7 +78,7 @@ static void audio_open(void)
 }
 - (void)keyUp:(NSEvent *)e
 {
-    if (board) qec64_board_push_event(board, (QEC64_INPUT_KEY_UP << 24) | ((uint32_t)e.keyCode << 16));
+    key_event(QEC64_INPUT_KEY_UP, e.keyCode);
 }
 - (void)flagsChanged:(NSEvent *)e
 {
@@ -71,10 +88,8 @@ static void audio_open(void)
         {62, NSEventModifierFlagControl}, {58, NSEventModifierFlagOption}, {61, NSEventModifierFlagOption},
         {55, NSEventModifierFlagCommand}, {54, NSEventModifierFlagCommand}, {57, NSEventModifierFlagCapsLock}};
     for (unsigned i = 0; i < sizeof mods / sizeof mods[0]; i++)
-        if (mods[i].key == e.keyCode && board) {
-            unsigned kind = (e.modifierFlags & mods[i].flag) ? QEC64_INPUT_KEY_DOWN : QEC64_INPUT_KEY_UP;
-            qec64_board_push_event(board, (kind << 24) | ((uint32_t)e.keyCode << 16));
-        }
+        if (mods[i].key == e.keyCode)
+            key_event((e.modifierFlags & mods[i].flag) ? QEC64_INPUT_KEY_DOWN : QEC64_INPUT_KEY_UP, e.keyCode);
 }
 - (BOOL)acceptsFirstResponder { return YES; }
 @end
@@ -124,7 +139,9 @@ static void audio_open(void)
 @interface QEC64Delegate : NSObject <NSWindowDelegate>
 @end
 @implementation QEC64Delegate
-- (void)windowWillClose:(NSNotification *)n { closed = YES; }
+- (void)windowWillClose:(NSNotification *)n { closed = YES; qrx_keycapture_focus(NO); }
+- (void)windowDidBecomeKey:(NSNotification *)n { qrx_keycapture_focus(YES); }
+- (void)windowDidResignKey:(NSNotification *)n { qrx_keycapture_focus(NO); release_all_keys(); }
 @end
 static QEC64Delegate *delegate;
 
@@ -247,7 +264,7 @@ int qec64_window_pump(void)
         for (;;) {
             NSEvent *e = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:until inMode:NSDefaultRunLoopMode dequeue:YES];
             if (!e) break;
-            [NSApp sendEvent:e];
+            if (!qrx_keycapture_take(e, window, console)) [NSApp sendEvent:e];
         }
         show_console_text();
         show_framebuffer();

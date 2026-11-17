@@ -61,6 +61,7 @@ static uint8_t *mem_at(ctx *x, uint64_t a, unsigned n)
 static bool mmio(ctx *x, uint64_t a, unsigned n, bool write, uint64_t *v)
 {
     qec64_cpu *c = x->c;
+    if (qec64_undo_log) qec64_side_effects++;
     if (!c->on_mmio || !c->on_mmio(c, a, n, write, v)) { c->fault_addr = a; stop_with(x, QEC64_BUS_FAULT); }
     return true;
 }
@@ -78,6 +79,15 @@ static uint64_t rd(ctx *x, uint64_t a, unsigned n)
     for (unsigned i = 0; i < n; i++) v = v << 8 | p[i];
     return v;
 }
+__thread qec64_undo *qec64_undo_log;
+__thread unsigned qec64_undo_n, qec64_undo_cap, qec64_side_effects;
+static void undo_note(qec64_cpu *c, uint64_t a, unsigned n)
+{
+    if (qec64_undo_n >= qec64_undo_cap || n > 8) { qec64_side_effects++; return; }
+    qec64_undo *u = &qec64_undo_log[qec64_undo_n++];
+    u->addr = a; u->n = (uint8_t)n;
+    memcpy(u->old, c->ram + a, n);
+}
 /* A write into RAM the JIT translated: those translations are stale now. */
 static void code_written(qec64_cpu *c, uint64_t a, unsigned n)
 {
@@ -89,6 +99,7 @@ static void wr(ctx *x, uint64_t a, unsigned n, uint64_t v)
 {
     if (__builtin_expect(a >= QEC64_MMIO_BASE, 0)) { v &= size_mask(n); mmio(x, a, n, true, &v); return; }
     uint8_t *p = mem_at(x, a, n);
+    if (__builtin_expect(qec64_undo_log != NULL, 0)) undo_note(x->c, a, n);
     if (__builtin_expect(x->c->code_map != NULL, 0) &&
         (x->c->code_map[a >> QEC64_CODE_SHIFT] | x->c->code_map[(a + n - 1) >> QEC64_CODE_SHIFT]))
         code_written(x->c, a, n);
@@ -522,6 +533,7 @@ static void op_immediate(ctx *x)
         need_alterable_mem(x, mode, reg);
         unsigned dc = e & 7, du = (e >> 6) & 7;
         uint8_t *p = mem_at(x, l.addr, s);
+        if (qec64_undo_log) qec64_side_effects++;
         if (s > 1 && (l.addr & (s - 1))) {
             /* Unaligned: not atomic, as CAS across a bus boundary was not on the 68040. */
             uint64_t old = rd(x, l.addr, s);
@@ -894,6 +906,7 @@ static void op_line4(ctx *x)
         need_data_alterable(x, mode, reg);
         loc l = ea(x, mode, reg, 1);
         if (l.kind == LOC_D) { uint64_t v = ld(x, &l, 1); logic_flags(c, v, 1); st(x, &l, 1, v | 0x80); return; }
+        if (qec64_undo_log) qec64_side_effects++;
         uint8_t old = __atomic_fetch_or(mem_at(x, l.addr, 1), 0x80, __ATOMIC_SEQ_CST);
         logic_flags(c, old, 1);
         return;

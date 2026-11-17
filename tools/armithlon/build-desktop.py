@@ -389,8 +389,52 @@ patch('''    if (!g_refresh_only) for (i = 0; i < QRX_COLORS; ++i) {
 patch('''            if (terminal_close_hit(mx, my)) { WindowToBack(g_terminal); return 1; }''','''            if (terminal_close_hit(mx, my)) { HideWindow(g_terminal); return 1; }''')
 assert s.count('WindowToFront(g_terminal)')>=1
 s=s.replace('WindowToFront(g_terminal)','ShowWindow(g_terminal,WINDOW_FRONTMOST);WindowToFront(g_terminal)')
+# The shell (tools/armithlon/desktop/qrx_shell.c): taskbar with window previews, the home menu,
+# the overview, wallpapers from pictures. The desktop window stays behind every other window.
+patch('static int g_archive_menu = 0;','static int g_archive_menu = 0;\nstatic int qrx_shell_is_picture(const char *name);\nstatic int qrx_shell_set_wallpaper(const char *path);')
+patch('''    return qrx_archive_kind(g_file_entries[index].name) != QRX_ARCH_NONE ? 2 : 4;''','''    if (qrx_shell_is_picture(g_file_entries[index].name)) return 2;
+    return qrx_archive_kind(g_file_entries[index].name) != QRX_ARCH_NONE ? 2 : 4;''')
+patch('''    if (index < 0 || index >= g_file_count) return "";
+    if (qrx_archive_kind(g_file_entries[index].name) == QRX_ARCH_IMAGE)''','''    if (index < 0 || index >= g_file_count) return "";
+    if (qrx_shell_is_picture(g_file_entries[index].name)) return row == 0 ? "Set as wallpaper" : "Cancel";
+    if (qrx_archive_kind(g_file_entries[index].name) == QRX_ARCH_IMAGE)''')
+patch('''    i = g_archive_index;
+    g_archive_menu = 0; g_archive_index = -1;
+''','''    i = g_archive_index;
+    g_archive_menu = 0; g_archive_index = -1;
+    if (qrx_shell_is_picture(g_file_entries[i].name)) {
+        if (row == 0) {
+            char full[FILE_PATH_LEN + 128];
+            qrx_join_path(full, sizeof(full), g_files_path, g_file_entries[i].name);
+            qrx_set_status(qrx_shell_set_wallpaper(full) ? "Wallpaper set." : "This picture cannot be read.");
+        }
+        redraw_filemanager();
+        return;
+    }
+''')
+patch('static int run_desktop(void) {','#include "qrx_shell.c"\n\nstatic int run_desktop(void) {')
+patch('''        WA_Flags, (g_screen_borrowed ? 0 : WFLG_BACKDROP) |''','''        WA_Flags, WFLG_BACKDROP |''')
+patch('''    if (!g_desktop) return 0;
+    if (g_screen_borrowed) WindowToFront(g_desktop);''','''    if (!g_desktop) return 0;''')
+patch('''    qrx_pointer_apply();
+
+    while (running) {''','''    qrx_pointer_apply();
+    qrx_shell_open();
+
+    while (running) {''')
+patch('''        wait_mask = term_sig | desk_sig | files_sig | (g_look_port ? 1UL << g_look_port->mp_SigBit : 0);
+        signals = Wait(wait_mask);''','''        wait_mask = term_sig | desk_sig | files_sig | (g_look_port ? 1UL << g_look_port->mp_SigBit : 0) | qrx_shell_sigmask();
+        signals = Wait(wait_mask);
+        qrx_shell_handle(signals);''')
+patch('''    save_preferences();
+    qrx_look_port_close();''','''    qrx_shell_close();
+    save_preferences();
+    qrx_look_port_close();''')
 (out/'qrx_desktop.armithlon.c').write_text(s)
-for f in ('qrx_icons.c','qrx_wicon.h','ipfs-drive.c'):shutil.copy(extra/f,out/f)
+for f in ('qrx_icons.c','qrx_wicon.h','ipfs-drive.c','qrx_shell.c'):shutil.copy(extra/f,out/f)
+# QRX OS One 64: QRX_CC64 is the m68k64 compiler with the AROS 64 sysroot (cc64 of build-ec64.sh)
+if os.environ.get('QRX_CC64'):
+ subprocess.run([os.environ['QRX_CC64'],'-O2','-w','-Wno-incompatible-pointer-types','-Wno-int-conversion','-I'+str(out),str(out/'qrx_desktop.armithlon.c'),'-o',str(out/'QRXDesktop64')],check=True)
 if not (out/'qrx_wallpaper.h').exists():
  generator=next((root/'qrx-os-one').glob('*/amiga-runtime-22.5.11/tests/desktop/gen-test-wallpaper.py'))
  subprocess.run([sys.executable,str(generator),str(out/'qrx_wallpaper.h')],check=True)

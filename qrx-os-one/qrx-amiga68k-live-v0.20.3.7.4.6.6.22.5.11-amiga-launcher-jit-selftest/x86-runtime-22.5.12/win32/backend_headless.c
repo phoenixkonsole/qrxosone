@@ -27,6 +27,7 @@ typedef struct hl {
     uint64_t now;
     uint64_t pending;
     uint64_t ic;                          /* guest instructions already turned into time */
+    int script_done;                      /* the script has ended */
     int line;
     char typebuf[256];
     int typepos, typeup;
@@ -114,7 +115,7 @@ static uint64_t real_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC
 #endif
 static void hl_tick(qwin *w)
 {
-    if (!g_hl.script) {
+    if (!g_hl.script || g_hl.script_done) {
         static uint64_t base;
         uint64_t r = real_ms();
         if (!base) base = r - g_hl.now;
@@ -163,7 +164,10 @@ static int hl_wait(qwin *w, uint32_t timeout, qevent *ev)
             else { ev->type = QE_KEYUP; g_hl.typeup = 0; g_hl.typepos++; g_hl.pending = 30; }
             return 1;
         }
-        if (!g_hl.script || !fgets(line, sizeof(line), g_hl.script)) return -1;
+        if (!g_hl.script || !fgets(line, sizeof(line), g_hl.script)) {
+            if (g_hl.script) g_hl.script_done = 1;      /* from now on the clock is the real one */
+            return -1;
+        }
         g_hl.line++;
         line[strcspn(line, "\r\n")] = 0;
         cmd = line;
@@ -202,6 +206,11 @@ static int hl_wait(qwin *w, uint32_t timeout, qevent *ev)
                 ku = *ev; ku.type = QE_KEYUP;
                 hl_pending_up = &ku;
             }
+            return 1;
+        }
+        if (!strcmp(cmd, "keydown") || !strcmp(cmd, "keyup")) {   /* held keys: games read several at once */
+            ev->vk = (int)strtol(rest, NULL, 0);
+            ev->type = cmd[3] == 'd' ? QE_KEYDOWN : QE_KEYUP;
             return 1;
         }
         if (!strcmp(cmd, "type")) { snprintf(g_hl.typebuf, sizeof(g_hl.typebuf), "%s", rest); g_hl.typepos = 0; g_hl.typeup = 0; continue; }

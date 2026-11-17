@@ -228,6 +228,7 @@ int main(int argc, char **argv)
         qec64_machine *m = qec64_machine_new(ram, ram_size, cores);
         if (!m) return 2;
         qec64_board_init(board, ram, ram_size);
+        board->cores = cores;
         qec64_machine_set_mmio(m, qec64_board_mmio, board);
         qec64_machine_console_sink(m, console_out, NULL);
         if (input) qec64_machine_console_input(m, input, strlen(input));

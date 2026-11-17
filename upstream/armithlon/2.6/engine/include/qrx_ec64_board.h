@@ -36,6 +36,12 @@
 #define QEC64_CLOCK_US          0x0300u  /* .q read: a monotonic clock in microseconds */
 #define QEC64_CLOCK_UNIX        0x0308u  /* .q read: seconds since 1970 (UTC) */
 #define QEC64_CPU_INSTRUCTIONS  0x0310u  /* .q read: instructions the reading core has run so far */
+#define QEC64_IDLE              0x0318u  /* .l write: the idle task, in a loop; counted as idle time */
+#define QEC64_CORES             0x031Cu  /* .l read: the cores of the machine */
+#define QEC64_IDLE_US           0x0320u  /* .q read at +8*n: microseconds core n slept in IDLE, n < 8 */
+#define QEC64_RAM_SIZE          0x0360u  /* .q read: guest RAM in bytes */
+#define QEC64_UPTIME_US         0x0368u  /* .q read: microseconds since the machine started */
+#define QEC64_HOST_CPU          0x0380u  /* 64 bytes read as .q: the host CPU's name, ASCII, 0 padded */
 
 /* Host services: a write of a request's RAM address runs it before the write returns. The request is
  * 32-bit big endian words, laid out like the 32-bit door's (qrx86_door.c): [0] the service, [3] the
@@ -69,6 +75,10 @@ typedef struct qec64_board {
     /* input events from the window to the guest */
     uint32_t events[256];
     volatile unsigned ev_head, ev_tail;
+    /* the cores' sleep in IDLE, and what QRXInfo shows of the host */
+    unsigned cores;
+    uint64_t idle_us[8], idle_last[8], start_us;
+    char host_cpu[64];
     /* sound from the guest to the host's audio output */
     uint64_t audio_addr;
     uint32_t audio_frames, audio_taken;

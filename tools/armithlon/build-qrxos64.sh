@@ -54,6 +54,11 @@ done
 cp "$QW" "$T/C/qrx-win32"
 [ -n "${QRX64_EXTRA_C:-}" ] && cp "$QRX64_EXTRA_C"/* "$T/C/"
 GUI=0; grep -q '^ec64gfx.hidd$' "$K/modules.txt" && GUI=1
+# The desktop's wallpapers, at the board's 1024 x 768, from the 32-bit system when it is there
+if [ -d "$BU/SystemFull/QRX/Wallpapers" ]; then
+    mkdir -p "$T/QRX/Wallpapers"
+    cp "$BU/SystemFull/QRX/Wallpapers/"*-1024x768.qrxwp "$T/QRX/Wallpapers/" 2>/dev/null || true
+fi
 cat > "$T/S/Startup-Sequence" <<'EOF'
 SetClock LOAD
 Echo "QRX OS One 64 - 64-bit SMP AROS on the 68100EC64"
@@ -68,6 +73,9 @@ if [ $GUI = 1 ]; then cat >> "$T/S/Startup-Sequence" <<'EOF'
 Assign >NIL: QRX: SYS:
 If EXISTS C:EC64Input
   Run >NIL: C:EC64Input
+EndIf
+If EXISTS C:OpenWB
+  C:OpenWB
 EndIf
 If EXISTS C:QRXDesktop
   Run >NIL: C:QRXDesktop

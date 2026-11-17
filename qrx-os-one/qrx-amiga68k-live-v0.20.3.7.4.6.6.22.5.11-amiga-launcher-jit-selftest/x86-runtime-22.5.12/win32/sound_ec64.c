@@ -130,7 +130,9 @@ int qw_ec64_sound(qwin *w, uint32_t *q)
     return 1;
 }
 int qw_ec64_sound_ok(void) { return board_ok(); }
+int qw_ec64_playing(void) { return g_live > 0; }
 #else
+int qw_ec64_playing(void) { return 0; }
 void qw_ec64_mix(qwin *w) { (void)w; }
 int qw_ec64_sound(qwin *w, uint32_t *q) { (void)w; (void)q; return 0; }
 int qw_ec64_sound_ok(void) { return 0; }

@@ -1530,14 +1530,17 @@ static void key_event(qwin *w, int type, int vk, int ch)
     int was_down = 0;
     qwnd *tgt = W(w, w->focus);
     qwnd *top = active_top(w);
-    if (!tgt || win_top(w, tgt) != top) tgt = top;
-    if (!tgt) return;
-    if (vk > 0 && vk < 256) {
+    /* The key state first: a key let go while no window has the focus must not stay held. */
+    if (vk > 0 && vk < 256 && type != QE_CHAR) {
+        int down = type == QE_KEYDOWN;
         was_down = w->keystate[vk] != 0;
-        w->keystate[vk] = type == QE_KEYDOWN ? 0x80 : 0;
-        if (w->verbose > 1 && type != QE_CHAR) qw_log(w, "key %02x %s%s", vk, type == QE_KEYDOWN ? "down" : "up", was_down && type == QE_KEYDOWN ? " repeat" : "");
+        w->keystate[vk] = down ? 0x80 : 0;
+        if (was_down != down) qw_dinput_key(w, vk, down);
+        if (w->verbose > 1) qw_log(w, "key %02x %s%s", vk, down ? "down" : "up", was_down && down ? " repeat" : "");
         if (ch) g_vkchar[vk] = (uint8_t)ch;
     }
+    if (!tgt || win_top(w, tgt) != top) tgt = top;
+    if (!tgt) return;
     /* Not a Windows function, but what people expect of it: works for every DirectDraw game. */
     if (type == QE_KEYDOWN && vk == 0x0D && w->keystate[0x12] && w->frames > 0 && !was_down) {
         qw_dd_toggle_window(w);
@@ -1783,6 +1786,23 @@ int user_pump(qwin *w, int block, qmsg *out, uint32_t filt)
             if (r > 0) script_event(w, &ev);
         }
     }
+}
+
+/* Input the program asks for directly (DirectInput, GetAsyncKeyState) must be current even when
+ * it has not pumped messages since: take what the window system has waiting. */
+void qw_input_poll(qwin *w)
+{
+    static int busy;
+    int n;
+    if (busy) return;
+    busy = 1;
+    for (n = 0; n < 64; n++) {
+        qevent ev;
+        memset(&ev, 0, sizeof(ev));
+        if (qw_be_wait(w, 0, &ev) <= 0) break;
+        script_event(w, &ev);
+    }
+    busy = 0;
 }
 
 /* ====================================================================== DefWindowProc */
@@ -2285,8 +2305,8 @@ FN(u_CharUpperW) {
     return a[0];
 }
 FN(u_GetKeyState) { return w->keystate[a[0] & 0xFF] ? 0xFFFF8000u : 0; }
-FN(u_GetAsyncKeyState) { return w->keystate[a[0] & 0xFF] ? 0xFFFF8000u : 0; }
-FN(u_GetKeyboardState) { int i; for (i = 0; i < 256; i++) x86_wr8(C, a[0] + (uint32_t)i, w->keystate[i]); return 1; }
+FN(u_GetAsyncKeyState) { qw_input_poll(w); return w->keystate[a[0] & 0xFF] ? 0xFFFF8000u : 0; }
+FN(u_GetKeyboardState) { int i; qw_input_poll(w); for (i = 0; i < 256; i++) x86_wr8(C, a[0] + (uint32_t)i, w->keystate[i]); return 1; }
 FN(u_GetKeyboardLayout) { UNUSED; return 0x04070407u; }
 FN(u_MapVirtualKeyExW) { UNUSED; if (a[1] == 2) return g_vkchar[a[0] & 0xFF] ? g_vkchar[a[0] & 0xFF] : (a[0] >= 0x30 && a[0] <= 0x5A ? a[0] : 0); return a[0] & 0xFF; }
 FN(u_ToAsciiEx) { uint32_t ch = g_vkchar[a[0] & 0xFF]; if (!ch) return 0; x86_wr16(C, a[3], (uint16_t)ch); return 1; }

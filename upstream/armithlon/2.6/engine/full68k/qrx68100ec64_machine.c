@@ -86,6 +86,28 @@ static int on_console_in(qec64_cpu *self)
     pthread_mutex_unlock(&m->lock);
     return ch;
 }
+uint64_t qec64_machine_idle(qec64_cpu *c, uint64_t max_us)
+{
+    qec64_machine *m = c->machine;
+    unsigned id = c->core_id;
+    uint64_t start = now_us(), end = start + max_us;
+    pthread_mutex_lock(&m->lock);
+    while (!__atomic_load_n(&c->pending, __ATOMIC_SEQ_CST) && !m->stopping) {
+        uint64_t cur = now_us(), n = m->next_timer_us[id];
+        if (n && cur >= n) { m->next_timer_us[id] = n + c->timer_us; qec64_raise(c, TIMER_LEVEL); break; }
+        if (cur >= end) break;
+        uint64_t wait = end - cur;
+        if (n && n - cur < wait) wait = n - cur;
+        struct timespec t;
+        clock_gettime(CLOCK_REALTIME, &t);
+        t.tv_nsec += (long)wait * 1000;
+        t.tv_sec += t.tv_nsec / 1000000000;
+        t.tv_nsec %= 1000000000;
+        pthread_cond_timedwait(&m->wake, &m->lock, &t);
+    }
+    pthread_mutex_unlock(&m->lock);
+    return now_us() - start;
+}
 static void *core_thread(void *arg)
 {
     qec64_cpu *c = arg;
