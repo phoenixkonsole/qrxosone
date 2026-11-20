@@ -2,13 +2,11 @@
 #include "qrx_ec64_board.h"
 #include "qrx_hostnet.h"
 #include "qrx_netpolicy.h"
-#ifdef __APPLE__
-#include "qrx_gl68k.h"
 #include "qrx_vault.h"
+#include "qrx_gl68k.h"
 #include <pthread.h>
 /* One GL stream at a time: the contexts belong to whichever core's thread calls. */
 static pthread_mutex_t gl_lock = PTHREAD_MUTEX_INITIALIZER;
-#endif
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -30,6 +28,14 @@ void qec64_board_init(qec64_board *b, uint8_t *ram, uint64_t ram_size)
 #ifdef __APPLE__
     size_t len = sizeof b->host_cpu - 1;
     if (sysctlbyname("machdep.cpu.brand_string", b->host_cpu, &len, NULL, 0)) snprintf(b->host_cpu, sizeof b->host_cpu, "Apple");
+#else
+    /* Linux: the board's name from the device tree ("Raspberry Pi 4 Model B Rev 1.4") */
+    FILE *f = fopen("/proc/device-tree/model", "r");
+    if (f) {
+        size_t n = fread(b->host_cpu, 1, sizeof b->host_cpu - 1, f);
+        b->host_cpu[n] = 0;
+        fclose(f);
+    }
 #endif
 }
 
@@ -78,14 +84,12 @@ static void host_call(qec64_board *b, uint64_t addr)
 {
     if (addr >= b->ram_size || b->ram_size - addr < 17 * 4 || (addr & 3)) return;
     uint8_t *q = b->ram + addr;
-#ifdef __APPLE__
     if (be32(q) == QEC64_HOST_GL) {
         pthread_mutex_lock(&gl_lock);
         qrx_gl68k_service(b->ram, b->ram_size, q);
         pthread_mutex_unlock(&gl_lock);
         return;
     }
-#endif
     uint32_t a[13];
     for (unsigned i = 0; i < 13; i++) a[i] = be32(q + 16 + i * 4);
     if (be32(q) == QRX_VAULT_SERVICE) {          /* users and their encrypted homes; checks its own buffers */

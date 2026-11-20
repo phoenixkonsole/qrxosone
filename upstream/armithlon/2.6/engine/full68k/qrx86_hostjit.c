@@ -1558,9 +1558,16 @@ static void xj_link(uint32_t *site, XBlock *b) {
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <mach/mach.h>
+#else
+#include <signal.h>
+#include <ucontext.h>
 #endif
 #define XP_MAX 8000
+#if defined(__APPLE__)
 static struct { uint64_t pc[XP_MAX]; volatile unsigned n; mach_port_t thread; } xp;
+#else
+static struct { uint64_t pc[XP_MAX]; volatile unsigned n; pthread_t thread; } xp;
+#endif
 #define XP_BE32(p) ((uint32_t)(p)[0] << 24 | (uint32_t)(p)[1] << 16 | (uint32_t)(p)[2] << 8 | (p)[3])
 /* Which AROS task runs: SysBase at 4, ThisTask at 276, then the name at 10. */
 static struct { char name[24]; unsigned n; } xp_tasks[32];
@@ -1582,6 +1589,7 @@ static void xp_task_sample(void) {
 /* The door may be idle for long: the sampler reports as well. */
 static void xp_dump(void);
 static void xp_dump_due(void) { xp_dump(); }
+#if defined(__APPLE__)
 /* Signals would only arrive at system calls and blame those. This stops the thread. */
 static void *xp_sampler(void *arg) {
     (void)arg;
@@ -1605,6 +1613,35 @@ static void xp_start(void) {
     xp.thread = mach_thread_self();
     pthread_create(&t, NULL, xp_sampler, NULL);
 }
+#else
+/* Linux: the sampler thread sends SIGPROF to the CPU thread, whose handler reads the
+ * interrupted PC from the signal context (Linux delivers it at once, not at a system call). */
+static void xp_on_prof(int sig, siginfo_t *si, void *uc) {
+    (void)sig; (void)si;
+    if (xp.n >= XP_MAX) return;
+    xp.pc[xp.n++] = (uint64_t)((ucontext_t *)uc)->uc_mcontext.pc;
+    xp_task_sample();
+}
+static void *xp_sampler(void *arg) {
+    (void)arg;
+    for (;;) {
+        usleep(1000);
+        if (xp.n >= XP_MAX) xp_dump_due();
+        if (xp.n < XP_MAX) pthread_kill(xp.thread, SIGPROF);
+    }
+    return NULL;
+}
+static void xp_start(void) {
+    pthread_t t;
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = xp_on_prof;
+    sa.sa_flags = SA_SIGINFO | SA_RESTART;
+    sigaction(SIGPROF, &sa, NULL);
+    xp.thread = pthread_self();
+    pthread_create(&t, NULL, xp_sampler, NULL);
+}
+#endif
 typedef struct { const char *name; uint32_t eip; unsigned n; } XpRow;
 static int xp_cmp(const void *a, const void *b) { return (int)((const XpRow *)b)->n - (int)((const XpRow *)a)->n; }
 static void xp_dump(void) {

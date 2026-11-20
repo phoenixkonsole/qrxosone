@@ -11,10 +11,24 @@
  * values, as the stream carries them. */
 #define GL_SILENCE_DEPRECATION
 #include "qrx_gl68k.h"
+#if defined(__APPLE__)
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/gl.h>
 #include <OpenGL/glext.h>
 #include <dlfcn.h>
+typedef CGLContextObj QglNative;
+#define QGL_PROC(name) dlsym(RTLD_DEFAULT, name)
+#else
+/* Linux (Raspberry Pi: Mesa V3D): a surfaceless EGL display with the desktop OpenGL API.
+ * Contexts never draw to a window here either; each has its FBO as on the Mac. */
+#define GL_GLEXT_PROTOTYPES 1
+#include <GL/gl.h>
+#include <GL/glext.h>
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+typedef EGLContext QglNative;
+#define QGL_PROC(name) ((void *)eglGetProcAddress(name))
+#endif
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -45,7 +59,7 @@ typedef struct {
 
 typedef struct {
     bool used;
-    CGLContextObj cgl;
+    QglNative cgl;
     GLuint fbo, rb_color, rb_depth;
     int w, h;
     bool started;
@@ -74,7 +88,7 @@ typedef struct QGL {
     uint64_t ret;
     Ctx ctx[MAX_CTX];
     Ctx *cur;
-    CGLContextObj share;
+    QglNative share;
     /* Per-command scratch memory. */
     uint8_t *arena;
     size_t arena_size, arena_used;
@@ -842,28 +856,92 @@ static bool fbo_size(Ctx *c, int w, int h)
     return st == GL_FRAMEBUFFER_COMPLETE_EXT;
 }
 
-static uint32_t op_create(QGL *g, uint32_t share)
+/* ---- native contexts: CGL on the Mac, EGL on Linux */
+#if defined(__APPLE__)
+static QglNative qgl_native_create(QglNative share)
 {
-    unsigned i;
-    for (i = 1; i < MAX_CTX && g->ctx[i].used; i++) {}
-    if (i == MAX_CTX) return 0;
     CGLPixelFormatAttribute at[] = {kCGLPFAOpenGLProfile, (CGLPixelFormatAttribute)kCGLOGLPVersion_Legacy, kCGLPFAAccelerated,
                                     kCGLPFAColorSize, 24, kCGLPFAAlphaSize, 8, kCGLPFADepthSize, 24, kCGLPFAStencilSize, 8, 0};
     CGLPixelFormatObj pf;
     GLint npf = 0;
     if (CGLChoosePixelFormat(at, &pf, &npf) != kCGLNoError || !pf) {
         fprintf(stderr, "[QRX-GL68K] no OpenGL 2.1 pixel format\n");
-        return 0;
+        return NULL;
     }
-    /* All contexts share one object space, as GHOST's windows expect. */
-    CGLContextObj sh = share && share < MAX_CTX && g->ctx[share].used ? g->ctx[share].cgl : g->share;
     CGLContextObj cgl = NULL;
-    CGLError e = CGLCreateContext(pf, sh, &cgl);
+    CGLError e = CGLCreateContext(pf, share, &cgl);
     CGLReleasePixelFormat(pf);
     if (e != kCGLNoError) {
         fprintf(stderr, "[QRX-GL68K] CGLCreateContext: %d\n", e);
-        return 0;
+        return NULL;
     }
+    return cgl;
+}
+static void qgl_native_current(QglNative c) { CGLSetCurrentContext(c); }
+static QglNative qgl_native_get(void) { return CGLGetCurrentContext(); }
+static void qgl_native_destroy(QglNative c) { CGLDestroyContext(c); }
+#else
+static EGLDisplay qgl_dpy = EGL_NO_DISPLAY;
+static EGLConfig qgl_cfg;
+static bool qgl_egl_init(void)
+{
+    if (qgl_dpy != EGL_NO_DISPLAY) return true;
+    /* Surfaceless first (no window system needed: console or KMS), then the default display. */
+    PFNEGLGETPLATFORMDISPLAYEXTPROC gpd = (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
+    EGLDisplay d = gpd ? gpd(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, NULL) : EGL_NO_DISPLAY;
+    EGLint major, minor, n = 0;
+    if (d == EGL_NO_DISPLAY || !eglInitialize(d, &major, &minor)) {
+        d = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+        if (d == EGL_NO_DISPLAY || !eglInitialize(d, &major, &minor)) {
+            fprintf(stderr, "[QRX-GL68K] no EGL display\n");
+            return false;
+        }
+    }
+    if (!eglBindAPI(EGL_OPENGL_API)) {
+        fprintf(stderr, "[QRX-GL68K] EGL has no desktop OpenGL\n");
+        return false;
+    }
+    const EGLint at[] = {EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT, EGL_SURFACE_TYPE, 0, EGL_NONE};
+    if (!eglChooseConfig(d, at, &qgl_cfg, 1, &n) || n < 1) {
+        fprintf(stderr, "[QRX-GL68K] no EGL config for OpenGL\n");
+        return false;
+    }
+    qgl_dpy = d;
+    return true;
+}
+static QglNative qgl_native_create(QglNative share)
+{
+    if (!qgl_egl_init()) return NULL;
+    /* the legacy (compatibility) profile, GLSL 1.20, like kCGLOGLPVersion_Legacy */
+    const EGLint at[] = {EGL_CONTEXT_MAJOR_VERSION, 2, EGL_CONTEXT_MINOR_VERSION, 1, EGL_NONE};
+    EGLContext c = eglCreateContext(qgl_dpy, qgl_cfg, share ? share : EGL_NO_CONTEXT, at);
+    if (c == EGL_NO_CONTEXT) {
+        fprintf(stderr, "[QRX-GL68K] eglCreateContext: 0x%x\n", eglGetError());
+        return NULL;
+    }
+    return c;
+}
+static void qgl_native_current(QglNative c)
+{
+    if (qgl_dpy != EGL_NO_DISPLAY) eglMakeCurrent(qgl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, c ? c : EGL_NO_CONTEXT);
+}
+static QglNative qgl_native_get(void)
+{
+    EGLContext c = eglGetCurrentContext();
+    return c == EGL_NO_CONTEXT ? NULL : c;
+}
+static void qgl_native_destroy(QglNative c) { eglDestroyContext(qgl_dpy, c); }
+#endif
+
+static uint32_t op_create(QGL *g, uint32_t share)
+{
+    unsigned i;
+    for (i = 1; i < MAX_CTX && g->ctx[i].used; i++) {}
+    if (i == MAX_CTX) return 0;
+    /* All contexts share one object space, as GHOST's windows expect. */
+    QglNative sh = share && share < MAX_CTX && g->ctx[share].used ? g->ctx[share].cgl : g->share;
+    QglNative cgl = qgl_native_create(sh);
+    if (!cgl) return 0;
     if (!g->share) g->share = cgl;
     Ctx *c = &g->ctx[i];
     memset(c, 0, sizeof *c);
@@ -881,13 +959,13 @@ static uint32_t op_create(QGL *g, uint32_t share)
 static uint32_t op_makecurrent(QGL *g, uint32_t id, int w, int h)
 {
     if (!id || id >= MAX_CTX || !g->ctx[id].used) {
-        CGLSetCurrentContext(NULL);
+        qgl_native_current(NULL);
         g->cur = NULL;
         return id == 0;
     }
     Ctx *c = &g->ctx[id];
-    if (CGLGetCurrentContext() != c->cgl)
-        CGLSetCurrentContext(c->cgl);
+    if (qgl_native_get() != c->cgl)
+        qgl_native_current(c->cgl);
     g->cur = c;
     if (!fbo_size(c, w, h))
         return 0;
@@ -911,19 +989,19 @@ static void op_destroy(QGL *g, uint32_t id)
     if (!id || id >= MAX_CTX || !g->ctx[id].used) return;
     Ctx *c = &g->ctx[id];
     if (g->cur == c) {
-        CGLSetCurrentContext(NULL);
+        qgl_native_current(NULL);
         g->cur = NULL;
     }
-    CGLSetCurrentContext(c->cgl);
+    qgl_native_current(c->cgl);
     if (c->fbo) {
         glDeleteFramebuffersEXT(1, &c->fbo);
         glDeleteRenderbuffersEXT(1, &c->rb_color);
         glDeleteRenderbuffersEXT(1, &c->rb_depth);
     }
-    CGLSetCurrentContext(g->cur ? g->cur->cgl : NULL);
+    qgl_native_current(g->cur ? g->cur->cgl : NULL);
     /* The first context holds the share group; it stays until the engine ends. */
     if (c->cgl != g->share)
-        CGLDestroyContext(c->cgl);
+        qgl_native_destroy(c->cgl);
     free(c->select_host);
     free(c->feedback_host);
     memset(c, 0, sizeof *c);
@@ -1068,8 +1146,8 @@ void qrx_gl68k_service(uint8_t *ram, uint64_t ram_size, uint8_t *q)
 {
     QGL *g = &G;
     /* On the 68100EC64 each core is a host thread: the current context follows the caller. */
-    if (g->cur && CGLGetCurrentContext() != g->cur->cgl)
-        CGLSetCurrentContext(g->cur->cgl);
+    if (g->cur && qgl_native_get() != g->cur->cgl)
+        qgl_native_current(g->cur->cgl);
     g->ram = ram;
     g->ram_size = ram_size;
     g->ret = 0;

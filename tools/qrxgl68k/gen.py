@@ -341,7 +341,7 @@ def main():
     h.append('static void qgl_resolve(void) {')
     for f in supported:
         if f['name'] not in HOST_CUSTOM:
-            h.append(f'    p_{f["name"]} = dlsym(RTLD_DEFAULT, "{f["name"]}");')
+            h.append(f'    p_{f["name"]} = QGL_PROC("{f["name"]}");')
     h.append('}')
     h.append('static void qgl_dispatch(QGL *g, unsigned id, const uint8_t *a, const uint8_t *end) {')
     h.append('    switch (id) {')

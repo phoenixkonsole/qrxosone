@@ -1,3 +1,6 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE   /* dladdr on Linux */
+#endif
 #include "qrx86_door.h"
 #include "qrx_netpolicy.h"
 #include "qrx_vault.h"
@@ -267,7 +270,9 @@ static void api_service(QRXFullCPU *c,uint8_t *q){
 void qrx_host_midi_short(uint32_t msg){(void)msg;}
 void qrx_host_midi_sysex(const uint8_t *d,uint32_t n){(void)d;(void)n;}
 void qrx_host_midi_reset(void){}
+#ifndef QRX_SDL_FRONTEND   /* the SDL window sets the pointer itself */
 void qrx_host_set_pointer(uint32_t i){(void)i;}
+#endif
 #endif
 static void midi_service(QRXFullCPU *c,uint8_t *q){
     uint32_t op=rd32(q+12);
@@ -407,9 +412,15 @@ static void shadow_sync(QRXFullCPU *c,uint32_t dir,uint32_t serial){
 }
 /* QRX86_STALLS=1: every pause over 8 ms in x86 execution on stderr, with the guest task
  * that ran before it. Rhythm shows in the times. */
+#if defined(__APPLE__)
 #include <mach/mach_time.h>
-static uint64_t stall_exit;
 static double stall_ms(uint64_t ticks){static mach_timebase_info_data_t tb;if(!tb.denom)mach_timebase_info(&tb);return (double)ticks*tb.numer/tb.denom/1e6;}
+#else
+/* Linux (Raspberry Pi): monotonic nanoseconds stand in for Mach absolute time */
+static uint64_t mach_absolute_time(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000000u+(uint64_t)t.tv_nsec;}
+static double stall_ms(uint64_t ticks){return (double)ticks/1e6;}
+#endif
+static uint64_t stall_exit;
 static void stall_enter(QRXFullCPU *c){
     uint64_t now=mach_absolute_time();
     static uint64_t start;

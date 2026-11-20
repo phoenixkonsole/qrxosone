@@ -13,8 +13,9 @@
 #include <time.h>
 #include <pthread.h>
 #include <stdatomic.h>
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(QRX_SDL_FRONTEND)   /* SDL: linux/qrx_aros_window_sdl.c */
 #include "../macos/qrx_aros_window.h"
+#define QRX_NATIVE_WINDOW 1
 #endif
 static int native_window;
 static uint32_t host_ms(void *ctx){(void)ctx;struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint32_t)((uint64_t)t.tv_sec*1000+t.tv_nsec/1000000);}
@@ -74,7 +75,7 @@ static void fsaga_host_display(void *arg, const QRXFullCPU *c, uint32_t frame,
     unsigned bpp = fsaga_bytes_pp(fmt);
     if (!bpp || !w || !h) return;
     if ((uint64_t)addr + (uint64_t)w * h * bpp > c->vm.ram.size) return;
-#ifdef __APPLE__
+#ifdef QRX_NATIVE_WINDOW
     /* Zero-copy: the GPU reads guest RAM itself. */
     if(native_window){qrx_aros_window_publish(addr,w*bpp+(int16_t)c->fsaga_bplhmod,w,h,fmt&0x7Fu,c->fsaga_clut);return;}
 #endif
@@ -175,6 +176,7 @@ int main(int argc,char **argv){
     uint32_t ram_mb=(uint32_t)(qrx_ram_auto_bytes()/(1024u*1024u));
     uint64_t budget=1000000;
     uint8_t *adf_hold=NULL;
+    uint8_t *rom=NULL;   /* before any goto done: freed there */
     for(int i=1;i<argc;i++){
         if(!strcmp(argv[i],"--cpu")&&i+1<argc)cpu=(unsigned)strtoul(argv[++i],NULL,10);
         else if(!strcmp(argv[i],"--rom")&&i+1<argc)mainrom=argv[++i];
@@ -206,7 +208,7 @@ int main(int argc,char **argv){
     }
     qrx_full_hide_high_ram(&c,32u*1024u*1024u);
     qrx_full_set_host(&c,putc_host,host_ms,NULL);
-#ifdef __APPLE__
+#ifdef QRX_NATIVE_WINDOW
     if(native_window){static struct fsaga_sink live;if(!qrx_aros_window_open(&c.vm,c.ram_total?c.ram_total:c.vm.ram.size)){fprintf(stderr,"native window failed\n");return 2;}qrx_full_set_display(&c,fsaga_host_display,&live);}
 #endif
     {
@@ -266,7 +268,7 @@ int main(int argc,char **argv){
             } else fprintf(stderr, "[ARMITHLON] ADF load failed: %s\n", adfpath);
         }
     }
-    uint8_t *rom=NULL;size_t sz=0;
+    size_t sz=0;
     if(mainrom){
         rom=load(mainrom,&sz);
         if(!rom||!qrx_full_load_rom(&c,QRX_FULL_ROM_MAIN_BASE,rom,sz)){fprintf(stderr,"invalid main ROM\n");goto done;}
@@ -301,7 +303,7 @@ int main(int argc,char **argv){
     if(realtime||native_window)qrx_full_set_realtime(&c,qrx_jit_cpu_stopped);
     {
         struct cpu_run run={&c,budget,1};
-#ifdef __APPLE__
+#ifdef QRX_NATIVE_WINDOW
         if(native_window){
             pthread_t tid;
             if(pthread_create(&tid,NULL,cpu_thread,&run)!=0){fprintf(stderr,"CPU thread failed\n");goto done;}
@@ -343,7 +345,7 @@ int main(int argc,char **argv){
           }
         }
       } }
-#ifdef __APPLE__
+#ifdef QRX_NATIVE_WINDOW
     if(native_window)qrx_aros_window_close();
 #endif
     qrx86_door_report();

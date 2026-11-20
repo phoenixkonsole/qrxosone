@@ -20,10 +20,12 @@ const QRXHostApi *qrx_d3d_thunks[QW_THUNKS];
 void qrx_d3d_new_process(void) {}
 uint32_t qrx_d3d_unimpl(x86cpu *c, const uint32_t *a) { (void)c; (void)a; return 0; }
 void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram) { (void)op; (void)a; (void)ram; }
+#ifdef __APPLE__   /* elsewhere qrx86_door.c has these stubs itself */
 void qrx_host_midi_short(uint32_t m) { (void)m; }
 void qrx_host_midi_sysex(const uint8_t *d, uint32_t n) { (void)d; (void)n; }
 void qrx_host_midi_reset(void) {}
 void qrx_host_set_pointer(uint32_t i) { (void)i; }
+#endif
 
 enum { CODE = 0x400000u, END = 0x401F00u, DATA = 0x500000u, STACK = 0x600000u };
 #define DATA_BASE (DATA + 0xFC0u)   /* 64 bytes below a page end: some accesses cross it */
@@ -248,7 +250,11 @@ static void test_budget(void) {
 /* A crash in generated code: say where, and what the generated code around it is. */
 static void on_crash(int sig, siginfo_t *si, void *uc) {
     ucontext_t *u = uc;
+#ifdef __APPLE__
     uint32_t *pc = (uint32_t *)u->uc_mcontext->__ss.__pc;
+#else
+    uint32_t *pc = (uint32_t *)u->uc_mcontext.pc;
+#endif
     fprintf(stderr, "signal %d at pc=%p addr=%p arena=%p..%p\n", sig, (void *)pc, si->si_addr, (void *)xj.arena, (void *)xj.next);
     if ((pc >= xj.arena && pc < xj.next)) {
         fprintf(stderr, "offset %ld words; runtime ends at %ld\n", (long)(pc - xj.arena), (long)(xj.arena_blocks - xj.arena));

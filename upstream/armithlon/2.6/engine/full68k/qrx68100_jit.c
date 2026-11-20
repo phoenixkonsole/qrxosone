@@ -28,7 +28,23 @@
 #include <pthread.h>
 #if defined(__APPLE__)
 #include <libkern/OSCacheControl.h>
+#else
+#include <sys/auxv.h>
 #endif
+
+/* ARMv8.3+ instructions the Apple M1 has and a Raspberry Pi 4 (Cortex-A72, ARMv8.0) or
+ * Pi 5 (Cortex-A76, ARMv8.2) may lack: CFINV (FEAT_FlagM, ARMv8.4) and LDAPR (FEAT_LRCPC,
+ * ARMv8.3; the A76 has it). Found once at JIT start; without them the JIT emits ARMv8.0
+ * equivalents. */
+static bool host_flagm = true, host_lrcpc = true;
+static void host_features(void){
+#if !defined(__APPLE__) && defined(AT_HWCAP)
+    unsigned long hw=getauxval(AT_HWCAP);
+    host_flagm=(hw&(1ul<<27))!=0;      /* HWCAP_FLAGM */
+    host_lrcpc=(hw&(1ul<<15))!=0;      /* HWCAP_LRCPC */
+    if(getenv("QRX_JIT_ARMV80")){host_flagm=false;host_lrcpc=false;}   /* test the fallbacks anywhere */
+#endif
+}
 
 #define CODE_BYTES (128u*1024u*1024u)
 #define BLOCK_HASH_BITS 18u
@@ -201,7 +217,14 @@ static void lsrv(Trans *t,int d,int n,int m){E(t,0x1AC02400u|R5(m)<<16|R5(n)<<5|
 static void mul32(Trans *t,int d,int n,int m){E(t,0x1B007C00u|R5(m)<<16|R5(n)<<5|R5(d));}
 static void smull(Trans *t,int d,int n,int m){E(t,0x9B207C00u|R5(m)<<16|R5(n)<<5|R5(d));}
 static void umull(Trans *t,int d,int n,int m){E(t,0x9BA07C00u|R5(m)<<16|R5(n)<<5|R5(d));}
-static void cfinv(Trans *t){E(t,0xD500401Fu);}
+/* Without FlagM: flip NZCV.C through x18, which Linux leaves to programs (the platform
+ * register on macOS, where CFINV always exists). Leaves every other flag as it was. */
+static void cfinv(Trans *t){
+    if(host_flagm){E(t,0xD500401Fu);return;}
+    E(t,0xD53B4212u);    /* mrs x18,nzcv */
+    E(t,0xD2630252u);    /* eor x18,x18,#(1<<29) */
+    E(t,0xD51B4212u);    /* msr nzcv,x18 */
+}
 static void mrs_nzcv(Trans *t,int d){E(t,0xD53B4200u|R5(d));}
 static void msr_nzcv(Trans *t,int s){E(t,0xD51B4200u|R5(s));}
 static void cset(Trans *t,int d,int cond){E(t,0x1A800400u|31u<<16|(unsigned)(cond^1)<<12|31u<<5|R5(d));}
@@ -497,9 +520,15 @@ static void mem_read(Trans *t,unsigned width){
     if(t->j->cpu->smp_strong){
         /* With a second core running, keep the 68040's bus order (ldapr after add x2,x2,x1). */
         E(t,0x8B010042u);
-        if(width==4){E(t,0xB8BFC040u);rev32(t,W0,W0);}
-        else if(width==2){E(t,0x78BFC040u);rev16w(t,W0,W0);}
-        else E(t,0x38BFC040u);
+        if(host_lrcpc){
+            if(width==4){E(t,0xB8BFC040u);rev32(t,W0,W0);}
+            else if(width==2){E(t,0x78BFC040u);rev16w(t,W0,W0);}
+            else E(t,0x38BFC040u);
+        }else{                      /* ldar: ARMv8.0, acquire (stronger than ldapr's RCpc) */
+            if(width==4){E(t,0x88DFFC40u);rev32(t,W0,W0);}
+            else if(width==2){E(t,0x48DFFC40u);rev16w(t,W0,W0);}
+            else E(t,0x08DFFC40u);
+        }
     }
     else if(width==4){E(t,0xB8616840u);rev32(t,W0,W0);}  /* ldr w0,[x2,x1] */
     else if(width==2){E(t,0x78616840u);rev16w(t,W0,W0);}/* ldrh w0,[x2,x1] */
@@ -2548,6 +2577,7 @@ static void *map_code(size_t n){
     return p==MAP_FAILED?NULL:p;
 }
 bool qrx_jit_init(QRXFullCPU *c,uint64_t start_instructions){
+    host_features();
     if(!c||c->jit||!c->rpage||!c->fast_bus||c->aux_opaque)return false;
     if(c->cpu_type!=68040&&c->cpu_type!=68030&&c->cpu_type!=68020)return false;
     JitCtx *j=calloc(1,sizeof(*j));

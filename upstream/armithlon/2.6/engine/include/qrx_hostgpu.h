@@ -36,4 +36,8 @@ uint64_t qrx_hg_frames(void);
 /* Window side: the layer to show frames on, and whether frames are arriving. */
 void qrx_hg_set_layer(void *cametal_layer);
 bool qrx_hg_active(void);
+#ifndef __APPLE__
+/* Linux: the finished frame as tightly packed RGBA8, row 0 on top; rgba NULL asks for the size. */
+bool qrx_hg_read_frame(void *rgba, unsigned *w, unsigned *h);
+#endif
 #endif
