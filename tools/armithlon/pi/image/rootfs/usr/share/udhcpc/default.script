@@ -1,0 +1,12 @@
+#!/bin/sh
+# BusyBox udhcpc: address, route and DNS for eth0 / wlan0
+case "$1" in
+deconfig) ip addr flush dev "$interface"; ip link set "$interface" up ;;
+bound|renew)
+  ip addr flush dev "$interface"
+  ip addr add "$ip/${mask:-24}" dev "$interface"
+  [ -n "$router" ] && { ip route del default dev "$interface" 2>/dev/null; for r in $router; do ip route add default via "$r" dev "$interface" metric "$([ "$interface" = eth0 ] && echo 10 || echo 20)"; break; done; }
+  : > /run/resolv.conf.$interface
+  for d in $dns; do echo "nameserver $d" >> /run/resolv.conf.$interface; done
+  cat /run/resolv.conf.* > /run/resolv.conf 2>/dev/null ;;
+esac

@@ -1,3 +1,6 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE   /* pthread_setaffinity_np */
+#endif
 /* CLI for complete Musashi instruction decoding on a QRX virtual board.
  * This is a CPU+bus diagnostic, not a complete Amiga/AROS machine emulator. */
 #include "qrx68100_full.h"
@@ -146,6 +149,13 @@ static void *cpu_thread(void *arg){
     int rc=1;
 #ifdef __APPLE__
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE,0);
+#elif defined(__linux__)
+    /* QRX_CPU_CORE=n: the 68k CPU thread alone on that core (the Pi image keeps core 3 free for
+     * it with isolcpus=3): no migrations, warm caches for the JIT code */
+    if(getenv("QRX_CPU_CORE")){
+        cpu_set_t set;CPU_ZERO(&set);CPU_SET(atoi(getenv("QRX_CPU_CORE")),&set);
+        if(pthread_setaffinity_np(pthread_self(),sizeof set,&set))fprintf(stderr,"[ARMITHLON] QRX_CPU_CORE: cannot pin the CPU thread\n");
+    }
 #endif
     struct timespec t0;clock_gettime(CLOCK_MONOTONIC,&t0);
     while(budget>0&&rc==1&&!atomic_load_explicit(&stop_requested,memory_order_relaxed)){

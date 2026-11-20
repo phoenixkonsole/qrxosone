@@ -2673,7 +2673,6 @@ bool qrx_jit_cpu_stopped(void){return CPU_STOPPED!=0;}
 bool qrx_jit_init(QRXFullCPU *c,uint64_t start_instructions){(void)c;(void)start_instructions;return false;}
 void qrx_jit_destroy(QRXFullCPU *c){(void)c;}
 void qrx_jit_report(const QRXFullCPU *c){(void)c;}
-bool qrx_jit_cpu_stopped(void){return CPU_STOPPED!=0;}
 void qrx_jit_counters(const QRXFullCPU *c,uint64_t *b,uint64_t *n,uint64_t *i){
     (void)c;if(b)*b=0;if(n)*n=0;if(i)*i=0;
 }

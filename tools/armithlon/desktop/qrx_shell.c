@@ -715,6 +715,7 @@ static const struct sh_app sh_apps[] = {
     { "Overview",   "*overview",            0xFF8B5CF6u, "OV" },
     { "About",      "C:QRXInfo",            0xFF3B82F6u, "i"  },
     { "Network",    "C:QRXNetwork",         0xFF059669u, "NW" },
+    { "Wi-Fi & BT", "C:QRXWireless",        0xFF0284C7u, "WB" },
     { "Users",      "*users",               0xFF0F766Eu, "US" },
     { "Writer",     "QRX:C/QRXWriter",      0xFF2563EBu, "W"  },
     { "Sheet",      "QRX:C/QRXSpreadsheet", 0xFF16A34Au, "S"  },

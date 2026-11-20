@@ -1,0 +1,30 @@
+# never pulled into the image (init, package management, interpreters, docs)
+# (X11, Wayland and PulseAudio client libraries are in the image: Ubuntu's SDL2 and Mesa link them
+# directly. Only the libraries: no X server, compositor or sound server ever runs.)
+systemd
+systemd-dev
+systemd-sysv
+libsystemd-shared
+libpam-systemd
+perl-base
+perl
+python3
+debconf
+dpkg
+apt
+adduser
+init-system-helpers
+sensible-utils
+usr-is-merged
+libpam0g
+libpam-modules
+libpam-modules-bin
+libpam-runtime
+login
+passwd
+dbus-session-bus-common
+dbus-user-session
+dbus-bin
+libpipewire-0.3-0t64
+libsndio7.0
+libjack-jackd2-0

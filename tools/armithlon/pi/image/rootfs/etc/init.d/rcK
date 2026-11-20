@@ -1,0 +1,4 @@
+#!/bin/sh
+sync
+umount /boot 2>/dev/null
+mount -o remount,ro / 2>/dev/null

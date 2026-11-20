@@ -1,0 +1,25 @@
+#!/bin/sh
+# QRX ARMithlon Pi 4, first start: the root partition (mmcblk0p2, the last one) grows to the end
+# of the SD card. Step 1 changes the size in the MBR and restarts (the kernel does not re-read the
+# table of a disk in use); step 2 grows the mounted ext4 file system (resize2fs works online).
+DISK=mmcblk0; PART=${DISK}p2; MBR=/dev/$DISK
+if [ -e /etc/qrx/grow-fs ]; then
+    resize2fs /dev/$PART >/run/qrx-grow.log 2>&1 && touch /etc/qrx/grown && rm -f /etc/qrx/grow-fs
+    exit 0
+fi
+start=$(cat /sys/class/block/$PART/start) || exit 1
+size=$(cat /sys/class/block/$PART/size)
+disk=$(cat /sys/class/block/$DISK/size)
+want=$(( (disk - start) / 2048 * 2048 ))          # whole MiB
+# the MBR's second entry must be the partition we grow (type 0x83, same start)
+t=$(dd if=$MBR bs=1 skip=$((446 + 16 + 4)) count=1 2>/dev/null | od -An -tu1 | tr -d ' ')
+s=$(dd if=$MBR bs=1 skip=$((446 + 16 + 8)) count=4 2>/dev/null | od -An -tu4 | tr -d ' ')
+if [ "$t" != 131 ] || [ "$s" != "$start" ] || [ "$want" -le $((size + 2048)) ]; then
+    touch /etc/qrx/grown; exit 0                   # nothing to do (or not our layout)
+fi
+le() { printf "\\$(printf %o $(($1 & 255)))\\$(printf %o $(($1 >> 8 & 255)))\\$(printf %o $(($1 >> 16 & 255)))\\$(printf %o $(($1 >> 24 & 255)))"; }
+le $want | dd of=$MBR bs=1 seek=$((446 + 16 + 12)) count=4 conv=notrunc 2>/dev/null || exit 1
+touch /etc/qrx/grow-fs
+sync
+echo "QRX: SD card partition grown, restarting once"
+reboot -f

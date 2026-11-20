@@ -110,10 +110,8 @@ bash tools/armithlon/pi/build-pi.sh --cross        # QRX_PI_CPU=cortex-a76 für 
 - **Der beschleunigte QRX3D-Strom** (auf dem Mac ein Metal-Renderer) ist unter Linux nicht
   angeschlossen. Programme bekommen dann den Software-Weg.
 - **MIDI-Ausgabe** (auf dem Mac der Systemsynthesizer) ist unter Linux noch stumm.
-- **Bundle mit ROM und System-Volume:**
-  - Ein startfertiges Paket wie `ARMithlon.app` mit gepatchtem ROM und `SystemFull` gibt es für
-    Linux noch nicht.
-  - Das System-Volume wird auf dem Mac lokal gebaut und liegt nicht im Repository.
+- **Bundle mit ROM und System-Volume:** für den Pi 4 jetzt als fertiges SD-Karten-Image, siehe
+  [raspberry-pi-image.md](raspberry-pi-image.md) (`tools/armithlon/pi/bundle/build-bundle.sh`).
 - **Echte Hardware:**
   - Bildrate, JIT-Geschwindigkeit und das Verhalten von Mesa V3D sind ungemessen.
   - Dasselbe gilt für die Spiegelung der Host-GPU (Front-Face-Winding) und den

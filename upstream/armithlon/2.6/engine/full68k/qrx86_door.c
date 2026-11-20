@@ -4,6 +4,7 @@
 #include "qrx86_door.h"
 #include "qrx_netpolicy.h"
 #include "qrx_vault.h"
+#include "qrx_hostctl.h"
 #include "qrx_hostmidi.h"
 void qrx_host_set_pointer(uint32_t index);
 #include "qrx_hostnet.h"
@@ -388,6 +389,8 @@ static void service_call(QRXFullCPU *c,uint32_t block){
     if(svc==4&&!rd32(q+8)){net_service(c,q);return;}
     /* OpenGL for native 68k programs. */
     if(svc==8){qrx_gl68k_service(c->ram_owned,c->vm.ram.size,q);return;}
+    /* Wi-Fi, Bluetooth and power of the appliance (Raspberry Pi image) */
+    if(svc==QRX_HOSTCTL_SERVICE){qrx_hostctl_call(c->ram_owned,c->vm.ram.size,q);return;}
     /* Users and their encrypted home volumes. */
     if(svc==QRX_VAULT_SERVICE){
         uint32_t a[13];

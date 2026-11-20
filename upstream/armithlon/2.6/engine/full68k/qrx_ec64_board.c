@@ -3,6 +3,7 @@
 #include "qrx_hostnet.h"
 #include "qrx_netpolicy.h"
 #include "qrx_vault.h"
+#include "qrx_hostctl.h"
 #include "qrx_gl68k.h"
 #include <pthread.h>
 /* One GL stream at a time: the contexts belong to whichever core's thread calls. */
@@ -84,6 +85,10 @@ static void host_call(qec64_board *b, uint64_t addr)
 {
     if (addr >= b->ram_size || b->ram_size - addr < 17 * 4 || (addr & 3)) return;
     uint8_t *q = b->ram + addr;
+    if (be32(q) == QRX_HOSTCTL_SERVICE) {          /* Wi-Fi, Bluetooth, power of the appliance */
+        qrx_hostctl_call(b->ram, b->ram_size < UINT64_C(0x100000000) ? b->ram_size : UINT64_C(0x100000000), q);
+        return;
+    }
     if (be32(q) == QEC64_HOST_GL) {
         pthread_mutex_lock(&gl_lock);
         qrx_gl68k_service(b->ram, b->ram_size, q);

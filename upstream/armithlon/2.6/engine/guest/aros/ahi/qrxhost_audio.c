@@ -1,7 +1,10 @@
 /* qrxhost.audio: AHI sub-driver for the ARMithlon board. AHI mixes in the guest
  * and this driver hands each buffer to the host's audio ring by DMA; the host
  * plays it through CoreAudio at a fixed 48 kHz. Playback only.
- * Built with m68k-amigaos-gcc against the AHI headers, see build.sh. */
+ * Built with m68k-amigaos-gcc against the AHI headers, see build.sh, or with the AROS
+ * m68k toolchain (build-aros.sh): AROS's gcc has no register parameters, so small
+ * assembler stubs take the registers AHI passes and call the C functions with them on the
+ * stack. */
 #include <exec/types.h>
 #include <exec/execbase.h>
 #include <exec/libraries.h>
@@ -19,6 +22,10 @@
 #include <proto/dos.h>
 #include <proto/utility.h>
 
+#ifdef __AROS__
+/* launched from the shell by mistake: the first code returns at once */
+__asm__(".text\n.even\nqrx_entry_guard:\n\tmoveq #-1,%d0\n\trts\n");
+#endif
 #define LIBNAME "qrxhost.audio"
 #define VERSION 6
 #define REVISION 0
@@ -37,7 +44,11 @@
 
 struct ExecBase *SysBase;
 struct DosLibrary *DOSBase;
+#ifdef __AROS__
+struct UtilityBase *UtilityBase;
+#else
 struct Library *UtilityBase;
+#endif
 static struct Library *DriverLibBase;
 static BPTR DriverSegList;
 struct QRXData {
@@ -48,7 +59,16 @@ struct QRXData {
 static const char libname[]=LIBNAME;
 static const char libid[]=LIBNAME " 1.0 (03.11.2026) ARMithlon host audio";
 
+#ifdef __AROS__
+#define R(reg)
+#define USED __attribute__((used, noinline))
+/* stub NAME_r: push the registers (last argument first), call NAME, drop them; d0 is the result */
+#define STUB(name, pushes, bytes) __asm__(".text\n.even\n" #name "_r:\n" pushes "\tjsr " #name "\n\tlea " #bytes "(%sp),%sp\n\trts\n");
+#define P(r) "\tmove.l %" #r ",-(%sp)\n"
+#else
 #define R(reg) __asm(#reg)
+#define USED
+#endif
 static void submit(const UBYTE *buffer,ULONG frames){
     /* The board rejects a transfer beyond its ring, so wait for room first. */
     while(frames){
@@ -84,7 +104,7 @@ static void slave_entry(void){
 }
 
 /* ---- AHIsub_* ---- */
-static ULONG sub_alloc(struct TagItem *tags R(a1),struct AHIAudioCtrlDrv *ctrl R(a2)){
+static USED ULONG sub_alloc(struct TagItem *tags R(a1),struct AHIAudioCtrlDrv *ctrl R(a2)){
     (void)tags;
     struct QRXData *d=AllocVec(sizeof(*d),MEMF_PUBLIC|MEMF_CLEAR);
     ctrl->ahiac_DriverData=d;
@@ -95,7 +115,7 @@ static ULONG sub_alloc(struct TagItem *tags R(a1),struct AHIAudioCtrlDrv *ctrl R
     if(d->master_signal==-1)return AHISF_ERROR;
     return AHISF_KNOWSTEREO|AHISF_MIXING|AHISF_TIMING;
 }
-static void sub_free(struct AHIAudioCtrlDrv *ctrl R(a2)){
+static USED void sub_free(struct AHIAudioCtrlDrv *ctrl R(a2)){
     struct QRXData *d=(struct QRXData*)ctrl->ahiac_DriverData;
     if(d){
         if(d->master_signal!=-1)FreeSignal(d->master_signal);
@@ -103,10 +123,10 @@ static void sub_free(struct AHIAudioCtrlDrv *ctrl R(a2)){
         ctrl->ahiac_DriverData=NULL;
     }
 }
-static void sub_disable(struct AHIAudioCtrlDrv *ctrl R(a2)){(void)ctrl;Forbid();}
-static void sub_enable(struct AHIAudioCtrlDrv *ctrl R(a2)){(void)ctrl;Permit();}
-static ULONG sub_stop(ULONG flags R(d0),struct AHIAudioCtrlDrv *ctrl R(a2));
-static ULONG sub_start(ULONG flags R(d0),struct AHIAudioCtrlDrv *ctrl R(a2)){
+static USED void sub_disable(struct AHIAudioCtrlDrv *ctrl R(a2)){(void)ctrl;Forbid();}
+static USED void sub_enable(struct AHIAudioCtrlDrv *ctrl R(a2)){(void)ctrl;Permit();}
+static USED ULONG sub_stop(ULONG flags R(d0),struct AHIAudioCtrlDrv *ctrl R(a2));
+static USED ULONG sub_start(ULONG flags R(d0),struct AHIAudioCtrlDrv *ctrl R(a2)){
     struct QRXData *d=(struct QRXData*)ctrl->ahiac_DriverData;sub_stop(flags,ctrl);
     if(flags&AHISF_RECORD)return AHIE_UNKNOWN;
     if(flags&AHISF_PLAY){
@@ -124,8 +144,8 @@ static ULONG sub_start(ULONG flags R(d0),struct AHIAudioCtrlDrv *ctrl R(a2)){
     }
     return AHIE_OK;
 }
-static ULONG sub_update(ULONG flags R(d0),struct AHIAudioCtrlDrv *ctrl R(a2)){(void)flags;(void)ctrl;return 0;}
-static ULONG sub_stop(ULONG flags R(d0),struct AHIAudioCtrlDrv *ctrl R(a2)){
+static USED ULONG sub_update(ULONG flags R(d0),struct AHIAudioCtrlDrv *ctrl R(a2)){(void)flags;(void)ctrl;return 0;}
+static USED ULONG sub_stop(ULONG flags R(d0),struct AHIAudioCtrlDrv *ctrl R(a2)){
     struct QRXData *d=(struct QRXData*)ctrl->ahiac_DriverData;
     if(flags&AHISF_PLAY){
         if(d->slave){
@@ -139,10 +159,10 @@ static ULONG sub_stop(ULONG flags R(d0),struct AHIAudioCtrlDrv *ctrl R(a2)){
 }
 /* All channel work stays in AHI's own mixer. */
 static ULONG sub_unknown(void){return AHIS_UNKNOWN;}
-static LONG sub_hwcontrol(ULONG attr R(d0),LONG arg R(d1),struct AHIAudioCtrlDrv *ctrl R(a2)){
+static USED LONG sub_hwcontrol(ULONG attr R(d0),LONG arg R(d1),struct AHIAudioCtrlDrv *ctrl R(a2)){
     (void)attr;(void)arg;(void)ctrl;return 0;
 }
-static ULONG sub_getattr(ULONG attr R(d0),LONG arg R(d1),ULONG defvalue R(d2),
+static USED ULONG sub_getattr(ULONG attr R(d0),LONG arg R(d1),ULONG defvalue R(d2),
                          struct TagItem *tags R(a1),struct AHIAudioCtrlDrv *ctrl R(a2)){
     (void)tags;(void)ctrl;switch(attr){
     case AHIDB_Bits:return 16;
@@ -156,7 +176,11 @@ static ULONG sub_getattr(ULONG attr R(d0),LONG arg R(d1),ULONG defvalue R(d2),
     case AHIDB_Realtime:return TRUE;
     case AHIDB_MaxChannels:return 128;
     case AHIDB_Outputs:return 1;
+#ifdef __AROS__
+    case AHIDB_Output:return (ULONG)"Host";
+#else
     case AHIDB_Output:return (ULONG)"Mac";
+#endif
     case AHIDB_Inputs:return 0;
     default:return defvalue;
     }
@@ -168,20 +192,20 @@ static BPTR lib_expunge_impl(struct Library *lib){
     if(lib->lib_OpenCnt){lib->lib_Flags|=LIBF_DELEXP;return 0;}
     Remove(&lib->lib_Node);
     seg=DriverSegList;
-    if(UtilityBase)CloseLibrary(UtilityBase);
+    if(UtilityBase)CloseLibrary((struct Library*)UtilityBase);
     if(DOSBase)CloseLibrary((struct Library*)DOSBase);
     FreeMem((UBYTE*)lib-lib->lib_NegSize,lib->lib_NegSize+lib->lib_PosSize);
     return seg;
 }
-static struct Library *lib_open(struct Library *lib R(a6)){lib->lib_OpenCnt++;lib->lib_Flags&=~LIBF_DELEXP;return lib;
+static USED struct Library *lib_open(struct Library *lib R(a6)){lib->lib_OpenCnt++;lib->lib_Flags&=~LIBF_DELEXP;return lib;
 }
-static BPTR lib_close(struct Library *lib R(a6)){
+static USED BPTR lib_close(struct Library *lib R(a6)){
     if(--lib->lib_OpenCnt==0&&(lib->lib_Flags&LIBF_DELEXP))return lib_expunge_impl(lib);
     return 0;
 }
-static BPTR lib_expunge(struct Library *lib R(a6)){return lib_expunge_impl(lib);}
+static USED BPTR lib_expunge(struct Library *lib R(a6)){return lib_expunge_impl(lib);}
 static ULONG lib_null(void){return 0;}
-static struct Library *lib_init(struct Library *lib R(d0),BPTR seg R(a0),struct ExecBase *sys R(a6)){
+static USED struct Library *lib_init(struct Library *lib R(d0),BPTR seg R(a0),struct ExecBase *sys R(a6)){
     SysBase=sys;
     DriverSegList=seg;
     DriverLibBase=lib;
@@ -192,17 +216,38 @@ static struct Library *lib_init(struct Library *lib R(d0),BPTR seg R(a0),struct 
     lib->lib_Revision=REVISION;
     lib->lib_IdString=(APTR)libid;
     DOSBase=(struct DosLibrary*)OpenLibrary((CONST_STRPTR)"dos.library",37);
-    UtilityBase=OpenLibrary((CONST_STRPTR)"utility.library",37);
+    UtilityBase=(void*)OpenLibrary((CONST_STRPTR)"utility.library",37);
     if(!DOSBase||!UtilityBase)return NULL;
     return lib;
 }
+#ifdef __AROS__
+STUB(lib_open, P(a6), 4)
+STUB(lib_close, P(a6), 4)
+STUB(lib_expunge, P(a6), 4)
+STUB(lib_init, P(a6) P(a0) P(d0), 12)
+STUB(sub_alloc, P(a2) P(a1), 8)
+STUB(sub_free, P(a2), 4)
+STUB(sub_disable, P(a2), 4)
+STUB(sub_enable, P(a2), 4)
+STUB(sub_start, P(a2) P(d0), 8)
+STUB(sub_update, P(a2) P(d0), 8)
+STUB(sub_stop, P(a2) P(d0), 8)
+STUB(sub_hwcontrol, P(a2) P(d1) P(d0), 12)
+STUB(sub_getattr, P(a2) P(a1) P(d2) P(d1) P(d0), 20)
+extern char lib_open_r[], lib_close_r[], lib_expunge_r[], lib_init_r[], sub_alloc_r[], sub_free_r[],
+    sub_disable_r[], sub_enable_r[], sub_start_r[], sub_update_r[], sub_stop_r[], sub_hwcontrol_r[],
+    sub_getattr_r[];
+#define E(f) (APTR)f##_r
+#else
+#define E(f) (APTR)f
+#endif
 static const APTR functions[]={
-    lib_open,lib_close,lib_expunge,lib_null,
-    sub_alloc,sub_free,sub_disable,sub_enable,sub_start,sub_update,sub_stop,
+    E(lib_open),E(lib_close),E(lib_expunge),lib_null,
+    E(sub_alloc),E(sub_free),E(sub_disable),E(sub_enable),E(sub_start),E(sub_update),E(sub_stop),
     sub_unknown,sub_unknown,sub_unknown,sub_unknown,sub_unknown,sub_unknown,
-    sub_getattr,sub_hwcontrol,(APTR)-1
+    E(sub_getattr),E(sub_hwcontrol),(APTR)-1
 };
-static const ULONG auto_table[4]={sizeof(struct Library),(ULONG)functions,0,(ULONG)lib_init};
+static const ULONG auto_table[4]={sizeof(struct Library),(ULONG)functions,0,(ULONG)E(lib_init)};
 const struct Resident romtag={
     RTC_MATCHWORD,(struct Resident*)&romtag,(APTR)(&romtag+1),RTF_AUTOINIT,VERSION,
     NT_LIBRARY,0,(char*)libname,(char*)libid,(APTR)auto_table

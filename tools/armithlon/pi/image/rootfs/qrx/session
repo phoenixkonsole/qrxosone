@@ -1,0 +1,19 @@
+#!/bin/sh
+# QRX OS One on the whole screen. The 68k CPU thread runs on core 3, which the kernel keeps
+# free for it (isolcpus=3); everything else runs on cores 0 to 2.
+export PATH=/usr/sbin:/usr/bin HOME=/root
+export SDL_VIDEODRIVER=kmsdrm SDL_AUDIODRIVER=alsa QRX_FULLSCREEN=1
+export QRX_APPS_DIR=/data/Apps QRX_FULL_ADF=/qrx/boot.adf QRX_CPU_CORE=3
+export QRX_NETCTL=/qrx/netctl
+# sound: HDMI when a screen with sound is there, else the 3.5 mm jack; /data/qrx-audio can name
+# an ALSA card (e.g. "Headphones" or "vc4hdmi0") to choose for good
+if [ -s /data/qrx-audio ]; then export ALSA_CARD="$(head -1 /data/qrx-audio)"
+elif grep -q vc4hdmi0 /proc/asound/cards 2>/dev/null; then export ALSA_CARD=vc4hdmi0
+else export ALSA_CARD=Headphones; fi
+cd /qrx
+taskset -c 0-2 /qrx/bin/armithlon --window --rom /qrx/aros-rom.bin --ext-rom /qrx/aros-ext.bin \
+  --share /qrx/System --share-rw >/run/armithlon.log 2>&1
+rc=$?
+# QRX OS One shut down: power off; a crash restarts it (init respawns this script)
+if [ $rc = 0 ]; then poweroff; fi
+sleep 1
