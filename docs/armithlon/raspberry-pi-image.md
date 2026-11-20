@@ -3,6 +3,10 @@
 Stand 2026-11-20. Ein Image, das man auf eine SD-Karte schreibt. Der Pi 4 startet damit direkt
 in QRX OS One, wie früher Amithlon: Linux ist nur der Unterbau und nie zu sehen.
 
+**Fertiges Image:** `dist/pi4/QRX-ARMithlon-Pi4-2026-11-20.img.xz` (86 MB, entpackt 983 MiB;
+SHA256 beider Formen in der `.sha256`-Datei daneben). Mit dem Raspberry Pi Imager („Eigenes
+Image verwenden“) oder `xz -dc … | sudo dd of=/dev/<karte> bs=4M` auf eine Karte ab 2 GB schreiben.
+
 ## Was geprüft ist und was nicht
 
 **Auf echter Pi-Hardware lief das Image noch nicht.** Geprüft ist, was ohne Pi geht:
@@ -15,6 +19,7 @@ in QRX OS One, wie früher Amithlon: Linux ist nur der Unterbau und nie zu sehen
 | Das QRX-OS-One-Paket des Images bootet bis zum Desktop | ok, mit der x86-64-Variante derselben Engine-Quellen (Bildschirmfoto unten) |
 | Ton: neuer AROS-Build des AHI-Treibers `qrxhost.audio`, `QRXAHITest` im Gast | `[AHITEST] PLAYED`, 48000 Frames kamen beim Host an |
 | WLAN/Bluetooth-Einstellungen: Gast-App → Door-Dienst 11 → Host-Programm | ok, mit einem Test-`netctl`, das feste Antworten gibt; Mausklicks und Tastatur aus dem Gast kamen als `wifi-connect HomeNet geheim123` und `bt-pair AA:BB:CC:DD:EE:02` an |
+| Image: Partitionstabelle, FAT-Inhalt, `e2fsck -fn` der Root-Partition, Rechte und Links der Startdateien | ok |
 | Engine-Release-Build `-mcpu=cortex-a72`: alle Tests | 56 direkt + 20/20 Python-Tests über die qemu-Wrapper |
 
 Nicht geprüft, weil es nur auf dem Pi geht: Bild über KMS/HDMI, 3D über Mesa V3D, Ton über
