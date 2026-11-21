@@ -112,6 +112,7 @@ typedef struct JitCtx {
     uint8_t *arena, *arena_next, *arena_end;
     uint64_t start_instructions;
     uint64_t blocks_made, native_insns, interp_insns, flushes, invalidations, slow_reads, slow_writes;
+    uint64_t peeked, cfinv_slow;     /* blocks whose exit liveness came from their successors; CFINV emulations */
     uint64_t *opcode_misses;
     uint64_t *fp_misses;  /* FPU instructions Musashi ran, by opcode class and second word */
     bool flush_pending, stats;
@@ -222,6 +223,7 @@ static void umull(Trans *t,int d,int n,int m){E(t,0x9BA07C00u|R5(m)<<16|R5(n)<<5
  * register on macOS, where CFINV always exists). Leaves every other flag as it was. */
 static void cfinv(Trans *t){
     if(host_flagm){E(t,0xD500401Fu);return;}
+    if(!t->dry)t->j->cfinv_slow++;
     E(t,0xD53B4212u);    /* mrs x18,nzcv */
     E(t,0xD2630252u);    /* eor x18,x18,#(1<<29) */
     E(t,0xD51B4212u);    /* msr nzcv,x18 */
@@ -2263,6 +2265,37 @@ static void set_icache(JitCtx *j,uint32_t pc,const void *code){
     ICacheEntry *e=&j->icache[(pc>>1)&(ICACHE_SIZE-1u)];
     e->pc=pc;e->code=code;
 }
+/* Flags the code at pc may read before it sets them: a dry translation of up to eight
+ * instructions there, as the block's own dry pass does. An instruction left to Musashi, or
+ * the end of that block: whatever is still unset there counts as read. QRX_JIT_PEEK=0 keeps
+ * every flag live at a block's end, as before. */
+static bool peek_on(void){
+    static int on=-1;
+    if(on<0){const char *e=getenv("QRX_JIT_PEEK");on=!(e&&!strcmp(e,"0"));}
+    return on;
+}
+static uint8_t live_in(JitCtx *j,uint32_t pc){
+    static __thread Trans *t;
+    if(!t){t=calloc(1,sizeof(*t));if(!t)return F_ALL|F_FPCC;}
+    uint8_t need=0,set=0;
+    uint32_t cur=pc,scratch=0;
+    t->j=j;t->start=pc;t->dry=true;
+    for(int n=0;n<8;n++){
+        if((cur&1u)||!fetch_ok(t,cur,2))break;
+        t->pc=cur;t->ip=cur;t->stop=false;t->uses=t->defs=0;t->ended=false;
+        t->live=F_ALL|F_FPCC;t->cold_count=0;t->exit_count=0;t->bail_count=0;t->p=&scratch;
+        t->fp_cold_count=0;t->fp_dirty=0;t->fp_touched=t->fp_round_ok=false;t->extra_cycles=0;
+        memset(t->fp_kind,FK_NONE,sizeof t->fp_kind);
+        t->op=(uint16_t)fetch16(t);
+        if(!tr_insn(t)||t->stop)break;
+        need|=(uint8_t)(t->uses&~set);
+        set|=t->defs;
+        if((uint8_t)(set|need)==(uint8_t)(F_ALL|F_FPCC))return need;
+        if(t->ended)break;
+        cur=t->ip;
+    }
+    return (uint8_t)(need|((F_ALL|F_FPCC)&~set));
+}
 /* Translate at most MAX_BLOCK_INSNS, stopping before a page boundary. */
 static Block *translate(JitCtx *j,uint32_t pc){
     if((size_t)(j->code_end-j->code_next)<4096u*16u||
@@ -2304,8 +2337,17 @@ static Block *translate(JitCtx *j,uint32_t pc){
         register_block_pages(j,b); /* the opcode may be rewritten too */
         return b;
     }
-    /* Backward liveness; all flags are live when a block ends. */
+    /* Backward liveness. At the block's end: what its successors read before they set it,
+     * when they are known (falling through, or exits to fixed addresses); otherwise all. */
     uint8_t live=F_ALL|F_FPCC;
+    if(peek_on()){
+        if(!ended){live=live_in(j,cur);j->peeked++;}
+        else if(t->exit_count){
+            uint8_t l=0;
+            for(unsigned i=0;i<t->exit_count;i++)l|=live_in(j,t->exits[i].target);
+            live=l;j->peeked++;
+        }
+    }
     for(int i=(int)count-1;i>=0;i--){
         t->live_after[i]=live;
         live=(uint8_t)((live&~defs[i])|uses[i]);
@@ -2649,11 +2691,12 @@ void qrx_jit_counters(const QRXFullCPU *c,uint64_t *blocks,uint64_t *native,uint
 void qrx_jit_report(const QRXFullCPU *c){
     const JitCtx *j=c?c->jit:NULL;
     if(!j||!j->stats)return;
-    fprintf(stderr,"[JIT] blocks=%llu native=%llu interp=%llu flushes=%llu invalidated=%llu slow_r=%llu slow_w=%llu code=%zuKB\n",
+    fprintf(stderr,"[JIT] blocks=%llu native=%llu interp=%llu flushes=%llu invalidated=%llu slow_r=%llu slow_w=%llu code=%zuKB peeked=%llu cfinv_emulated=%llu\n",
         (unsigned long long)j->blocks_made,(unsigned long long)j->native_insns,
         (unsigned long long)j->interp_insns,(unsigned long long)j->flushes,
         (unsigned long long)j->invalidations,(unsigned long long)j->slow_reads,
-        (unsigned long long)j->slow_writes,(size_t)((uint8_t*)j->code_next-(uint8_t*)j->code_base)/1024u);
+        (unsigned long long)j->slow_writes,(size_t)((uint8_t*)j->code_next-(uint8_t*)j->code_base)/1024u,
+        (unsigned long long)j->peeked,(unsigned long long)j->cfinv_slow);
     if(!j->opcode_misses)return;
     fprintf(stderr,"[JIT] interpreted opcodes by count:");
     for(int n=0;n<40;n++){

@@ -480,11 +480,72 @@ Das ist zufälliger Testcode, keine echte Spiele-Last.
 
 **Weiter offen:**
 - SSE/MMX nativ (läuft jetzt im Block, aber einzeln im Interpreter).
-- `REP MOVS`/`STOS` als schnelle Kopie.
+- ~~`REP MOVS`/`STOS` als schnelle Kopie~~ (erledigt, siehe unten).
 - 8- und 16-Bit-Formen von `ADC`/`SBB`, `MUL`, `DIV`.
 - `FCOM`/`FNSTSW` und `FUCOMIP`.
 - Messungen mit echten Spielen auf dem Pi. `dxtest.exe` läuft inzwischen, siehe den folgenden
   Abschnitt.
+
+### `REP MOVS`/`STOS` im x86-JIT (2026-11-21)
+
+**Vorher:** Der Interpreter führt `REP`-Stringbefehle in Stücken zu 4096 Elementen aus, jedes
+Element einzeln mit eigener Seitenübersetzung. Spiele kopieren und löschen damit ganze Bildpuffer.
+
+**Jetzt:** Für `REP MOVSB/W/D` und `REP STOSB/W/D` erledigt der Hilfsaufruf des JIT ein solches
+Stück selbst (`xj_rep_fast`).
+- Er arbeitet seitenweise mit `memmove`/`memset` über die Seitentabellen des JIT.
+- Wort- und Doppelwort-Füllen geht per `memset`, wenn alle Bytes gleich sind, sonst durch
+  verdoppelndes Kopieren.
+- Überlappende Vorwärtskopien laufen wie auf x86 Element für Element.
+- Der Interpreter übernimmt weiterhin bei: Rückwärtsrichtung, Segmentpräfix, einer Seite ohne
+  Tabelleneintrag (nicht eingeblendet, schreibgeschützt, enthält Code) und einem Element über
+  eine Seitengrenze. Fehler und Codeschreibzugriffe bleiben damit seine Sache.
+
+**Gemessen** (`qrx86_jit_tests bench`, 4 MiB über den JIT, unter qemu Cortex-A72):
+
+| Befehl | vorher | jetzt |
+| --- | --- | --- |
+| `REP STOSD` | 136 MB/s | 1891 MB/s |
+| `REP MOVSD` | 214 MB/s | 2203 MB/s |
+| `REP MOVSB` | 50 MB/s | 2158 MB/s |
+
+Auf dem Pi: `.build/armithlon-pi/qrx86_jit_tests bench`. Die JIT-Statistik zählt die schnellen
+Stücke (`rep_fast`).
+
+**Geprüft:** Der Differenztest erzeugt `REP MOVS`/`STOS` aller Größen mit Überlappung, Anzahl 0,
+`DF=1` und Seitengrenze. 200 000 Fälle stimmen mit dem Interpreter überein.
+
+### 32-Bit-JIT: Flags am Blockende nach den Nachfolgern (2026-11-21)
+
+**Ausgangslage:** Der 68k-JIT hält den Übertrag umgekehrt in den AArch64-Flags. Nach `ADD` muss er
+ihn umdrehen, sobald ihn jemand liest. Der Pi 4 hat dafür kein `CFINV`, also braucht er drei
+Befehle (`mrs`/`eor`/`msr` auf NZCV). Bisher galten am Blockende alle Flags als gelesen, deshalb
+wurde der Übertrag nach einem `ADD` am Blockende fast immer umgedreht, ebenso andere Flags.
+
+**Jetzt:** Bei festen Nachfolgern (Durchfallen, Ausgänge zu festen Adressen) übersetzt der JIT bis
+zu acht Befehle jedes Nachfolgers trocken (`live_in`). Als lebendig gilt nur, was dort gelesen
+wird, bevor es gesetzt wird. Bei indirekten Sprüngen, Rücksprüngen oder Befehlen, die Musashi
+ausführt, gilt der Rest weiter als lebendig. `QRX_JIT_PEEK=0` schaltet das ab; die JIT-Statistik
+zeigt `peeked` und `cfinv_emulated`.
+
+**Gemessen** (32-Bit-System aus dem Image, Start, Desktop und `dxtest`, 400 s unter qemu
+Cortex-A72; das Modell hat wie der Pi 4 kein `CFINV`):
+
+| | ohne | mit |
+| --- | --- | --- |
+| `CFINV`-Ersatzfolgen im erzeugten Code | 15 626 | 8 298 (−47 %) |
+| Codegröße | 5552 KB | 5453 KB |
+
+Das sind Stellen im Code, keine gezählten Ausführungen. Wie viel Zeit das auf dem Pi spart, zeigt
+erst `bench-pi.sh --perf 32`.
+
+**Geprüft:**
+- Der 68k-JIT-Differenztest gegen Musashi und die Zwei-Kern-Tests bestehen, auch mit
+  `QRX_JIT_ARMV80=1` und mit `QRX_JIT_PEEK=0`.
+- Beide Läufe oben starten bis zum Desktop, `dxtest` meldet RESULT PASS.
+- Alle direkten AArch64-Tests bestehen.
+- Der zeitempfindliche Python-Test `QRX68_2_live_IDCMP…concurrent` schlug im Gesamtlauf einmal
+  fehl. Einzeln bestand er 5 von 5 Mal mit und 5 von 5 Mal ohne diese Änderung.
 
 ### Windows-Programme: der Hänger nach dem Fensteröffnen (behoben 2026-11-21)
 
