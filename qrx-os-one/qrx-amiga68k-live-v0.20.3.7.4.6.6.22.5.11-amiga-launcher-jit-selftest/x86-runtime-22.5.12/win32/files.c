@@ -538,7 +538,12 @@ static uint32_t do_fopen(qwin *w, const char *win, const char *mode)
     if (i < 0) { fclose(fp); return 0; }
     g_f[i].f = fp;
     g_f[i].text = !strchr(mode, 'b');
-    g_f[i].gfile = qw_alloc(w, 32);           /* opaque guest FILE (its fields are not used) */
+    /* The guest FILE: its fields are not used, but MinGW's C runtime locks a stream outside its
+     * own _iob table through the CRITICAL_SECTION that follows the 32-byte FILE (_FILEX), so
+     * that comes with it, zeroed (no owner). Without it fprintf waited in EnterCriticalSection
+     * on whatever the next allocation left there (a window's data in the AROS guest). */
+    g_f[i].gfile = qw_alloc(w, 32 + 24);
+    if (g_f[i].gfile) { uint32_t k; for (k = 0; k < 32 + 24; k += 4) WR32(g_f[i].gfile + k, 0); }
     if (w->verbose) qw_log(w, "fopen(%s, %s) -> %s", win, mode, host);
     return g_f[i].gfile;
 }

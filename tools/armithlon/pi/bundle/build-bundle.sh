@@ -56,6 +56,15 @@ cp "$REPO/.build/qrx-desktop/QRXDesktopPrefs.hunk" "$S/QRX/C/QRXDesktopPrefs"
 for f in QRXWelcome QRXWriter QRXSpreadsheet QRXPresenter QRXHardware QRXSettings QRXIPFSPrefs; do
   cp "$REPO/.build/qrx-apps/$f" "$S/QRX/C/$f"
 done
+# Windows and Linux i386 programs (x86 runtime 22.5.12): C:qrx-win32, C:qrx-i386, C:QRXInput;
+# the x86 code runs on the host door (the engine's x86 JIT). Two test programs in SYS:X86.
+XR=$(ls -d "$REPO"/qrx-os-one/*/x86-runtime-22.5.12 | head -1)
+DEV="$(dirname "$E2H")/../../amiga-m68k/AROS/Development"
+QRX_AROS_CC="$CC" QRX_ELF2HUNK="$E2H" QRX_AROS_CFLAGS="-B$DEV/lib/ -I$DEV/include -L$DEV/lib" \
+  bash "$XR/build-target.sh" "$OUT/x86rt" >/dev/null
+for f in qrx-win32 qrx-i386 QRXInput; do cp "$OUT/x86rt/hunk/$f" "$S/C/$f"; done
+mkdir -p "$S/X86"
+cp "$XR/win32/apps/prebuilt/dxtest.exe" "$XR/win32/apps/prebuilt/qrxclock.exe" "$S/X86/"
 # wallpapers and design icons (gen-assets.py: the Linux port of gen-assets.swift; fonts-inter)
 python3 "$REPO/tools/armithlon/desktop/gen-assets.py" "$S/QRX" >/dev/null
 # sound: the host AHI driver is the default mode (install-ahi.sh does the same on the Mac)

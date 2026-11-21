@@ -221,9 +221,9 @@ Keine Distribution, sondern ein eigener Kernel und genau die Programme, die das 
 | Teil | Was es ist | Stand auf dem Pi |
 | --- | --- | --- |
 | OpenGL für 68k-Programme (GL-Door, `full68k/qrx_gl68k.c`) | Gast-OpenGL auf Mesa V3D des Hosts | Engine-Seite gebaut und getestet (EGL ohne Fenster); läuft auf echter V3D-Hardware noch nicht geprüft |
-| Direct3D, Glide, OpenGL, Vulkan für Windows-Programme (`qrx_hostapi_*.c`, Host-GPU `linux/qrx_hostgpu_gl.c`) | Host-API-Wrapper für QRX86-Programme | gebaut; die Bilder kommen über die Konsolen-Schicht. Ein Windows-Programm lief auf Linux noch nicht erfolgreich (siehe unten) |
+| Direct3D, Glide, OpenGL, Vulkan für Windows-Programme (`qrx_hostapi_*.c`, Host-GPU `linux/qrx_hostgpu_gl.c`) | Host-API-Wrapper für QRX86-Programme | gebaut; die Bilder kommen über die Konsolen-Schicht. DirectDraw läuft (`dxtest.exe`, siehe unten); Direct3D, Glide, OpenGL und Vulkan mit einem Windows-Programm auf Linux noch nicht geprüft |
 | Warp3D | – | **nicht vorhanden**; QRX3D (`FF000500`) ist eine eigene virtuelle 3D-Schnittstelle, kein Warp3D |
-| Windows-Programme (`C:qrx-win32`, `C:qrx-i386`) | x86-Runtime 22.5.12 | baut für m68k (`x86-runtime-22.5.12/build-target.sh`), ist aber **nicht im Image**: im Test (32-Bit-System, x86-Engine) startete `dxtest.exe`, leerte seinen Bildbereich und zeichnete dann nichts. Muss erst untersucht werden |
+| Windows-Programme (`C:qrx-win32`, `C:qrx-i386`) | x86-Runtime 22.5.12 | **läuft** (2026-11-21): `dxtest.exe` besteht alle 31 Prüfungen (DirectDraw 640×480×8 mit Seitenwechsel, Palette, Farbschlüssel, `GetDC`; DirectSound; DirectInput), auf der x86-64-Engine und auf der AArch64-Engine mit x86-JIT unter qemu Cortex-A72. `bundle/build-bundle.sh` baut sie jetzt mit ins Paket (`C:qrx-win32`, `C:qrx-i386`, `C:QRXInput`, Testprogramme in `SYS:X86`); das Image in `dist/pi4` ist noch das alte. Ursache des „zeichnet nichts“ siehe „Windows-Programme: der Hänger nach dem Fensteröffnen“ |
 
 ## Auf dem Pi selbst bauen
 
@@ -470,8 +470,40 @@ Das ist zufälliger Testcode, keine echte Spiele-Last.
 - `REP MOVS`/`STOS` als schnelle Kopie.
 - 8- und 16-Bit-Formen von `ADC`/`SBB`, `MUL`, `DIV`.
 - `FCOM`/`FNSTSW` und `FUCOMIP`.
-- Windows-Programme zeichnen unter Linux noch nichts (`dxtest.exe`). Erst danach lässt sich mit
-  echten Spielen auf dem Pi messen.
+- Messungen mit echten Spielen auf dem Pi. `dxtest.exe` läuft inzwischen, siehe den folgenden
+  Abschnitt.
+
+### Windows-Programme: der Hänger nach dem Fensteröffnen (behoben 2026-11-21)
+
+**Bild:** `C:qrx-win32 SYS:dxtest.exe` öffnete sein 640×480-Fenster und zeichnete dann nichts. Die
+Tür meldete am Ende nur 769 ausgeführte x86-Befehle. Es war also kein Zeichenfehler: Das Programm
+blieb stehen.
+
+**Ursache:** Mit `qrx-win32 -T` (API-Trace) zeigte sich der Hänger. `CreateWindowExA` kehrte
+zurück, das folgende `EnterCriticalSection` nicht.
+- MinGWs C-Laufzeit sperrt eine Datei, die nicht in ihrem eigenen `_iob`-Feld liegt, über die
+  `CRITICAL_SECTION`, die direkt hinter der 32-Byte-`FILE`-Struktur steht (`_FILEX`).
+- Unser `fopen` legte nur die 32 Byte an. Die Sperre lag damit im Speicher der nächsten Zuteilung,
+  im AROS-Gast in Daten des eben erzeugten Fensters.
+- Ihr Besitzerfeld war nicht null, also wartete schon das erste `fprintf` für immer.
+- Im reinen Host-Test war der Speicher dort zufällig null, deshalb fiel es nicht auf.
+
+**Korrektur:** `x86-runtime-22.5.12/win32/files.c`: `fopen` legt `FILE` und Sperre an
+(32 + 24 Byte) und nullt beides.
+
+**Geprüft:**
+
+| Lauf | Ergebnis |
+| --- | --- |
+| 32-Bit-System, x86-64-Engine | `dxtest.exe` RESULT PASS, 0 Fehler; das Bild zeigt den Verlauf über die Palette, die Sprites mit Farbschlüssel und den GDI-Text |
+| 32-Bit-System, AArch64-Engine mit 68100- und x86-JIT unter qemu Cortex-A72 | RESULT PASS; der x86-JIT gab nur 3017 Befehle einzeln an den Interpreter |
+| Host-Tests der x86-Laufzeit (`tests/run-host-tests.sh`) | 10 bestanden, 3 übersprungen (BusyBox- und ReactOS-Dateien fehlen hier) |
+
+**Nicht geprüft:**
+- echte Spiele;
+- Direct3D, Glide, OpenGL und Vulkan aus einem Windows-Programm auf Linux;
+- auf echter Pi-Hardware;
+- ein vollständiger Paket- und Image-Bau mit dem neuen Schritt.
 
 ## QRX OS One 64 ohne Mac neu gebaut (2026-11-21)
 
