@@ -3,11 +3,24 @@
 Stand 2026-11-21. Ein Image, das man auf eine SD-Karte schreibt. Der Pi 4 startet damit direkt
 in QRX OS One, wie früher Amithlon: Linux ist nur der Unterbau und nie zu sehen.
 
-**Fertiges Image:** `dist/pi4/QRX-ARMithlon-Pi4-2026-11-21c.img.xz` (95 MB, entpackt 1280 MiB;
-SHA256 beider Formen in der `.sha256`-Datei daneben). Darauf **beide Systeme**: QRX OS One (32 Bit,
-Standard) und QRX OS One 64 (68100EC64, SMP) auf der Boot-Partition; umschalten mit
-`C:QRXSystem 64` bzw. `32` oder `system=` in `qrx.txt`. Dazu die rekonstruierten Hintergrundbilder,
-Design-Icons und Mauszeiger. Ältere Images liegen daneben.
+**Fertiges Image:** `dist/pi4/QRX-ARMithlon-Pi4-2026-11-21d.img.xz` (96 MB, entpackt 1283 MiB;
+SHA256 beider Formen in der `.sha256`-Datei daneben).
+
+- **Systeme:** QRX OS One (32 Bit, Standard) und QRX OS One 64 (68100EC64, SMP) auf der
+  Boot-Partition. Umschalten mit `C:QRXSystem 64` bzw. `32` oder `system=` in `qrx.txt`.
+- **Ausstattung:** die rekonstruierten Hintergrundbilder, Design-Icons und Mauszeiger.
+- **Neu gegenüber `21c`:**
+  - Start-Stillstand des 32-Bit-Systems behoben;
+  - QRX OS One 64 schläft im Leerlauf;
+  - geordnete Speicherzugriffe des 64-Bit-JIT nur bei mehreren aktiven Kernen;
+  - erweiterter x86-JIT;
+  - Windows-Programme im 32-Bit-System: `C:qrx-win32`, `C:qrx-i386`, Testprogramme in `SYS:X86`.
+- **Geprüft** (aus dem Image entnommen, Pi-Engine des Images unter qemu Cortex-A72):
+  - 32-Bit-System startet, `C:qrx-win32 SYS:X86/dxtest.exe` meldet RESULT PASS;
+  - QRX OS One 64 mit 2 Kernen: Start, Shell-Runden, Herunterfahren.
+
+  Auf echter Pi-Hardware noch nicht.
+- Ältere Images liegen daneben.
 
 ## Was geprüft ist und was nicht
 
