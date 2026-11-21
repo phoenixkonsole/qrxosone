@@ -515,6 +515,26 @@ Stücke (`rep_fast`).
 **Geprüft:** Der Differenztest erzeugt `REP MOVS`/`STOS` aller Größen mit Überlappung, Anzahl 0,
 `DF=1` und Seitengrenze. 200 000 Fälle stimmen mit dem Interpreter überein.
 
+### 64-Bit-JIT: kürzere Prüfungen je Speicherzugriff (2026-11-21)
+
+Vor jedem Zugriff prüfte der 68100EC64-JIT Bereich (3 Befehle) und Ausrichtung (2 Befehle),
+bei Schreibzugriffen zusätzlich die Code-Tabelle (3 Befehle).
+
+- **Bereich:** `RSIZE` hält ab dem Blockeintritt `ram_size − 8`, ein `cmp` + `b.hi` genügt
+  (2 Befehle). Die letzten 8 Byte des RAMs gehen an den Interpreter.
+- **Ausrichtung:** Ein unausgerichteter Lesezugriff ist auch im Interpreter ein gewöhnlicher
+  Big-Endian-Zugriff, und `LDR` erledigt ihn auf dem Pi. Die Prüfung bleibt deshalb nur bei
+  Schreibzugriffen (die Code-Tabelle wird beim ersten Byte geprüft) und im geordneten Modus
+  (`LDAR`/`STLR` brauchen Ausrichtung).
+- **Wirkung:** Ein Lesezugriff im einfachen Modus braucht 5 statt 8 Befehle, ein
+  Schreibzugriff einen weniger.
+
+**Geprüft:**
+- Alle EC64-Tests, darunter JIT gegen Interpreter.
+- Die feste Aufgabe (Start, Shell-Runden, `Shutdown`) mit 1 und 2 Kernen unter qemu Cortex-A72.
+- Das System im Prüfmodus `QRX_EC64_JIT_VERIFY=1`: Jeder Block läuft in JIT und Interpreter;
+  175 Mio. Befehle bis `Shutdown` ohne Abweichung.
+
 ### x87-Vergleiche im x86-JIT (2026-11-21)
 
 Gleitkomma-Vergleiche laufen jetzt nativ statt einzeln im Interpreter (`K_FCMP`):

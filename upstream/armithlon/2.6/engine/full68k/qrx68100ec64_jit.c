@@ -194,13 +194,17 @@ static void leave_before(T *t, uint32_t *site)
     if (t->nstub >= MAX_STUBS) { t->bad = true; return; }
     t->stub[t->nstub++] = (Stub){ site, t->start, t->done, t->pend_start };
 }
-/* The address in ra must be inside RAM for s bytes, aligned, and for a write not in code. */
+static bool ordered(const T *t);
+/* The address in ra must be inside RAM for s bytes (s <= 8; RSIZE holds the RAM size minus 8,
+ * so the last 8 bytes of RAM go to the interpreter), and for a write not in code.
+ * Alignment: a misaligned read in RAM is a plain big-endian read in the interpreter too, and
+ * LDR does it on the host; writes stay aligned (the code map is checked at their first byte
+ * only) and so do the ordered accesses (LDAR/STLR fault when misaligned). */
 static void check(T *t, unsigned ra, unsigned s, bool write)
 {
-    sub_i(t, S0, RSIZE, s);
-    cmp_r(t, ra, S0);
+    cmp_r(t, ra, RSIZE);
     leave_before(t, bcond_site(t, C_HI));
-    if (s > 1) { tst_i_low(t, ra, s == 2 ? 1 : s == 4 ? 2 : 3); leave_before(t, bcond_site(t, C_NE)); }
+    if (s > 1 && (write || ordered(t))) { tst_i_low(t, ra, s == 2 ? 1 : s == 4 ? 2 : 3); leave_before(t, bcond_site(t, C_NE)); }
     if (write) {
         lsr_i(t, S0, ra, QEC64_CODE_SHIFT);
         ldrb_reg(t, S0, RMAP, S0);
@@ -210,11 +214,10 @@ static void check(T *t, unsigned ra, unsigned s, bool write)
 /* A range [ra, ra + n) of s-byte accesses, n <= 128, ra aligned to s */
 static void check_range(T *t, unsigned ra, unsigned n, unsigned s, bool write)
 {
-    mov_imm(t, S0, n);
-    sub_r(t, S0, RSIZE, S0);
-    cmp_r(t, ra, S0);
+    if (n <= 8) cmp_r(t, ra, RSIZE);
+    else { sub_i(t, S0, RSIZE, n - 8); cmp_r(t, ra, S0); }
     leave_before(t, bcond_site(t, C_HI));
-    if (s > 1) { tst_i_low(t, ra, s == 2 ? 1 : s == 4 ? 2 : 3); leave_before(t, bcond_site(t, C_NE)); }
+    if (s > 1 && (write || ordered(t))) { tst_i_low(t, ra, s == 2 ? 1 : s == 4 ? 2 : 3); leave_before(t, bcond_site(t, C_NE)); }
     if (write) {
         lsr_i(t, S0, ra, QEC64_CODE_SHIFT);
         ldrb_reg(t, S0, RMAP, S0);
@@ -1171,6 +1174,7 @@ static void prologue(T *t)
     mov_imm(t, RDONE, 0);
     ldr_x(t, RRAM, RCPU, (unsigned)offsetof(qec64_cpu, ram));
     ldr_x(t, RSIZE, RCPU, (unsigned)offsetof(qec64_cpu, ram_size));
+    sub_i(t, RSIZE, RSIZE, 8);                    /* see check() */
     ldr_x(t, RMAP, RCPU, (unsigned)offsetof(qec64_cpu, code_map));
 }
 static void epilogue(T *t)
