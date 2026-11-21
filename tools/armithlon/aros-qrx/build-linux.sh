@@ -34,16 +34,27 @@ cd "$B"
 [ -f config.status ] || CC=gcc CXX=g++ "$SRC/configure" --target=qrx-m68k64 --with-toolchain=llvm \
     --with-aros-toolchain=yes --with-aros-toolchain-install="$TC" --disable-crosstools
 J="-j${QRX_BUILD_JOBS:-4}"
-# AROS' parallel make sometimes races copying the same header twice ("File exists"): a failed
-# step runs once more with one job
-# step runs once more with one job. A -quick target that stops with "Error 20" while generating
-# includes lacks its include/{proto,clib,defines,inline} directories under gen/ (README): those
-# are made before the second try.
-include_dirs() {
-  find bin/native-m68k64/gen -type d -name include 2>/dev/null | while read -r d; do
-    mkdir -p "$d/proto" "$d/clib" "$d/defines" "$d/inline"; done
+# AROS' parallel make sometimes races copying the same header twice ("File exists"), and a -quick
+# target can stop with "Error 20" while generating includes, its include/{proto,clib,defines,inline}
+# directories under gen/ missing (README). A failed step runs again with one job, up to eight
+# times, after making the directories its error names.
+mk() {
+  echo "== gmake $*"
+  gmake $J "$@" && return
+  local try out
+  for try in 1 2 3 4 5 6 7 8; do
+    echo "== again with one job ($try): $*"
+    out=$(mktemp)
+    if gmake -j1 "$@" 2>&1 | tee "$out"; then
+      [ "${PIPESTATUS[0]}" = 0 ] && { rm -f "$out"; return; }
+    fi
+    # .../gen/<module>/include/proto/<name>.h: No such file or directory
+    grep -o '/[^ ]*/include/proto/[^ :]*\.h: No such file' "$out" | sed 's|/proto/[^/]*$||' | sort -u |
+      while read -r d; do mkdir -p "$d/proto" "$d/clib" "$d/defines" "$d/inline"; done
+    rm -f "$out"
+  done
+  return 1
 }
-mk() { echo "== gmake $*"; gmake $J "$@" || { echo "== again with one job: $*"; include_dirs; gmake -j1 "$@"; }; }
 
 # 3. the kernel and the kickstart modules
 mk kernel-utility kernel-qrx-m68k64
