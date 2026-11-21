@@ -21,6 +21,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <math.h>
 
 static int testing;                 /* QRX_LIO_TEST: no hardware */
 static const char *input_dir = "/dev/input";
@@ -38,6 +39,7 @@ static uint32_t *frame_mem;                       /* the frame as the caller wri
 static unsigned frame_w, frame_h, prev_y0, prev_y1;
 static unsigned dst_x, dst_y, dst_w, dst_h;       /* where the frame lands on the screen */
 static int released;                              /* our terminal is not shown: hands off */
+static int pointer_shape = -2, ptr_x, ptr_y, hot_x, hot_y;  /* the pointer: shape, frame pixels */
 
 static int xioctl(int fd, unsigned long req, void *arg)
 {
@@ -248,6 +250,17 @@ int qrx_lio_capture(const char *path)
             uint32_t v = 0;
             if (x >= dst_x && x < dst_x + dst_w && y >= dst_y && y < dst_y + dst_h)
                 v = frame_mem[(size_t)((uint64_t)(y - dst_y) * frame_h / dst_h) * frame_w + (uint64_t)(x - dst_x) * frame_w / dst_w];
+            if (pointer_shape >= 0 && cursor_buf.map && frame_w) {      /* the pointer on top */
+                int cx = (int)x - ((int)dst_x + (int)((int64_t)ptr_x * dst_w / frame_w) - hot_x);
+                int cy = (int)y - ((int)dst_y + (int)((int64_t)ptr_y * dst_h / frame_h) - hot_y);
+                if (cx >= 0 && cy >= 0 && cx < 64 && cy < 64) {
+                    uint32_t c = ((uint32_t *)(void *)cursor_buf.map)[cy * 64 + cx], a = c >> 24;
+                    uint32_t r = (c >> 16 & 255) + (v >> 16 & 255) * (255 - a) / 255;
+                    uint32_t g = (c >> 8 & 255) + (v >> 8 & 255) * (255 - a) / 255;
+                    uint32_t bl = (c & 255) + (v & 255) * (255 - a) / 255;
+                    v = r << 16 | g << 8 | bl;
+                }
+            }
             row[x * 3] = (uint8_t)(v >> 16); row[x * 3 + 1] = (uint8_t)(v >> 8); row[x * 3 + 2] = (uint8_t)v;
         }
         fwrite(row, 1, (size_t)screen_w * 3, f);
@@ -258,37 +271,81 @@ int qrx_lio_capture(const char *path)
 }
 
 /* ------------------------------------------------------------------ pointer (hardware cursor) */
-static int pointer_shape = -1, ptr_x, ptr_y;
+/* The pointers of QRX OS One's desktop (QRXDesktopPrefs), as the Mac drew them
+ * (macos/qrx_aros_window.m): 0 the classic arrow, 1 "QRX neon", 2 "Amiga style", 3 crosshair,
+ * 4 "Large white". Drawn with 4x4 samples a pixel; premultiplied ARGB for the cursor plane. */
+static int in_poly(const float *xy, int n, float x, float y)
+{
+    int in = 0;
+    for (int i = 0, j = n - 1; i < n; j = i++) {
+        float xi = xy[2 * i], yi = xy[2 * i + 1], xj = xy[2 * j], yj = xy[2 * j + 1];
+        if ((yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) in = !in;
+    }
+    return in;
+}
+static float seg_dist(float px, float py, float ax, float ay, float bx, float by)
+{
+    float dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy, t = l > 0 ? ((px - ax) * dx + (py - ay) * dy) / l : 0;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    float qx = ax + t * dx - px, qy = ay + t * dy - py;
+    return sqrtf(qx * qx + qy * qy);
+}
 static void cursor_image(int shape)
 {
     uint32_t *px = (uint32_t *)(void *)cursor_buf.map;
+    unsigned stride = cursor_buf.pitch / 4;
     memset(px, 0, cursor_buf.size);
-    if (shape == 1) {               /* arrow, black edge, white inside; hot spot top left */
-        static const char *arrow[] = {
-            "X", "XX", "X.X", "X..X", "X...X", "X....X", "X.....X", "X......X", "X.......X", "X........X",
-            "X.........X", "X......XXXX", "X...X..X", "X..XX..X", "X.X  X..X", "XX   X..X", "X     X..X",
-            "      X..X", "       XX" };
-        for (unsigned y = 0; y < sizeof arrow / sizeof arrow[0]; y++)
-            for (unsigned x = 0; arrow[y][x]; x++)
-                if (arrow[y][x] != ' ')
-                    px[y * (cursor_buf.pitch / 4) + x] = arrow[y][x] == 'X' ? 0xFF000000u : 0xFFFFFFFFu;
-    } else if (shape == 2) {        /* crosshair, hot spot in the middle (16,16) */
-        for (unsigned i = 4; i < 29; i++) if (i < 14 || i > 18) {
-            px[16 * (cursor_buf.pitch / 4) + i] = px[i * (cursor_buf.pitch / 4) + 16] = 0xFFFFFFFFu;
-            px[15 * (cursor_buf.pitch / 4) + i] = px[i * (cursor_buf.pitch / 4) + 15] = 0xFF000000u;
+    float k = shape == 4 ? 1.5f : 1.0f;            /* 36 instead of 24 points */
+    static const float arrow[] = { 2,2, 2,19, 7,15, 11,22, 14,20.5f, 10.5f,14, 16,13.5f };
+    float poly[14];
+    for (int i = 0; i < 14; i++) poly[i] = arrow[i] * k;
+    uint32_t fill, line;
+    float lw = 1.4f * k;
+    if (shape == 1) { fill = 0x0D1426; line = 0x38E6C7; }          /* QRX neon */
+    else if (shape == 2) { fill = 0xF24026; line = 0x000000; }     /* Amiga style */
+    else { fill = 0xFFFFFF; line = 0x000000; }                      /* classic, large white */
+    hot_x = hot_y = shape == 3 ? 12 : (int)(2 * k);
+    for (int y = 0; y < 40; y++)
+        for (int x = 0; x < 40; x++) {
+            unsigned r = 0, g = 0, b = 0, n = 0;
+            for (int sy = 0; sy < 4; sy++)
+                for (int sx = 0; sx < 4; sx++) {
+                    float fx = x + (sx + 0.5f) / 4, fy = y + (sy + 0.5f) / 4;
+                    uint32_t c;
+                    int hit = 0;
+                    if (shape == 3) {              /* crosshair: four arms and a ring, teal, 2 wide */
+                        float d = fabsf(sqrtf((fx - 12) * (fx - 12) + (fy - 12) * (fy - 12)) - 4);
+                        hit = d <= 1 || seg_dist(fx, fy, 12, 1, 12, 9) <= 1 || seg_dist(fx, fy, 12, 15, 12, 23) <= 1 ||
+                              seg_dist(fx, fy, 1, 12, 9, 12) <= 1 || seg_dist(fx, fy, 15, 12, 23, 12) <= 1;
+                        c = 0x38E6C7;
+                    } else {
+                        float d = 1e9f;
+                        for (int i = 0, j = 6; i < 7; j = i++) {
+                            float e = seg_dist(fx, fy, poly[2 * j], poly[2 * j + 1], poly[2 * i], poly[2 * i + 1]);
+                            if (e < d) d = e;
+                        }
+                        if (d <= lw / 2) { hit = 1; c = line; }
+                        else if (in_poly(poly, 7, fx, fy)) { hit = 1; c = fill; }
+                    }
+                    if (!hit) continue;
+                    r += c >> 16 & 255; g += c >> 8 & 255; b += c & 255; n++;
+                }
+            if (!n) continue;
+            /* premultiplied: the sum over 16 samples is colour x coverage */
+            px[y * stride + x] = (n * 255 / 16) << 24 | (r / 16) << 16 | (g / 16) << 8 | (b / 16);
         }
-    }
 }
 static void cursor_apply(int set_image)
 {
     if (drm < 0 || !have_cursor || released || !frame_w) return;
-    int hot = pointer_shape == 2 ? 16 : 0;
-    int sx = (int)dst_x + (int)((int64_t)ptr_x * dst_w / frame_w) - hot;
-    int sy = (int)dst_y + (int)((int64_t)ptr_y * dst_h / frame_h) - hot;
-    struct drm_mode_cursor2 c = { .crtc_id = crtc_id, .x = sx, .y = sy, .hot_x = hot, .hot_y = hot };
+    if (set_image && pointer_shape >= 0) cursor_image(pointer_shape);
+    int sx = (int)dst_x + (int)((int64_t)ptr_x * dst_w / frame_w) - hot_x;
+    int sy = (int)dst_y + (int)((int64_t)ptr_y * dst_h / frame_h) - hot_y;
+    struct drm_mode_cursor2 c = { .crtc_id = crtc_id, .x = sx, .y = sy, .hot_x = hot_x, .hot_y = hot_y };
     if (set_image) {
         c.flags = DRM_MODE_CURSOR_BO | DRM_MODE_CURSOR_MOVE;
-        if (pointer_shape > 0) { cursor_image(pointer_shape); c.handle = cursor_buf.handle; c.width = 64; c.height = 64; }
+        if (pointer_shape >= 0) { c.handle = cursor_buf.handle; c.width = 64; c.height = 64; }
     } else c.flags = DRM_MODE_CURSOR_MOVE;
     xioctl(drm, DRM_IOCTL_MODE_CURSOR2, &c);
 }
@@ -296,8 +353,12 @@ void qrx_lio_pointer(int shape, int x, int y)
 {
     int moved = x != ptr_x || y != ptr_y;
     ptr_x = x; ptr_y = y;
-    if (shape != pointer_shape) { pointer_shape = shape; cursor_apply(1); }
-    else if (moved && shape > 0) cursor_apply(0);
+    if (shape != pointer_shape) {
+        pointer_shape = shape;
+        if (testing && shape >= 0) cursor_image(shape);       /* for the screen capture */
+        cursor_apply(1);
+    }
+    else if (moved && shape >= 0) cursor_apply(0);
 }
 void qrx_lio_pointer_pos(int *x, int *y) { *x = ptr_x; *y = ptr_y; }
 
@@ -504,6 +565,8 @@ int qrx_lio_open(void)
         input_dir = t;
         const char *sz = getenv("QRX_LIO_TEST_SIZE");
         if (sz) sscanf(sz, "%ux%u", &screen_w, &screen_h);
+        cursor_buf.pitch = 64 * 4; cursor_buf.size = 64 * 64 * 4;
+        cursor_buf.map = calloc(1, cursor_buf.size);
     } else {
         if (!find_output()) { fprintf(stderr, "[LIO] no connected screen on /dev/dri/card*\n"); return 0; }
         if (!buf_create(&primary[0], screen_w, screen_h) || !buf_create(&primary[1], screen_w, screen_h) || !set_crtc()) {
@@ -540,6 +603,7 @@ void qrx_lio_close(void)
     ndev = 0;
     if (inotify_fd >= 0) close(inotify_fd);
     inotify_fd = -1;
+    if (testing) { free(cursor_buf.map); memset(&cursor_buf, 0, sizeof cursor_buf); }
     if (drm >= 0) {
         buf_free(&frame_buf[0]); buf_free(&frame_buf[1]); buf_free(&cursor_buf);
         buf_free(&primary[0]); buf_free(&primary[1]);

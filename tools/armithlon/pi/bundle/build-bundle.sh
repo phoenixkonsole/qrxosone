@@ -56,6 +56,8 @@ cp "$REPO/.build/qrx-desktop/QRXDesktopPrefs.hunk" "$S/QRX/C/QRXDesktopPrefs"
 for f in QRXWelcome QRXWriter QRXSpreadsheet QRXPresenter QRXHardware QRXSettings QRXIPFSPrefs; do
   cp "$REPO/.build/qrx-apps/$f" "$S/QRX/C/$f"
 done
+# wallpapers and design icons (gen-assets.py: the Linux port of gen-assets.swift; fonts-inter)
+python3 "$REPO/tools/armithlon/desktop/gen-assets.py" "$S/QRX" >/dev/null
 # sound: the host AHI driver is the default mode (install-ahi.sh does the same on the Mac)
 A="$OUT/ahi"
 cp "$A/qrxhost.audio" "$S/Devs/AHI/qrxhost.audio"

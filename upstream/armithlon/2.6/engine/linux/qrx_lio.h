@@ -39,7 +39,8 @@ uint32_t *qrx_lio_frame_begin(unsigned w, unsigned h, unsigned *pitch);
 void qrx_lio_frame_end(unsigned y0, unsigned y1);
 /* Next input event, waiting up to timeout_ms; 0 when none came */
 int qrx_lio_poll(qrx_lio_event *e, int timeout_ms);
-/* The pointer: 0 hidden, 1 arrow, 2 crosshair; at frame pixel x, y */
+/* The pointer: -1 hidden; 0 arrow, 1 QRX neon, 2 Amiga style, 3 crosshair, 4 large white (the
+ * desktop's choices); at frame pixel x, y */
 void qrx_lio_pointer(int shape, int x, int y);
 /* The pointer position the input moved to, in frame pixels */
 void qrx_lio_pointer_pos(int *x, int *y);

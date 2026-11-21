@@ -136,7 +136,11 @@ int main(void)
     assert(w == 320 && h == 200);
     expect(rgb, w, 10, 100, 0, 0, 0);               /* letterbox */
     expect(rgb, w, 310, 100, 0, 0, 0);
-    expect(rgb, w, 27, 0, 0, 0, 255);               /* frame pixel 0,0 */
+    expect(rgb, w, 40, 5, 12, 20, 251);             /* frame pixel 3,1 (index 4), beside the pointer at 0,0 */
+    {   /* the pointer (the classic arrow, hot spot 2,2) is drawn over the frame's top left corner */
+        const uint8_t *p = rgb + ((size_t)5 * w + 28) * 3;
+        assert(p[0] > 0xE0 && p[1] > 0xE0 && p[2] > 0xE0);     /* its white inside */
+    }
     {   /* frame pixel 32,24 lands at 26 + 32 * 267 / 64 = 159, 24 * 200 / 48 = 100 */
         unsigned i = 32 + 24;
         expect(rgb, w, 160, 101, (i * 3) & 255, (i * 5) & 255, 255 - i);

@@ -35,7 +35,7 @@ static size_t ram_bytes;
 static int running;
 static atomic_uint_fast64_t present_fb, present_geom;
 static const uint32_t *present_clut;
-static atomic_uint pointer_want = 1;
+static atomic_uint pointer_want = 0;
 static uint8_t keys_down[128];
 static unsigned buttons;
 static uint64_t audio_frames_heard;
@@ -350,7 +350,8 @@ int qrx_aros_window_pump(void)
         }
     }
     qrx_lio_pointer_pos(&x, &y);
-    qrx_lio_pointer(atomic_load(&pointer_want) == 3 ? 2 : 1, x, y);
+    unsigned pw = atomic_load(&pointer_want);
+    qrx_lio_pointer(pw > 4 ? 0 : (int)pw, x, y);
     return running;
 }
 

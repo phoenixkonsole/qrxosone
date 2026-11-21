@@ -466,6 +466,9 @@ system=root/'.build/bundle/SystemFull/QRX'
 if system.is_dir() and sys.platform=='darwin':
  subprocess.run(['swiftc','-O',str(extra/'gen-assets.swift'),'-o',str(out/'gen-assets')],check=True)
  subprocess.run([str(out/'gen-assets'),str(system)],check=True)
+elif system.is_dir():
+ # Linux: the Python port draws the same designs (Inter instead of Avenir Next)
+ subprocess.run([sys.executable,str(extra/'gen-assets.py'),str(system)],check=True)
  # Install both into the tree ARMithlon.app actually launches.
  shutil.copy(out/'QRXDesktop.hunk',system/'C/QRXDesktop')
  shutil.copy(out/'QRXDesktopPrefs.hunk',system/'C/QRXDesktopPrefs')
