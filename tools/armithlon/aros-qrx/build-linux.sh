@@ -82,5 +82,7 @@ Z=bin/native-m68k64/Ports/zlib/zlib
 cp "$Z/zconf.h.in" "$Z/zconf.h"
 sed -i 's|^#ifdef HAVE_UNISTD_H .*|#if 1|; s|^#ifdef HAVE_STDARG_H .*|#if 1|' "$Z/zconf.h"
 mk linklibs-z-static workbench-libs-z-quick
+# coolimages.library links the coolimagesstatic linklib (likewise not in README's order)
+mk linklibs-coolimagesstatic
 mk workbench-libs-asl-catalogs workbench-libs-coolimages-quick workbench-libs-asl-quick
 echo "QRX OS One 64 built: $B/bin/native-m68k64"
