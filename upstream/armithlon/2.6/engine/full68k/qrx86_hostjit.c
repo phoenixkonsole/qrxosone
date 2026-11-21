@@ -65,6 +65,7 @@ static struct {
     size_t nlinks, caplinks;
     QRXFullCPU *cpu;
     uint64_t blocks, flushes, kills, interp_ins, volatile_pages, enters;
+    uint64_t rep_fast, rep_elems;    /* REP MOVS/STOS portions done by xj_rep_fast, their elements */
 } xj;
 
 typedef void (*xj_enter_fn)(x86cpu *c, void *code, uintptr_t *rt);
@@ -1422,11 +1423,85 @@ static void gen_ins(XT *t, XIns *x, int *nz, XOut *outs, int *nouts) {
 /* ---- runtime ---- */
 /* next: where the block goes on. The interpreter can stay elsewhere: REP string
  * instructions run in portions and leave eip on themselves until the count is done. */
+/* REP MOVS and REP STOS (bytes, words, dwords; forward, flat segments): one portion of at
+ * most 4096 elements, as the interpreter's string_op does it, but copied or filled a page
+ * piece at a time with memmove/memset through the JIT's page tables instead of one element
+ * at a time. A page without a table entry (not mapped, read only, holding code) or an
+ * element across two pages: the interpreter goes on from there, so faults and code writes
+ * stay its business. Overlapping forward copies go element by element, as on x86. */
+static bool xj_rep_fast(x86cpu *c, uint32_t eip, uint32_t next) {
+    const uint8_t *q;
+    uint32_t room, pos = 0, sz = 4;
+    bool rep = false;
+    if (!xj_fetch_ok(eip, &q, &room)) return false;
+    for (; pos < room && pos < 4; pos++) {
+        if (q[pos] == 0xF3 || q[pos] == 0xF2) rep = true;
+        else if (q[pos] == 0x66) sz = 2;
+        else break;
+    }
+    if (!rep || pos >= room) return false;
+    uint8_t op = q[pos];
+    bool movs = op == 0xA4 || op == 0xA5;
+    if (!movs && op != 0xAA && op != 0xAB) return false;
+    if (op == 0xA4 || op == 0xAA) sz = 1;
+    if ((c->eflags & X86_DF) || c->sbase[X86_ES] || (movs && c->sbase[X86_DS])) return false;
+    uint32_t cnt = c->r[X86_ECX], todo = cnt < 4096u ? cnt : 4096u, done = 0;
+    uint32_t val = c->r[X86_EAX];
+    c->cur_eip = eip;
+    while (done < todo) {
+        uint32_t di = c->r[X86_EDI], si = c->r[X86_ESI];
+        uintptr_t wb = xj.wt[di >> 12], rb = 0;
+        if (!wb) break;
+        uint32_t k = (0x1000u - (di & 0xFFFu)) / sz;
+        if (movs) {
+            rb = xj.rt[si >> 12];
+            if (!rb) break;
+            uint32_t ks = (0x1000u - (si & 0xFFFu)) / sz;
+            if (ks < k) k = ks;
+        }
+        if (k > todo - done) k = todo - done;
+        if (!k) break;                               /* an element across two pages */
+        uint8_t *d = (uint8_t *)(wb + di);
+        uint32_t bytes = k * sz;
+        if (movs) {
+            const uint8_t *src = (const uint8_t *)(rb + si);
+            if (d > src && d < src + bytes) for (uint32_t i = 0; i < k; i++) memmove(d + i * sz, src + i * sz, sz);
+            else memmove(d, src, bytes);
+            c->r[X86_ESI] = si + bytes;
+        } else if (sz == 1) memset(d, (int)(val & 0xFFu), bytes);
+        else {
+            uint8_t v[4] = { (uint8_t)val, (uint8_t)(val >> 8), (uint8_t)(val >> 16), (uint8_t)(val >> 24) };
+            if (v[0] == v[1] && (sz == 2 || (v[0] == v[2] && v[0] == v[3]))) memset(d, v[0], bytes);
+            else {                                       /* one element, then doubling copies */
+                uint32_t have = sz;
+                memcpy(d, v, sz);
+                while (have < bytes) {
+                    uint32_t n = have < bytes - have ? have : bytes - have;
+                    memcpy(d + have, d, n);
+                    have += n;
+                }
+            }
+        }
+        c->r[X86_EDI] = di + bytes;
+        c->r[X86_ECX] -= k;
+        done += k;
+    }
+    if (todo && !done) return false;                 /* nothing for us: all to the interpreter */
+    xj.rep_fast++;
+    xj.rep_elems += done;
+    if (done < todo) { c->eip = eip; exec_one(c); return true; }
+    if (todo == 4096u) {                             /* string_op's accounting of a full portion */
+        if (c->left >= todo) c->left -= todo;
+        else { c->icount += todo - c->left; c->left = 0; }
+    }
+    c->eip = c->r[X86_ECX] ? eip : next;             /* more to do: the same instruction again */
+    return true;
+}
 static uint64_t xj_interp_helper(x86cpu *c, uint32_t eip, uint32_t next) {
     c->eip = eip;
     c->left--;
     xj.interp_ins++;
-    exec_one(c);
+    if (!xj_rep_fast(c, eip, next)) exec_one(c);
     return (uint64_t)(c->xj_abort != 0 || c->eip != next);
 }
 static uint64_t xj_cond_helper(x86cpu *c, uint32_t cc) { return (uint64_t)cond(c, (int)cc); }
@@ -2048,8 +2123,9 @@ static int xj_run(x86cpu *c, uint32_t stop_eip) {
     return c->fault;
 }
 static void xj_report(void) {
-    if (xj.blocks) fprintf(stderr, "[QRX86-JIT] blocks=%llu enters=%llu interp=%llu kills=%llu volatile=%llu flushes=%llu code=%zuKB\n",
+    if (xj.blocks) fprintf(stderr, "[QRX86-JIT] blocks=%llu enters=%llu interp=%llu kills=%llu volatile=%llu flushes=%llu code=%zuKB rep_fast=%llu/%llu elements\n",
         (unsigned long long)xj.blocks, (unsigned long long)xj.enters, (unsigned long long)xj.interp_ins, (unsigned long long)xj.kills,
-        (unsigned long long)xj.volatile_pages, (unsigned long long)xj.flushes, (size_t)((char *)xj.next - (char *)xj.arena) / 1024u);
+        (unsigned long long)xj.volatile_pages, (unsigned long long)xj.flushes, (size_t)((char *)xj.next - (char *)xj.arena) / 1024u,
+        (unsigned long long)xj.rep_fast, (unsigned long long)xj.rep_elems);
 }
 #endif

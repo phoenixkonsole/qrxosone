@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <sys/ucontext.h>
 #include <unistd.h>
+#include <time.h>
 
 #ifndef QRX86_HOST_JIT_ACTIVE
 int main(void) { puts("skipped: not an AArch64 host"); return 0; }
@@ -91,7 +92,7 @@ static void gen_flagged(void) {
 }
 static void gen_one(void) {
     unsigned sz;
-    switch (pick(28)) {
+    switch (pick(30)) {
     case 0: case 1: sz = osz(); c8((pick(8) << 3) | (pick(2) << 1) | (sz != 8)); modrm(rsz(sz), sz, true); break;
     case 2: sz = osz(); c8(sz == 8 ? 0x80 : 0x81); modrm(pick(8), sz, true); imm_sz(sz); break;
     case 3: sz = osz(); c8(0x88 | (pick(2) << 1) | (sz != 8)); modrm(rsz(sz), sz, true); break;
@@ -180,6 +181,18 @@ static void gen_one(void) {
             if (depth > 6) { c8(0xDD); c8(0xD8); depth--; }
         }
         for (k = 0; k < depth; k++) { c8(0xDD); c8(0x9B); c32(128 + 8 * pick(8)); }            /* fstp m64 */
+        break;
+    }
+    case 27: case 28: {                                                  /* REP MOVS, REP STOS of every size */
+        unsigned op = (unsigned[]){ 0xA4, 0xA5, 0xAA, 0xAB }[pick(4)], back = pick(5) == 0;
+        c8(0x60);                                                        /* pusha */
+        c8(0x8D); c8(0x73); c8(back ? 96 + pick(32) : pick(96));         /* lea esi,[ebx+d]: may overlap */
+        c8(0x8D); c8(0x7B); c8(back ? 96 + pick(32) : pick(96));         /* lea edi,[ebx+d] */
+        c8(0xB9); c32(pick(8) ? pick(24) : 0);                           /* mov ecx,n (sometimes 0) */
+        if (back) c8(0xFD);                                              /* std */
+        c8(0xF3); if ((op & 1) && pick(3) == 0) c8(0x66); c8(op);
+        if (back) c8(0xFC);                                              /* cld */
+        c8(0x61);                                                        /* popa */
         break;
     }
     default: gen_flagged(); break;
@@ -344,11 +357,43 @@ static void test_rep_large(void) {
     assert(host.r[X86_EDI] == BIG + BYTES);
     puts("large REP string instructions complete");
 }
+/* qrx86_jit_tests bench: REP STOSD, REP MOVSD and REP MOVSB over 4 MiB through the JIT, in MB/s
+ * (for the Pi: what a game's frame buffer copies and clears cost). */
+static double now_s(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (double)t.tv_sec + t.tv_nsec * 1e-9; }
+static void bench_rep(void) {
+    enum { BIG = 0x800000u, BYTES = 0x400000u, ROUNDS = 8 };
+    static const struct { const char *name; uint8_t op; unsigned esz; } k[3] = {
+        { "REP STOSD", 0xAB, 4 }, { "REP MOVSD", 0xA5, 4 }, { "REP MOVSB", 0xA4, 1 } };
+    x86_map(&host, BIG, BYTES, 1);
+    for (uint32_t a = BIG; a < BIG + BYTES; a += 0x1000) xj_table_page(a >> 12, pg(&host, a));
+    for (int i = 0; i < 3; i++) {
+        unsigned half = k[i].op == 0xAB ? BYTES : BYTES / 2;
+        cp = 0;
+        memset(code, 0x90, sizeof code);
+        c8(0xB9); c32(half / k[i].esz);                     /* mov ecx,count */
+        c8(0xBE); c32(BIG);                                 /* mov esi,BIG */
+        c8(0xBF); c32(k[i].op == 0xAB ? BIG : BIG + BYTES / 2);   /* mov edi */
+        c8(0xF3); c8(k[i].op);
+        c8(0xE9); c32(END - (CODE + cp + 4));
+        double t0 = now_s();
+        for (int r = 0; r < ROUNDS; r++) {
+            xj_kill_page(CODE >> 12);
+            xj.page_kills[CODE >> 12] = 0;
+            reset(&host, 1);
+            host.left = host.lbase = 0x7FFFFFFF;
+            (void)xj_run(&host, END);
+            assert(!host.fault);
+        }
+        double dt = now_s() - t0;
+        printf("%s: %.0f MB/s\n", k[i].name, (double)half * ROUNDS / dt / 1e6);
+    }
+}
 int main(int argc, char **argv) {
     struct sigaction sa = {0};
     sa.sa_sigaction = on_crash; sa.sa_flags = SA_SIGINFO;
     sigaction(SIGILL, &sa, NULL); sigaction(SIGSEGV, &sa, NULL); sigaction(SIGBUS, &sa, NULL);
-    unsigned cases = argc > 1 ? (unsigned)atoi(argv[1]) : 200000u;
+    bool bench = argc > 1 && !strcmp(argv[1], "bench");
+    unsigned cases = bench ? 0u : argc > 1 ? (unsigned)atoi(argv[1]) : 200000u;
     unsigned failed = 0;
     x86_init(&host);
     x86_init(&ref);
@@ -366,6 +411,7 @@ int main(int argc, char **argv) {
         c8(0xE9); c32(END - (CODE + cp + 4));
         failed += (unsigned)run_case(i + 1);
     }
+    if (bench) { bench_rep(); xj_report(); return 0; }
     test_self_modifying();
     test_budget();
     test_rep_large();
