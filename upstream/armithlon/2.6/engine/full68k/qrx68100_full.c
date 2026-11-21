@@ -2397,15 +2397,31 @@ static uint64_t host_us(void) {
     clock_gettime(CLOCK_MONOTONIC,&t);
     return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u;
 }
-void qrx_full_set_realtime(QRXFullCPU *c, bool (*cpu_stopped)(void)) {
-    if(!c)return;
-    c->realtime=true;
-    c->cpu_stopped=cpu_stopped;
-    c->realtime_base_us=host_us();
-}
 /* PAL master rate used by the beam (454 x 313 x 50) and the CIAs (/10). */
 #define QRX_REALTIME_HZ UINT64_C(7105000)
-static inline void realtime_clock(QRXFullCPU *c) {
+/* Realtime: the cycles (beam, VBlank, the cycle-driven CIAs, the floppy) follow the host's clock,
+ * so guest time is wall time however fast the CPU runs. Not during the boot, though: some CIA
+ * timers count instructions and others cycles, and with the cycles on the host's clock their ratio
+ * depends on the host's speed. Early in the boot the AROS ROM then sometimes lost a timer.device
+ * interrupt and idled forever before the first floppy read (about one start in three natively,
+ * every start under qemu). The first QRX_REALTIME_AFTER instructions (default 64 million, past
+ * the system disk's mount) therefore run on the guest's own clock, as without realtime and
+ * deterministic; then the host's clock takes over from the guest's time at that moment. */
+void qrx_full_set_realtime(QRXFullCPU *c, bool (*cpu_stopped)(void)) {
+    if(!c)return;
+    const char *e=getenv("QRX_REALTIME_AFTER");
+    c->realtime=true;
+    c->cpu_stopped=cpu_stopped;
+    c->realtime_after=e?strtoull(e,NULL,0):UINT64_C(64000000);
+    c->realtime_live=false;
+    c->realtime_base_us=host_us()-c->cycles*1000000u/QRX_REALTIME_HZ;   /* the idle pacing's start */
+}
+static inline void realtime_clock(QRXFullCPU *c, unsigned taken) {
+    if(!c->realtime_live){
+        if(c->instructions<c->realtime_after){c->cycles+=taken;return;}
+        c->realtime_live=true;
+        c->realtime_base_us=host_us()-c->cycles*1000000u/QRX_REALTIME_HZ;
+    }
     uint64_t now=(host_us()-c->realtime_base_us)*QRX_REALTIME_HZ/1000000u;
     if(now>c->cycles)c->cycles=now;
 }
@@ -2431,14 +2447,18 @@ int qrx_full_run_cycles(QRXFullCPU *c,uint64_t budget){
             continue;
         }
         elapsed+=(unsigned)taken;
-        if(c->realtime)realtime_clock(c);else c->cycles+=(unsigned)taken;
+        if(c->realtime)realtime_clock(c,(unsigned)taken);else c->cycles+=(unsigned)taken;
         if(c->aux_cpu_index==0)timer_tick(c,(unsigned)taken);
         if(amiga_bus(c))boot_cia_tick(c);
         fl_dma_progress(c);
         vblank_tick(c);
         /* An idle guest waits for the next timer on the host's own clock and
          * hands the caller its turn, instead of burning a core in STOP. */
-        if(c->realtime&&c->cpu_stopped&&c->cpu_stopped()){
+        if(c->realtime&&c->cpu_stopped&&c->cpu_stopped()&&
+           (c->realtime_live||c->cycles>(host_us()-c->realtime_base_us)*QRX_REALTIME_HZ/1000000u)){
+            /* During the boot (guest's own clock) only while the guest's time is ahead of the
+             * wall clock, so it does not run ahead of it; sleeping changes no instruction or
+             * cycle count, the boot stays deterministic. */
             struct timespec nap={0,150000};
             nanosleep(&nap,NULL);
             break;

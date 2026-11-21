@@ -310,7 +310,10 @@ int main(int argc,char **argv){
         }
     }
     struct timespec bench_t0;clock_gettime(CLOCK_MONOTONIC,&bench_t0);
-    if(realtime||native_window)qrx_full_set_realtime(&c,qrx_jit_cpu_stopped);
+    /* QRX_REALTIME=0: the guest's clocks follow its own cycles, not the host's (deterministic,
+     * for tests and for finding timing bugs; the guest's time runs slow when the host is slow) */
+    {const char *rt=getenv("QRX_REALTIME");
+     if((realtime||native_window)&&!(rt&&!strcmp(rt,"0")))qrx_full_set_realtime(&c,qrx_jit_cpu_stopped);}
     {
         struct cpu_run run={&c,budget,1};
 #ifdef QRX_NATIVE_WINDOW

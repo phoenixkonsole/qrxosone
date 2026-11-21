@@ -120,15 +120,47 @@ Keine Distribution, sondern ein eigener Kernel und genau die Programme, die das 
   auf Eingaben. Gemessen (x86-64, ruhender Desktop, Fenster-Thread, CPU in 30 s): ursprünglich
   14,5 s, mit SDL und Zeilenvergleich 1,45 s, jetzt ohne SDL 0,83 s (Testmodus; auf dem Pi
   skaliert die Display-Hardware, das kostet dort gar keine CPU).
-- **Boot-Wächter:** Das AROS-ROM verliert beim Start manchmal einen Interrupt von
-  `timer.device` (CIA-A Timer A wird nach einem Interrupt nicht mehr neu gestellt) und bleibt
-  dann vor dem ersten Diskettenzugriff im Leerlauf (`PC=$FE6866`). Auf dem x86-Testrechner
-  betraf das etwa jeden zweiten Start, mit und ohne Echtzeitmodus, auch mit dem alten
-  Engine-Stand; die genaue Ursache im Zusammenspiel von CIA-/Paula-Modell und `timer.device`
-  ist noch offen (`docs/boot-stall-analysis-2026-11.md`). Die Session startet die Engine deshalb
-  neu, wenn die Startdiskette nach `boot_wait` Sekunden (Standard 15, ein guter Start braucht
-  etwa 5) das System-Volume noch nicht eingebunden hat, bis zu sechsmal. Geprüft: drei Läufe,
-  alle auf dem Desktop, zwei davon nach einem bzw. zwei Neustarts.
+- **Start-Stillstand behoben (2026-11-21):** Das AROS-ROM verlor beim Start manchmal einen
+  Interrupt von `timer.device` und blieb dann vor dem ersten Diskettenzugriff im Leerlauf
+  (`PC=$FE6866`). Betroffen war etwa jeder dritte Start mit dem x86-Interpreter und jeder Start
+  mit dem AArch64-JIT unter qemu Cortex-A72; ein Pi wäre also sehr wahrscheinlich immer hängen
+  geblieben. Es gab zwei Ursachen, beide in der Engine, keine im ROM:
+
+  1. **Abschnittslänge vor dem JIT-Start:** Solange der JIT auf seinen Start (nach 20 Mio.
+     Befehlen) wartet, gab `jit_execute` Musashi Abschnitte von 4096 statt 256 Takten. Erst
+     zwischen den Abschnitten laufen CIA-Timer, Strahl und Diskette weiter, deshalb kamen alle
+     Timer-Interrupts der Startphase später als ohne JIT. Jetzt gilt bis zum Start dieselbe
+     Abschnittslänge wie ohne JIT (`full68k/qrx68100_jit.c`).
+  2. **Zwei Uhren im Echtzeitmodus:** Ein Teil der CIA-Timer zählt nach Befehlen, ein anderer
+     nach Takten, und die Takte folgen im Echtzeitmodus der Host-Uhr. Damit schwankte ihr
+     Verhältnis mit dem Tempo des Hosts.
+
+     Jetzt laufen die ersten 64 Mio. Befehle (`QRX_REALTIME_AFTER`, über das Einbinden der
+     Systemdiskette hinaus) nach der eigenen Uhr des Gasts, und der Start ist reproduzierbar.
+     Danach übernimmt die Host-Uhr ab der dann erreichten Gastzeit. In der Startphase schläft
+     nur der Leerlauf, solange die Gastzeit vor der echten Zeit liegt
+     (`full68k/qrx68100_full.c`).
+
+  `QRX_REALTIME=0` schaltet den Echtzeitmodus zum Testen ganz ab.
+
+  Geprüft, Systemdiskette erreicht:
+
+  | Aufbau | vorher | jetzt |
+  | --- | --- | --- |
+  | x86-64-Interpreter, Echtzeit | 4 von 6 | 6 von 6 |
+  | AArch64-JIT unter qemu Cortex-A72 | 0 von 11 | 9 von 9 (Echtzeit und ohne) |
+
+  Alle Starts liefen bis zur ersten Meldung mit derselben Befehlszahl (13 476 248). Der Desktop
+  erscheint auch mit dem JIT. Die Tests bestehen weiter (AArch64: 57 direkte und 20 Python-Tests).
+
+  **Nebenwirkung:** Die CPU ist schneller als ein echter 68040, deshalb läuft die Gastzeit in der
+  Startphase vor. Danach geht sie im richtigen Takt weiter, liegt aber einige zehn Sekunden vor
+  der Wanduhr; im Mittel über 40 s waren es 11,6 statt 7,1 Mio. Takte pro Sekunde. Ob die
+  Systemzeit des Gasts davon abweicht, ist nicht geprüft.
+
+  Der Boot-Wächter der Session bleibt als Absicherung: Er startet die Engine neu, wenn das
+  System-Volume nach `boot_wait` Sekunden (Standard 15) nicht eingebunden ist. Auf echter
+  Pi-Hardware ist das noch nicht geprüft.
 - QRX OS One herunterfahren schaltet den Pi aus; stürzt die Engine ab, startet Init sie neu.
 - Auf tty2 (Strg+Alt+F2) wartet eine Root-Shell für Notfälle. Wer physisch an den Pi kommt,
   hat damit Root.
@@ -232,7 +264,8 @@ Appliance-Images:
 - Ablauf geprüft (2026-11-21), nicht auf einem Pi:
   - Mit dem x86-64-Build hier (Interpreter, keine JITs): 32-Bit 9,3 MIPS nach zwei erkannten
     Stillständen; QRX OS One 64 mit 34,8 Mio. Befehlen/s auf 1 Kern und 28,7 Mio. auf 2 Kernen.
-  - Unter qemu Cortex-A72 kam das 32-Bit-System in keinem der sechs Starts bis zur Systemdiskette.
+  - Unter qemu Cortex-A72 kam das 32-Bit-System in keinem der sechs Starts bis zur Systemdiskette
+    (seitdem behoben, siehe „Start-Stillstand behoben“).
   - Diese Zahlen sagen nichts über den Pi.
 
 ### QRX OS One unter Ubuntu auf dem Bildschirm (statt Dual Boot)

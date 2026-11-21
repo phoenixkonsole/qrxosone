@@ -2504,7 +2504,11 @@ static inline void flags_from_host(const JitCtx *j){
 }
 static int jit_execute(QRXFullCPU *c,int slice){
     JitCtx *j=c->jit;
-    if(c->instructions<j->start_instructions||c->subroutine_armed)return m68k_execute(slice);
+    /* Before the JIT starts, Musashi runs exactly as without it: in the run loop's interpreter
+     * slices of 256 cycles, between which the CIA timers, the beam and the floppy advance. The
+     * JIT's 4096 here delayed every timer interrupt in early boot, and the AROS ROM then lost
+     * one and idled forever before the first floppy read (every boot under qemu cortex-a72). */
+    if(c->instructions<j->start_instructions||c->subroutine_armed)return m68k_execute(slice>256?256:slice);
     int64_t remaining=slice;
     while(remaining>0){
         if(c->mem_fault||c->vm.cpu.halted)break;

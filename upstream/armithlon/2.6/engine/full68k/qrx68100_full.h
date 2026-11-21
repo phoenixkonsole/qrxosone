@@ -178,6 +178,8 @@ typedef struct QRXFullCPU {
     bool realtime;
     bool (*cpu_stopped)(void);
     uint64_t realtime_base_us;
+    uint64_t realtime_after;      /* instructions run on the guest's own clock first (the boot) */
+    bool realtime_live;           /* the host clock drives the cycles now */
     uint32_t pc_ring[16];
     unsigned pc_ring_i;
     bool vec_trace;

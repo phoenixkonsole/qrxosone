@@ -635,3 +635,20 @@ bleibt weiter am `$FAACEC`-`AddTail`-Punkt hängen**:
 der `tb_vb_count`-Field (tb+0xEE) wird für `A0`/`A1`-Pointer einer
 `$FAAACE`-`$FAAACCC`-AddTail-Route gelesen.
 So erreichen wir das erste `input.device`-Signal im `$FAAA360`-dispatch-loop.
+
+## 18. Behoben (2026-11-21): Abschnittslänge vor dem JIT-Start, zwei Uhren im Echtzeitmodus
+
+Der verbliebene Stillstand vor dem ersten Diskettenzugriff (`PC=$FE6866`) hatte zwei Ursachen in
+der Engine. Beide sind behoben, Einzelheiten in `docs/armithlon/raspberry-pi-image.md`
+(„Start-Stillstand behoben“):
+
+1. **Abschnittslänge vor dem JIT-Start:** Vor dem JIT-Start bekam Musashi Abschnitte von 4096
+   statt 256 Takten. Damit kamen die Timer-Interrupts der Startphase später, und mit dem
+   AArch64-JIT unter qemu blieb jeder Start hängen.
+2. **Zwei Uhren im Echtzeitmodus:** Die befehlsgezählten und die taktgezählten CIA-Timer standen
+   in einem Verhältnis, das vom Tempo des Hosts abhing. Natives x86 blieb dadurch bei etwa jedem
+   dritten Start hängen. Jetzt laufen die ersten 64 Mio. Befehle (`QRX_REALTIME_AFTER`) nach der
+   eigenen Uhr des Gasts.
+
+Belegt durch: `QRX_REALTIME=0` (neu) ergibt einen reproduzierbaren Start, der auf x86 und
+AArch64 (ohne JIT) mit derselben Befehlszahl jedes Mal durchkommt.
