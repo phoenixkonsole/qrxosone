@@ -36,7 +36,14 @@ cd "$B"
 J="-j${QRX_BUILD_JOBS:-4}"
 # AROS' parallel make sometimes races copying the same header twice ("File exists"): a failed
 # step runs once more with one job
-mk() { echo "== gmake $*"; gmake $J "$@" || { echo "== again with one job: $*"; gmake -j1 "$@"; }; }
+# step runs once more with one job. A -quick target that stops with "Error 20" while generating
+# includes lacks its include/{proto,clib,defines,inline} directories under gen/ (README): those
+# are made before the second try.
+include_dirs() {
+  find bin/native-m68k64/gen -type d -name include 2>/dev/null | while read -r d; do
+    mkdir -p "$d/proto" "$d/clib" "$d/defines" "$d/inline"; done
+}
+mk() { echo "== gmake $*"; gmake $J "$@" || { echo "== again with one job: $*"; include_dirs; gmake -j1 "$@"; }; }
 
 # 3. the kernel and the kickstart modules
 mk kernel-utility kernel-qrx-m68k64
