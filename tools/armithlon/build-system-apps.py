@@ -7,14 +7,15 @@ root=Path(__file__).resolve().parents[2]
 orig=next((root/'qrx-os-one').glob('*/diagnostics-v6.6/tools/qrx_unified_apps.c'))
 out=root/'.build/qrx-apps';out.mkdir(parents=True,exist_ok=True)
 sdk=root/'.build/qrx-sdk/bin'
-# The settings panel opens the desktop's own look settings.
+# The settings panel opens the desktop's own look settings, IPFS, and Wi-Fi and Bluetooth of the
+# Raspberry Pi appliance (C:QRXWireless; elsewhere it says that the host has them).
 text=orig.read_text()
 old='''btn(r,242,168,205,"SYSTEM / BOOT");wrap(r,3,20,225,'''
-new='''btn(r,242,168,205,"SYSTEM / BOOT");btn(r,20,204,427,"DESKTOP LOOK: WALLPAPER AND POINTER");btn(r,20,240,427,"IPFS: NETZWERK, GATEWAY UND PINS");wrap(r,3,20,278,'''
+new='''btn(r,242,168,205,"SYSTEM / BOOT");btn(r,20,204,427,"DESKTOP LOOK: WALLPAPER AND POINTER");btn(r,20,240,205,"IPFS: NETZ UND PINS");btn(r,242,240,205,"WI-FI & BLUETOOTH");wrap(r,3,20,278,'''
 assert text.count(old)==1
 text=text.replace(old,new)
 old='''else if(y>=168&&y<=189)c=x<230?"SYS:Prefs/Locale":"SYS:Prefs/Boot";if(c)'''
-new='''else if(y>=168&&y<=189)c=x<230?"SYS:Prefs/Locale":"SYS:Prefs/Boot";else if(y>=204&&y<=225)c="SYS:QRX/C/QRXDesktopPrefs";else if(y>=240&&y<=261)c="SYS:QRX/C/QRXIPFSPrefs";if(c)'''
+new='''else if(y>=168&&y<=189)c=x<230?"SYS:Prefs/Locale":"SYS:Prefs/Boot";else if(y>=204&&y<=225)c="SYS:QRX/C/QRXDesktopPrefs";else if(y>=240&&y<=261)c=x<230?"SYS:QRX/C/QRXIPFSPrefs":"C:QRXWireless";if(c)'''
 assert text.count(old)==1
 text=text.replace(old,new)
 src=out/'qrx_unified_apps.c'

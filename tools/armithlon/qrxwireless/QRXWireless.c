@@ -112,7 +112,7 @@ static void bt_line(char *l)
 }
 
 /* ---- the window */
-enum { G_WIFI, G_PASS, G_SCAN, G_CONNECT, G_FORGET, G_BT, G_BTON, G_BTSCAN, G_PAIR, G_REMOVE, G_COUNT };
+enum { G_WIFI, G_PASS, G_SHOW, G_SCAN, G_CONNECT, G_FORGET, G_BT, G_BTON, G_BTSCAN, G_PAIR, G_REMOVE, G_COUNT };
 static struct Gadget *gads[G_COUNT];
 static struct Window *win;
 static LONG wifi_sel = -1, bt_sel = -1;
@@ -161,11 +161,34 @@ static void refresh_bt(void)
     GT_SetGadgetAttrs(gads[G_BT], win, NULL, GTLV_Labels, (IPTR)&bt.list, TAG_DONE);
     bt_sel = -1;
 }
-static const char *password(void)
+/* The password: GadTools has no password field, so the window takes the typed keys itself and
+ * the field (a text gadget) shows one '*' per character, or the text while "Show" is ticked.
+ * Return connects, Esc clears; it is cleared after every connect and when the window closes. */
+static char pass[64], pass_shown[64];
+static int pass_len, show_pass;
+static void pass_draw(void)
 {
-    STRPTR s = NULL;
-    GT_GetGadgetAttrs(gads[G_PASS], win, NULL, GTST_String, (IPTR)&s, TAG_DONE);
-    return s ? (const char *)s : "";
+    for (int i = 0; i < pass_len; i++) pass_shown[i] = show_pass ? pass[i] : '*';
+    pass_shown[pass_len] = 0;
+    GT_SetGadgetAttrs(gads[G_PASS], win, NULL, GTTX_Text, (IPTR)(pass_len ? pass_shown : "(type it, Return connects)"), TAG_DONE);
+}
+static void pass_clear(void)
+{
+    memset(pass, 0, sizeof pass);
+    memset(pass_shown, 0, sizeof pass_shown);
+    pass_len = 0;
+    pass_draw();
+}
+/* a key for the password field: 1 when it took it, 2 for Return */
+static int pass_key(UWORD code)
+{
+    if (code == 13) return 2;
+    if (code == 27) { pass_clear(); return 1; }
+    if (code == 8 || code == 127) { if (pass_len) pass[--pass_len] = 0; pass_draw(); return 1; }
+    if (code < 32 || code > 126 || pass_len >= 63) return 0;    /* WPA passphrases are printable ASCII */
+    pass[pass_len++] = (char)code;
+    pass_draw();
+    return 1;
 }
 static void result(const char *what)
 {
@@ -174,6 +197,17 @@ static void result(const char *what)
     if (e) *e = 0;
     snprintf(s, sizeof s, "%s: %s", what, *out ? out : "done");
     say(s);
+}
+/* A saved network connects without a password; netctl answers "password needed" for a new
+ * secured one. The password is cleared afterwards, also from the argument buffer. */
+static void connect(void)
+{
+    if (wifi_sel < 0 || wifi_sel >= wifi.count) { say("Choose a network first."); return; }
+    int rc = ctl("wifi-connect", wifi.key[wifi_sel], pass_len ? pass : NULL);
+    memset(args, 0, sizeof args);
+    if (rc == 3) { say("This network needs its password: type it, then Return."); return; }
+    pass_clear();
+    result("Connect");
 }
 
 int main(void)
@@ -203,8 +237,12 @@ int main(void)
     g = gads[G_WIFI] = CreateGadget(LISTVIEW_KIND, g, &ng, GTLV_Labels, (IPTR)&wifi.list, GTLV_ShowSelected, 0, TAG_DONE);
     ng.ng_Flags = PLACETEXT_LEFT;
     ng.ng_LeftEdge = left + 80; ng.ng_TopEdge = top + 116; ng.ng_Width = 340; ng.ng_Height = 14;
+    ng.ng_Width = 260;
     ng.ng_GadgetText = (STRPTR)"Password"; ng.ng_GadgetID = G_PASS;
-    g = gads[G_PASS] = CreateGadget(STRING_KIND, g, &ng, GTST_MaxChars, 63, TAG_DONE);
+    g = gads[G_PASS] = CreateGadget(TEXT_KIND, g, &ng, GTTX_Border, TRUE, GTTX_Text, (IPTR)"(type it, Return connects)", TAG_DONE);
+    ng.ng_LeftEdge = left + 80 + 268; ng.ng_Width = 26; ng.ng_Height = 14; ng.ng_Flags = PLACETEXT_RIGHT;
+    ng.ng_GadgetText = (STRPTR)"Show"; ng.ng_GadgetID = G_SHOW;
+    g = gads[G_SHOW] = CreateGadget(CHECKBOX_KIND, g, &ng, GTCB_Scaled, TRUE, TAG_DONE);
     ng.ng_Flags = PLACETEXT_IN;
     ng.ng_TopEdge = top + 136; ng.ng_Width = 132; ng.ng_Height = 18;
     const char *wb[] = { "Search", "Connect", "Forget" };
@@ -229,7 +267,7 @@ int main(void)
                              WA_InnerHeight, btop + 150 - scr->WBorTop - scr->Font->ta_YSize,
                              WA_Gadgets, (IPTR)glist, WA_DragBar, TRUE, WA_DepthGadget, TRUE, WA_CloseGadget, TRUE, WA_Activate, TRUE,
                              WA_PubScreen, (IPTR)scr,
-                             WA_IDCMP, IDCMP_CLOSEWINDOW | IDCMP_GADGETUP | IDCMP_REFRESHWINDOW | LISTVIEWIDCMP | STRINGIDCMP | BUTTONIDCMP | IDCMP_INTUITICKS,
+                             WA_IDCMP, IDCMP_CLOSEWINDOW | IDCMP_GADGETUP | IDCMP_REFRESHWINDOW | LISTVIEWIDCMP | CHECKBOXIDCMP | BUTTONIDCMP | IDCMP_INTUITICKS | IDCMP_VANILLAKEY,
                              TAG_DONE) : NULL;
     UnlockPubScreen(NULL, scr);
     if (!win) { PutStr("QRXWireless: no window\n"); return 20; }
@@ -248,6 +286,7 @@ int main(void)
             GT_ReplyIMsg(m);
             if (cls == IDCMP_CLOSEWINDOW) done = 1;
             else if (cls == IDCMP_REFRESHWINDOW) { GT_BeginRefresh(win); GT_EndRefresh(win, TRUE); }
+            else if (cls == IDCMP_VANILLAKEY && appliance) { if (pass_key(code) == 2) connect(); }
             else if (cls == IDCMP_INTUITICKS) {
                 /* while a search runs, the lists fill in about every second */
                 if (scanning && ++tick % 10 == 0) { scanning--; refresh_wifi(); refresh_bt(); }
@@ -257,11 +296,8 @@ int main(void)
                 case G_WIFI: wifi_sel = code; break;
                 case G_BT: bt_sel = code; break;
                 case G_SCAN: ctl("wifi-scan", NULL, NULL); scanning = 6; say("Searching for Wi-Fi networks..."); break;
-                case G_CONNECT:
-                    if (wifi_sel < 0 || wifi_sel >= wifi.count) { say("Choose a network first."); break; }
-                    ctl("wifi-connect", wifi.key[wifi_sel], password());
-                    result("Connect");
-                    break;
+                case G_CONNECT: connect(); break;
+                case G_SHOW: show_pass = code != 0; pass_draw(); break;
                 case G_FORGET:
                     if (wifi_sel < 0 || wifi_sel >= wifi.count) { say("Choose a network first."); break; }
                     ctl("wifi-forget", wifi.key[wifi_sel], NULL); result("Forget"); break;
@@ -282,6 +318,8 @@ int main(void)
         }
     }
     memset(args, 0, sizeof args);                 /* the password does not stay in memory */
+    memset(pass, 0, sizeof pass);
+    memset(pass_shown, 0, sizeof pass_shown);
     CloseWindow(win);
     FreeGadgets(glist);
     FreeVisualInfo(vi);

@@ -8,7 +8,8 @@ from Ubuntu 24.04 arm64 packages unpacked into STAGE (fetch-debs.sh); nothing el
 packages is copied.
 
   mkrootfs.py STAGE ENGINE BUNDLE OUT
-    ENGINE  the AArch64 qrx68100_full_run (SDL2 window)
+    ENGINE  the AArch64 qrx68100_full_run (SDL2 window); ENGINE64=qrx_ec64_run in the environment
+            adds QRX OS One 64's machine
     BUNDLE  QRX OS One: aros-rom.bin, aros-ext.bin, boot.adf, SystemFull/ (bundle/build-bundle.sh)
 """
 import os, shutil, stat, subprocess, sys
@@ -22,7 +23,7 @@ READELF = os.environ.get('READELF', 'aarch64-linux-gnu-readelf')
 # programs taken from the packages
 PROGRAMS = [
     'usr/bin/busybox',
-    'usr/sbin/wpa_supplicant', 'usr/sbin/wpa_cli', 'usr/sbin/iw',
+    'usr/sbin/wpa_supplicant', 'usr/sbin/wpa_cli', 'usr/bin/wpa_passphrase', 'usr/sbin/iw',
     'usr/bin/dbus-daemon', 'usr/libexec/bluetooth/bluetoothd', 'usr/bin/bluetoothctl', 'usr/bin/btmgmt',
     'usr/sbin/resize2fs', 'usr/sbin/e2fsck',          # first start: the root fills the card
 ]
@@ -115,6 +116,11 @@ def main():
     (q / 'bin').mkdir(parents=True)
     shutil.copy2(ENGINE, q / 'bin/armithlon')
     with_deps('qrx/bin/armithlon', ENGINE)
+    # QRX OS One 64's machine (qrx_ec64_run with the SDL window), when given: ENGINE64=path
+    e64 = os.environ.get('ENGINE64')
+    if e64:
+        shutil.copy2(e64, q / 'bin/armithlon64')
+        with_deps('qrx/bin/armithlon64', Path(e64))
     for f in ('aros-rom.bin', 'aros-ext.bin', 'boot.adf'):
         shutil.copy2(BUNDLE / f, q / f)
     shutil.copytree(BUNDLE / 'SystemFull', q / 'System', symlinks=True)

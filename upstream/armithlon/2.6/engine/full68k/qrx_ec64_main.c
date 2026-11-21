@@ -6,7 +6,8 @@
  *     --disk IMAGE     a disk image for qrxdisk.device (an FFS image from mkffsimg.py)
  *     --disk-write     write the disk back to the file at the end
  *     --cmdline TEXT   the kernel command line (default "econsole")
- *     --window         a Mac window: the console, and the board's framebuffer once it is on
+ *     --window         a window (Cocoa on the Mac, SDL2 on Linux): the console, and the board's
+ *                      framebuffer once it is on
  *     --stdin          console input from stdin (without --window)
  *     --input TEXT     console input to start with, \n for a new line
  *     --seconds S      stop after S seconds (default: run until the system ends or the window closes)
@@ -23,7 +24,8 @@
 #include "qrx68100ec64.h"
 #include "qrx_ec64_boot.h"
 #include "qrx_ec64_board.h"
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(QRX_SDL_FRONTEND)
+#define QEC64_WINDOW 1
 #include "../macos/qrx_ec64_window.h"
 #endif
 #include <inttypes.h>
@@ -72,14 +74,14 @@ static double wall(void)
 static void console_out(void *ctx, unsigned ch)
 {
     (void)ctx;
-#ifdef __APPLE__
+#ifdef QEC64_WINDOW
     if (use_window) { char c = (char)ch; qec64_window_console(&c, 1); return; }
 #endif
     fputc((int)ch, stdout);
     if (ch == '\n') fflush(stdout);
 }
 
-#ifdef __APPLE__
+#ifdef QEC64_WINDOW
 static qec64_machine *volatile current;     /* the machine of the boot that runs now */
 static void typed(void *ctx, const char *text, size_t len)
 {
@@ -213,8 +215,8 @@ int main(int argc, char **argv)
                         "       [--input TEXT] [--seconds S] [--map FILE] [--stats] core.elf [module...]\n", argv[0]);
         return 2;
     }
-#ifndef __APPLE__
-    if (use_window) { fprintf(stderr, "--window needs macOS\n"); return 2; }
+#ifndef QEC64_WINDOW
+    if (use_window) { fprintf(stderr, "--window needs macOS or a build with SDL2\n"); return 2; }
 #endif
     uint8_t *disk = NULL;
     if (disk_path) {
@@ -272,7 +274,7 @@ int main(int argc, char **argv)
 
         struct run_args r = { m, L.pc, L.sp, seconds, 0, QEC64_RUNNING, 0 };
         double t0 = wall();
-#ifdef __APPLE__
+#ifdef QEC64_WINDOW
         if (use_window) {
             qec64_window_input in = { typed, NULL };
             current = m;
@@ -315,7 +317,7 @@ int main(int argc, char **argv)
         }
         break;
     }
-#ifdef __APPLE__
+#ifdef QEC64_WINDOW
     if (use_window) qec64_window_close();
 #endif
     if (disk && disk_write) {

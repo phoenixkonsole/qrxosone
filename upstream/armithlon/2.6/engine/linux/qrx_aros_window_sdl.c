@@ -128,11 +128,16 @@ static void apply_pointer(void)
 
 /* ---- framebuffer formats as published (see the Metal shader on the Mac) -> XRGB8888 */
 typedef struct { uint32_t fb, stride, w, h, fmt; } Present;
-static int convert(const Present *u, const uint32_t *clut, uint32_t *out)
+static unsigned bytes_per_pixel(uint32_t fmt) { return fmt == 1 ? 1u : fmt == 2 || fmt == 3 ? 2u : fmt == 4 ? 3u : fmt == 5 ? 4u : 0u; }
+static int present_ok(const Present *u)
 {
-    size_t bytes = (size_t)u->stride * u->h;
-    if (!u->w || !u->h || !u->fmt || (uint64_t)u->fb + bytes > ram_bytes) return 0;
-    for (uint32_t y = 0; y < u->h; y++) {
+    unsigned bpp = bytes_per_pixel(u->fmt);
+    return u->w && u->h && bpp && u->stride >= u->w * bpp && (uint64_t)u->fb + (uint64_t)u->stride * u->h <= ram_bytes;
+}
+/* rows y0..y1-1 of the guest frame into out (w pixels a row) */
+static void convert_rows(const Present *u, const uint32_t *clut, uint32_t *out, uint32_t y0, uint32_t y1)
+{
+    for (uint32_t y = y0; y < y1; y++) {
         const uint8_t *row = ram_base + u->fb + (size_t)y * u->stride;
         uint32_t *o = out + (size_t)y * u->w;
         switch (u->fmt) {
@@ -147,9 +152,14 @@ static int convert(const Present *u, const uint32_t *clut, uint32_t *out)
                 break;
         case 4: for (uint32_t x = 0; x < u->w; x++) o[x] = (uint32_t)row[x * 3] << 16 | (uint32_t)row[x * 3 + 1] << 8 | row[x * 3 + 2]; break;
         case 5: for (uint32_t x = 0; x < u->w; x++) o[x] = (uint32_t)row[x * 4 + 1] << 16 | (uint32_t)row[x * 4 + 2] << 8 | row[x * 4 + 3]; break;
-        default: return 0;
+        default: break;
         }
     }
+}
+static int convert(const Present *u, const uint32_t *clut, uint32_t *out)
+{
+    if (!present_ok(u)) return 0;
+    convert_rows(u, clut, out, 0, u->h);
     return 1;
 }
 static Present current_present(void)
@@ -166,21 +176,29 @@ static int ensure_pixels(size_t n)
     pixels = p; pixels_cap = n;
     return 1;
 }
-static void show(unsigned w, unsigned h)
+static void show_rows(unsigned w, unsigned h, unsigned y0, unsigned y1)
 {
     if (!tex || tex_w != (int)w || tex_h != (int)h) {
+        y0 = 0; y1 = h;
         if (tex) SDL_DestroyTexture(tex);
         tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, (int)w, (int)h);
         tex_w = (int)w; tex_h = (int)h;
         SDL_RenderSetLogicalSize(ren, (int)w, (int)h);
     }
     if (!tex) return;
-    SDL_UpdateTexture(tex, NULL, pixels, (int)w * 4);
+    SDL_Rect r = { 0, (int)y0, (int)w, (int)(y1 - y0) };
+    SDL_UpdateTexture(tex, &r, pixels + (size_t)y0 * w, (int)w * 4);
     SDL_RenderClear(ren);
     SDL_RenderCopy(ren, tex, NULL, NULL);
     SDL_RenderPresent(ren);                          /* paced by vsync */
 }
-static void present_guest(void)
+static uint8_t *shadow;
+static size_t shadow_cap;
+static Present shown;
+static uint32_t shown_clut[256];
+static int shown_valid;
+/* 1 when a frame was presented (vsync paced), 0 when nothing changed */
+static int present_guest(void)
 {
     unsigned w, h;
     if (qrx_hg_active() && qrx_hg_read_frame(NULL, &w, &h) && ensure_pixels((size_t)w * h)) {
@@ -191,18 +209,53 @@ static void present_guest(void)
             for (size_t i = 0; i < (size_t)w * h; i++)
                 pixels[i] = (uint32_t)rgba[i * 4] << 16 | (uint32_t)rgba[i * 4 + 1] << 8 | rgba[i * 4 + 2];
             guest_w = w; guest_h = h;
-            show(w, h);
-            return;
+            show_rows(w, h, 0, h);
+            shown_valid = 0;
+            return 1;
         }
     }
+    /* The guest's frame: only rows that changed since the last one shown are converted and
+     * uploaded (a shadow copy of the guest bytes tells which); with none, nothing is presented and
+     * the caller waits for input instead of spinning on vsync. On the Pi this keeps a still
+     * desktop from costing a core and most of the memory bandwidth. */
     Present u = current_present();
-    if (!u.w || !u.h || !ensure_pixels((size_t)u.w * u.h) || !convert(&u, present_clut, pixels)) {
+    if (!present_ok(&u) || !ensure_pixels((size_t)u.w * u.h)) {
+        shown_valid = 0;
         SDL_RenderClear(ren);
         SDL_RenderPresent(ren);
-        return;
+        return 1;
+    }
+    size_t row_bytes = (size_t)u.w * bytes_per_pixel(u.fmt), total = (size_t)u.stride * u.h;
+    if (total > shadow_cap) {
+        uint8_t *n = realloc(shadow, total);
+        if (!n) { shown_valid = 0; return 0; }
+        shadow = n; shadow_cap = total;
+    }
+    const uint8_t *fb = ram_base + u.fb;
+    int full = !shown_valid || memcmp(&u, &shown, sizeof u) ||
+               (u.fmt == 1 && present_clut && memcmp(present_clut, shown_clut, sizeof shown_clut));
+    unsigned y0 = u.h, y1 = 0;
+    if (full) {
+        memcpy(shadow, fb, total);
+        if (u.fmt == 1 && present_clut) memcpy(shown_clut, present_clut, sizeof shown_clut);
+        convert_rows(&u, present_clut, pixels, 0, u.h);
+        y0 = 0; y1 = u.h;
+        shown = u; shown_valid = 1;
+    } else {
+        for (unsigned y = 0; y < u.h; y++) {
+            const uint8_t *row = fb + (size_t)y * u.stride;
+            uint8_t *old = shadow + (size_t)y * u.stride;
+            if (!memcmp(row, old, row_bytes)) continue;
+            memcpy(old, row, row_bytes);
+            convert_rows(&u, present_clut, pixels, y, y + 1);
+            if (y < y0) y0 = y;
+            y1 = y + 1;
+        }
+        if (y0 >= y1) return 0;
     }
     guest_w = u.w; guest_h = u.h;
-    show(u.w, u.h);
+    show_rows(u.w, u.h, y0, y1);
+    return 1;
 }
 static void capture_guest(const char *path)
 {
@@ -359,33 +412,49 @@ static void test_hooks(void)
     }
 }
 
+static void handle_event(const SDL_Event *ev)
+{
+    SDL_Event e = *ev;
+    switch (e.type) {
+    case SDL_QUIT: running = 0; break;
+    case SDL_KEYDOWN: case SDL_KEYUP: {
+        unsigned code = rawkey(e.key.keysym.scancode);
+        if (code != 0xFF) key(code, e.type == SDL_KEYDOWN, e.key.repeat);
+        break; }
+    case SDL_MOUSEMOTION: mouse_at(e.motion.x, e.motion.y); break;
+    case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP: {
+        unsigned b = e.button.button == SDL_BUTTON_LEFT ? 0u : e.button.button == SDL_BUTTON_RIGHT ? 1u : e.button.button == SDL_BUTTON_MIDDLE ? 2u : 9u;
+        mouse_at(e.button.x, e.button.y);
+        if (b < 9u) qrx_media_push_input(&media, (4u << 24) | (b << 16) | (e.type == SDL_MOUSEBUTTONDOWN ? 1u : 0u));
+        break; }
+    case SDL_WINDOWEVENT:
+        if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) release_all_keys();
+        if (e.window.event == SDL_WINDOWEVENT_EXPOSED || e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) shown_valid = 0;
+        if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
+            qrx_host_view_size = (uint32_t)e.window.data1 << 16 | ((uint32_t)e.window.data2 & 0xFFFFu);
+        break;
+    default: break;
+    }
+}
+
 int qrx_aros_window_pump(void)
 {
     SDL_Event e;
     test_hooks();
     apply_pointer();
-    while (SDL_PollEvent(&e)) {
-        switch (e.type) {
-        case SDL_QUIT: running = 0; break;
-        case SDL_KEYDOWN: case SDL_KEYUP: {
-            unsigned code = rawkey(e.key.keysym.scancode);
-            if (code != 0xFF) key(code, e.type == SDL_KEYDOWN, e.key.repeat);
-            break; }
-        case SDL_MOUSEMOTION: mouse_at(e.motion.x, e.motion.y); break;
-        case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP: {
-            unsigned b = e.button.button == SDL_BUTTON_LEFT ? 0u : e.button.button == SDL_BUTTON_RIGHT ? 1u : e.button.button == SDL_BUTTON_MIDDLE ? 2u : 9u;
-            mouse_at(e.button.x, e.button.y);
-            if (b < 9u) qrx_media_push_input(&media, (4u << 24) | (b << 16) | (e.type == SDL_MOUSEBUTTONDOWN ? 1u : 0u));
-            break; }
-        case SDL_WINDOWEVENT:
-            if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) release_all_keys();
-            if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
-                qrx_host_view_size = (uint32_t)e.window.data1 << 16 | ((uint32_t)e.window.data2 & 0xFFFFu);
+    while (SDL_PollEvent(&e)) handle_event(&e);
+    /* nothing new on the guest's screen: wait up to 8 ms for input (handled at once), then look
+     * again. SDL's own bookkeeping events (the poll sentinel, 0x7F00) do not end the wait. */
+    if (!present_guest()) {
+        Uint32 end = SDL_GetTicks() + 8;
+        for (;;) {
+            int left = (int)(end - SDL_GetTicks());
+            if (left <= 0 || !SDL_WaitEventTimeout(&e, left)) break;
+            if (e.type >= 0x7F00u) continue;
+            handle_event(&e);
             break;
-        default: break;
         }
     }
-    present_guest();
     return running;
 }
 

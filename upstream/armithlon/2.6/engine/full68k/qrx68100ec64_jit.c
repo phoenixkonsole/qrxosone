@@ -219,8 +219,25 @@ static void check_range(T *t, unsigned ra, unsigned n, unsigned s, bool write)
         leave_before(t, cbnz_site(t, S0));
     }
 }
+/* Ordered accesses (LDAR/STLR) are only needed while other cores share the RAM: with one core,
+ * as in the 32-bit JIT, plain LDR/STR with a register offset do, which on in-order-retiring
+ * cores like the Pi 4's Cortex-A72 cost far less. The devices on other host threads synchronise
+ * through the board's own locks and atomics, not through these accesses.
+ * QRX_EC64_JIT_ORDERED=1 keeps the ordered form on one core too. */
+static bool ordered(const T *t)
+{
+    static int forced = -1;
+    if (forced < 0) forced = getenv("QRX_EC64_JIT_ORDERED") != NULL;
+    return forced || t->c->num_cores > 1;
+}
 static void load(T *t, unsigned rd, unsigned ra, unsigned s)
 {
+    if (!ordered(t)) {
+        static const uint32_t ld[9] = { 0, 0x38606800u, 0x78606800u, 0, 0xB8606800u, 0, 0, 0, 0xF8606800u };
+        emit(t, ld[s] | (ra << 16) | (RRAM << 5) | rd);          /* ldr rd, [x20, ra] */
+        rev(t, rd, rd, s);
+        return;
+    }
     add_r(t, S1, RRAM, ra);
     static const uint32_t ld[9] = { 0, 0x08DFFC00u, 0x48DFFC00u, 0, 0x88DFFC00u, 0, 0, 0, 0xC8DFFC00u };
     emit(t, ld[s] | (S1 << 5) | rd);
@@ -228,8 +245,13 @@ static void load(T *t, unsigned rd, unsigned ra, unsigned s)
 }
 static void store(T *t, unsigned rv, unsigned ra, unsigned s)
 {
-    add_r(t, S1, RRAM, ra);
     rev(t, S0, rv, s);
+    if (!ordered(t)) {
+        static const uint32_t st[9] = { 0, 0x38206800u, 0x78206800u, 0, 0xB8206800u, 0, 0, 0, 0xF8206800u };
+        emit(t, st[s] | (ra << 16) | (RRAM << 5) | S0);          /* str s0, [x20, ra] */
+        return;
+    }
+    add_r(t, S1, RRAM, ra);
     static const uint32_t st[9] = { 0, 0x089FFC00u, 0x489FFC00u, 0, 0x889FFC00u, 0, 0, 0, 0xC89FFC00u };
     emit(t, st[s] | (S1 << 5) | S0);
 }

@@ -104,9 +104,8 @@ bash tools/armithlon/pi/build-pi.sh --cross        # QRX_PI_CPU=cortex-a76 für 
 
 ## Noch offen
 
-- **QRX OS One 64 (68100EC64) hat unter Linux noch kein Fenster.**
-  - `qrx_ec64_run` läuft dort ohne Bildschirm.
-  - Ein SDL-Gegenstück zu `macos/qrx_ec64_window.m` fehlt noch.
+- QRX OS One 64 (68100EC64) hat unter Linux jetzt ein SDL2-Fenster
+  (`linux/qrx_ec64_window_sdl.c`), siehe [raspberry-pi-image.md](raspberry-pi-image.md).
 - **Der beschleunigte QRX3D-Strom** (auf dem Mac ein Metal-Renderer) ist unter Linux nicht
   angeschlossen. Programme bekommen dann den Software-Weg.
 - **MIDI-Ausgabe** (auf dem Mac der Systemsynthesizer) ist unter Linux noch stumm.

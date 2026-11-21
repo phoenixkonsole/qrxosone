@@ -1,0 +1,9 @@
+# QRX ARMithlon: which QRX OS One starts (also from QRX OS One: C:QRXSystem 32 or 64)
+#   system=32    the 32-bit QRX OS One (68100, in the image)
+#   system=64    QRX OS One 64 (68100EC64): first copy, from the Mac's ARMithlon.app,
+#                Contents/Resources/qrx64/ to qrx64/ here and QRXOS64.img next to this file
+#   cores64=2    its cores, 1 to 4
+#   ram64=1024   its RAM in MB (default: half the Pi's memory, at most 2048)
+#   boot_wait=15 seconds until a 32-bit boot that did not reach its system disk is started again
+system=32
+cores64=2

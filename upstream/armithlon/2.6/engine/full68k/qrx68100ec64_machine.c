@@ -1,5 +1,8 @@
 /* Cores of the 68100EC64 on host threads. Core 0 starts running, the others wait until core 0
  * signals them for the first time: then they take over its VBR and the stack it named. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
 #include "qrx68100ec64.h"
 #include <pthread.h>
 #include <stdio.h>
@@ -200,11 +203,39 @@ static void gf_sleep(qec64_cpu *c)
     __atomic_compare_exchange_n(&gf_owner, &id, -1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
 }
 
+/* QRX_EC64_CPUS=3,2,...: guest core k runs only on host CPU number k of the list (the Pi image keeps
+ * core 3 for the emulation with isolcpus=3): no migrations, warm caches for each core's JIT code.
+ * Cores past the end of the list are not pinned. */
+static void pin_core(unsigned id)
+{
+#if defined(__linux__)
+    const char *list = getenv("QRX_EC64_CPUS");
+    if (!list) return;
+    for (unsigned k = 0; *list; k++) {
+        char *e;
+        long cpu = strtol(list, &e, 10);
+        if (e == list) return;
+        if (k == id && cpu >= 0 && cpu < CPU_SETSIZE) {
+            cpu_set_t set;
+            CPU_ZERO(&set);
+            CPU_SET((int)cpu, &set);
+            if (pthread_setaffinity_np(pthread_self(), sizeof set, &set))
+                fprintf(stderr, "[EC64] QRX_EC64_CPUS: cannot pin core %u to CPU %ld\n", id, cpu);
+            return;
+        }
+        list = *e == ',' ? e + 1 : e;
+    }
+#else
+    (void)id;
+#endif
+}
+
 static void *core_thread(void *arg)
 {
     qec64_cpu *c = arg;
     qec64_machine *m = c->machine;
     unsigned id = c->core_id;
+    pin_core(id);
     for (;;) {
         if (__atomic_load_n(&m->stopping, __ATOMIC_ACQUIRE)) return NULL;
         if (!__atomic_load_n(&c->started, __ATOMIC_ACQUIRE)) {
