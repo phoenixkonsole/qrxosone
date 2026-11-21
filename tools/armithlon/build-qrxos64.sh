@@ -63,6 +63,12 @@ if [ -d "$BU/SystemFull/QRX/Wallpapers" ]; then
     mkdir -p "$T/QRX/Wallpapers"
     cp "$BU/SystemFull/QRX/Wallpapers/"*.qrxwp "$T/QRX/Wallpapers/" 2>/dev/null || true
 fi
+# and the design icons of the four looks (gen-assets.swift / gen-assets.py)
+if [ -d "$BU/SystemFull/QRX/Icons" ]; then
+    mkdir -p "$T/QRX/Icons"
+    cp -R "$BU/SystemFull/QRX/Icons/." "$T/QRX/Icons/"
+    rm -f "$T/QRX/Icons/sheet.png"
+fi
 cat > "$T/S/Startup-Sequence" <<'EOF'
 SetClock LOAD
 Echo "QRX OS One 64 - 64-bit SMP AROS on the 68100EC64"

@@ -3,12 +3,11 @@
 Stand 2026-11-21. Ein Image, das man auf eine SD-Karte schreibt. Der Pi 4 startet damit direkt
 in QRX OS One, wie früher Amithlon: Linux ist nur der Unterbau und nie zu sehen.
 
-**Fertiges Image:** `dist/pi4/QRX-ARMithlon-Pi4-2026-11-21b.img.xz` (wie `…-nosdl`, dazu der
-KI-Knopf über der Taskleiste). Davor: `dist/pi4/QRX-ARMithlon-Pi4-2026-11-21-nosdl.img.xz` (82 MB, entpackt
-1225 MiB; SHA256 beider Formen in der `.sha256`-Datei daneben): ohne SDL, direkt auf dem Kernel.
-Die älteren Images liegen daneben: `…-2026-11-21` (noch mit SDL) und `…-2026-11-20` (zusätzlich
-ohne Boot-Wächter, Passwortmaske und QRX OS One 64). Mit dem Raspberry Pi Imager („Eigenes
-Image verwenden“) oder `xz -dc … | sudo dd of=/dev/<karte> bs=4M` auf eine Karte ab 2 GB schreiben.
+**Fertiges Image:** `dist/pi4/QRX-ARMithlon-Pi4-2026-11-21c.img.xz` (95 MB, entpackt 1280 MiB;
+SHA256 beider Formen in der `.sha256`-Datei daneben). Darauf **beide Systeme**: QRX OS One (32 Bit,
+Standard) und QRX OS One 64 (68100EC64, SMP) auf der Boot-Partition; umschalten mit
+`C:QRXSystem 64` bzw. `32` oder `system=` in `qrx.txt`. Dazu die rekonstruierten Hintergrundbilder,
+Design-Icons und Mauszeiger. Ältere Images liegen daneben.
 
 ## Was geprüft ist und was nicht
 
@@ -206,6 +205,39 @@ Keine Distribution, sondern ein eigener Kernel und genau die Programme, die das 
 - **QRX-OS-One-Paket:** `bundle/build-bundle.sh` braucht die Deadwood-m68k-AROS-Toolchain.
   - Die ist hier nur auf x86-64 gebaut; auf AArch64 ungeprüft.
   - Das fertige Paket kann man vom PC übernehmen.
+
+## QRX OS One 64 ohne Mac neu gebaut (2026-11-21)
+
+Das Mac-Paket ist verloren; QRX OS One 64 ist jetzt aus dem Repository allein auf Linux gebaut:
+
+1. `tools/armithlon/ec64-llvm/build.sh` – LLVM 22.1.2 (SHA256 geprüft) mit dem m68k64-Backend.
+2. `tools/armithlon/aros-qrx/build-linux.sh` – AROS 5b5fd4c mit dem qrx-m68k64-Patch: Kernel,
+   32 Kickstart-Module (mit Grafik, Intuition, Tastatur, Maus, `ec64gfx.hidd`), 107 Befehle,
+   Bibliotheken. Ergänzt gegenüber der README: `linklibs-hiddstubs` und
+   `linklibs-coolimagesstatic` vorher bauen, fehlende Include-Ordner anlegen, Schritte mit einem
+   Job wiederholen. Fremdarchive kommen aus dem geprüften Bestand des 32-Bit-Builds
+   (`portssources`, SHA256-Liste), weil Intel- und AROS-Spiegel hier 403 liefern.
+3. Die 64-Bit-Programme mit dem m68k64-Clang: QRXDesktop, QRXInfo, QRXNetwork, QRXWireless,
+   QRXSystem, QRXHostSocket, EC64Input, OpenWB, EC64GLDemo, `qrx-win32`.
+4. `tools/armithlon/build-qrxos64.sh` – Systemdisk `QRXOS64.img` (jetzt mit Icons).
+
+**Geprüft:**
+
+| Lauf | Ergebnis |
+| --- | --- |
+| x86-64-Engine (Interpreter), 2 Kerne | bootet, Startup-Sequence, 64-Bit-Desktop mit Hintergrundbild, Taskleiste, KI-Knopf; ~25 Mio. Befehle/s |
+| **AArch64-Engine mit 68100EC64-JIT, 2 Kerne, auf dem Cortex-A72-Modell (Pi 4)** unter qemu | bootet gleich bis zum Desktop. Die Geschwindigkeit unter qemu (5 Mio./s) sagt nichts über den Pi, weil qemu den erzeugten ARM-Code selbst nachbildet. |
+
+**Nicht geprüft:** auf echter Pi-Hardware; Programme wie `qrx-win32` und `EC64GLDemo` im
+64-Bit-System; die Mac-Werkzeuge (QRX68KRun, QRXAppRun, QRXMach) sind nicht mitgebaut.
+
+## Hintergrundbilder, Icons, Mauszeiger
+
+- `tools/armithlon/desktop/gen-assets.py` ist die Linux-Fassung des Mac-Generators
+  (`gen-assets.swift`): Convergence, Horizon, Aurora in vier Größen und die 28 Icons der vier
+  Designs. Schrift Inter statt Avenir Next (nur macOS). Das Paket erzeugt sie beim Bauen.
+- Die fünf Zeiger der Desktop-Einstellungen (klassischer Pfeil, QRX neon, Amiga style,
+  Fadenkreuz, groß weiß) zeichnet die Konsolen-Schicht wie der Mac, als Hardware-Cursor.
 
 ## Bauen
 

@@ -4,10 +4,11 @@
 #                              overlays, config.txt, cmdline.txt, qrx.txt; room for QRX OS One 64
 #                              (qrx64/ and QRXOS64.img, copied from the Mac bundle)
 #   p2 ext4  "qrxroot":        the root file system of mkrootfs.py (grows to the card on first start)
-# mkimage.sh ROOTFS KERNELDIR FIRMWAREDIR OUT.img
+# mkimage.sh ROOTFS KERNELDIR FIRMWAREDIR OUT.img [QRX64-KICKSTART-DIR QRXOS64.img]
 #   KERNELDIR   output of kernel/build-kernel.sh;  FIRMWAREDIR  .../usr/lib/linux-firmware-raspi
 set -Eeuo pipefail
 ROOT="$1"; K="$2"; FW="$3"; IMG="$4"
+Q64="${5:-}"; Q64IMG="${6:-}"   # optional: QRX OS One 64's kickstart dir (core.elf, modules.txt) and QRXOS64.img
 HERE="$(cd "$(dirname "$0")" && pwd)"
 W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
 MiB=$((1024 * 1024)); BOOT_MB=512
@@ -20,6 +21,11 @@ cp "$K"/overlays/* "$W/boot/overlays/"
 cp "$HERE/boot/config.txt" "$HERE/boot/cmdline.txt" "$HERE/boot/qrx.txt" "$W/boot/"
 truncate -s $((BOOT_MB * MiB)) "$W/boot.img"
 mkfs.vfat -F 32 -n QRXBOOT "$W/boot.img" >/dev/null
+if [ -n "$Q64" ]; then
+  mkdir -p "$W/boot/qrx64"
+  cp "$Q64"/* "$W/boot/qrx64/"
+  cp "$Q64IMG" "$W/boot/QRXOS64.img"
+fi
 mcopy -s -i "$W/boot.img" "$W"/boot/* ::/
 
 # root partition: the files plus a quarter, at least 256 MiB free, whole MiB
