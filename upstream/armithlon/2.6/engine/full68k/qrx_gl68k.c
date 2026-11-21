@@ -28,6 +28,29 @@ typedef CGLContextObj QglNative;
 #include <EGL/eglext.h>
 typedef EGLContext QglNative;
 #define QGL_PROC(name) ((void *)eglGetProcAddress(name))
+/* Extension entry points are not exported by glvnd's libOpenGL (OpenGL without GLX, which the
+ * Pi image links so it needs no X11): they come from EGL on first use. */
+#define QGL_EXT(type, name) static type qgl_##name(void) { static type f; if (!f) f = (type)QGL_PROC(#name); return f; }
+QGL_EXT(PFNGLBINDFRAMEBUFFEREXTPROC, glBindFramebufferEXT)
+QGL_EXT(PFNGLBINDRENDERBUFFEREXTPROC, glBindRenderbufferEXT)
+QGL_EXT(PFNGLCHECKFRAMEBUFFERSTATUSEXTPROC, glCheckFramebufferStatusEXT)
+QGL_EXT(PFNGLDELETEFRAMEBUFFERSEXTPROC, glDeleteFramebuffersEXT)
+QGL_EXT(PFNGLDELETERENDERBUFFERSEXTPROC, glDeleteRenderbuffersEXT)
+QGL_EXT(PFNGLFRAMEBUFFERRENDERBUFFEREXTPROC, glFramebufferRenderbufferEXT)
+QGL_EXT(PFNGLGENFRAMEBUFFERSEXTPROC, glGenFramebuffersEXT)
+QGL_EXT(PFNGLGENRENDERBUFFERSEXTPROC, glGenRenderbuffersEXT)
+QGL_EXT(PFNGLRENDERBUFFERSTORAGEEXTPROC, glRenderbufferStorageEXT)
+QGL_EXT(PFNGLSHADERSOURCEARBPROC, glShaderSourceARB)
+#define glBindFramebufferEXT qgl_glBindFramebufferEXT()
+#define glBindRenderbufferEXT qgl_glBindRenderbufferEXT()
+#define glCheckFramebufferStatusEXT qgl_glCheckFramebufferStatusEXT()
+#define glDeleteFramebuffersEXT qgl_glDeleteFramebuffersEXT()
+#define glDeleteRenderbuffersEXT qgl_glDeleteRenderbuffersEXT()
+#define glFramebufferRenderbufferEXT qgl_glFramebufferRenderbufferEXT()
+#define glGenFramebuffersEXT qgl_glGenFramebuffersEXT()
+#define glGenRenderbuffersEXT qgl_glGenRenderbuffersEXT()
+#define glRenderbufferStorageEXT qgl_glRenderbufferStorageEXT()
+#define glShaderSourceARB qgl_glShaderSourceARB()
 #endif
 #include <stdbool.h>
 #include <stdint.h>

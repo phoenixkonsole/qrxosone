@@ -3,9 +3,10 @@
 Stand 2026-11-21. Ein Image, das man auf eine SD-Karte schreibt. Der Pi 4 startet damit direkt
 in QRX OS One, wie früher Amithlon: Linux ist nur der Unterbau und nie zu sehen.
 
-**Fertiges Image:** `dist/pi4/QRX-ARMithlon-Pi4-2026-11-21.img.xz` (86 MB, entpackt 1239 MiB;
-SHA256 beider Formen in der `.sha256`-Datei daneben). Das Image vom 20.11. liegt daneben (ohne
-Boot-Wächter, Passwortmaske und QRX OS One 64). Mit dem Raspberry Pi Imager („Eigenes
+**Fertiges Image:** `dist/pi4/QRX-ARMithlon-Pi4-2026-11-21-nosdl.img.xz` (82 MB, entpackt
+1225 MiB; SHA256 beider Formen in der `.sha256`-Datei daneben): ohne SDL, direkt auf dem Kernel.
+Die älteren Images liegen daneben: `…-2026-11-21` (noch mit SDL) und `…-2026-11-20` (zusätzlich
+ohne Boot-Wächter, Passwortmaske und QRX OS One 64). Mit dem Raspberry Pi Imager („Eigenes
 Image verwenden“) oder `xz -dc … | sudo dd of=/dev/<karte> bs=4M` auf eine Karte ab 2 GB schreiben.
 
 ## Was geprüft ist und was nicht
@@ -25,7 +26,11 @@ Image verwenden“) oder `xz -dc … | sudo dd of=/dev/<karte> bs=4M` auf eine K
 | `netctl system 32/64` und die Session-Logik (`qrx.txt`, Kern-/RAM-Wahl, Startbefehl) mit Platzhalterdateien | ok |
 | Boot-Wächter mit der echten Engine (x86-64) | 3 von 3 Läufen auf dem Desktop, davon zwei nach Neustarts |
 | Image: Partitionstabelle, FAT-Inhalt, `e2fsck -fn` der Root-Partition, Rechte und Links der Startdateien | ok |
-| Engine-Release-Build `-mcpu=cortex-a72`: alle Tests | 57 direkt (neu: EC64-Fenster) + 20/20 Python-Tests über die qemu-Wrapper |
+| Engine-Release-Build `-mcpu=cortex-a72`: alle Tests | 57 direkt (darunter die beiden Konsolen-Fenster) + 20/20 Python-Tests über die qemu-Wrapper |
+| Konsolen-Schicht ohne Hardware (`QRX_LIO_TEST`): RTG-Formate, Skalierung mit Seitenverhältnis, evdev-Tasten als Amiga-Rawkeys, Maus relativ und geklemmt, Tasten, ein nachträglich eingestecktes Gerät; EC64: Konsole, beide Framebuffer-Formate, macOS-Tastencodes, getippter Text mit Shift, Maus | bestanden (x86-64 und AArch64) |
+| Boot bis zum Desktop über die Konsolen-Schicht (Testmodus, 1920×1080) | ok; Fenster-Thread im Leerlauf 0,83 s CPU in 30 s |
+| Ton über ALSA (`null`-Gerät): `QRXAHITest` im Gast | `[AHITEST] PLAYED` |
+| Engine und EC64-Maschine starten mit den Bibliotheken des Images | ok; sie brauchen nur noch EGL, `libOpenGL`, ALSA und libc |
 
 Nicht geprüft, weil es nur auf dem Pi geht: Bild über KMS/HDMI, 3D über Mesa V3D, Ton über
 HDMI und Klinke, WLAN- und Bluetooth-Firmware, Ethernet, Tastatur/Maus über USB, die
@@ -55,12 +60,14 @@ Keine Distribution, sondern ein eigener Kernel und genau die Programme, die das 
   - Rohstoff sind Ubuntu-24.04-arm64-Pakete (`fetch-debs.sh`, `packages.txt`; `exclude.txt`
     hält systemd, Paketverwaltung, Perl und Python fern).
   - `mkrootfs.py` übernimmt daraus nur die Programme der Liste und die Bibliotheken, die sie
-    wirklich laden (ELF `DT_NEEDED`, rekursiv), dazu die per `dlopen` geladenen von SDL2 und Mesa.
+    wirklich laden (ELF `DT_NEEDED`, rekursiv), dazu Mesas per `dlopen` geladenen Treiber.
   - BusyBox ist Init, Shell, DHCP-Client und Werkzeugkasten.
-  - X11-, Wayland- und PulseAudio-*Bibliotheken* sind dabei, weil Ubuntus SDL2 und Mesa sie
-    fest einbinden. Kein X-Server, Compositor oder Sound-Server läuft je.
-  - Größe: etwa 375 MB, davon 133 MB `libLLVM` und 30 MB ICU, die Ubuntus Mesa mitbringt.
-    Ein eigenes Mesa nur mit V3D/VC4 wäre deutlich kleiner (offen).
+  - **Kein SDL mehr.** Die Engine bindet nur EGL, glvnds `libOpenGL` (OpenGL ohne GLX, also
+    ohne X11), ALSA und libc. Ein paar xcb-/Wayland-Client-Bibliotheken kommen nur noch über
+    Ubuntus Mesa mit; kein X-Server oder Compositor läuft je. 150 Programme/Bibliotheken statt 211.
+  - Größe: etwa 363 MB, davon 133 MB `libLLVM` und 30 MB ICU aus Ubuntus Mesa. Die Quellen für
+    ein eigenes, schlankes Mesa (nur V3D/VC4, ohne LLVM) liegen jetzt im Repository
+    (`upstream/pi-sources`, siehe unten); gebaut ist es noch nicht.
 - **QRX OS One** (`tools/armithlon/pi/bundle/build-bundle.sh`)
   - Grundlage ist das Deadwood-AROS-Release 5b5fd4c aus dem Repository. ROM, Ext-ROM, ISO und
     Bootdiskette werden nur mit ihren gespeicherten SHA256-Summen verwendet.
@@ -85,18 +92,34 @@ Keine Distribution, sondern ein eigener Kernel und genau die Programme, die das 
 
 - BusyBox-Init → `rcS`: Dateisysteme, Governor `performance`, Ethernet per DHCP,
   `wpa_supplicant` für WLAN, D-Bus und `bluetoothd`.
-- Danach `/qrx/session`: die Engine im Vollbild über SDL2/KMSDRM, Ton über ALSA.
+- Danach `/qrx/session`: die Engine direkt auf dem Kernel (`linux/qrx_lio.c`), ohne SDL und ohne
+  Display-Server:
+  - **Bild:** DRM/KMS über die ioctls des Kernels (kein libdrm). Das Gastbild liegt in einem
+    eigenen Puffer auf einer Overlay-Ebene, die die Display-Hardware (HVS) des Pi auf den
+    Bildschirm skaliert, mit Seitenverhältnis und schwarzen Rändern; gewechselt wird im
+    Vertical Blank. Ohne skalierende Ebene skaliert die CPU (nächster Nachbar). `QRX_MODE=WxH`
+    wählt einen Bildschirmmodus, `QRX_SCALE_INTEGER=1` ganzzahlige Skalierung.
+  - **Zeiger:** der Hardware-Cursor der Anzeige (Pfeil, Fadenkreuz wie vom Gast gewählt).
+  - **Eingabe:** evdev direkt, Tastaturen, Mäuse, Touchscreens und Tablets; die Geräte werden
+    exklusiv übernommen. Später eingesteckte Geräte (auch gekoppelte Bluetooth-Tastaturen)
+    findet die Engine sofort über inotify. `QRX_MOUSE_SPEED` skaliert die Maus.
+  - **Konsole:** das Terminal geht in den Grafikmodus. **Strg+Alt+F2** wechselt zur
+    Notfall-Shell, **Strg+Alt+F1** zurück; die Engine gibt Bild und Eingabe dabei ab und holt
+    sie sich zurück, QRX OS One läuft weiter.
+  - **Ton:** ALSA (alsa-lib, wegen der IEC958-Aufbereitung für HDMI auf dem Pi), auf einem eigenen
+    Thread, 40 ms Puffer.
   - HDMI-Ton, wenn der Bildschirm welchen hat, sonst die Klinke.
   - `/data/qrx-audio` mit einem ALSA-Kartennamen (`Headphones`, `vc4hdmi0`) legt das fest.
 - **Kern 3 gehört der 68k-CPU:** `isolcpus=3 nohz_full=3 rcu_nocbs=3`, die Engine setzt ihren
   CPU-Thread per `QRX_CPU_CORE=3` dorthin, alles andere läuft auf Kern 0–2.
 - `arm_boost=1` (1,8 GHz auf neueren Pi 4). Übertakten steht auskommentiert in `config.txt`.
-- **Bildausgabe ohne Leerlauf-Kosten** (`linux/qrx_aros_window_sdl.c`): Das Fenster vergleicht
-  jede Zeile des Gastbilds mit einer Schattenkopie und wandelt und lädt nur geänderte Zeilen.
-  Hat sich nichts geändert, wird nichts dargestellt und das Fenster wartet bis 8 ms auf Eingaben.
-  Gemessen (x86-64, Offscreen-Treiber, ruhender Desktop): der Fenster-Thread braucht 1,45 s
-  statt 14,5 s CPU in 30 s. Auf dem Pi spart das vor allem Speicherbandbreite, die sich der
-  Fenster-Thread mit dem 68k-Kern teilt.
+- **Bildausgabe ohne Leerlauf-Kosten** (`linux/qrx_aros_window_kms.c`): Das Fenster vergleicht
+  jede Zeile des Gastbilds mit einer Schattenkopie und wandelt nur geänderte Zeilen; in den
+  Anzeigepuffer gehen nur diese (und die des letzten Bilds, der zweite Puffer hat sie noch nicht).
+  Hat sich nichts geändert, gibt es keine Kopie und keinen Bildwechsel, der Thread wartet bis 8 ms
+  auf Eingaben. Gemessen (x86-64, ruhender Desktop, Fenster-Thread, CPU in 30 s): ursprünglich
+  14,5 s, mit SDL und Zeilenvergleich 1,45 s, jetzt ohne SDL 0,83 s (Testmodus; auf dem Pi
+  skaliert die Display-Hardware, das kostet dort gar keine CPU).
 - **Boot-Wächter:** Das AROS-ROM verliert beim Start manchmal einen Interrupt von
   `timer.device` (CIA-A Timer A wird nach einem Interrupt nicht mehr neu gestellt) und bleibt
   dann vor dem ersten Diskettenzugriff im Leerlauf (`PC=$FE6866`). Auf dem x86-Testrechner
@@ -136,8 +159,9 @@ Keine Distribution, sondern ein eigener Kernel und genau die Programme, die das 
 
 ## QRX OS One 64 (68100EC64) auf dem Pi
 
-- Das Image enthält die EC64-Maschine `qrx_ec64_run` als `/qrx/bin/armithlon64`, jetzt mit
-  einem eigenen SDL2-Fenster (`linux/qrx_ec64_window_sdl.c`, Gegenstück zum Mac-Fenster):
+- Das Image enthält die EC64-Maschine `qrx_ec64_run` als `/qrx/bin/armithlon64`, mit einer
+  Bildschirmausgabe direkt auf der Konsolen-Schicht (`linux/qrx_ec64_window_kms.c`; für einen
+  Linux-Desktop gibt es weiter `linux/qrx_ec64_window_sdl.c`, Gegenstücke zum Mac-Fenster):
   Konsole mit eingebauter 8×8-Schrift, dann der Framebuffer der Karte (XRGB32 ohne Umwandlung,
   RGB565 byte-getauscht), Tasten als macOS-Tastencodes (wie die Karte sie erwartet; die
   Windows-Tasten sind die Amiga-Tasten), Maus in Framebuffer-Pixeln, Ton aus dem Ring der
@@ -172,6 +196,7 @@ bash tools/armithlon/pi/image/fetch-debs.sh DEBS          # danach alle .deb nac
 bash tools/armithlon/pi/bundle/build-bundle.sh BUNDLE
 bash tools/armithlon/pi/build-pi.sh --cross               # Engine; fürs Image Release + -mcpu=cortex-a72
 ENGINE64=qrx_ec64_run python3 tools/armithlon/pi/image/mkrootfs.py STAGE ENGINE BUNDLE ROOTFS
+# Engine fürs Image: QRX_LINUX_FRONTEND=kms (Standard) und -DQRX_GL_LIB=.../libOpenGL.so.0 (arm64)
 bash tools/armithlon/pi/image/mkimage.sh ROOTFS KERNEL-OUT STAGE/usr/lib/linux-firmware-raspi qrx-armithlon-pi4.img
 ```
 
@@ -181,14 +206,26 @@ Auf die Karte: z. B. mit dem Raspberry Pi Imager („eigenes Image“) oder `dd`
 
 - Nur **Pi 4 Model B** (Gerätebaum `bcm2711-rpi-4-b.dtb`). Pi 400, CM4 und Pi 5 brauchen eigene
   Gerätebäume bzw. für den Pi 5 einen anderen Kernel (`bcm2712`).
-- **Tastatur und Maus vor dem Start einstecken.** Ohne udev-Dienst sieht SDL2 die Geräte beim
-  Start (es liest ihre Fähigkeiten aus sysfs), später eingesteckte aber nicht. Bluetooth-Geräte
-  nach dem Koppeln: QRX OS One einmal neu starten.
+- Die Konsolen-Schicht ist ohne Hardware getestet (Testmodus mit Speicherpuffer und
+  evdev-Ereignissen aus Dateien), die DRM-/KMS-Aufrufe selbst, die Overlay-Skalierung, der
+  Hardware-Cursor und der Terminalwechsel liefen noch nie auf einem Pi. Fällt die Overlay-Ebene
+  aus, bleibt die CPU-Skalierung; `QRX_NO_PLANE=1` erzwingt sie zum Vergleich.
+- Getippter Text für die Konsole von QRX OS One 64 nimmt das US-Layout (die Tasten selbst gehen
+  als Tastencodes an den Gast, der sein eigenes Layout anwendet).
 - Das Passwort geht als Argument an `wpa_passphrase`; solange das läuft, steht es in dessen
   Prozessliste (nur lokal sichtbar, für Millisekunden).
 - Das WLAN-Land ist `DE` (`/etc/qrx/wpa_supplicant.conf`); in der App noch nicht wählbar.
 - QRX OS One 64 selbst (Kernel, Module, `QRXOS64.img`) baut dieses Repository nur mit dem
   m68k64-LLVM (`tools/armithlon/ec64-llvm`) und dem 64-Bit-AROS-Build; beides lief hier nicht
   (zu wenig Platz). Die Dateien kommen deshalb aus dem Mac-Paket, siehe unten.
-- Ein eigenes, schlankes Mesa (nur V3D/VC4, ohne LLVM) und ein SDL2 nur mit KMSDRM/ALSA würden
-  das Image um gut 200 MB verkleinern.
+- Ein eigenes, schlankes Mesa (nur V3D/VC4, ohne LLVM) würde das Image um gut 200 MB
+  verkleinern; die Quellen liegen bereit (`upstream/pi-sources`).
+
+## Quellen zum Entschlacken (`upstream/pi-sources`)
+
+Mesa 25.2.8, libdrm 2.4.125, alsa-lib 1.2.11 und BusyBox 1.36.1 als Quellen, genau die Fassungen
+im Image (Upstream-Tarball, Ubuntus Patches, `.dsc`). Geprüft: Ubuntus signiertes
+`noble-updates`-Verzeichnis → `Sources.xz` → jede `.dsc` → jede Datei; `SHA256SUMS` hält alles
+fest. Der Kernel ist zu groß fürs Repository: `tools/armithlon/pi/kernel/fetch-kernel.sh` holt
+genau den Commit, aus dem das Image gebaut ist. SDL ist nicht dabei, das Image braucht es nicht
+mehr.

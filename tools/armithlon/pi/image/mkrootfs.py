@@ -27,10 +27,9 @@ PROGRAMS = [
     'usr/bin/dbus-daemon', 'usr/libexec/bluetooth/bluetoothd', 'usr/bin/bluetoothctl', 'usr/bin/btmgmt',
     'usr/sbin/resize2fs', 'usr/sbin/e2fsck',          # first start: the root fills the card
 ]
-# loaded with dlopen (SDL2: KMS/DRM, GBM, EGL, GLES2, ALSA, udev; Mesa: the gallium driver)
-RUNTIME_LIBS = ['libdrm.so.2', 'libgbm.so.1', 'libEGL.so.1', 'libGLESv2.so.2', 'libasound.so.2',
-                'libudev.so.1', 'libEGL_mesa.so.0', 'libGLX_mesa.so.0',
-                'dri/libdril_dri.so', 'gbm/dri_gbm.so']
+# loaded with dlopen: glvnd's EGL loads Mesa's EGL (libEGL_mesa), which loads the gallium driver.
+# The engine itself links EGL, glvnd's libOpenGL (no GLX, so no X11) and ALSA directly; no SDL.
+RUNTIME_LIBS = ['libEGL_mesa.so.0', 'dri/libdril_dri.so', 'gbm/dri_gbm.so']
 DRI_NAMES = ['v3d_dri.so', 'vc4_dri.so', 'kms_swrast_dri.so', 'swrast_dri.so']   # links to libdril
 DATA = ['usr/share/glvnd/egl_vendor.d/50_mesa.json', 'usr/share/drirc.d', 'usr/share/alsa',
         'usr/share/dbus-1/system.conf', 'usr/share/dbus-1/system.d/bluetooth.conf',

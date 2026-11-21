@@ -10,7 +10,8 @@
 # The emulated CPU cores run alone on host core 3, which the kernel keeps free (isolcpus=3), and
 # then 2, 1; everything else runs on the cores left.
 export PATH=/usr/sbin:/usr/bin HOME=/root
-export SDL_VIDEODRIVER=kmsdrm SDL_AUDIODRIVER=alsa QRX_FULLSCREEN=1
+# The screen, keyboard, mouse and sound are the engine's own (KMS/DRM, evdev, ALSA, no SDL);
+# Ctrl+Alt+F2 switches to the emergency shell, Ctrl+Alt+F1 back.
 export QRX_NETCTL=/qrx/netctl
 # sound: HDMI when a screen with sound is there, else the 3.5 mm jack; /data/qrx-audio can name
 # an ALSA card (e.g. "Headphones" or "vc4hdmi0") to choose for good
