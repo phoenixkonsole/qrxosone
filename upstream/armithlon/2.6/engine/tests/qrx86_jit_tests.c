@@ -92,7 +92,7 @@ static void gen_flagged(void) {
 }
 static void gen_one(void) {
     unsigned sz;
-    switch (pick(32)) {
+    switch (pick(34)) {
     case 0: case 1: sz = osz(); c8((pick(8) << 3) | (pick(2) << 1) | (sz != 8)); modrm(rsz(sz), sz, true); break;
     case 2: sz = osz(); c8(sz == 8 ? 0x80 : 0x81); modrm(pick(8), sz, true); imm_sz(sz); break;
     case 3: sz = osz(); c8(0x88 | (pick(2) << 1) | (sz != 8)); modrm(rsz(sz), sz, true); break;
@@ -221,6 +221,22 @@ static void gen_one(void) {
         default: { unsigned at; c8(0x70 | pick(16)); at = cp; c8(0); c8(0xB8 | r32()); c32(rnd()); code[at] = (uint8_t)(cp - at - 1); break; }
         }
         c8(0xDB); c8(0xE3);                                              /* fninit: an empty stack again */
+        break;
+    }
+    case 31: case 32: {                                                  /* float to int as MSVC's _ftol does */
+        c8(0xD9); c8(0x7B); c8(0x70);                                    /* fnstcw [ebx+70h] */
+        c8(0x66); c8(0x8B); c8(0x43); c8(0x70);                          /* mov ax,[ebx+70h] */
+        c8(0x80); c8(0xE4); c8(0xF3);                                    /* and ah,0F3h */
+        c8(0x80); c8(0xCC); c8(4 * pick(4));                             /* or ah,rounding */
+        c8(0x66); c8(0x89); c8(0x43); c8(0x74);                          /* mov [ebx+74h],ax */
+        if (pick(2)) c8(0x9B);                                           /* fwait */
+        c8(0xD9); c8(0x6B); c8(0x74);                                    /* fldcw [ebx+74h] */
+        c8(0xDD); c8(0x83); c32(128 + 8 * pick(8));                      /* fld m64 */
+        if (pick(3) == 0) { c8(0xD8); c8(0x8B); c32(128 + 8 * pick(8)); code[cp - 5] = 0x8B; }  /* fmul m32 (approx) */
+        if (pick(2)) { c8(0xDB); c8(0x5B); c8(0x78); }                   /* fistp [ebx+78h] */
+        else { c8(0xDB); c8(0x53); c8(0x78); c8(0xDD); c8(0xD8); }        /* fist [ebx+78h]; fstp st0 */
+        c8(0xD9); c8(0x6B); c8(0x70);                                    /* fldcw [ebx+70h]: back */
+        c8(0x8B); c8(0x43 | r32() << 3); c8(0x78);                       /* mov reg,[ebx+78h] */
         break;
     }
     default: gen_flagged(); break;

@@ -515,6 +515,31 @@ Stücke (`rep_fast`).
 **Geprüft:** Der Differenztest erzeugt `REP MOVS`/`STOS` aller Größen mit Überlappung, Anzahl 0,
 `DF=1` und Seitengrenze. 200 000 Fälle stimmen mit dem Interpreter überein.
 
+### x86-JIT: Gleitkomma → Ganzzahl wie in MSVC-Programmen (2026-11-21)
+
+**Messwerkzeug:** `QRX86_JIT_STATS=1` zählt, welche x86-Befehle an den Interpreter gehen, und
+listet Codeseiten, die der JIT als flüchtig aufgegeben hat.
+
+**Befund mit echten Programmen** (32-Bit-System unter qemu Cortex-A72):
+- `dxtest.exe`: nur 3013 Befehle im Interpreter.
+- `qrxclock.exe`: 16 % seines x86-Codes liefen im Interpreter, fast alles `D9`/`DB`. Das ist
+  MSVCs Muster für Gleitkomma → Ganzzahl (`_ftol`): Rundung mit `FNSTCW`/`FLDCW` auf
+  „abschneiden“ stellen, `FISTP`, Rundung zurück.
+- Laufen zwei Windows-Programme gleichzeitig, liegen beide bei `0x400000`. Jeder Wechsel
+  überschreibt den Code des anderen, und der JIT gibt die Seiten auf: rund ein Drittel lief dann
+  im Interpreter. Das ist noch offen; dafür bräuchte jedes Programm einen eigenen JIT-Bereich.
+
+**Jetzt nativ:**
+- `FIST`/`FISTP m32` mit allen vier Rundungsarten des Steuerworts (`FCVTNS`/`FCVTMS`/
+  `FCVTPS`/`FCVTZS`, Auswahl mit `tbnz`, ohne NZCV anzufassen);
+- `FLDCW` und `FNSTCW`;
+- `FWAIT`.
+
+**Wirkung bei `qrxclock.exe`:** im Interpreter 269 302 → 54 024 Befehle (16 % → 3,7 %).
+
+**Geprüft:** Der Differenztest erzeugt das `_ftol`-Muster mit allen Rundungsarten,
+0,5-Grenzfällen und Überlauf; 200 000 Fälle stimmen mit dem Interpreter überein.
+
 ### 64-Bit-JIT: kürzere Prüfungen je Speicherzugriff (2026-11-21)
 
 Vor jedem Zugriff prüfte der 68100EC64-JIT Bereich (3 Befehle) und Ausrichtung (2 Befehle),

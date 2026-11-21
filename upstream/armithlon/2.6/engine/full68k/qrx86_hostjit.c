@@ -96,7 +96,7 @@ enum {
     K_FCMP                           /* x87 compares: op = FC_*, rm = ST index, cc = pops, src_sz for memory */
 };
 enum { FC_FCOM, FC_FCOMI, FC_FNSTSW };
-enum { FP_LDST, FP_XCH, FP_STST, FP_STSTP, FP_CHS, FP_ABS, FP_SQRT, FP_LD1, FP_LDZ, FP_ILD32, FP_IST32, FP_ISTP32 };
+enum { FP_LDST, FP_XCH, FP_STST, FP_STSTP, FP_CHS, FP_ABS, FP_SQRT, FP_LD1, FP_LDZ, FP_ILD32, FP_IST32, FP_ISTP32, FP_LDCW, FP_STCW };
 typedef struct {
     int base, index;
     unsigned scale;
@@ -372,6 +372,8 @@ static bool xj_decode1(uint32_t eip, XIns *x) {
                 y.kind = K_FCMP; y.op = FC_FCOM; y.src_sz = b == 0xD8 ? 32 : 64; y.cc = y.reg == 3;
             }
             else if (b == 0xDB && y.reg == 0) { y.kind = K_FPU; y.op = FP_ILD32; }
+            else if (b == 0xD9 && y.reg == 5) { y.kind = K_FPU; y.op = FP_LDCW; }
+            else if (b == 0xD9 && y.reg == 7) { y.kind = K_FPU; y.op = FP_STCW; }
             else if (b == 0xDB && (y.reg == 2 || y.reg == 3)) { y.kind = K_FPU; y.op = y.reg == 3 ? FP_ISTP32 : FP_IST32; }
         } else if (!y.has_mem) {
             unsigned sub = 0xC0u | (unsigned)y.reg << 3 | y.rm;
@@ -442,6 +444,7 @@ static bool xj_decode1(uint32_t eip, XIns *x) {
         x->kind = K_LEA;
         break;
     case 0x90: x->kind = rep ? K_FALL : K_NOP; break;
+    case 0x9B: x->kind = K_NOP; break;               /* FWAIT: nothing pending in this x87 */
     case 0x98: x->kind = K_CWDE; break;
     case 0x99: x->kind = K_CDQ; break;
     case 0xA0: case 0xA1: case 0xA2: case 0xA3:
@@ -1106,6 +1109,17 @@ static void gen_fpu(XT *t, const XIns *x) {
         if (x->op == FP_SQRT) fp_nan_check(t);     /* below zero or NaN: the interpreter's x87 rules */
         E(e, 0xFD000000u | (2u << 5) | 0u);
         break;
+    case FP_LDCW: case FP_STCW:                    /* FLDCW, FNSTCW m16 */
+        addr = ea(t, &x->m);
+        if (addr == 0) { movr(e, 5, 0); addr = 5; }
+        if (x->op == FP_LDCW) {
+            load(t, 9, addr, 16, false);
+            E(e, 0x79000000u | ((uint32_t)(offsetof(x86cpu, fcw) / 2) << 10) | (XCPU << 5) | 9u);   /* strh w9,fcw */
+        } else {
+            E(e, 0x79400000u | ((uint32_t)(offsetof(x86cpu, fcw) / 2) << 10) | (XCPU << 5) | 9u);   /* ldrh w9,fcw */
+            store(t, 9, addr, 16);
+        }
+        break;
     case FP_ILD32:                                 /* FILD m32 */
         addr = ea(t, &x->m);
         if (addr == 0) { movr(e, 5, 0); addr = 5; }
@@ -1113,7 +1127,7 @@ static void gen_fpu(XT *t, const XIns *x) {
         E(e, 0x1E620000u | (9u << 5) | 0u);        /* scvtf d0,w9 */
         fp_push_d0(e);
         break;
-    default: {                                     /* FIST, FISTP m32: round to nearest only, in range */
+    default: {                                     /* FIST, FISTP m32: the rounding of the control word, in range */
         addr = ea(t, &x->m);
         if (addr == 0) { movr(e, 5, 0); addr = 5; }
         fp_top(e, 1);
@@ -1121,9 +1135,18 @@ static void gen_fpu(XT *t, const XIns *x) {
         E(e, 0xFD400000u | (2u << 5) | 0u);
         fp_nan_check(t);
         E(e, 0x79400000u | ((uint32_t)(offsetof(x86cpu, fcw) / 2) << 10) | (XCPU << 5) | 9u);   /* ldrh w9,fcw */
-        ubfm(e, 9, 9, 10, 11);                     /* rounding control */
-        fix_add(t, 0x35000000u | 9u, 0);           /* cbnz w9,stub */
-        E(e, 0x9E600000u | (0u << 5) | 10u);       /* fcvtns x10,d0: nearest, ties to even */
+        ubfm(e, 9, 9, 10, 11);                     /* rounding control: 0 nearest, 1 down, 2 up, 3 toward zero */
+        /* tbnz, not cmp: NZCV may hold x86 flags */
+        E(e, 0x37000000u | (1u << 19) | (6u << 5) | 9u);      /* tbnz w9,#1,+6 */
+        E(e, 0x37000000u | (0u << 19) | (3u << 5) | 9u);      /* tbnz w9,#0,+3 */
+        E(e, 0x9E600000u | (0u << 5) | 10u);                  /* fcvtns x10,d0: nearest, ties to even */
+        E(e, 0x14000000u | 7u);                               /* b +7 */
+        E(e, 0x9E700000u | (0u << 5) | 10u);                  /* fcvtms x10,d0: down */
+        E(e, 0x14000000u | 5u);                               /* b +5 */
+        E(e, 0x37000000u | (0u << 19) | (3u << 5) | 9u);      /* tbnz w9,#0,+3 */
+        E(e, 0x9E680000u | (0u << 5) | 10u);                  /* fcvtps x10,d0: up */
+        E(e, 0x14000000u | 2u);                               /* b +2 */
+        E(e, 0x9E780000u | (0u << 5) | 10u);                  /* fcvtzs x10,d0: toward zero */
         E(e, 0x93407C00u | (10u << 5) | 11u);      /* sxtw x11,w10 */
         E(e, 0xCB000000u | (10u << 16) | (11u << 5) | 11u);   /* sub x11,x11,x10: no flags, NZCV are x86's */
         fix_add(t, 0xB5000000u | 11u, 0);          /* out of range: cbnz x11,stub */
