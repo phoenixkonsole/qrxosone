@@ -92,9 +92,17 @@ run64() {
   cp "$T/boot/QRXOS64.img" "$W/disk.img"
   local mods=()
   while read -r m; do [ -n "$m" ] && mods+=("$K/$m"); done < "$K/modules.txt"
-  QRX_EC64_CPUS=3,2 "$@" taskset -c 0-1 "$B/qrx_ec64_run" --cores "$cores" --ram 1024 --disk "$W/disk.img" \
-    --cmdline econsole-startup --seconds "$SECS" --stats --capture "$W/fb.ppm" --host-view 1024x768 \
-    "$K/core.elf" "${mods[@]}" > "$W/run.log" 2>&1 || true
+  # a fixed job: the boot, 15 rounds of dir and avail in the shell, Shutdown. Idle cores sleep
+  # (QRX_EC64_IDLE_SLEEP), so instructions a second only count work; the time to the end and the
+  # host CPU it took are the numbers to compare.
+  local job="" i t TIMEFORMAT='%R %U %S'
+  for i in $(seq 1 15); do job="${job}dir SYS:C >NIL:\\navail >NIL:\\necho ROUND-$i\\n"; done
+  job="${job}Shutdown\\n"
+  t=$( { time QRX_EC64_CPUS=3,2 "$@" taskset -c 0-1 "$B/qrx_ec64_run" --cores "$cores" --ram 1024 \
+    --disk "$W/disk.img" --cmdline econsole-startup --seconds "$SECS" --stats --input "$job" \
+    --capture "$W/fb.ppm" --host-view 1024x768 "$K/core.elf" "${mods[@]}" > "$W/run.log" 2>&1 || true; } 2>&1 )
+  read -r wall user sys <<< "$t"
+  echo "  job (boot, 15 rounds, Shutdown): $(grep -ao 'ROUND-[0-9]*' "$W/run.log" | tail -1 || true) after ${wall} s, host CPU ${user} s user + ${sys} s sys"
   grep -a "\[EC64\] core\|all cores" "$W/run.log" | sed 's/^/  /' || true
   [ -e "$W/fb.ppm" ] && echo "  the screen at the end: $W/fb.ppm"
   return 0

@@ -252,6 +252,9 @@ Offen:
   die Leerlaufzeit je Kern ($320+8n), dazu Kernzahl ($31C), RAM ($360), Laufzeit ($368) und Host-CPU ($380).
   Schlafen im Leerlauf (`QRX_EC64_IDLE_SLEEP=1`) spart Mac-CPU, zeigte aber Hänger und einmal eine
   Ausnahme in `core_Switch`. Es bleibt deshalb aus.
+  **Nachtrag 2026-11-21:** Die Hänger kamen von der gleichzeitig eingeschalteten Verteilung der
+  Tasks (siehe SMP-Befund am Abend), nicht vom Schlafen. Schlafen ist jetzt Standard
+  (`QRX_EC64_IDLE_SLEEP=0` schaltet es ab), Messungen in `raspberry-pi-image.md`.
 - **QRXInfo:** „Über QRX OS One“ mit OS, Prozessor, Host, Speicher, Display, Ton, Netz, 3D, Laufzeit
   und live der Last je Kern. `QRXInfo TEXT` gibt dasselbe in der Shell aus. Gibt es auch für Classic.
 - **Desktop-Shell** (`tools/armithlon/desktop/qrx_shell.c`, über `build-desktop.py`):

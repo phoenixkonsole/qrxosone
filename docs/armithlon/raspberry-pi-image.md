@@ -322,9 +322,44 @@ Engine-Funktionen.
 | `qec64_board_mmio` | 39 % |
 | `clock_gettime` | 14 % |
 
-Ein User-Programm (PC `0x1118f0`) fragt die Board-Uhr in einer Schleife ab, statt zu warten (`STOP`
-legt einen Kern schlafen, wird hier aber nicht erreicht). Die Leerlauf-Befehlsraten messen also vor
-allem diese Schleife. Das ist der erste Punkt, der mit dem JIT auf dem Pi zu prüfen ist.
+Die Schleife bei PC `0x1118f0` war die Idle-Task von AROS 64. Sie schreibt das Board-Register IDLE
+(`$318`) in einer Schleife, und das Board ließ den Kern dabei weiterlaufen, statt ihn schlafen zu legen.
+Das ist inzwischen behoben, siehe den nächsten Abschnitt.
+
+### QRX OS One 64: schlafender Leerlauf (2026-11-21)
+
+**Jetzt Standard:** Ein Kern im Leerlauf schläft beim IDLE-Schreiben, bis ein Interrupt kommt
+(Signal eines anderen Kerns, eigener Timer, Gerät), höchstens 1 ms. `QRX_EC64_IDLE_SLEEP=0`
+schaltet zurück auf die Dauerschleife.
+
+**Warum es vorher aus war:** Das Schlafen wurde am 17.11. abgeschaltet, nachdem Hänger und ein
+Fehler in `core_Switch` aufgetreten waren. Getestet wurde damals aber, während neue Tasks auf alle
+Kerne verteilt wurden. Am selben Abend stellte sich die Verteilung als Ursache heraus: `Forbid()`
+hält in AROS nur den eigenen Kern an. Die Verteilung ist seitdem aus, das Schlafen blieb aber aus.
+
+**Dazu geändert:** Ein schlafender Kern zählt beim globalen `Forbid()` als angehalten. Der
+besitzende Kern wartete sonst bis zu 1 ms auf ihn.
+
+**Gemessen** (x86-64-Interpreter, 2 Kerne):
+
+| Aufgabe | Dauerschleife | Schlafen |
+| --- | --- | --- |
+| Start, 15 Runden `dir`/`avail`, `Shutdown` (je 3 Läufe) | 5,6 s Laufzeit, 10,2–10,4 s Host-CPU | 5,6–5,8 s Laufzeit, 5,5–5,7 s Host-CPU |
+| Start, dann Leerlauf, zusammen 30 s | 59 s Host-CPU (zwei volle Kerne) | 4,2 s Host-CPU, fast nur der Start |
+
+Mit dem AArch64-JIT unter qemu Cortex-A72 kamen 2 und 4 Kerne durch alle Runden. Mit
+Verteilung (`QRX_EC64_SMP_SPREAD=1`) kam der Lauf jetzt ebenfalls durch, vorher hing er nach
+Runde 2. Die Verteilung bleibt trotzdem aus, wegen `Forbid()`.
+
+**Was das für den Pi heißt:**
+- Ein ruhendes QRX OS One 64 belegt keine Pi-Kerne mehr. Das bedeutet weniger Hitze und weniger
+  Takt-Drosselung, und Fenster und Ton bekommen mehr Rechenzeit.
+- `bench-pi.sh` misst deshalb jetzt eine feste Aufgabe (Start, 15 Runden, `Shutdown`): die Zeit
+  bis zum Ende und die Host-CPU. Befehle pro Sekunde zählen nur noch echte Arbeit.
+
+**Weiter offen:** Ohne Verteilung läuft alle Arbeit auf Kern 0; Kern 1 führte in der Aufgabe nur
+0,3 Mio. Befehle aus. Mehr Kerne bringen erst etwas mit einem `Forbid()` über alle Kerne, das
+auch AROS' Bibliotheken trägt.
 
 ## QRX OS One 64 ohne Mac neu gebaut (2026-11-21)
 

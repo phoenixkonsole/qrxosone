@@ -90,11 +90,15 @@ static int on_console_in(qec64_cpu *self)
     pthread_mutex_unlock(&m->lock);
     return ch;
 }
+/* Cores asleep in the idle task's IDLE write (board): they touch no shared data, so a global
+ * Forbid()'s owner need not wait for them to reach a block boundary (gf_gate). */
+static uint32_t idle_asleep;
 uint64_t qec64_machine_idle(qec64_cpu *c, uint64_t max_us)
 {
     qec64_machine *m = c->machine;
     unsigned id = c->core_id;
     uint64_t start = now_us(), end = start + max_us;
+    __atomic_fetch_or(&idle_asleep, 1u << (id & 31), __ATOMIC_SEQ_CST);
     pthread_mutex_lock(&m->lock);
     while (!__atomic_load_n(&c->pending, __ATOMIC_SEQ_CST) && !m->stopping) {
         uint64_t cur = now_us(), n = m->next_timer_us[id];
@@ -110,6 +114,7 @@ uint64_t qec64_machine_idle(qec64_cpu *c, uint64_t max_us)
         pthread_cond_timedwait(&m->wake, &m->lock, &t);
     }
     pthread_mutex_unlock(&m->lock);
+    __atomic_fetch_and(&idle_asleep, ~(1u << (id & 31)), __ATOMIC_SEQ_CST);
     return now_us() - start;
 }
 /* ---- Global Forbid()/Disable() for AROS SMP.
@@ -188,7 +193,8 @@ static void gf_gate(qec64_cpu *c)
             if ((int)k == id) continue;
             qec64_cpu *o2 = &m->cpu[k];
             while (__atomic_load_n(&o2->started, __ATOMIC_ACQUIRE) && !o2->waiting && !o2->supervisor &&
-                   !(__atomic_load_n(&gf_stopped, __ATOMIC_ACQUIRE) >> k & 1) && !m->stopping) {
+                   !(__atomic_load_n(&gf_stopped, __ATOMIC_ACQUIRE) >> k & 1) &&
+                   !(__atomic_load_n(&idle_asleep, __ATOMIC_ACQUIRE) >> k & 1) && !m->stopping) {
                 if (now_us() > until) { gf_ack_timeouts++; break; }
                 gf_nap();
             }

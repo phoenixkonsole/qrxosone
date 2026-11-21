@@ -207,12 +207,20 @@ bool qec64_board_mmio(qec64_cpu *c, uint64_t addr, unsigned size, bool write, ui
 #endif
         return true;
     case QEC64_IDLE: {
-        /* The idle task writes this in a loop. The time between two such writes close together is
-         * idle time. Sleeping here (QRX_EC64_IDLE_SLEEP=1) spares the host but still exposes an
-         * SMP race in AROS 64, so by default the core keeps spinning. */
+        /* The idle task writes this in a loop. By default the core sleeps here until an interrupt
+         * (another core's signal, its timer, a device), at most 1 ms, and the board counts that as
+         * idle time. A spinning idle core held a host core at full load: on a Raspberry Pi 4 that
+         * is heat, throttling and time taken from the window and sound threads.
+         * Sleeping was off since 2026-11-17, when it was tried while new tasks were spread over all
+         * cores and hangs and a fault in core_Switch appeared; those came from the spreading
+         * (Forbid() only holds its own core in AROS), which is off by default since. Measured
+         * 2026-11-21 (boot, 15 rounds of dir/avail, Shutdown; 2 cores, x86-64 interpreter): the
+         * same time (5.6 s against 5.6-5.8 s), half the host CPU (10.3 s against 5.6 s); with the
+         * AArch64 JIT under qemu cortex-a72 on 2 and 4 cores all rounds done.
+         * QRX_EC64_IDLE_SLEEP=0: spin, counting the time between close writes as idle. */
         static int sleep_on = -1;
         if (!write || size != 4) return false;
-        if (sleep_on < 0) sleep_on = getenv("QRX_EC64_IDLE_SLEEP") != NULL;
+        if (sleep_on < 0) { const char *e = getenv("QRX_EC64_IDLE_SLEEP"); sleep_on = !(e && !strcmp(e, "0")); }
         unsigned id = c->core_id < 8 ? c->core_id : 7;
         if (sleep_on) { b->idle_us[id] += qec64_machine_idle(c, 1000); return true; }
         uint64_t now = clock_us(), last = b->idle_last[id];
