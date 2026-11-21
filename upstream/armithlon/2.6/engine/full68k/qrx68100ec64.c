@@ -1272,6 +1272,7 @@ enum qec64_status qec64_run(qec64_cpu *c, uint64_t max)
         if (p && vectored(c)) {
             unsigned level = 31u - (unsigned)__builtin_clz(p);
             if (level > c->ipl || level == 7) {
+                if (c->quiet && c->on_wake) c->on_wake(c);   /* before it touches memory */
                 __atomic_fetch_and(&c->pending, ~(UINT32_C(1) << level), __ATOMIC_SEQ_CST);
                 c->waiting = false;
                 uint64_t pc = c->pc;

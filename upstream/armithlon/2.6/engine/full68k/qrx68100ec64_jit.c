@@ -45,6 +45,7 @@ bool qec64_jit_map_new(uint64_t ram_size, uint8_t **code_map, uint32_t **code_ge
 /* For tests: fewer instructions per block (1 steps instruction by instruction). */
 unsigned qec64_jit_block_limit = MAX_INSNS;
 #define MAX_STUBS 160u
+#define CHAIN_RUN 4096u
 
 #define XF 0x10
 #define NF 0x08
@@ -75,7 +76,11 @@ typedef struct {
     uint32_t *last_exit;     /* a block's exit to a fixed pc that returned here, to patch */
     uint64_t last_exit_pc;   /* that pc: only a block there may be chained in */
     uint32_t *single;        /* with QRX_EC64_JIT_STATS: interpreted instructions by prefix and opcode */
+    bool ord;                /* this cache's code orders its accesses (LDAR/STLR) */
 } Jit;
+/* A core's two code caches, plain and ordered (see core_wake in qrx68100ec64_machine.c); cur is
+ * the one in use, 2 before the first block. */
+typedef struct { Jit *k[2]; unsigned cur; uint64_t switches; } JitSet;
 
 /* ------------------------------------------------------------------ AArch64 encoding */
 /* x23: instructions done in this call, x25: chain while x23 is below it */
@@ -220,16 +225,40 @@ static void check_range(T *t, unsigned ra, unsigned n, unsigned s, bool write)
         leave_before(t, cbnz_site(t, S0));
     }
 }
-/* Ordered accesses (LDAR/STLR) are only needed while other cores share the RAM: with one core,
- * as in the 32-bit JIT, plain LDR/STR with a register offset do, which on in-order-retiring
- * cores like the Pi 4's Cortex-A72 cost far less. The devices on other host threads synchronise
- * through the board's own locks and atomics, not through these accesses.
- * QRX_EC64_JIT_ORDERED=1 keeps the ordered form on one core too. */
-static bool ordered(const T *t)
+/* Ordered accesses (LDAR/STLR) are only needed while another core touches the RAM too: alone,
+ * as in the 32-bit JIT, plain LDR/STR with a register offset do, which on cores like the Pi 4's
+ * Cortex-A72 cost far less. Each core keeps a cache of each kind and picks one before every block
+ * it enters from the dispatcher (want_ordered). The devices on other host threads synchronise
+ * through the board's own locks and atomics, not through these accesses. */
+static bool ordered(const T *t) { return t->j->ord; }
+static int forced_ordered(void)
 {
     static int forced = -1;
-    if (forced < 0) forced = getenv("QRX_EC64_JIT_ORDERED") != NULL;
-    return forced || t->c->num_cores > 1;
+    if (forced < 0) forced = getenv("QRX_EC64_JIT_ORDERED") != NULL;   /* ordered code always */
+    return forced;
+}
+/* The kind of code this core may run now; as a side effect publishes it in c->ordered, the
+ * hand-over described at core_wake (qrx68100ec64_machine.c). */
+static bool want_ordered(qec64_cpu *c)
+{
+    if (!c->active_mask) return forced_ordered() || c->num_cores > 1;    /* no machine */
+    uint32_t me = 1u << c->core_id;
+    bool want = forced_ordered() || (__atomic_load_n(c->active_mask, __ATOMIC_SEQ_CST) & ~me) != 0;
+    if (want) {
+        if (!__atomic_load_n(&c->ordered, __ATOMIC_RELAXED)) {
+            __atomic_thread_fence(__ATOMIC_SEQ_CST);              /* the plain stores first */
+            __atomic_store_n(&c->ordered, true, __ATOMIC_SEQ_CST);
+        }
+        return true;
+    }
+    if (__atomic_load_n(&c->ordered, __ATOMIC_RELAXED)) {
+        __atomic_store_n(&c->ordered, false, __ATOMIC_SEQ_CST);
+        if (__atomic_load_n(c->active_mask, __ATOMIC_SEQ_CST) & ~me) {   /* one woke meanwhile */
+            __atomic_store_n(&c->ordered, true, __ATOMIC_SEQ_CST);
+            return true;
+        }
+    }
+    return false;
 }
 static void load(T *t, unsigned rd, unsigned ra, unsigned s)
 {
@@ -1161,9 +1190,8 @@ static void jit_flush(Jit *j)
     memset(j->hash, 0, sizeof j->hash);
     j->nblocks = 0;
 }
-static Jit *jit_of(qec64_cpu *c)
+static Jit *jit_new(qec64_cpu *c, bool ord)
 {
-    if (c->jit) return c->jit;
     Jit *j = calloc(1, sizeof *j);
     if (!j) return NULL;
     int flags = MAP_PRIVATE | MAP_ANON;
@@ -1179,16 +1207,31 @@ static Jit *jit_of(qec64_cpu *c)
     jit_flush(j);
     j->gen = __atomic_load_n(c->code_gen, __ATOMIC_ACQUIRE);
     if (getenv("QRX_EC64_JIT_STATS")) j->single = calloc(1u << 21, sizeof(uint32_t));
-    c->jit = j;
+    j->ord = ord;
     return j;
 }
-void qec64_jit_free(qec64_cpu *c)
+static JitSet *jit_set(qec64_cpu *c)
 {
-    Jit *j = c->jit;
+    if (!c->jit) {
+        JitSet *s = calloc(1, sizeof *s);
+        if (!s) return NULL;
+        s->cur = 2;
+        c->jit = s;
+    }
+    return c->jit;
+}
+/* The cache in use (for verify_block) */
+static Jit *jit_cur(qec64_cpu *c)
+{
+    JitSet *s = c->jit;
+    return s && s->cur < 2 ? s->k[s->cur] : NULL;
+}
+static void jit_free_one(qec64_cpu *c, Jit *j)
+{
     if (!j) return;
     if (getenv("QRX_EC64_JIT_STATS"))
-        fprintf(stderr, "[EC64 JIT] core %u: %llu blocks translated, %llu entered, %llu chained, %llu single instructions in the interpreter, %llu flushes\n",
-                c->core_id, (unsigned long long)j->translated, (unsigned long long)j->entered, (unsigned long long)j->chained, (unsigned long long)j->interpreted, (unsigned long long)j->flushes);
+        fprintf(stderr, "[EC64 JIT] core %u %s: %llu blocks translated, %llu entered, %llu chained, %llu single instructions in the interpreter, %llu flushes\n",
+                c->core_id, j->ord ? "ordered" : "plain", (unsigned long long)j->translated, (unsigned long long)j->entered, (unsigned long long)j->chained, (unsigned long long)j->interpreted, (unsigned long long)j->flushes);
     if (j->single) {
         for (int k = 0; k < 12; k++) {
             unsigned best = 0;
@@ -1202,6 +1245,16 @@ void qec64_jit_free(qec64_cpu *c)
     munmap(j->buf, CODE_BYTES);
     free(j->blocks);
     free(j);
+}
+void qec64_jit_free(qec64_cpu *c)
+{
+    JitSet *s = c->jit;
+    if (!s) return;
+    if (getenv("QRX_EC64_JIT_STATS") && s->switches)
+        fprintf(stderr, "[EC64 JIT] core %u: %llu switches between plain and ordered code\n", c->core_id, (unsigned long long)s->switches);
+    jit_free_one(c, s->k[0]);
+    jit_free_one(c, s->k[1]);
+    free(s);
     c->jit = NULL;
 }
 static inline unsigned hash_pc(uint64_t pc) { return (unsigned)((pc >> 1) ^ (pc >> 17)) & ((1u << HASH_BITS) - 1); }
@@ -1362,7 +1415,7 @@ static int verify_block(qec64_cpu *c, Block *b, uint64_t *n, enum qec64_status *
     for (unsigned i = 0; i < nw; i++) memcpy(now[i], c->ram + log[i].addr, log[i].n);
     for (unsigned i = nw; i-- > 0;) memcpy(c->ram + log[i].addr, log[i].old, log[i].n);
     *c = s0;
-    Jit *j = c->jit;
+    Jit *j = jit_cur(c);
     uint64_t done = ((uint64_t (*)(qec64_cpu *, uint64_t))(void *)b->code)(c, 0);
     j->last_exit = NULL;
     c->instructions += done;
@@ -1403,13 +1456,38 @@ static int verify_block(qec64_cpu *c, Block *b, uint64_t *n, enum qec64_status *
 
 enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
 {
-    if (!c->code_map || !c->m64) return qec64_run(c, max);
-    Jit *j = jit_of(c);
-    if (!j) return qec64_run(c, max);
+    JitSet *set = c->code_map && c->m64 ? jit_set(c) : NULL;
+    if (!set) {
+        /* no JIT code now: nothing plain of ours for a waking core to wait for */
+        if (c->active_mask && !__atomic_load_n(&c->ordered, __ATOMIC_RELAXED)) {
+            __atomic_thread_fence(__ATOMIC_SEQ_CST);
+            __atomic_store_n(&c->ordered, true, __ATOMIC_SEQ_CST);
+        }
+        return qec64_run(c, max);
+    }
+    Jit *j = NULL;
     uint64_t left = max;
     c->status = QEC64_RUNNING;
     while (left) {
-        if (c->gate) { c->gate(c); j->last_exit = NULL; }
+        /* The global Forbid's gate first: a core standing there runs no guest code, and decides
+         * its kind of code only after it (core_wake counts it as done). */
+        if (c->gate) c->gate(c);
+        {
+            unsigned want = want_ordered(c) ? 1u : 0u;
+            if (want != set->cur || !j) {
+                if (!set->k[want]) set->k[want] = jit_new(c, want);
+                if (!set->k[want]) {       /* no memory for the code: the interpreter, as without a JIT */
+                    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+                    __atomic_store_n(&c->ordered, true, __ATOMIC_SEQ_CST);
+                    return qec64_run(c, left);
+                }
+                if (set->cur < 2 && want != set->cur) { set->switches++; set->k[set->cur]->last_exit = NULL; }
+                set->cur = want;
+                j = set->k[want];
+                j->last_exit = NULL;
+            }
+        }
+        if (c->gate) j->last_exit = NULL;
         if (!c->m64 || c->waiting || pending_irq(c)) {
             j->last_exit = NULL;
             uint64_t before = c->instructions;
@@ -1470,7 +1548,10 @@ enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
         if (__builtin_expect((j->entered & ((1u << 26) - 1)) == 0, 0) && getenv("QRX_EC64_JIT_SAMPLE"))
             fprintf(stderr, "[EC64 JIT] core %u at %llx sp %llx d0 %llx a0 %llx sr ipl %u super %d\n", c->core_id, (unsigned long long)pc,
                     (unsigned long long)c->a[7], (unsigned long long)c->d[0], (unsigned long long)c->a[0], c->ipl, c->supervisor);
-        uint64_t limit = left > MAX_INSNS ? left - MAX_INSNS : 0;
+        /* With other cores, back here at least every CHAIN_RUN instructions: a core waking from
+         * idle waits until this one has looked at the active mask (core_wake). */
+        uint64_t room = c->num_cores > 1 && left > CHAIN_RUN ? CHAIN_RUN : left;
+        uint64_t limit = room > MAX_INSNS ? room - MAX_INSNS : 0;
         uint64_t done = ((uint64_t (*)(qec64_cpu *, uint64_t))(void *)b->code)(c, limit);
         j->last_exit_pc = c->pc;
         c->instructions += done;

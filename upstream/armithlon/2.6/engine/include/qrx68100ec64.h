@@ -72,6 +72,15 @@ struct qec64_cpu {
     /* Called before every block when set (the machine's global Forbid, see
      * qrx68100ec64_machine.c); blocks are then not chained, so it really is every block. */
     void (*gate)(qec64_cpu *self);
+    /* Memory order between cores (qrx68100ec64_machine.c, qrx68100ec64_jit.c). active_mask: the
+     * machine's cores that may touch shared memory now (NULL: no machine; the JIT then orders
+     * whenever num_cores > 1). quiet: this core sleeps in STOP or in its idle task and touches no
+     * shared memory. ordered: its JIT code is the ordered kind (LDAR/STLR) now, or it runs none.
+     * on_wake: a quiet core is about to take an interrupt (called by qec64_run). */
+    uint32_t *active_mask;
+    const bool *stopping;
+    bool quiet, ordered;
+    void (*on_wake)(qec64_cpu *self);
 };
 #define QEC64_CODE_SHIFT 8
 

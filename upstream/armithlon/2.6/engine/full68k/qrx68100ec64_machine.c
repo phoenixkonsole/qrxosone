@@ -5,6 +5,7 @@
 #endif
 #include "qrx68100ec64.h"
 #include <pthread.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,9 @@ struct qec64_machine {
     pthread_mutex_t lock;
     pthread_cond_t wake;
     bool stopping;
+    uint32_t active;                           /* cores that may touch shared memory, see core_wake */
+    uint32_t in_gate;                          /* cores inside gf_gate: they run no guest code there */
+    uint64_t wake_waits, wake_wait_us;         /* core_wake: times it waited for the others, and how long */
     enum qec64_status end;
     unsigned end_core;
     char *out;
@@ -41,6 +45,54 @@ static uint64_t now_us(void)
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (uint64_t)t.tv_sec * 1000000u + (uint64_t)t.tv_nsec / 1000u;
+}
+/* ---- Memory order between cores.
+ * The JIT has two kinds of code (qrx68100ec64_jit.c): plain LDR/STR, and LDAR/STLR, which keeps
+ * the order of every access as other cores see it. The ordered kind costs much on cores like the
+ * Pi 4's Cortex-A72 (each STLR waits for the stores before it, an LDAR after an STLR for that
+ * STLR). It is only needed while another core touches the shared memory too. A core sleeping in
+ * STOP or in its idle task (quiet) touches none: its idle loop only writes the board's IDLE
+ * register. So a core runs the plain kind while all the others are quiet, the ordered kind
+ * otherwise, and a quiet core that is about to take an interrupt (core_wake, from qec64_run)
+ * first marks itself active and waits until every other active core runs ordered code.
+ * The hand-over, both sides sequentially consistent:
+ *   waking core:  active |= me;            then reads each other core's `ordered`
+ *   other core:   ordered = false;         then reads `active` again, back to ordered if set
+ * so at least one of them sees the other's write: no core starts plain code while another wakes
+ * unseen. Going to ordered code, a core first fences (its plain stores become visible) and then
+ * sets `ordered`; the waking core reads that with acquire, so it sees those stores.
+ * The interpreter's own accesses are plain C, ordered or not, as before. */
+static void core_quiet(qec64_cpu *c)
+{
+    if (!c->active_mask || c->quiet) return;
+    c->quiet = true;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);   /* its stores before the others may go plain */
+    __atomic_fetch_and(c->active_mask, ~(1u << c->core_id), __ATOMIC_SEQ_CST);
+}
+static void core_wake(qec64_cpu *c)
+{
+    qec64_machine *m = c->machine;
+    uint32_t me = 1u << c->core_id;
+    c->quiet = false;
+    __atomic_store_n(&c->ordered, true, __ATOMIC_SEQ_CST);   /* no plain code before its next check */
+    __atomic_fetch_or(&m->active, me, __ATOMIC_SEQ_CST);
+    uint64_t t0 = 0;
+    for (unsigned k = 0; k < m->cores; k++) {
+        if (k == c->core_id) continue;
+        qec64_cpu *o = &m->cpu[k];
+        unsigned spins = 0;
+        /* done: o is not active, or runs ordered code, or stands in the global Forbid's gate,
+         * after which it looks at the active mask again before its next block */
+        while ((__atomic_load_n(&m->active, __ATOMIC_SEQ_CST) >> k & 1) &&
+               !__atomic_load_n(&o->ordered, __ATOMIC_SEQ_CST) &&
+               !(__atomic_load_n(&m->in_gate, __ATOMIC_SEQ_CST) >> k & 1) &&
+               !__atomic_load_n(&m->stopping, __ATOMIC_ACQUIRE)) {
+            if (!t0) { t0 = now_us(); m->wake_waits++; }
+            if (++spins > 100) sched_yield();
+        }
+    }
+    if (t0) m->wake_wait_us += now_us() - t0;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
 }
 static void wake_all(qec64_machine *m)
 {
@@ -98,6 +150,7 @@ uint64_t qec64_machine_idle(qec64_cpu *c, uint64_t max_us)
     qec64_machine *m = c->machine;
     unsigned id = c->core_id;
     uint64_t start = now_us(), end = start + max_us;
+    core_quiet(c);   /* until its next interrupt: the idle loop touches no shared memory */
     __atomic_fetch_or(&idle_asleep, 1u << (id & 31), __ATOMIC_SEQ_CST);
     pthread_mutex_lock(&m->lock);
     while (!__atomic_load_n(&c->pending, __ATOMIC_SEQ_CST) && !m->stopping) {
@@ -159,7 +212,7 @@ static bool gf_tls(const qec64_cpu *c, int *spins)
     *spins = c->ram[t + TLS_SPINS];
     return (int8_t)c->ram[t + TLS_IDNEST] >= 0 || (int8_t)c->ram[t + TLS_TDNEST] >= 0;
 }
-static void gf_gate(qec64_cpu *c)
+static void gf_gate_in(qec64_cpu *c)
 {
     qec64_machine *m = c->machine;
     int id = (int)c->core_id;
@@ -202,6 +255,14 @@ static void gf_gate(qec64_cpu *c)
         return;
     }
 }
+static void gf_gate(qec64_cpu *c)
+{
+    qec64_machine *m = c->machine;
+    uint32_t me = 1u << c->core_id;
+    __atomic_fetch_or(&m->in_gate, me, __ATOMIC_SEQ_CST);
+    gf_gate_in(c);
+    __atomic_fetch_and(&m->in_gate, ~me, __ATOMIC_SEQ_CST);   /* then want_ordered reads the active mask */
+}
 /* A core going to sleep (STOP) gives the machine back */
 static void gf_sleep(qec64_cpu *c)
 {
@@ -243,7 +304,7 @@ static void *core_thread(void *arg)
     unsigned id = c->core_id;
     pin_core(id);
     for (;;) {
-        if (__atomic_load_n(&m->stopping, __ATOMIC_ACQUIRE)) return NULL;
+        if (__atomic_load_n(&m->stopping, __ATOMIC_ACQUIRE)) { core_quiet(c); return NULL; }
         if (!__atomic_load_n(&c->started, __ATOMIC_ACQUIRE)) {
             pthread_mutex_lock(&m->lock);
             if (!c->started && !m->stopping) pthread_cond_wait(&m->wake, &m->lock);
@@ -259,6 +320,7 @@ static void *core_thread(void *arg)
         if (st == QEC64_RUNNING) continue;
         if (st == QEC64_WAITING) {
             if (c->gate) gf_sleep(c);
+            core_quiet(c);   /* STOP: nothing runs until an interrupt, which wakes it (core_wake) */
             pthread_mutex_lock(&m->lock);
             /* Ask again under the lock: a signal between the run and here must not be missed. */
             while (!__atomic_load_n(&c->pending, __ATOMIC_SEQ_CST) && !m->stopping) {
@@ -278,6 +340,7 @@ static void *core_thread(void *arg)
             pthread_mutex_unlock(&m->lock);
             continue;
         }
+        core_quiet(c);
         pthread_mutex_lock(&m->lock);
         if (!m->stopping) { m->end = st; m->end_core = id; m->stopping = true; }
         pthread_cond_broadcast(&m->wake);
@@ -290,6 +353,7 @@ qec64_machine *qec64_machine_new(uint8_t *ram, uint64_t ram_size, unsigned cores
     qec64_machine *m = calloc(1, sizeof *m);
     if (!m || cores == 0 || cores > QEC64_MAX_CORES) { free(m); return NULL; }
     m->cores = cores;
+    m->active = 1;
     pthread_mutex_init(&m->lock, NULL);
     pthread_cond_init(&m->wake, NULL);
     for (unsigned i = 0; i < cores; i++) {
@@ -298,6 +362,10 @@ qec64_machine *qec64_machine_new(uint8_t *ram, uint64_t ram_size, unsigned cores
         c->num_cores = cores;
         c->machine = m;
         c->on_ipi = on_ipi;
+        c->active_mask = &m->active;
+        c->stopping = &m->stopping;
+        c->on_wake = core_wake;
+        c->quiet = i != 0;          /* core 0 runs from the start, the others wait for their first signal */
         c->on_timer = on_timer;
         c->on_console = on_console;
         c->on_console_in = on_console_in;
@@ -318,6 +386,9 @@ void qec64_machine_free(qec64_machine *m)
     if (m->cpu[0].gate)
         fprintf(stderr, "[EC64] global Forbid: %llu times, %llu waits for a core cut short, %llu stops cut short\n",
                 (unsigned long long)gf_acquired, (unsigned long long)gf_ack_timeouts, (unsigned long long)gf_pause_timeouts);
+    if (m->cores > 1 && getenv("QRX_EC64_JIT_STATS"))
+        fprintf(stderr, "[EC64] cores waking waited %llu times for the others to order, %llu us in all\n",
+                (unsigned long long)m->wake_waits, (unsigned long long)m->wake_wait_us);
     for (unsigned i = 0; i < m->cores; i++) qec64_jit_free(&m->cpu[i]);
     free(m->code_map);
     free(m->code_gen);

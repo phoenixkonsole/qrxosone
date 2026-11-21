@@ -361,6 +361,61 @@ Runde 2. Die Verteilung bleibt trotzdem aus, wegen `Forbid()`.
 0,3 Mio. Befehle aus. Mehr Kerne bringen erst etwas mit einem `Forbid()` über alle Kerne, das
 auch AROS' Bibliotheken trägt.
 
+### QRX OS One 64: Speicherzugriffe des JIT bei mehreren Kernen (2026-11-21)
+
+**Vorher:** Mit mehr als einem Kern wurde jeder Speicherzugriff des 64-Bit-JIT zu `LDAR`/`STLR`.
+Das hält die Reihenfolge, die andere Kerne sehen, kostet auf dem Cortex-A72 aber viel: Jedes `STLR`
+wartet auf die Schreibzugriffe davor, ein `LDAR` nach einem `STLR` auf dieses. Das galt auch dann,
+wenn die anderen Kerne nur schliefen.
+
+**Jetzt:** Geordnet wird nur noch, solange ein anderer Kern den Speicher wirklich benutzt.
+- Ein Kern ist **ruhig**, solange er noch nicht gestartet ist, in `STOP` schläft oder in seiner
+  Idle-Task steckt. Die Idle-Schleife schreibt nur das Board-Register IDLE und fasst keinen
+  gemeinsamen Speicher an.
+- Jeder Kern hat **zwei Code-Caches**, einfach (`LDR`/`STR`) und geordnet. Vor jedem Block aus dem
+  Dispatcher wählt er: einfach, wenn alle anderen Kerne ruhig sind, sonst geordnet. Zum Umschalten
+  wird nichts neu übersetzt.
+- Ein ruhiger Kern, der einen Interrupt annehmen will, meldet sich zuerst als aktiv (`core_wake`,
+  aus `qec64_run`). Dann wartet er, bis jeder andere aktive Kern auf geordneten Code umgeschaltet
+  hat. Erst danach fasst er Speicher an.
+- **Übergabe:** Der aufwachende Kern setzt erst sein Bit in der Maske der aktiven Kerne und liest
+  dann die Meldungen der anderen. Ein Kern, der zu einfachem Code wechselt, meldet erst „nicht
+  geordnet“ und liest dann die Maske noch einmal. Beides geschieht sequentiell konsistent, also
+  sieht mindestens einer den Eintrag des anderen. Beim Wechsel zu geordnetem Code steht zuerst eine
+  Barriere, dann die Meldung, so sieht der aufwachende Kern die Schreibzugriffe davor.
+- **Wartezeit begrenzt:** Mit mehreren Kernen kehren verkettete Blöcke spätestens nach 4096
+  Befehlen zum Dispatcher zurück. Ein Kern im Tor des globalen `Forbid()` (nur bei Verteilung)
+  zählt als bestätigt: Er führt dort keinen Gastcode aus und wählt seinen Code erst danach.
+- `QRX_EC64_JIT_ORDERED=1` erzwingt wie bisher immer geordneten Code. Mit `QRX_EC64_JIT_STATS=1`
+  gibt es Zähler je Cache, die Umschaltungen und die Wartezeit der aufwachenden Kerne.
+
+**Gemessen** unter qemu Cortex-A72 (Start, 8 Runden `dir`/`avail`, `Shutdown`; alle Läufe bis zum
+Ende):
+
+| Kerne | Blockeinsprünge von Kern 0 mit einfachem Code | aufwachende Kerne warteten |
+| --- | --- | --- |
+| 2 | 98 % (3,06 Mio. von 3,13 Mio.) | 2581-mal, im Mittel 0,24 ms |
+| 4 | 93 % | 9840-mal, im Mittel 0,22 ms |
+| 2, mit Verteilung | beide Kerne arbeiten, meist geordnet | 1381- bzw. 1610-mal, im Mittel 0,16–0,17 ms |
+
+Vorher war bei mehreren Kernen alles geordnet. Mit Verteilung kamen 2 von 2 Läufen durch, mit
+immer geordnetem Code ebenfalls 2 von 2. Ohne die Ausnahme fürs `Forbid()`-Tor kam nur 1 von 3
+durch.
+
+**Tests:** AArch64 57 direkte Tests, darunter alle EC64- und JIT-Tests. Die 20 Python-Tests
+bestanden in 3 von 4 Durchgängen; sie prüfen nur das 32-Bit-System, das diese Änderung nicht
+berührt.
+
+**Grenzen:**
+- Unter qemu-user auf einem x86-64-Host ordnet der Host die Zugriffe ohnehin streng. Die Läufe
+  oben belegen die Abläufe und das Umschalten, aber nicht die Speicherordnung selbst. Die beruht
+  auf der Übergabe oben.
+- Wie viel schneller es auf dem Pi wird, ist nicht gemessen (`bench-pi.sh`, `QRX_EC64_JIT_ORDERED=1`
+  zum Vergleich).
+- Der Interpreter nutzt für seine eigenen Zugriffe wie bisher einfache C-Zugriffe.
+- Die Wartezeit eines aufwachenden Kerns kommt zu seiner Interrupt-Latenz hinzu.
+- Der zweite Cache kostet weitere Übersetzungen und bis zu 32 MB Code-Speicher je Kern.
+
 ## QRX OS One 64 ohne Mac neu gebaut (2026-11-21)
 
 Das Mac-Paket ist verloren; QRX OS One 64 ist jetzt aus dem Repository allein auf Linux gebaut:
