@@ -66,6 +66,7 @@ static struct {
     QRXFullCPU *cpu;
     uint64_t blocks, flushes, kills, interp_ins, volatile_pages, enters;
     uint64_t rep_fast, rep_elems;    /* REP MOVS/STOS portions done by xj_rep_fast, their elements */
+    uint32_t *op_counts;             /* QRX86_JIT_STATS=1: interpreted instructions by opcode (0F xx: 0x100 + xx) */
 } xj;
 
 typedef void (*xj_enter_fn)(x86cpu *c, void *code, uintptr_t *rt);
@@ -1592,10 +1593,30 @@ static bool xj_rep_fast(x86cpu *c, uint32_t eip, uint32_t next) {
     c->eip = c->r[X86_ECX] ? eip : next;             /* more to do: the same instruction again */
     return true;
 }
+/* QRX86_JIT_STATS: which instructions go to the interpreter (the first opcode byte after the
+ * prefixes, two-byte opcodes as 0x100 + the second byte; F3/F2 prefixed as +0x200) */
+static void xj_count_op(uint32_t eip) {
+    static int on = -1;
+    if (on < 0) { on = getenv("QRX86_JIT_STATS") != NULL; if (on) xj.op_counts = calloc(0x400, sizeof(uint32_t)); if (!xj.op_counts) on = 0; }
+    if (!on) return;
+    const uint8_t *q;
+    uint32_t room, pos = 0, rep = 0;
+    if (!xj_fetch_ok(eip, &q, &room)) return;
+    while (pos < room && pos < 4 && (q[pos] == 0x66 || q[pos] == 0x67 || q[pos] == 0xF0 || q[pos] == 0xF2 || q[pos] == 0xF3 ||
+                                     q[pos] == 0x2E || q[pos] == 0x3E || q[pos] == 0x26 || q[pos] == 0x36 || q[pos] == 0x64 || q[pos] == 0x65)) {
+        if (q[pos] == 0xF2 || q[pos] == 0xF3) rep = 0x200;
+        pos++;
+    }
+    if (pos >= room) return;
+    uint32_t k = q[pos];
+    if (k == 0x0F && pos + 1 < room) k = 0x100u + q[pos + 1];
+    xj.op_counts[(k | rep) & 0x3FF]++;
+}
 static uint64_t xj_interp_helper(x86cpu *c, uint32_t eip, uint32_t next) {
     c->eip = eip;
     c->left--;
     xj.interp_ins++;
+    xj_count_op(eip);
     if (!xj_rep_fast(c, eip, next)) exec_one(c);
     return (uint64_t)(c->xj_abort != 0 || c->eip != next);
 }
@@ -2223,5 +2244,21 @@ static void xj_report(void) {
         (unsigned long long)xj.blocks, (unsigned long long)xj.enters, (unsigned long long)xj.interp_ins, (unsigned long long)xj.kills,
         (unsigned long long)xj.volatile_pages, (unsigned long long)xj.flushes, (size_t)((char *)xj.next - (char *)xj.arena) / 1024u,
         (unsigned long long)xj.rep_fast, (unsigned long long)xj.rep_elems);
+    if (xj.op_counts && xj.volatile_pages) {
+        fprintf(stderr, "[QRX86-JIT] volatile pages (code written %u times or more, interpreted from then on):", XJ_KILLS_VOLATILE);
+        for (uint32_t v = 0; v < XJ_PAGES; v++) if (xj.page_kills[v] >= XJ_KILLS_VOLATILE) fprintf(stderr, " %08x(%u)", v << 12, xj.page_kills[v]);
+        fprintf(stderr, "\n");
+    }
+    if (xj.op_counts) {
+        fprintf(stderr, "[QRX86-JIT] interpreted by opcode:");
+        for (int n = 0; n < 16; n++) {
+            unsigned best = 0;
+            for (unsigned i = 1; i < 0x400; i++) if (xj.op_counts[i] > xj.op_counts[best]) best = i;
+            if (!xj.op_counts[best]) break;
+            fprintf(stderr, " %s%s%02x:%u", best & 0x200 ? "rep " : "", best & 0x100 ? "0f " : "", best & 0xFF, xj.op_counts[best]);
+            xj.op_counts[best] = 0;
+        }
+        fprintf(stderr, "\n");
+    }
 }
 #endif
