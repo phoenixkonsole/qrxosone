@@ -33,6 +33,7 @@ bool qec64_jit_map_new(uint64_t ram_size, uint8_t **code_map, uint32_t **code_ge
 
 #if defined(__aarch64__)
 #include <sys/mman.h>
+#include "qrx_perfmap.h"
 #include <pthread.h>
 #if defined(__APPLE__)
 #include <libkern/OSCacheControl.h>
@@ -1284,6 +1285,7 @@ static Block *translate(qec64_cpu *c, Jit *j, uint64_t pc)
 #else
     __builtin___clear_cache((char *)code, (char *)t.p);
 #endif
+    if (b->code) qrx_perfmap(code, (size_t)((char *)t.p - (char *)code), "ec64_%016llx", (unsigned long long)pc);
     j->pos = t.p;
     b->next = j->hash[hash_pc(pc)];
     j->hash[hash_pc(pc)] = b;

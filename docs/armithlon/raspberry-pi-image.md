@@ -235,6 +235,64 @@ Appliance-Images:
   - Unter qemu Cortex-A72 kam das 32-Bit-System in keinem der sechs Starts bis zur Systemdiskette.
   - Diese Zahlen sagen nichts über den Pi.
 
+### QRX OS One unter Ubuntu auf dem Bildschirm (statt Dual Boot)
+
+`tools/armithlon/pi/qrx-on-ubuntu.sh [32|64] [KERNE] [RAM-MB]` startet QRX OS One wie auf dem
+QRX-Image direkt auf Bildschirm, Tastatur, Maus und Ton (DRM/KMS, evdev, ALSA), ohne Desktop dazwischen:
+
+- **Wo es läuft:** auf einer Konsole des Pi. Aus SSH oder einer Claude-Sitzung wechselt es mit
+  `openvt` (sudo) auf eine freie Konsole; die Engine läuft weiter als der Benutzer.
+- **Daten:** bleiben in `~/qrx-data`:
+  - das Systemvolume `System/`;
+  - `Apps/`;
+  - die Platte von QRX OS One 64;
+  - die Logs.
+- **Gleiche Abläufe wie im Image:**
+  - die Kernaufteilung (`QRX_EC64_CPUS`, `taskset`);
+  - der Boot-Watchdog für das 32-Bit-System.
+- **WLAN/Bluetooth:** Die Einstellungen aus QRX heraus sind hier aus (`QRX_NETCTL=/bin/false`);
+  das Netz verwaltet Ubuntu.
+- **Geprüft hier** (x86-64-Build, Bildschirm im Speicher):
+  - 32-Bit: Desktop nach 40 s;
+  - 64-Bit: startet mit 2 Kernen und der Kopie der Platte.
+
+  Auf einer echten Pi-Konsole noch nicht.
+
+### JIT-Profil mit perf
+
+Alle drei JITs schreiben mit `QRX_PERF_MAP=1` jeden übersetzten Block nach `/tmp/perf-<pid>.map`
+(`full68k/qrx_perfmap.h`):
+
+| JIT | Blocknamen |
+| --- | --- |
+| 68100 | `m68k_<pc>` |
+| 68100EC64 | `ec64_<pc>` |
+| QRX86 | `x86_<eip>` |
+
+Die festen Hilfsroutinen heißen `*_stubs`. `perf report` zeigt damit die heißen Gastblöcke neben den
+Engine-Funktionen.
+
+- **Aufruf:** `bench-pi.sh --perf 32|64|x86 [SEKUNDEN]` nimmt das Profil auf.
+- **Rechte:** Ubuntu erlaubt perf nur root; das Skript setzt dafür `kernel.perf_event_paranoid=1`
+  bis zum nächsten Neustart.
+- **Last für x86:** vorerst nur der Differenztest des Host-JIT, bis Windows-Programme unter Linux
+  laufen.
+- **Getestet:**
+  - Cross-Build AArch64: 57 direkte und 20 Python-Tests bestanden;
+  - Maps aus allen drei JIT-Tests unter qemu Cortex-A72;
+  - Profilablauf mit perf 6.8 am x86-64-Build.
+
+**Erster Befund** (x86-64-Interpreter, nicht Pi): QRX OS One 64 im Leerlauf nach dem Start
+
+| Funktion | Anteil der Zeit |
+| --- | --- |
+| `qec64_board_mmio` | 39 % |
+| `clock_gettime` | 14 % |
+
+Ein User-Programm (PC `0x1118f0`) fragt die Board-Uhr in einer Schleife ab, statt zu warten (`STOP`
+legt einen Kern schlafen, wird hier aber nicht erreicht). Die Leerlauf-Befehlsraten messen also vor
+allem diese Schleife. Das ist der erste Punkt, der mit dem JIT auf dem Pi zu prüfen ist.
+
 ## QRX OS One 64 ohne Mac neu gebaut (2026-11-21)
 
 Das Mac-Paket ist verloren; QRX OS One 64 ist jetzt aus dem Repository allein auf Linux gebaut:

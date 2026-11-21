@@ -1,20 +1,34 @@
 #!/usr/bin/env bash
 # Measurements of QRX ARMithlon on the Raspberry Pi itself (after setup-ubuntu-pi4.sh).
-#   bench-pi.sh [--extract-only] [SECONDS]
+#   bench-pi.sh [SECONDS]                 the measurements below
+#   bench-pi.sh --perf 32|64|x86 [SECONDS] a perf profile of one JIT (see below)
+#   bench-pi.sh --extract-only            only take the systems out of the image
 # Takes both systems out of the newest image in dist/pi4 (no root needed: the FAT partition through
 # mtools, the ext4 one through debugfs) into $QRX_TEST_DIR (default ~/qrx-test), then measures with
-# the engine built in .build/armithlon-pi:
+# the engine built in .build/armithlon-pi ($QRX_BUILD):
 #   1. the JIT tests (68100, 68100EC64, QRX86 host JIT) with their times,
 #   2. the 32-bit QRX OS One: SECONDS from the start with the screen in memory (QRX_LIO_TEST, no
 #      display needed), instructions a second ([BENCH]), the boot watchdog's restarts,
 #   3. QRX OS One 64 on 1 and 2 cores: instructions a second per core,
 #   4. clock, temperature and throttling.
 # Everything goes to $QRX_TEST_DIR/bench-<date>.txt as well.
+#
+# --perf records with `perf` while the JIT writes /tmp/perf-<pid>.map (QRX_PERF_MAP=1), so the
+# report names the hot translated blocks by their guest address (m68k_<pc>, ec64_<pc>, x86_<eip>)
+# next to the engine's own functions. 32 = the 32-bit system (68100 JIT), 64 = QRX OS One 64 on
+# 2 cores (68100EC64 JIT), x86 = the QRX86 host JIT's differential test (the only x86 load until
+# Windows programs run on Linux). Ubuntu allows perf only to root (kernel.perf_event_paranoid=4),
+# and perf as root ignores a map file of another user: the script sets paranoid to 1 with sudo
+# until the next reboot. Report in $QRX_TEST_DIR/perf-<what>-<date>.txt.
 set -Eeuo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 T="${QRX_TEST_DIR:-$HOME/qrx-test}"
 B="${QRX_BUILD:-$REPO/.build/armithlon-pi}"
-EXTRACT_ONLY=0; [ "${1:-}" = --extract-only ] && { EXTRACT_ONLY=1; shift; }
+MODE=bench PERF=
+case "${1:-}" in
+  --extract-only) MODE=extract; shift ;;
+  --perf) MODE=perf; PERF="${2:?--perf 32, 64 or x86}"; shift 2 ;;
+esac
 SECS="${1:-60}"
 WAIT="${QRX_BOOT_WAIT:-15}"   # seconds to the system disk before a restart, as boot_wait in qrx.txt
 mkdir -p "$T"
@@ -36,13 +50,10 @@ if [ ! -e "$STAMP" ]; then
   rm -f "$raw" "$T/root.ext4"
   touch "$STAMP"
 fi
-[ "$EXTRACT_ONLY" = 1 ] && { echo "systems in $T"; exit 0; }
+[ "$MODE" = extract ] && { echo "systems in $T"; exit 0; }
 [ -x "$B/qrx68100_full_run" ] || { echo "no engine in $B: run setup-ubuntu-pi4.sh first" >&2; exit 1; }
+R="$T/root/qrx" K="$T/boot/qrx64"
 
-OUT="$T/bench-$(date +%Y%m%d-%H%M).txt"
-exec > >(tee "$OUT") 2>&1
-echo "QRX ARMithlon measurements, $(date), $(tr -d '\0' < /proc/device-tree/model 2>/dev/null)"
-echo "kernel $(uname -r), engine $(git -C "$REPO" rev-parse --short HEAD), image $(basename "$IMG")"
 clock() {
   local f t
   f=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null || echo 0)
@@ -50,38 +61,86 @@ clock() {
   echo "  clock $((f / 1000)) MHz, $((t / 1000)) C$(command -v vcgencmd >/dev/null && echo ", $(vcgencmd get_throttled 2>/dev/null)")"
 }
 
+# the 32-bit system for SECS seconds from a fresh copy of its system volume, restarted (as the
+# session's watchdog does) when it stalls before the system disk; "$@" = a command in front (perf)
+run32() {
+  local W="$T/run32" try pid n
+  rm -rf "$W"; mkdir -p "$W/apps" "$W/input"; cp -a "$R/System" "$W/sys"
+  cd "$R"   # as the session: the engine runs in /qrx
+  for try in 1 2 3 4 5 6; do
+    rm -f "$W/sys/hostfs-boot-marker.txt"
+    QRX_LIO_TEST="$W/input" QRX_ALSA_DEVICE=null QRX_NETCTL=/bin/true QRX_CPU_CORE=3 QRX_APPS_DIR="$W/apps" \
+    QRX_FULL_ADF="$R/boot.adf" QRX_SCREEN_CAPTURE="$W/screen.ppm" QRX_SCREEN_CAPTURE_AT=$((SECS - 5)) \
+      timeout $((SECS + 30)) "$@" taskset -c 0-2 "$B/qrx68100_full_run" --window --seconds "$SECS" \
+      --rom "$R/aros-rom.bin" --ext-rom "$R/aros-ext.bin" --share "$W/sys" --share-rw > "$W/run.log" 2>&1 &
+    pid=$!; n=0
+    while [ ! -e "$W/sys/hostfs-boot-marker.txt" ] && kill -0 $pid 2>/dev/null && [ $n -lt $((WAIT * 5)) ]; do sleep 0.2; n=$((n + 1)); done
+    if [ -e "$W/sys/hostfs-boot-marker.txt" ]; then echo "  system disk after $((n / 5)) s (start $try)"; wait $pid || true; break; fi
+    echo "  start $try stalled before the system disk (the ROM's lost timer interrupt), again"
+    kill $pid 2>/dev/null; wait $pid 2>/dev/null || true
+  done
+  cd "$REPO"
+  grep -a "\[BENCH\]" "$W/run.log" | sed 's/^/  /' || true
+  [ -e "$W/screen.ppm" ] && echo "  the screen at $((SECS - 5)) s: $W/screen.ppm"
+  return 0
+}
+
+# QRX OS One 64 on $1 cores for SECS seconds from a fresh copy of its disk; $2... = a command in front
+run64() {
+  local cores=$1 W="$T/run64-$1" m; shift
+  rm -rf "$W"; mkdir -p "$W"
+  cp "$T/boot/QRXOS64.img" "$W/disk.img"
+  local mods=()
+  while read -r m; do [ -n "$m" ] && mods+=("$K/$m"); done < "$K/modules.txt"
+  QRX_EC64_CPUS=3,2 "$@" taskset -c 0-1 "$B/qrx_ec64_run" --cores "$cores" --ram 1024 --disk "$W/disk.img" \
+    --cmdline econsole-startup --seconds "$SECS" --stats --capture "$W/fb.ppm" --host-view 1024x768 \
+    "$K/core.elf" "${mods[@]}" > "$W/run.log" 2>&1 || true
+  grep -a "\[EC64\] core\|all cores" "$W/run.log" | sed 's/^/  /' || true
+  [ -e "$W/fb.ppm" ] && echo "  the screen at the end: $W/fb.ppm"
+  return 0
+}
+
+if [ "$MODE" = perf ]; then
+  command -v perf >/dev/null && perf version >/dev/null 2>&1 ||
+    { echo "no perf for this kernel: sudo apt-get install linux-tools-raspi linux-tools-$(uname -r)" >&2; exit 1; }
+  if [ "$(cat /proc/sys/kernel/perf_event_paranoid)" -gt 1 ]; then
+    echo "perf for your user until the next reboot: kernel.perf_event_paranoid=1"
+    sudo sysctl -q -w kernel.perf_event_paranoid=1
+  fi
+  data="$T/perf-$PERF.data"
+  rm -f /tmp/perf-*.map
+  export QRX_PERF_MAP=1
+  rec=(perf record -F 2999 -o "$data" --)
+  case "$PERF" in
+    32) run32 "${rec[@]}" ;;
+    64) run64 2 "${rec[@]}" ;;
+    x86) "${rec[@]}" "$B/qrx86_jit_tests" > "$T/perf-x86.log" 2>&1 ;;
+    *) echo "--perf 32, 64 or x86" >&2; exit 1 ;;
+  esac
+  OUT="$T/perf-$PERF-$(date +%Y%m%d-%H%M).txt"
+  { echo "perf profile of the $PERF load, $(date), $(tr -d "\0" 2>/dev/null < /proc/device-tree/model || true)"
+    echo "engine $(git -C "$REPO" rev-parse --short HEAD); blocks: m68k_<pc> / ec64_<pc> / x86_<eip>, stubs: *_stubs"
+    perf report -i "$data" --no-children --sort dso,sym --percent-limit 0.3 --stdio 2>/dev/null | grep -v '^$'
+  } > "$OUT"
+  head -60 "$OUT"
+  echo "written to $OUT (perf data: $data; one block's code: perf annotate -i $data <name>)"
+  exit 0
+fi
+
+OUT="$T/bench-$(date +%Y%m%d-%H%M).txt"
+exec > >(tee "$OUT") 2>&1
+echo "QRX ARMithlon measurements, $(date), $(tr -d "\0" 2>/dev/null < /proc/device-tree/model || true)"
+echo "kernel $(uname -r), engine $(git -C "$REPO" rev-parse --short HEAD), image $(basename "$IMG")"
+
 echo; echo "1. JIT tests"; clock
 ctest --test-dir "$B" -R "jit|ec64" 2>&1 | grep -E "Test +#|tests passed" || true
 
 echo; echo "2. QRX OS One (32-bit), $SECS s, screen in memory"; clock
-R="$T/root/qrx"; W="$T/run32"; rm -rf "$W"; mkdir -p "$W/apps" "$W/input"; cp -a "$R/System" "$W/sys"
-cd "$R"   # as the session: the engine runs in /qrx
-for try in 1 2 3 4 5 6; do
-  rm -f "$W/sys/hostfs-boot-marker.txt"
-  QRX_LIO_TEST="$W/input" QRX_ALSA_DEVICE=null QRX_NETCTL=/bin/true QRX_CPU_CORE=3 QRX_APPS_DIR="$W/apps" \
-  QRX_FULL_ADF="$R/boot.adf" QRX_SCREEN_CAPTURE="$W/screen.ppm" QRX_SCREEN_CAPTURE_AT=$((SECS - 5)) \
-    timeout $((SECS + 30)) taskset -c 0-2 "$B/qrx68100_full_run" --window --seconds "$SECS" \
-    --rom "$R/aros-rom.bin" --ext-rom "$R/aros-ext.bin" --share "$W/sys" --share-rw > "$W/run.log" 2>&1 &
-  pid=$!; n=0
-  while [ ! -e "$W/sys/hostfs-boot-marker.txt" ] && kill -0 $pid 2>/dev/null && [ $n -lt $((WAIT * 5)) ]; do sleep 0.2; n=$((n + 1)); done
-  if [ -e "$W/sys/hostfs-boot-marker.txt" ]; then echo "  system disk after $((n / 5)) s (start $try)"; wait $pid || true; break; fi
-  echo "  start $try stalled before the system disk (the ROM's lost timer interrupt), again"
-  kill $pid 2>/dev/null; wait $pid 2>/dev/null || true
-done
-grep -a "\[BENCH\]" "$W/run.log" | sed 's/^/  /' || true
-[ -e "$W/screen.ppm" ] && echo "  the screen at $((SECS - 5)) s: $W/screen.ppm"
+run32
 
 for cores in 1 2; do
   echo; echo "3. QRX OS One 64, $cores core(s), $SECS s"; clock
-  K="$T/boot/qrx64"; W="$T/run64-$cores"; rm -rf "$W"; mkdir -p "$W"
-  cp "$T/boot/QRXOS64.img" "$W/disk.img"
-  set --
-  while read -r m; do [ -n "$m" ] && set -- "$@" "$K/$m"; done < "$K/modules.txt"
-  QRX_EC64_CPUS=3,2 taskset -c 0-1 "$B/qrx_ec64_run" --cores "$cores" --ram 1024 --disk "$W/disk.img" \
-    --cmdline econsole-startup --seconds "$SECS" --stats --capture "$W/fb.ppm" --host-view 1024x768 \
-    "$K/core.elf" "$@" > "$W/run.log" 2>&1 || true
-  grep -a "\[EC64\] core\|all cores" "$W/run.log" | sed 's/^/  /' || true
-  [ -e "$W/fb.ppm" ] && echo "  the screen at the end: $W/fb.ppm"
+  run64 "$cores"
 done
 echo; clock
 echo "written to $OUT"

@@ -24,7 +24,7 @@ sudo apt-get install -y --no-install-recommends \
   git ca-certificates curl xz-utils build-essential cmake ninja-build python3 python3-pil python3-numpy \
   libasound2-dev libegl-dev libopengl-dev libgl-dev libgles-dev libssl-dev linux-libc-dev \
   mesa-utils mesa-utils-bin alsa-utils evtest fonts-inter \
-  dosfstools mtools e2fsprogs fdisk \
+  dosfstools mtools e2fsprogs fdisk kbd \
   linux-tools-raspi linux-tools-common htop
 # the engine on the console: the screen (video, render), keyboard and mouse (input), sound (audio)
 sudo usermod -aG video,render,input,audio "$USER"
@@ -61,8 +61,13 @@ For a Claude session on this Pi:
   cd $REPO && claude remote-control
 The session then shows up in the Claude Code app; there Claude can build, test and measure here.
 
-Measurements (no display needed for most):
-  bash $REPO/tools/armithlon/pi/bench-pi.sh
+QRX OS One on the Pi's screen (from the Pi's console, or from SSH / the Claude session: it moves
+to a free console):
+  bash $REPO/tools/armithlon/pi/qrx-on-ubuntu.sh        the 32-bit QRX OS One
+  bash $REPO/tools/armithlon/pi/qrx-on-ubuntu.sh 64 2   QRX OS One 64 on 2 cores
+Measurements (no display needed):
+  bash $REPO/tools/armithlon/pi/bench-pi.sh             speed of both systems, JIT tests
+  bash $REPO/tools/armithlon/pi/bench-pi.sh --perf 64   where the time goes (perf, JIT blocks by guest address)
 
 Optional, for steadier numbers (your decision, it changes the boot settings):
   - all cores at the highest clock:   echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor

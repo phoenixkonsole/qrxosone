@@ -25,6 +25,7 @@
 
 #if defined(__aarch64__)
 #include <sys/mman.h>
+#include "qrx_perfmap.h"
 #include <pthread.h>
 #if defined(__APPLE__)
 #include <libkern/OSCacheControl.h>
@@ -2381,6 +2382,7 @@ static Block *translate(JitCtx *j,uint32_t pc){
     size_t words=(size_t)(t->p-budget_stub);
     icache_sync(budget_stub,words*4u);
     write_enable(false);
+    qrx_perfmap(budget_stub,words*4u,"m68k_%08x",b->pc);
     j->code_next=t->p;
     b->code=code;b->end=end;
     b->exit_count=(uint8_t)t->exit_count;
@@ -2609,6 +2611,7 @@ bool qrx_jit_init(QRXFullCPU *c,uint64_t start_instructions){
     write_enable(true);
     build_stubs(j);
     icache_sync(j->code_base,(size_t)((uint8_t*)j->code_next-(uint8_t*)j->code_base));
+    qrx_perfmap(j->code_base,(size_t)((uint8_t*)j->code_next-(uint8_t*)j->code_base),"m68k_stubs");
     write_enable(false);
     j->code_blocks=j->code_next;
     the_ctx=j;

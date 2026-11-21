@@ -23,6 +23,7 @@
 #if defined(__aarch64__) || defined(__arm64__)
 #define QRX86_HOST_JIT_ACTIVE 1
 #include <sys/mman.h>
+#include "qrx_perfmap.h"
 #include <pthread.h>
 #include <stddef.h>
 #if defined(__APPLE__)
@@ -1349,6 +1350,7 @@ static bool xj_init(QRXFullCPU *c) {
     xj_gen_runtime();
     xj_w_enable(false);
     xj_sync(xj.arena, (size_t)((char *)xj.arena_blocks - (char *)xj.arena));
+    qrx_perfmap(xj.arena, (size_t)((char *)xj.arena_blocks - (char *)xj.arena), "x86_stubs");
     xj.next = xj.arena_blocks;
     xj.on = true;
     /* Tables start out empty; fill them from what is mapped already. */
@@ -1524,6 +1526,7 @@ static XBlock *xj_translate(uint32_t eip) {
     xj.next = e->p;
     xj_w_enable(false);
     xj_sync(start, (size_t)((char *)e->p - (char *)start));
+    qrx_perfmap(start, (size_t)((char *)e->p - (char *)start), "x86_%08x", (unsigned)eip);
 
     XBlock *b = malloc(sizeof *b);
     if (!b) return NULL;
