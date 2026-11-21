@@ -444,6 +444,10 @@ patch('''        action = g_session_action;
             continue;
         }
 ''')
+# The floating AI button sat at the bottom right where the shell's taskbar (40 pixels) now covers
+# half of it: it goes above the taskbar, drawing and click area alike.
+patch('''static void qrx_draw_ai_float(struct RastPort *rp){WORD x=g_screen_width-54,y=g_screen_height-64;''','''static void qrx_draw_ai_float(struct RastPort *rp){WORD x=g_screen_width-54,y=g_screen_height-40-50;''')
+patch('''static int qrx_ai_float_hit(WORD x,WORD y){WORD ax=g_screen_width-54,ay=g_screen_height-64;''','''static int qrx_ai_float_hit(WORD x,WORD y){WORD ax=g_screen_width-54,ay=g_screen_height-40-50;''')
 (out/'qrx_desktop.armithlon.c').write_text(s)
 for f in ('qrx_icons.c','qrx_wicon.h','ipfs-drive.c','qrx_shell.c'):shutil.copy(extra/f,out/f)
 # QRX OS One 64: QRX_CC64 is the m68k64 compiler with the AROS 64 sysroot (cc64 of build-ec64.sh)

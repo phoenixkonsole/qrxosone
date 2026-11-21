@@ -18,7 +18,8 @@ from pathlib import Path
 STAGE, ENGINE, BUNDLE, OUT = map(Path, sys.argv[1:5])
 HERE = Path(__file__).resolve().parent
 LIB = 'usr/lib/aarch64-linux-gnu'
-READELF = os.environ.get('READELF', 'aarch64-linux-gnu-readelf')
+NATIVE = os.uname().machine == 'aarch64'          # built on the Pi itself: no cross tools, no qemu
+READELF = os.environ.get('READELF', 'readelf' if NATIVE else 'aarch64-linux-gnu-readelf')
 
 # programs taken from the packages
 PROGRAMS = [
@@ -100,7 +101,7 @@ def main():
     for d in DATA:
         if not put(d): missing.append(d)
     # BusyBox applets as links (init, sh, mount, ip, udhcpc, mdev, ...)
-    applets = subprocess.run(['qemu-aarch64', str(STAGE / 'usr/bin/busybox'), '--list-full'],
+    applets = subprocess.run(([] if NATIVE else ['qemu-aarch64']) + [str(STAGE / 'usr/bin/busybox'), '--list-full'],
                              capture_output=True, text=True).stdout.split()
     for a in applets:
         # merged /usr: bin/x and sbin/x live in usr/bin and usr/sbin; linuxrc is not wanted

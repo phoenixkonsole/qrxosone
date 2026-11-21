@@ -6,7 +6,9 @@
 set -Eeuo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC="$(cd "$1" && pwd)"; FW="$(cd "$2" && pwd)"; OUT="$3"; mkdir -p "$OUT"; OUT="$(cd "$OUT" && pwd)"
-export ARCH=arm64 CROSS_COMPILE="${CROSS_COMPILE:-aarch64-linux-gnu-}"
+# on an AArch64 host (the Pi itself) the native compiler builds it, elsewhere the cross compiler
+if [ "$(uname -m)" = aarch64 ]; then export ARCH=arm64 CROSS_COMPILE="${CROSS_COMPILE:-}"
+else export ARCH=arm64 CROSS_COMPILE="${CROSS_COMPILE:-aarch64-linux-gnu-}"; fi
 rm -rf "$SRC/firmware-qrx"; cp -r "$FW" "$SRC/firmware-qrx"
 make -C "$SRC" O="$OUT/obj" bcm2711_defconfig >/dev/null
 "$SRC/scripts/kconfig/merge_config.sh" -m -O "$OUT/obj" "$OUT/obj/.config" "$HERE/qrx-pi4.config" >/dev/null

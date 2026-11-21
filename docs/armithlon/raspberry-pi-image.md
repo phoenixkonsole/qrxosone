@@ -3,7 +3,8 @@
 Stand 2026-11-21. Ein Image, das man auf eine SD-Karte schreibt. Der Pi 4 startet damit direkt
 in QRX OS One, wie früher Amithlon: Linux ist nur der Unterbau und nie zu sehen.
 
-**Fertiges Image:** `dist/pi4/QRX-ARMithlon-Pi4-2026-11-21-nosdl.img.xz` (82 MB, entpackt
+**Fertiges Image:** `dist/pi4/QRX-ARMithlon-Pi4-2026-11-21b.img.xz` (wie `…-nosdl`, dazu der
+KI-Knopf über der Taskleiste). Davor: `dist/pi4/QRX-ARMithlon-Pi4-2026-11-21-nosdl.img.xz` (82 MB, entpackt
 1225 MiB; SHA256 beider Formen in der `.sha256`-Datei daneben): ohne SDL, direkt auf dem Kernel.
 Die älteren Images liegen daneben: `…-2026-11-21` (noch mit SDL) und `…-2026-11-20` (zusätzlich
 ohne Boot-Wächter, Passwortmaske und QRX OS One 64). Mit dem Raspberry Pi Imager („Eigenes
@@ -183,6 +184,28 @@ Keine Distribution, sondern ein eigener Kernel und genau die Programme, die das 
 - Gastkerne laufen auf Host-Kern 3, dann 2, 1, 0; Fenster, Ton und Linux auf den übrigen.
 - Nicht geprüft: QRX OS One 64 selbst lief hier nicht (keine Systemdateien), nur sein Fenster
   im Test und die Session-Logik (Startbefehl, Kern- und RAM-Wahl) mit Platzhalterdateien.
+
+## 3D-Schnittstellen und Windows-Programme: Stand auf Linux/Pi
+
+| Teil | Was es ist | Stand auf dem Pi |
+| --- | --- | --- |
+| OpenGL für 68k-Programme (GL-Door, `full68k/qrx_gl68k.c`) | Gast-OpenGL auf Mesa V3D des Hosts | Engine-Seite gebaut und getestet (EGL ohne Fenster); läuft auf echter V3D-Hardware noch nicht geprüft |
+| Direct3D, Glide, OpenGL, Vulkan für Windows-Programme (`qrx_hostapi_*.c`, Host-GPU `linux/qrx_hostgpu_gl.c`) | Host-API-Wrapper für QRX86-Programme | gebaut; die Bilder kommen über die Konsolen-Schicht. Ein Windows-Programm lief auf Linux noch nicht erfolgreich (siehe unten) |
+| Warp3D | – | **nicht vorhanden**; QRX3D (`FF000500`) ist eine eigene virtuelle 3D-Schnittstelle, kein Warp3D |
+| Windows-Programme (`C:qrx-win32`, `C:qrx-i386`) | x86-Runtime 22.5.12 | baut für m68k (`x86-runtime-22.5.12/build-target.sh`), ist aber **nicht im Image**: im Test (32-Bit-System, x86-Engine) startete `dxtest.exe`, leerte seinen Bildbereich und zeichnete dann nichts. Muss erst untersucht werden |
+
+## Auf dem Pi selbst bauen
+
+- **Engine:** `tools/armithlon/pi/build-pi.sh` baut nativ und führt alle Tests aus.
+  - Pakete: `cmake gcc python3 git libegl-dev libopengl-dev libasound2-dev linux-libc-dev`
+    (`libsdl2-dev` nur für die SDL-Variante); OpenSSL ≥ 3.5 für Benutzerkonten.
+- **Kernel:** `kernel/build-kernel.sh` nimmt auf einem AArch64-Rechner den eigenen Compiler.
+- **Image:** `image/fetch-debs.sh`, `mkrootfs.py` und `mkimage.sh` laufen auf dem Pi ohne qemu
+  und ohne Cross-Werkzeuge.
+  - `fetch-debs.sh` braucht Ubuntu 24.04, weil das Image aus dessen Paketen besteht.
+- **QRX-OS-One-Paket:** `bundle/build-bundle.sh` braucht die Deadwood-m68k-AROS-Toolchain.
+  - Die ist hier nur auf x86-64 gebaut; auf AArch64 ungeprüft.
+  - Das fertige Paket kann man vom PC übernehmen.
 
 ## Bauen
 
