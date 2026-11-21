@@ -34,7 +34,9 @@ cd "$B"
 [ -f config.status ] || CC=gcc CXX=g++ "$SRC/configure" --target=qrx-m68k64 --with-toolchain=llvm \
     --with-aros-toolchain=yes --with-aros-toolchain-install="$TC" --disable-crosstools
 J="-j${QRX_BUILD_JOBS:-4}"
-mk() { echo "== gmake $*"; gmake $J "$@"; }
+# AROS' parallel make sometimes races copying the same header twice ("File exists"): a failed
+# step runs once more with one job
+mk() { echo "== gmake $*"; gmake $J "$@" || { echo "== again with one job: $*"; gmake -j1 "$@"; }; }
 
 # 3. the kernel and the kickstart modules
 mk kernel-utility kernel-qrx-m68k64
