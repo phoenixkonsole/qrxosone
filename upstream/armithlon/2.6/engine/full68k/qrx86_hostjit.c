@@ -88,8 +88,11 @@ static inline void xj_sync(void *p, size_t n) {
 enum {
     K_FALL, K_FALL_END, K_ALU, K_MOV, K_MOVX, K_LEA, K_PUSH, K_POP, K_INCDEC, K_NOT, K_NEG, K_SHIFT, K_IMUL,
     K_JCC, K_JMP, K_CALL, K_RET, K_JMPI, K_CALLI, K_SETCC, K_CMOV, K_CDQ, K_CWDE, K_XCHG, K_LEAVE, K_NOP,
-    K_FLD_M, K_FSTP_M, K_FARITH_M, K_FARITH_ST
+    K_FLD_M, K_FSTP_M, K_FARITH_M, K_FARITH_ST,
+    K_MUL1,                          /* F7 /4-/7 on 32 bits: MUL, IMUL, DIV, IDIV of EDX:EAX (op = /n) */
+    K_FPU                            /* more x87, op = FP_*, rm = the ST index */
 };
+enum { FP_LDST, FP_XCH, FP_STST, FP_STSTP, FP_CHS, FP_ABS, FP_SQRT, FP_LD1, FP_LDZ, FP_ILD32, FP_IST32, FP_ISTP32 };
 typedef struct {
     int base, index;
     unsigned scale;
@@ -169,9 +172,116 @@ static bool xj_imm(const uint8_t *q, uint32_t room, uint32_t *pos, int bytes, bo
     return true;
 }
 
+/* The length of any instruction in 32-bit code (one-byte and 0F maps, 0F 38 and 0F 3A),
+ * for those without a native translation: they run in the interpreter one at a time and
+ * the block goes on after them, instead of ending there. -1: not known here (16-bit
+ * addressing, past the page). *control: the instruction may go elsewhere (jumps, calls,
+ * returns, interrupts, HLT); those still end the block. A wrong length could only cost
+ * speed: the interpreter helper ends the block whenever eip is not where it expected. */
+static int xj_length(const uint8_t *q, uint32_t room, bool *control) {
+    uint32_t pos = 0;
+    bool o16 = false;
+    uint8_t b;
+    *control = false;
+    for (;;) {
+        if (pos >= room || pos > 14) return -1;
+        b = q[pos];
+        if (b == 0x66) o16 = true;
+        else if (b == 0x67) return -1;
+        else if (!(b == 0xF0 || b == 0xF2 || b == 0xF3 || b == 0x26 || b == 0x2E || b == 0x36 ||
+                   b == 0x3E || b == 0x64 || b == 0x65)) break;
+        pos++;
+    }
+    pos++;
+    unsigned immz = o16 ? 2u : 4u, imm = 0;
+    bool modrm = false;
+    int sub = -1;                    /* the opcode extension in the mod/rm byte, when needed */
+    if (b == 0x0F) {
+        if (pos >= room) return -1;
+        uint8_t c = q[pos++];
+        if (c == 0x38 || c == 0x3A) {                    /* three-byte maps: opcode, mod/rm */
+            if (pos >= room) return -1;
+            pos++;
+            modrm = true;
+            imm = c == 0x3A ? 1u : 0u;
+        } else if ((c >= 0x80 && c <= 0x8F)) { *control = true; imm = immz; }
+        else if (c == 0x05 || c == 0x07 || c == 0x34 || c == 0x35 || c == 0x0B) *control = true;
+        else if (c == 0x06 || c == 0x08 || c == 0x09 || c == 0x0E || (c >= 0x30 && c <= 0x37) || c == 0x77 ||
+                 c == 0xA0 || c == 0xA1 || c == 0xA2 || c == 0xA8 || c == 0xA9 || c == 0xAA || (c >= 0xC8 && c <= 0xCF)) { }
+        else {
+            modrm = true;
+            if ((c >= 0x70 && c <= 0x73) || c == 0xA4 || c == 0xAC || c == 0xBA || c == 0xC2 || c == 0xC4 ||
+                c == 0xC5 || c == 0xC6 || c == 0x0F) imm = 1;
+        }
+    } else {
+        switch (b) {
+        case 0x04: case 0x0C: case 0x14: case 0x1C: case 0x24: case 0x2C: case 0x34: case 0x3C:
+        case 0x6A: case 0xA8: case 0xCD: case 0xD4: case 0xD5: case 0xE4: case 0xE5: case 0xE6: case 0xE7:
+            imm = 1; break;
+        case 0x05: case 0x0D: case 0x15: case 0x1D: case 0x25: case 0x2D: case 0x35: case 0x3D:
+        case 0x68: case 0xA9:
+            imm = immz; break;
+        case 0xA0: case 0xA1: case 0xA2: case 0xA3: imm = 4; break;   /* moffs, 32-bit addressing */
+        case 0xC2: case 0xCA: imm = 2; *control = true; break;
+        case 0xC8: imm = 3; break;
+        case 0x9A: case 0xEA: imm = o16 ? 4u : 6u; *control = true; break;
+        case 0xE8: case 0xE9: imm = immz; *control = true; break;
+        case 0xEB: case 0xE0: case 0xE1: case 0xE2: case 0xE3: imm = 1; *control = true; break;
+        case 0xC3: case 0xCB: case 0xCC: case 0xCE: case 0xCF: case 0xF4: *control = true; break;
+        case 0x69: case 0x81: case 0xC7: modrm = true; imm = immz; break;
+        case 0x6B: case 0x80: case 0x82: case 0x83: case 0xC0: case 0xC1: case 0xC6: modrm = true; imm = 1; break;
+        case 0x62: case 0x63: case 0xC4: case 0xC5: case 0xD0: case 0xD1: case 0xD2: case 0xD3:
+        case 0xFE:
+            modrm = true; break;
+        case 0xF6: case 0xF7: case 0xFF: modrm = true; sub = b; break;
+        default:
+            if (b >= 0x70 && b <= 0x7F) { imm = 1; *control = true; }
+            else if (b >= 0xB0 && b <= 0xB7) imm = 1;
+            else if (b >= 0xB8 && b <= 0xBF) imm = immz;
+            else if ((b < 0x40 && (b & 7) < 4) || (b >= 0x84 && b <= 0x8F) || (b >= 0xD8 && b <= 0xDF)) modrm = true;
+            break;
+        }
+    }
+    if (modrm) {
+        if (pos >= room) return -1;
+        uint8_t m = q[pos++];
+        unsigned mod = m >> 6, rm = m & 7, reg = (m >> 3) & 7;
+        if (sub == 0xF6 && reg < 2) imm = 1;
+        if (sub == 0xF7 && reg < 2) imm = immz;
+        if (sub == 0xFF && reg >= 2 && reg <= 5) *control = true;
+        if (mod != 3) {
+            if (rm == 4) {
+                if (pos >= room) return -1;
+                uint8_t sib = q[pos++];
+                if (mod == 0 && (sib & 7) == 5) pos += 4;
+            } else if (mod == 0 && rm == 5) pos += 4;
+            if (mod == 1) pos += 1;
+            else if (mod == 2) pos += 4;
+        }
+    }
+    pos += imm;
+    return pos <= room && pos <= 15 ? (int)pos : -1;
+}
+
 /* Decodes one instruction. Returns false when it crosses the page or the page is
  * not mapped: the caller ends the block in front of it. */
+static bool xj_decode1(uint32_t eip, XIns *x);
 static bool xj_decode(uint32_t eip, XIns *x) {
+    if (!xj_decode1(eip, x)) return false;
+    if (x->kind == K_FALL_END) {
+        const uint8_t *q;
+        uint32_t room;
+        bool control;
+        int len;
+        if (xj_fetch_ok(eip, &q, &room) && (len = xj_length(q, room, &control)) > 0 && !control) {
+            x->kind = K_FALL;
+            x->next = eip + (uint32_t)len;
+            x->has_mem = false;      /* nothing native reads its operands */
+        }
+    }
+    return true;
+}
+static bool xj_decode1(uint32_t eip, XIns *x) {
     const uint8_t *q;
     uint32_t room, pos = 0;
     int osz = 32, seg = 0, rep = 0;
@@ -212,7 +322,7 @@ static bool xj_decode(uint32_t eip, XIns *x) {
             x->has_imm = true;
             if (!xj_imm(q, room, &pos, x->sz == 8 ? 1 : x->sz == 16 ? 2 : 4, false, &x->imm)) return false;
         }
-        if (op == 2 || op == 3) x->kind = K_FALL;
+        if ((op == 2 || op == 3) && x->sz != 32) x->kind = K_FALL;     /* ADC, SBB: 32 bits native */
         goto done;
     }
     if (b == 0x0F) goto two_byte;
@@ -254,7 +364,18 @@ static bool xj_decode(uint32_t eip, XIns *x) {
             else if ((b == 0xD8 || b == 0xDC) && y.reg != 2 && y.reg != 3) {
                 y.kind = K_FARITH_M; y.src_sz = b == 0xD8 ? 32 : 64; y.op = y.reg;
             }
+            else if (b == 0xDB && y.reg == 0) { y.kind = K_FPU; y.op = FP_ILD32; }
+            else if (b == 0xDB && (y.reg == 2 || y.reg == 3)) { y.kind = K_FPU; y.op = y.reg == 3 ? FP_ISTP32 : FP_IST32; }
         } else if (!y.has_mem) {
+            unsigned sub = 0xC0u | (unsigned)y.reg << 3 | y.rm;
+            if (b == 0xD9 && y.reg == 0) { y.kind = K_FPU; y.op = FP_LDST; }
+            else if (b == 0xD9 && y.reg == 1) { y.kind = K_FPU; y.op = FP_XCH; }
+            else if (b == 0xDD && (y.reg == 2 || y.reg == 3)) { y.kind = K_FPU; y.op = y.reg == 3 ? FP_STSTP : FP_STST; }
+            else if (b == 0xD9 && sub == 0xE0) { y.kind = K_FPU; y.op = FP_CHS; }
+            else if (b == 0xD9 && sub == 0xE1) { y.kind = K_FPU; y.op = FP_ABS; }
+            else if (b == 0xD9 && sub == 0xFA) { y.kind = K_FPU; y.op = FP_SQRT; }
+            else if (b == 0xD9 && sub == 0xE8) { y.kind = K_FPU; y.op = FP_LD1; }
+            else if (b == 0xD9 && sub == 0xEE) { y.kind = K_FPU; y.op = FP_LDZ; }
             /* D8 ST0,STi; DC STi,ST0; DE STi,ST0 and pop: add, mul, sub, subr, div, divr */
             if (b == 0xD8 && y.reg != 2 && y.reg != 3) { y.kind = K_FARITH_ST; y.op = y.reg; y.cc = 0; }
             else if ((b == 0xDC || b == 0xDE) && y.reg != 2 && y.reg != 3) {
@@ -280,7 +401,7 @@ static bool xj_decode(uint32_t eip, XIns *x) {
         x->kind = K_ALU; x->op = x->reg; x->writes = x->reg != 7; x->rm_dst = true; x->has_imm = true;
         x->sz = b == 0x80 ? 8 : (uint8_t)osz;
         if (!xj_imm(q, room, &pos, b == 0x81 ? (osz == 16 ? 2 : 4) : 1, b == 0x83, &x->imm)) return false;
-        if (x->op == 2 || x->op == 3) x->kind = K_FALL;
+        if ((x->op == 2 || x->op == 3) && x->sz != 32) x->kind = K_FALL;
         break;
     case 0x84: case 0x85:
         if (!xj_modrm(q, room, &pos, x, seg)) return false;
@@ -351,7 +472,10 @@ static bool xj_decode(uint32_t eip, XIns *x) {
             break;
         case 2: x->kind = K_NOT; x->rm_dst = true; break;
         case 3: x->kind = K_NEG; x->rm_dst = true; break;
-        default: x->kind = K_FALL; break;     /* MUL, IMUL, DIV, IDIV */
+        default:                              /* MUL, IMUL, DIV, IDIV: 32 bits native */
+            if (b == 0xF7 && osz == 32) { x->kind = K_MUL1; x->op = x->reg; }
+            else x->kind = K_FALL;
+            break;
         }
         break;
     case 0xFE: case 0xFF: {
@@ -434,13 +558,13 @@ static unsigned xj_peek_live(uint32_t addr) {
         XIns y;
         if (!xj_decode(addr, &y)) return mask;
         switch (y.kind) {
-        case K_ALU: return 0;
+        case K_ALU: return (y.op == 2 || y.op == 3) ? (mask & L_CF) : 0;   /* ADC, SBB read CF */
         case K_SHIFT:
             if (xj_kills_all(&y)) return 0;
             return mask;
         case K_INCDEC: mask &= ~L_OTHER; addr = y.next; break;
         case K_MOV: case K_MOVX: case K_LEA: case K_PUSH: case K_POP: case K_NOT: case K_NOP: case K_CDQ: case K_CWDE:
-        case K_XCHG: case K_LEAVE: case K_FLD_M: case K_FSTP_M: case K_FARITH_M: case K_FARITH_ST:
+        case K_XCHG: case K_LEAVE: case K_FLD_M: case K_FSTP_M: case K_FARITH_M: case K_FARITH_ST: case K_FPU:
             addr = y.next;
             break;
         case K_JMP: addr = y.target; break;
@@ -477,14 +601,14 @@ static void xj_analyse(XIns *ins, int n, unsigned end_live) {
             XIns *x = &ins[i];
             x->native_cc = false;
             switch (x->kind) {
-            case K_ALU: nz = (x->op == 5 || x->op == 7) ? NZ_SUB : x->op == 0 ? NZ_ADD : NZ_LOGIC; break;
+            case K_ALU: nz = (x->op == 3 || x->op == 5 || x->op == 7) ? NZ_SUB : (x->op == 0 || x->op == 2) ? NZ_ADD : NZ_LOGIC; break;
             case K_INCDEC: nz = NZ_INCDEC; break;
             case K_JCC: case K_SETCC: case K_CMOV:
                 /* An interpreter re-run of a memory form reads the lazy flags. */
                 x->native_cc = !x->has_mem && xj_a64_cc(nz, x->cc) >= 0;
                 if (!x->native_cc) nz = NZ_NONE;
                 break;
-            case K_SHIFT: case K_NEG: case K_IMUL: case K_FALL: case K_FALL_END: nz = NZ_NONE; break;
+            case K_SHIFT: case K_NEG: case K_IMUL: case K_MUL1: case K_FALL: case K_FALL_END: nz = NZ_NONE; break;
             default: break;
             }
         }
@@ -495,7 +619,7 @@ static void xj_analyse(XIns *ins, int n, unsigned end_live) {
             switch (x->kind) {
             case K_ALU:
                 x->need_lf = live != 0;
-                live = 0;
+                live = (x->op == 2 || x->op == 3) ? L_CF : 0;   /* ADC, SBB read CF */
                 break;
             case K_INCDEC:
                 if (live & L_CF) { x->kind = K_FALL; changed = true; live = L_ALL; break; }
@@ -511,8 +635,10 @@ static void xj_analyse(XIns *ins, int n, unsigned end_live) {
                 else if (x->has_imm) { /* count 0: no effect on flags */ }
                 else x->need_lf = live != 0; /* live stays: count 0 keeps the old flags */
                 break;
-            case K_NEG: case K_IMUL:
+            case K_NEG: case K_IMUL: case K_MUL1:
                 if (live) { x->kind = K_FALL; changed = true; live = L_ALL; }
+                /* DIV and IDIV can fault (#DE): the flags from before are then what is seen */
+                else if (x->kind == K_MUL1 && x->op >= 6) live = L_ALL;
                 break;
             case K_JCC: case K_SETCC: case K_CMOV:
                 if (!x->native_cc) live |= xj_cc_reads(x->cc);
@@ -680,6 +806,12 @@ static void gen_alu(XT *t, const XIns *x, int *nz) {
     bool mem_a = x->has_mem && x->rm_dst, mem_b = x->has_mem && !x->rm_dst;
     int dreg = x->rm_dst ? x->rm : x->reg;
 
+    if (x->op == 2 || x->op == 3) {
+        /* ADC, SBB (32 bits): CF into w11 first, the condition helper may change w0-w5 */
+        int c = xj_a64_cc(*nz, 2);                  /* x86 condition B: CF */
+        if (c >= 0) E(e, 0x1A9F07E0u | ((uint32_t)(c ^ 1) << 12) | 11u);    /* cset w11,c */
+        else { mov_w(e, 1, 2); bl_to(e, xj.cond_thunk); movr(e, 11, 0); }
+    }
     if (x->has_mem) {
         addr = ea(t, &x->m);
         if (addr == 0) { movr(e, 5, 0); addr = 5; }
@@ -706,6 +838,12 @@ static void gen_alu(XT *t, const XIns *x, int *nz) {
     case 0: E(e, R3(0x2B000000u, res, a, b)); *nz = NZ_ADD; break;
     case 5: case 7: E(e, R3(0x6B000000u, res, a, b)); *nz = NZ_SUB; break;
     case 4: E(e, R3(0x6A000000u, res, a, b)); *nz = NZ_LOGIC; break;
+    case 2:                                        /* C = CF, then ADCS */
+        E(e, 0x7100041Fu | (11u << 5));            /* cmp w11,#1 */
+        E(e, R3(0x3A000000u, res, a, b)); *nz = NZ_ADD; break;
+    case 3:                                        /* C = !CF (no borrow), then SBCS */
+        E(e, R3(0x6B000000u, WZR, WZR, 11));       /* cmp wzr,w11 */
+        E(e, R3(0x7A000000u, res, a, b)); *nz = NZ_SUB; break;
     case 1: E(e, R3(0x2A000000u, res, a, b)); E(e, R3(0x6A000000u, WZR, res, res)); *nz = NZ_LOGIC; break;
     default: E(e, R3(0x4A000000u, res, a, b)); E(e, R3(0x6A000000u, WZR, res, res)); *nz = NZ_LOGIC; break;
     }
@@ -720,8 +858,9 @@ static void gen_alu(XT *t, const XIns *x, int *nz) {
         } else reg_write(e, dreg, sz, res);
     }
     if (x->need_lf) {
-        int lf = x->op == 0 ? LF_ADD : (x->op == 5 || x->op == 7) ? LF_SUB : LF_LOGIC;
+        int lf = x->op == 0 ? LF_ADD : x->op == 2 ? LF_ADC : x->op == 3 ? LF_SBB : (x->op == 5 || x->op == 7) ? LF_SUB : LF_LOGIC;
         lf_store(e, lf, sz, res, oa, ob);
+        if (x->op == 2 || x->op == 3) str_cpu(e, 11, offsetof(x86cpu, lf_cf));
     }
 }
 
@@ -871,6 +1010,105 @@ static void fp_nan_check(XT *t) {
     cbz_stub_x(t, 4);
 }
 
+/* xd = &c->field (an offset into x86cpu) */
+static void fp_field(XE *e, int xd, size_t off) {
+    if (off < 4096) E(e, 0x91000000u | ((uint32_t)off << 10) | (XCPU << 5) | (uint32_t)xd);
+    else { mov_x(e, xd, off); E(e, 0x8B000000u | ((uint32_t)xd << 16) | (XCPU << 5) | (uint32_t)xd); }
+}
+/* Push d0 as the interpreter's fpush does: top-1, the value, not exact, tag valid. Uses w1-w4. */
+static void fp_push_d0(XE *e) {
+    fp_top(e, 1);
+    sub_i(e, 1, 1, 1);
+    ubfm(e, 1, 1, 0, 2);
+    fp_st_addr(e, 2, 1, 0);
+    E(e, 0xFD000000u | (2u << 5) | 0u);            /* str d0,[x2] */
+    str_cpu(e, 1, offsetof(x86cpu, top));
+    fp_tag(e, 1, false);
+    fp_field(e, 2, offsetof(x86cpu, st_exact));
+    E(e, R3(0x38204800u, WZR, 2, 1));              /* strb wzr,[x2,w1,uxtw] */
+}
+/* fpop: tag empty, top+1. w1 = top. Uses w3, w4. */
+static void fp_pop(XE *e) {
+    fp_tag(e, 1, true);
+    add_i(e, 1, 1, 1);
+    ubfm(e, 1, 1, 0, 2);
+    str_cpu(e, 1, offsetof(x86cpu, top));
+}
+static void gen_fpu(XT *t, const XIns *x) {
+    XE *e = &t->e;
+    int addr;
+    switch (x->op) {
+    case FP_LDST:                                  /* FLD ST(i) */
+        fp_top(e, 1);
+        fp_st_addr(e, 2, 1, x->rm);
+        E(e, 0xFD400000u | (2u << 5) | 0u);
+        fp_push_d0(e);
+        break;
+    case FP_LD1: E(e, 0x1E6E1000u); fp_push_d0(e); break;                  /* fmov d0,#1.0 */
+    case FP_LDZ: E(e, 0x9E6703E0u); fp_push_d0(e); break;                  /* fmov d0,xzr */
+    case FP_XCH: {                                 /* FXCH ST(i): the values and the exactness records */
+        static const struct { size_t off; uint32_t ld, st; } arr[4] = {
+            { offsetof(x86cpu, st), 0xF8605800u, 0xF8205800u },        /* the doubles' bits, through x9/x10 */
+            { offsetof(x86cpu, st_int), 0xF8605800u, 0xF8205800u },    /* ldr/str x,[xn,wm,uxtw #3] */
+            { offsetof(x86cpu, st_was), 0xF8605800u, 0xF8205800u },
+            { offsetof(x86cpu, st_exact), 0x38604800u, 0x38204800u },  /* ldrb/strb w,[xn,wm,uxtw] */
+        };
+        fp_top(e, 1);
+        add_i(e, 5, 1, x->rm);
+        ubfm(e, 5, 5, 0, 2);
+        for (int k = 0; k < 4; k++) {
+            fp_field(e, 2, arr[k].off);
+            E(e, R3(arr[k].ld, 9, 2, 1));
+            E(e, R3(arr[k].ld, 10, 2, 5));
+            E(e, R3(arr[k].st, 10, 2, 1));
+            E(e, R3(arr[k].st, 9, 2, 5));
+        }
+        break;
+    }
+    case FP_STST: case FP_STSTP:                   /* FST, FSTP ST(i) */
+        fp_top(e, 1);
+        fp_st_addr(e, 2, 1, 0);
+        fp_st_addr(e, 3, 1, x->rm);
+        E(e, 0xFD400000u | (2u << 5) | 0u);
+        E(e, 0xFD000000u | (3u << 5) | 0u);
+        if (x->op == FP_STSTP) fp_pop(e);
+        break;
+    case FP_CHS: case FP_ABS: case FP_SQRT:
+        fp_top(e, 1);
+        fp_st_addr(e, 2, 1, 0);
+        E(e, 0xFD400000u | (2u << 5) | 0u);
+        E(e, x->op == FP_CHS ? 0x1E614000u : x->op == FP_ABS ? 0x1E60C000u : 0x1E61C000u);   /* fneg fabs fsqrt d0,d0 */
+        if (x->op == FP_SQRT) fp_nan_check(t);     /* below zero or NaN: the interpreter's x87 rules */
+        E(e, 0xFD000000u | (2u << 5) | 0u);
+        break;
+    case FP_ILD32:                                 /* FILD m32 */
+        addr = ea(t, &x->m);
+        if (addr == 0) { movr(e, 5, 0); addr = 5; }
+        load(t, 9, addr, 32, false);
+        E(e, 0x1E620000u | (9u << 5) | 0u);        /* scvtf d0,w9 */
+        fp_push_d0(e);
+        break;
+    default: {                                     /* FIST, FISTP m32: round to nearest only, in range */
+        addr = ea(t, &x->m);
+        if (addr == 0) { movr(e, 5, 0); addr = 5; }
+        fp_top(e, 1);
+        fp_st_addr(e, 2, 1, 0);
+        E(e, 0xFD400000u | (2u << 5) | 0u);
+        fp_nan_check(t);
+        E(e, 0x79400000u | ((uint32_t)(offsetof(x86cpu, fcw) / 2) << 10) | (XCPU << 5) | 9u);   /* ldrh w9,fcw */
+        ubfm(e, 9, 9, 10, 11);                     /* rounding control */
+        fix_add(t, 0x35000000u | 9u, 0);           /* cbnz w9,stub */
+        E(e, 0x9E600000u | (0u << 5) | 10u);       /* fcvtns x10,d0: nearest, ties to even */
+        E(e, 0x93407C00u | (10u << 5) | 11u);      /* sxtw x11,w10 */
+        E(e, 0xCB000000u | (10u << 16) | (11u << 5) | 11u);   /* sub x11,x11,x10: no flags, NZCV are x86's */
+        fix_add(t, 0xB5000000u | 11u, 0);          /* out of range: cbnz x11,stub */
+        store(t, 10, addr, 32);
+        if (x->op == FP_ISTP32) fp_pop(e);
+        break;
+    }
+    }
+}
+
 static void gen_ins(XT *t, XIns *x, int *nz, XOut *outs, int *nouts) {
     XE *e = &t->e;
     int addr, v;
@@ -981,6 +1219,44 @@ static void gen_ins(XT *t, XIns *x, int *nz, XOut *outs, int *nouts) {
         else E(e, 0x1B007C00u | ((uint32_t)XR(x->reg) << 16) | ((uint32_t)v << 5) | (uint32_t)XR(x->reg));
         *nz = NZ_NONE;
         break;
+    case K_MUL1: {
+        /* Only with dead flags, see xj_analyse. The source first (a memory miss re-runs the
+         * whole instruction), then EDX:EAX in x0. A division by zero or a quotient too big
+         * goes to the interpreter stub, which raises the fault before anything is written. */
+        int src;
+        if (x->has_mem) {
+            addr = ea(t, &x->m);
+            if (addr == 0) { movr(e, 5, 0); addr = 5; }
+            load(t, 2, addr, 32, false);
+            src = 2;
+        } else src = XR(x->rm);
+        if (x->op == 4 || x->op == 5) {
+            E(e, (x->op == 4 ? 0x9BA07C00u : 0x9B207C00u) | ((uint32_t)src << 16) | ((uint32_t)XR(X86_EAX) << 5) | 0u);  /* u/smull x0,eax,src */
+            movr(e, XR(X86_EAX), 0);
+            E(e, 0xD360FC00u | (0u << 5) | (uint32_t)XR(X86_EDX));                 /* lsr x(edx),x0,#32 */
+        } else {
+            movr(e, 1, XR(X86_EAX));                                              /* w1: EAX zero extended */
+            E(e, 0xD3607C00u | ((uint32_t)XR(X86_EDX) << 5) | 0u);                  /* lsl x0,x(edx),#32 */
+            E(e, R3(0xAA000000u, 0, 0, 1));                                       /* orr x0,x0,x1 */
+            if (x->op == 6) movr(e, 2, src);                                      /* w2: divisor zero extended */
+            else E(e, 0x93407C00u | ((uint32_t)src << 5) | 2u);                    /* sxtw x2,src */
+            fix_add(t, 0xB4000000u | 2u, 0);                                      /* cbz x2,stub */
+            E(e, (x->op == 6 ? 0x9AC00800u : 0x9AC00C00u) | (2u << 16) | (0u << 5) | 3u);  /* u/sdiv x3,x0,x2 */
+            if (x->op == 6) {
+                E(e, 0xD360FC00u | (3u << 5) | 4u);                               /* lsr x4,x3,#32 */
+                fix_add(t, 0xB5000000u | 4u, 0);                                  /* cbnz x4,stub */
+            } else {
+                E(e, 0x93407C00u | (3u << 5) | 4u);                               /* sxtw x4,w3 */
+                E(e, 0xEB000000u | (3u << 16) | (4u << 5) | 31u);                  /* cmp x4,x3 */
+                fix_add(t, 0x54000000u | C_NE, 0);                                /* b.ne stub */
+            }
+            E(e, 0x9B008000u | (2u << 16) | (0u << 10) | (3u << 5) | 4u);          /* msub x4,x3,x2,x0 */
+            movr(e, XR(X86_EAX), 3);
+            movr(e, XR(X86_EDX), 4);
+        }
+        *nz = NZ_NONE;
+        break;
+    }
     case K_CDQ:
         if (x->sz == 32) asr_i(e, XR(X86_EDX), XR(X86_EAX), 31);
         else { sbfm(e, 1, XR(X86_EAX), 0, 15); asr_i(e, 1, 1, 16); bfi(e, XR(X86_EDX), 1, 0, 16); }
@@ -1034,14 +1310,9 @@ static void gen_ins(XT *t, XIns *x, int *nz, XOut *outs, int *nouts) {
         addr = ea(t, &x->m);
         if (addr == 0) { movr(e, 5, 0); addr = 5; }
         fp_load_mem(t, addr, x->src_sz);
-        fp_top(e, 1);
-        sub_i(e, 1, 1, 1);
-        ubfm(e, 1, 1, 0, 2);
-        fp_st_addr(e, 2, 1, 0);
-        E(e, 0xFD000000u | (2u << 5) | 0u);        /* str d0,[x2] */
-        str_cpu(e, 1, offsetof(x86cpu, top));
-        fp_tag(e, 1, false);
+        fp_push_d0(e);
         break;
+    case K_FPU: gen_fpu(t, x); break;
     case K_FSTP_M:
         addr = ea(t, &x->m);
         if (addr == 0) { movr(e, 5, 0); addr = 5; }
@@ -1494,7 +1765,7 @@ static XBlock *xj_translate(uint32_t eip) {
         bl_to(e, xj.interp_thunk);
         bool control = x->kind == K_JMP || x->kind == K_CALL || x->kind == K_RET || x->kind == K_JMPI ||
                        x->kind == K_CALLI || x->kind == K_JCC;
-        bool setter = x->kind == K_ALU || x->kind == K_INCDEC || x->kind == K_SHIFT || x->kind == K_NEG || x->kind == K_IMUL;
+        bool setter = x->kind == K_ALU || x->kind == K_INCDEC || x->kind == K_SHIFT || x->kind == K_NEG || x->kind == K_IMUL || x->kind == K_MUL1;
         if (control || setter || i == n - 1) {
             /* Control left, or NZCV no longer match the lazy flags the interpreter set. */
             b_to(e, xj.epi_plain);

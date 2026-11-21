@@ -91,7 +91,7 @@ static void gen_flagged(void) {
 }
 static void gen_one(void) {
     unsigned sz;
-    switch (pick(24)) {
+    switch (pick(28)) {
     case 0: case 1: sz = osz(); c8((pick(8) << 3) | (pick(2) << 1) | (sz != 8)); modrm(rsz(sz), sz, true); break;
     case 2: sz = osz(); c8(sz == 8 ? 0x80 : 0x81); modrm(pick(8), sz, true); imm_sz(sz); break;
     case 3: sz = osz(); c8(0x88 | (pick(2) << 1) | (sz != 8)); modrm(rsz(sz), sz, true); break;
@@ -135,6 +135,53 @@ static void gen_one(void) {
         c8(0xF3); c8(pick(2) ? 0xA5 : 0xAB);                             /* rep movsd or stosd */
         c8(0x61);                                                        /* popa */
         break;
+    case 23:                                                             /* MUL, IMUL, DIV, IDIV on 32 bits */
+        switch (pick(4)) {
+        case 0: c8(0x31); c8(0xD2); c8(0xB9); c32(1 + pick(1000)); c8(0xF7); c8(0xF1); break;    /* xor edx,edx; mov ecx,n; div ecx */
+        case 1: c8(0x99); c8(0xB9); c32(pick(2) ? 1 + pick(1000) : 0u - (1 + pick(1000)));       /* cdq; mov ecx,+-n; idiv ecx */
+                c8(0xF7); c8(0xF9); break;
+        case 2: c8(0xF7); modrm(6 + pick(2), 32, true); break;                                   /* any DIV, IDIV: may fault */
+        default: c8(0xF7); modrm(4 + pick(2), 32, true); break;                                  /* MUL, IMUL, also memory */
+        }
+        break;
+    case 24:                                                             /* left to the interpreter inside a block */
+        switch (pick(10)) {
+        case 0: c8(0x0F); c8(0xC8 | r32()); break;                                               /* bswap */
+        case 1: c8(0xF8 | pick(2)); break;                                                       /* clc, stc */
+        case 2: c8(0xF5); break;                                                                 /* cmc */
+        case 3: c8(0x0F); c8(0xBA); modrm(4 + pick(4), 32, true); c8(pick(32)); break;           /* bt bts btr btc, imm */
+        case 4: c8(0x0F); c8(0xBC | pick(2)); modrm(r32(), 32, true); break;                     /* bsf, bsr */
+        case 5: c8(0x0F); c8(0xA4 | (pick(2) << 3)); modrm(r32(), 32, true); c8(pick(32)); break;   /* shld, shrd */
+        case 6: c8(0x0F); c8(0xC1); modrm(r32(), 32, true); break;                               /* xadd */
+        case 7: c8(0x0F); c8(0xB1); modrm(r32(), 32, true); break;                               /* cmpxchg */
+        case 8: c8(0x9C); c8(0x58 | r32()); break;                                               /* pushfd; pop */
+        default: c8(0x0F); c8(0xA3); modrm(r32(), 32, false); break;                             /* bt reg,reg */
+        }
+        break;
+    case 25: case 26: {                                                  /* x87: registers, constants, FILD, FIST */
+        unsigned depth = 2, k;
+        c8(0xDD); c8(0x83); c32(128 + 8 * pick(8));                      /* fld m64 */
+        c8(0xDD); c8(0x83); c32(128 + 8 * pick(8));
+        for (unsigned n = 1 + pick(4); n; n--) {
+            switch (pick(12)) {
+            case 0: c8(0xD9); c8(0xC8 | (1 + pick(depth - 1 > 0 ? depth - 1 : 1))); break;        /* fxch st(i) */
+            case 1: c8(0xD9); c8(0xC0 | pick(depth)); depth++; break;                             /* fld st(i) */
+            case 2: if (depth > 1) { c8(0xDD); c8(0xD8 | (1 + pick(depth - 1))); depth--; } break; /* fstp st(i) */
+            case 3: c8(0xDD); c8(0xD0 | pick(depth)); break;                                      /* fst st(i) */
+            case 4: c8(0xD9); c8(0xE0); break;                                                    /* fchs */
+            case 5: c8(0xD9); c8(0xE1); break;                                                    /* fabs */
+            case 6: c8(0xD9); c8(0xFA); break;                                                    /* fsqrt, also of negatives */
+            case 7: c8(0xD9); c8(pick(2) ? 0xE8 : 0xEE); depth++; break;                          /* fld1, fldz */
+            case 8: c8(0xDB); c8(0x83); c32(4 * pick(30)); depth++; break;                        /* fild m32 */
+            case 9: if (depth > 1) { c8(0xDB); c8(0x9B); c32(4 * pick(30)); depth--; } break;     /* fistp m32 */
+            case 10: c8(0xDB); c8(0x93); c32(4 * pick(30)); break;                                /* fist m32 */
+            default: c8(0xDE); c8(0xC1 | (pick(2) << 3)); depth--; if (!depth) depth = 1; break;  /* faddp, fmulp */
+            }
+            if (depth > 6) { c8(0xDD); c8(0xD8); depth--; }
+        }
+        for (k = 0; k < depth; k++) { c8(0xDD); c8(0x9B); c32(128 + 8 * pick(8)); }            /* fstp m64 */
+        break;
+    }
     default: gen_flagged(); break;
     }
 }

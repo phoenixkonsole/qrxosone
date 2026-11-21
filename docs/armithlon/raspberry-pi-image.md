@@ -416,6 +416,63 @@ berührt.
 - Die Wartezeit eines aufwachenden Kerns kommt zu seiner Interrupt-Latenz hinzu.
 - Der zweite Cache kostet weitere Übersetzungen und bis zu 32 MB Code-Speicher je Kern.
 
+### x86-Gast-JIT (Windows-Programme): Lücken geschlossen (2026-11-21)
+
+Der QRX86-Host-JIT (`full68k/qrx86_hostjit.c`) übersetzt x86 nach AArch64.
+
+**Unbekannte Befehle beenden den Block nicht mehr.** Ein neuer Längen-Decoder (`xj_length`) kennt
+jeden Befehl der 1- und 2-Byte-Opcodetabelle sowie von `0F 38` und `0F 3A`.
+- Befehle ohne native Übersetzung, die nicht springen, laufen einzeln im Interpreter, und der Block
+  geht danach weiter. Vorher endete er dort.
+- Das betrifft unter anderem alle SSE- und MMX-Befehle, `BSWAP`, `BT*`, `BSF`/`BSR`,
+  `SHLD`/`SHRD`, `XADD`, `CMPXCHG`, `CLC`/`STC`/`CMC`/`CLD`/`STD` und `PUSHFD`.
+- Eine falsch berechnete Länge kostet nur Zeit: Der Hilfsaufruf beendet den Block, sobald `eip`
+  nicht dort steht, wo der Decoder es erwartet hat.
+
+**Neu nativ übersetzt:**
+- **`ADC`/`SBB` (32 Bit):** Der Übertrag kommt aus den AArch64-Flags oder dem verzögerten
+  Flag-Zustand und geht über `ADCS`/`SBCS`. Die verzögerten Flags werden wie im Interpreter
+  abgelegt (`LF_ADC`/`LF_SBB` mit `lf_cf`).
+- **`MUL`, `IMUL`, `DIV`, `IDIV` mit einem Operanden (32 Bit, `EDX:EAX`):**
+  - Bei Division durch null oder zu großem Quotienten geht der Befehl an den Interpreter, der die
+    Ausnahme auslöst.
+  - Nativ nur, wenn danach niemand die Flags liest.
+  - Weil eine Division eine Ausnahme auslösen kann, gelten die Flags davor als gelesen.
+- **x87:**
+  - `FXCH ST(i)` (mit den Schattenwerten `st_int`/`st_was`/`st_exact`), `FLD ST(i)`,
+    `FST`/`FSTP ST(i)`, `FCHS`, `FABS`, `FLD1`, `FLDZ`.
+  - `FSQRT`: Negative Werte und NaN gehen an den Interpreter.
+  - `FILD m32`.
+  - `FIST`/`FISTP m32`: nativ nur bei Rundung „zum Nächsten“ und Werten, die in 32 Bit passen;
+    sonst Interpreter.
+  - Alle ändern die AArch64-Flags nicht, in denen x86-Flags stehen können.
+- Nebenbei: Natives `FLD m` setzt `st_exact` jetzt wie der Interpreter zurück.
+
+**Geprüft:** Der Differenztest (`tests/qrx86_jit_tests.c`) erzeugt jetzt auch Divisionen (mit
+und ohne Ausnahme), die genannten Interpreter-Befehle zwischen Flag-Setzern und -Lesern sowie
+x87-Folgen mit allen neuen Formen.
+- 200 000 Fälle unter qemu Cortex-A72: alle gleich wie der Interpreter, ebenso die übrigen
+  AArch64-Tests.
+- Zwei Fehler fand der Test unterwegs, beide behoben: die Flags vor einer Division, die eine
+  Ausnahme auslöst, und ein `cmp` in `FIST`, das x86-Flags überschrieb.
+
+**Wirkung** (derselbe Zufallsgenerator, 20 000 Fälle):
+
+| | vorher | jetzt |
+| --- | --- | --- |
+| Blöcke | 68 623 | 47 467 (−31 %) |
+| einzeln interpretierte Befehle | 149 662 | 86 843 (−42 %) |
+
+Das ist zufälliger Testcode, keine echte Spiele-Last.
+
+**Weiter offen:**
+- SSE/MMX nativ (läuft jetzt im Block, aber einzeln im Interpreter).
+- `REP MOVS`/`STOS` als schnelle Kopie.
+- 8- und 16-Bit-Formen von `ADC`/`SBB`, `MUL`, `DIV`.
+- `FCOM`/`FNSTSW` und `FUCOMIP`.
+- Windows-Programme zeichnen unter Linux noch nichts (`dxtest.exe`). Erst danach lässt sich mit
+  echten Spielen auf dem Pi messen.
+
 ## QRX OS One 64 ohne Mac neu gebaut (2026-11-21)
 
 Das Mac-Paket ist verloren; QRX OS One 64 ist jetzt aus dem Repository allein auf Linux gebaut:
