@@ -91,8 +91,10 @@ enum {
     K_JCC, K_JMP, K_CALL, K_RET, K_JMPI, K_CALLI, K_SETCC, K_CMOV, K_CDQ, K_CWDE, K_XCHG, K_LEAVE, K_NOP,
     K_FLD_M, K_FSTP_M, K_FARITH_M, K_FARITH_ST,
     K_MUL1,                          /* F7 /4-/7 on 32 bits: MUL, IMUL, DIV, IDIV of EDX:EAX (op = /n) */
-    K_FPU                            /* more x87, op = FP_*, rm = the ST index */
+    K_FPU,                           /* more x87, op = FP_*, rm = the ST index */
+    K_FCMP                           /* x87 compares: op = FC_*, rm = ST index, cc = pops, src_sz for memory */
 };
+enum { FC_FCOM, FC_FCOMI, FC_FNSTSW };
 enum { FP_LDST, FP_XCH, FP_STST, FP_STSTP, FP_CHS, FP_ABS, FP_SQRT, FP_LD1, FP_LDZ, FP_ILD32, FP_IST32, FP_ISTP32 };
 typedef struct {
     int base, index;
@@ -365,6 +367,9 @@ static bool xj_decode1(uint32_t eip, XIns *x) {
             else if ((b == 0xD8 || b == 0xDC) && y.reg != 2 && y.reg != 3) {
                 y.kind = K_FARITH_M; y.src_sz = b == 0xD8 ? 32 : 64; y.op = y.reg;
             }
+            else if ((b == 0xD8 || b == 0xDC) && (y.reg == 2 || y.reg == 3)) {
+                y.kind = K_FCMP; y.op = FC_FCOM; y.src_sz = b == 0xD8 ? 32 : 64; y.cc = y.reg == 3;
+            }
             else if (b == 0xDB && y.reg == 0) { y.kind = K_FPU; y.op = FP_ILD32; }
             else if (b == 0xDB && (y.reg == 2 || y.reg == 3)) { y.kind = K_FPU; y.op = y.reg == 3 ? FP_ISTP32 : FP_IST32; }
         } else if (!y.has_mem) {
@@ -377,6 +382,13 @@ static bool xj_decode1(uint32_t eip, XIns *x) {
             else if (b == 0xD9 && sub == 0xFA) { y.kind = K_FPU; y.op = FP_SQRT; }
             else if (b == 0xD9 && sub == 0xE8) { y.kind = K_FPU; y.op = FP_LD1; }
             else if (b == 0xD9 && sub == 0xEE) { y.kind = K_FPU; y.op = FP_LDZ; }
+            /* compares: FCOM(P) ST(i), FCOMPP, FUCOM(P) ST(i), FUCOMPP, F(U)COMI(P), FNSTSW AX */
+            else if ((b == 0xD8 || b == 0xDC) && (y.reg == 2 || y.reg == 3)) { y.kind = K_FCMP; y.op = FC_FCOM; y.cc = y.reg == 3; }
+            else if (b == 0xDE && sub == 0xD9) { y.kind = K_FCMP; y.op = FC_FCOM; y.cc = 2; y.rm = 1; }
+            else if (b == 0xDD && (y.reg == 4 || y.reg == 5)) { y.kind = K_FCMP; y.op = FC_FCOM; y.cc = y.reg == 5; }
+            else if (b == 0xDA && sub == 0xE9) { y.kind = K_FCMP; y.op = FC_FCOM; y.cc = 2; y.rm = 1; }
+            else if ((b == 0xDB || b == 0xDF) && (y.reg == 5 || y.reg == 6)) { y.kind = K_FCMP; y.op = FC_FCOMI; y.cc = b == 0xDF; }
+            else if (b == 0xDF && sub == 0xE0) { y.kind = K_FCMP; y.op = FC_FNSTSW; }
             /* D8 ST0,STi; DC STi,ST0; DE STi,ST0 and pop: add, mul, sub, subr, div, divr */
             if (b == 0xD8 && y.reg != 2 && y.reg != 3) { y.kind = K_FARITH_ST; y.op = y.reg; y.cc = 0; }
             else if ((b == 0xDC || b == 0xDE) && y.reg != 2 && y.reg != 3) {
@@ -560,6 +572,10 @@ static unsigned xj_peek_live(uint32_t addr) {
         if (!xj_decode(addr, &y)) return mask;
         switch (y.kind) {
         case K_ALU: return (y.op == 2 || y.op == 3) ? (mask & L_CF) : 0;   /* ADC, SBB read CF */
+        case K_FCMP:
+            if (y.op == FC_FCOMI) return 0;              /* sets every arithmetic flag */
+            addr = y.next;
+            break;
         case K_SHIFT:
             if (xj_kills_all(&y)) return 0;
             return mask;
@@ -575,18 +591,21 @@ static unsigned xj_peek_live(uint32_t addr) {
     }
     return mask;
 }
-enum { NZ_NONE, NZ_SUB, NZ_ADD, NZ_LOGIC, NZ_INCDEC };
+enum { NZ_NONE, NZ_SUB, NZ_ADD, NZ_LOGIC, NZ_INCDEC, NZ_FCOMI };
 enum { C_EQ, C_NE, C_HS, C_LO, C_MI, C_PL, C_VS, C_VC, C_HI, C_LS, C_GE, C_LT, C_GT, C_LE, C_AL };
 static int xj_a64_cc(int nz, unsigned cc) {
     static const int8_t sub[16] = { C_VS, C_VC, C_LO, C_HS, C_EQ, C_NE, C_LS, C_HI, C_MI, C_PL, -1, -1, C_LT, C_GE, C_LE, C_GT };
     static const int8_t add[16] = { C_VS, C_VC, C_HS, C_LO, C_EQ, C_NE, -1, -1, C_MI, C_PL, -1, -1, C_LT, C_GE, C_LE, C_GT };
     static const int8_t logic[16] = { -1, -1, -1, -1, C_EQ, C_NE, C_EQ, C_NE, C_MI, C_PL, -1, -1, C_LT, C_GE, C_LE, C_GT };
     static const int8_t incdec[16] = { C_VS, C_VC, -1, -1, C_EQ, C_NE, -1, -1, C_MI, C_PL, -1, -1, C_LT, C_GE, C_LE, C_GT };
+    /* FCMP of two ordered values (NaN goes to the interpreter): CF = less, ZF = equal */
+    static const int8_t fcomi[16] = { -1, -1, C_LO, C_HS, C_EQ, C_NE, C_LS, C_HI, -1, -1, -1, -1, -1, -1, -1, -1 };
     switch (nz) {
     case NZ_SUB: return sub[cc & 15];
     case NZ_ADD: return add[cc & 15];
     case NZ_LOGIC: return logic[cc & 15];
     case NZ_INCDEC: return incdec[cc & 15];
+    case NZ_FCOMI: return fcomi[cc & 15];
     default: return -1;
     }
 }
@@ -604,6 +623,7 @@ static void xj_analyse(XIns *ins, int n, unsigned end_live) {
             switch (x->kind) {
             case K_ALU: nz = (x->op == 3 || x->op == 5 || x->op == 7) ? NZ_SUB : (x->op == 0 || x->op == 2) ? NZ_ADD : NZ_LOGIC; break;
             case K_INCDEC: nz = NZ_INCDEC; break;
+            case K_FCMP: if (x->op == FC_FCOMI) nz = NZ_FCOMI; break;
             case K_JCC: case K_SETCC: case K_CMOV:
                 /* An interpreter re-run of a memory form reads the lazy flags. */
                 x->native_cc = !x->has_mem && xj_a64_cc(nz, x->cc) >= 0;
@@ -635,6 +655,9 @@ static void xj_analyse(XIns *ins, int n, unsigned end_live) {
                 if (xj_kills_all(x)) { x->need_lf = live != 0; live = 0; }
                 else if (x->has_imm) { /* count 0: no effect on flags */ }
                 else x->need_lf = live != 0; /* live stays: count 0 keeps the old flags */
+                break;
+            case K_FCMP:
+                if (x->op == FC_FCOMI) { x->need_lf = live != 0; live = 0; }
                 break;
             case K_NEG: case K_IMUL: case K_MUL1:
                 if (live) { x->kind = K_FALL; changed = true; live = L_ALL; }
@@ -1110,6 +1133,77 @@ static void gen_fpu(XT *t, const XIns *x) {
     }
 }
 
+/* A NaN in dreg re-runs the instruction in the interpreter. NZCV stays untouched. */
+static void fp_nan_check_d(XT *t, unsigned dreg) {
+    XE *e = &t->e;
+    E(e, 0x5E60E400u | (dreg << 16) | (dreg << 5) | 4u);      /* fcmeq d4,dn,dn */
+    E(e, 0x9E660000u | (4u << 5) | 4u);                        /* fmov x4,d4 */
+    cbz_stub_x(t, 4);
+}
+/* x87 compares of ST(0) with ST(i) or memory, both ordered: FCOM sets C3 (equal) and C0
+ * (less) in the status word with SIMD compares, so NZCV keep the x86 flags they may hold;
+ * FCOMI sets the flags themselves through FCMP (NZ_FCOMI). Then the pops. */
+static void gen_fcmp(XT *t, const XIns *x, int *nz) {
+    XE *e = &t->e;
+    if (x->op == FC_FNSTSW) {                      /* AX = status word with TOP */
+        E(e, 0x79400000u | ((uint32_t)(offsetof(x86cpu, fsw) / 2) << 10) | (XCPU << 5) | 9u);   /* ldrh w9,fsw */
+        mov_w(e, 10, 0x3800u);
+        E(e, R3(0x0A200000u, 9, 9, 10));           /* bic w9,w9,w10 */
+        fp_top(e, 1);
+        lsl_i(e, 1, 1, 11);
+        E(e, R3(0x2A000000u, 9, 9, 1));            /* orr w9,w9,w1 */
+        reg_write(e, X86_EAX, 16, 9);
+        return;
+    }
+    if (x->has_mem) {
+        int addr = ea(t, &x->m);
+        if (addr == 0) { movr(e, 5, 0); addr = 5; }
+        fp_load_mem(t, addr, x->src_sz);
+        E(e, 0x1E604001u);                         /* fmov d1,d0 */
+        fp_top(e, 1);
+        fp_st_addr(e, 2, 1, 0);
+        E(e, 0xFD400000u | (2u << 5) | 0u);        /* ldr d0,[x2] */
+    } else {
+        fp_top(e, 1);
+        fp_st_addr(e, 2, 1, 0);
+        E(e, 0xFD400000u | (2u << 5) | 0u);
+        fp_st_addr(e, 3, 1, x->rm);
+        E(e, 0xFD400000u | (3u << 5) | 1u);        /* ldr d1,[x3] */
+    }
+    fp_nan_check_d(t, 0);
+    fp_nan_check_d(t, 1);
+    if (x->op == FC_FCOM) {
+        E(e, 0x5E60E400u | (1u << 16) | (0u << 5) | 4u);   /* fcmeq d4,d0,d1 */
+        E(e, 0x7EE0E400u | (0u << 16) | (1u << 5) | 5u);   /* fcmgt d5,d1,d0: less */
+        E(e, 0x9E660000u | (4u << 5) | 4u);                /* fmov x4,d4 */
+        E(e, 0x9E660000u | (5u << 5) | 5u);                /* fmov x5,d5 */
+        ubfm(e, 4, 4, 0, 0); lsl_i(e, 4, 4, 14);           /* C3 */
+        ubfm(e, 5, 5, 0, 0); lsl_i(e, 5, 5, 8);            /* C0 */
+        E(e, 0x79400000u | ((uint32_t)(offsetof(x86cpu, fsw) / 2) << 10) | (XCPU << 5) | 9u);   /* ldrh w9,fsw */
+        mov_w(e, 10, 0x4700u);                             /* C3 C2 C1 C0 */
+        E(e, R3(0x0A200000u, 9, 9, 10));
+        E(e, R3(0x2A000000u, 9, 9, 4));
+        E(e, R3(0x2A000000u, 9, 9, 5));
+        E(e, 0x79000000u | ((uint32_t)(offsetof(x86cpu, fsw) / 2) << 10) | (XCPU << 5) | 9u);   /* strh */
+    } else {
+        E(e, 0x1E602000u | (1u << 16) | (0u << 5));       /* fcmp d0,d1 */
+        *nz = NZ_FCOMI;
+        if (x->need_lf) {                                  /* the interpreter's fcomi: eflags, no lazy op */
+            E(e, 0x1A9F07E0u | ((uint32_t)(C_LO ^ 1) << 12) | 9u);   /* cset w9,lo: CF */
+            E(e, 0x1A9F07E0u | ((uint32_t)(C_EQ ^ 1) << 12) | 10u);  /* cset w10,eq */
+            lsl_i(e, 10, 10, 6);                                     /* ZF */
+            E(e, R3(0x2A000000u, 9, 9, 10));
+            ldr_cpu(e, 10, offsetof(x86cpu, eflags));
+            mov_w(e, 11, X86_ARITH);
+            E(e, R3(0x0A200000u, 10, 10, 11));
+            E(e, R3(0x2A000000u, 10, 10, 9));
+            str_cpu(e, 10, offsetof(x86cpu, eflags));
+            str_cpu(e, WZR, offsetof(x86cpu, lf_op));
+        }
+    }
+    for (unsigned k = 0; k < x->cc; k++) { fp_top(e, 1); fp_pop(e); }
+}
+
 static void gen_ins(XT *t, XIns *x, int *nz, XOut *outs, int *nouts) {
     XE *e = &t->e;
     int addr, v;
@@ -1314,6 +1408,7 @@ static void gen_ins(XT *t, XIns *x, int *nz, XOut *outs, int *nouts) {
         fp_push_d0(e);
         break;
     case K_FPU: gen_fpu(t, x); break;
+    case K_FCMP: gen_fcmp(t, x, nz); break;
     case K_FSTP_M:
         addr = ea(t, &x->m);
         if (addr == 0) { movr(e, 5, 0); addr = 5; }
@@ -1750,10 +1845,10 @@ static void xj_protect_page(uint32_t vpage) {
 
 /* QRX86_JITOFF=mask: instruction kinds (bit = K_ value) left to the interpreter, to find
  * by bisection which translation a misbehaving program depends on. */
-static uint32_t xj_off_mask(void) {
+static uint64_t xj_off_mask(void) {
     static int have;
-    static uint32_t mask;
-    if (!have) { const char *e = getenv("QRX86_JITOFF"); mask = e ? (uint32_t)strtoul(e, NULL, 0) : 0; have = 1; }
+    static uint64_t mask;
+    if (!have) { const char *e = getenv("QRX86_JITOFF"); mask = e ? (uint64_t)strtoull(e, NULL, 0) : 0; have = 1; }
     return mask;
 }
 static XBlock *xj_translate(uint32_t eip) {
@@ -1840,7 +1935,8 @@ static XBlock *xj_translate(uint32_t eip) {
         bl_to(e, xj.interp_thunk);
         bool control = x->kind == K_JMP || x->kind == K_CALL || x->kind == K_RET || x->kind == K_JMPI ||
                        x->kind == K_CALLI || x->kind == K_JCC;
-        bool setter = x->kind == K_ALU || x->kind == K_INCDEC || x->kind == K_SHIFT || x->kind == K_NEG || x->kind == K_IMUL || x->kind == K_MUL1;
+        bool setter = x->kind == K_ALU || x->kind == K_INCDEC || x->kind == K_SHIFT || x->kind == K_NEG || x->kind == K_IMUL || x->kind == K_MUL1 ||
+                      (x->kind == K_FCMP && x->op == FC_FCOMI);
         if (control || setter || i == n - 1) {
             /* Control left, or NZCV no longer match the lazy flags the interpreter set. */
             b_to(e, xj.epi_plain);

@@ -515,6 +515,26 @@ Stücke (`rep_fast`).
 **Geprüft:** Der Differenztest erzeugt `REP MOVS`/`STOS` aller Größen mit Überlappung, Anzahl 0,
 `DF=1` und Seitengrenze. 200 000 Fälle stimmen mit dem Interpreter überein.
 
+### x87-Vergleiche im x86-JIT (2026-11-21)
+
+Gleitkomma-Vergleiche laufen jetzt nativ statt einzeln im Interpreter (`K_FCMP`):
+
+- **Compilerstil ab Pentium Pro:** `FCOMI`/`FCOMIP`/`FUCOMI`/`FUCOMIP` laufen über `FCMP`. Die
+  Flags bleiben für folgende `Jcc`/`SETcc`/`CMOV` stehen, mit eigener Zuordnung: `B`, `AE`, `E`,
+  `NE`, `BE` und `A` sind nativ, andere Bedingungen gehen über die verzögerten Flags, die dann wie
+  im Interpreter abgelegt werden.
+- **Älterer Stil:** `FCOM`/`FCOMP` mit Speicher- oder Registeroperand, `FCOMPP`, `FUCOM`/`FUCOMP`
+  und `FUCOMPP` setzen C3/C0 im Statuswort über SIMD-Vergleiche. Die AArch64-Flags, in denen
+  x86-Flags stehen können, bleiben dabei unberührt.
+- **`FNSTSW AX`** ist nativ.
+- **NaN** geht an den Interpreter, bevor sich etwas ändert.
+- Nebenbei: `QRX86_JITOFF` ist jetzt 64 Bit breit, weil die Befehlsarten über 31 hinausgehen.
+
+**Geprüft:** Der Differenztest erzeugt alle Vergleichsformen, gleiche Werte und NaN, danach
+`FNSTSW AX` + `TEST AH` und `Jcc`/`SETcc`/`CMOV`. 200 000 Fälle stimmen mit dem Interpreter überein.
+
+**Wirkung** bei diesem Generator (20 000 Fälle): einzeln interpretierte Befehle 198 193 → 168 307.
+
 ### 32-Bit-JIT: Flags am Blockende nach den Nachfolgern (2026-11-21)
 
 **Ausgangslage:** Der 68k-JIT hält den Übertrag umgekehrt in den AArch64-Flags. Nach `ADD` muss er

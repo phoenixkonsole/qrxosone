@@ -92,7 +92,7 @@ static void gen_flagged(void) {
 }
 static void gen_one(void) {
     unsigned sz;
-    switch (pick(30)) {
+    switch (pick(32)) {
     case 0: case 1: sz = osz(); c8((pick(8) << 3) | (pick(2) << 1) | (sz != 8)); modrm(rsz(sz), sz, true); break;
     case 2: sz = osz(); c8(sz == 8 ? 0x80 : 0x81); modrm(pick(8), sz, true); imm_sz(sz); break;
     case 3: sz = osz(); c8(0x88 | (pick(2) << 1) | (sz != 8)); modrm(rsz(sz), sz, true); break;
@@ -193,6 +193,34 @@ static void gen_one(void) {
         c8(0xF3); if ((op & 1) && pick(3) == 0) c8(0x66); c8(op);
         if (back) c8(0xFC);                                              /* cld */
         c8(0x61);                                                        /* popa */
+        break;
+    }
+    case 29: case 30: {                                                  /* x87 compares and what reads them */
+        unsigned cell = 128 + 8 * pick(8);
+        c8(0xDD); c8(0x83); c32(cell);                                   /* fld m64 */
+        c8(0xDD); c8(0x83); c32(pick(3) ? 128 + 8 * pick(8) : cell);     /* fld m64: sometimes the same */
+        if (pick(6) == 0) { c8(0xD9); c8(0xE0); c8(0xD9); c8(0xFA); }    /* fchs; fsqrt: a NaN */
+        switch (pick(7)) {
+        case 0: c8(0xD8 | (pick(2) << 2)); c8(0x93); c32(pick(2) ? 128 + 8 * pick(8) : 192 + 8 * pick(8));  /* fcom m32/m64 */
+                if (code[cp - 6] == 0xDC) code[cp - 4] = (uint8_t)(128 + 8 * pick(8)); else code[cp - 4] = (uint8_t)(192 + 8 * pick(8));
+                break;
+        case 1: c8(0xD8); c8(0xD1); break;                                                   /* fcom st1 */
+        case 2: c8(0xDD); c8(0xE1); break;                                                   /* fucom st1 */
+        case 3: c8(0xDB); c8(pick(2) ? 0xF1 : 0xE9); break;                                  /* fcomi, fucomi st1 */
+        case 4: c8(0xDF); c8(pick(2) ? 0xF1 : 0xE9); break;                                  /* fcomip, fucomip st1 */
+        case 5: c8(0xDE); c8(0xD9); break;                                                   /* fcompp */
+        default: c8(0xDA); c8(0xE9); break;                                                  /* fucompp */
+        }
+        if (pick(2)) {                                                   /* fnstsw ax; test ah,imm; then a reader */
+            c8(0xDF); c8(0xE0);
+            c8(0xF6); c8(0xC4); c8((uint8_t[]){ 0x01, 0x40, 0x41, 0x05, 0x45 }[pick(5)]);
+        }
+        switch (pick(3)) {
+        case 0: c8(0x0F); c8(0x90 | pick(16)); c8(0xC0 | r8()); break;   /* setcc */
+        case 1: c8(0x0F); c8(0x40 | pick(16)); c8(0xC0 | r32() << 3 | r32()); break;   /* cmov */
+        default: { unsigned at; c8(0x70 | pick(16)); at = cp; c8(0); c8(0xB8 | r32()); c32(rnd()); code[at] = (uint8_t)(cp - at - 1); break; }
+        }
+        c8(0xDB); c8(0xE3);                                              /* fninit: an empty stack again */
         break;
     }
     default: gen_flagged(); break;
