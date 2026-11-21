@@ -206,6 +206,35 @@ Keine Distribution, sondern ein eigener Kernel und genau die Programme, die das 
   - Die ist hier nur auf x86-64 gebaut; auf AArch64 ungeprüft.
   - Das fertige Paket kann man vom PC übernehmen.
 
+## Entwickeln und messen auf dem Pi (Ubuntu Server 24.04)
+
+Für Leistungsmessungen und JIT-Tuning eine zweite SD-Karte mit Ubuntu Server 24.04 (arm64) statt des
+Appliance-Images:
+
+- `tools/armithlon/pi/setup-ubuntu-pi4.sh` erledigt:
+  - Pakete und Gruppen (video, render, input, audio);
+  - holt das Repository;
+  - baut die Engine nativ (`-mcpu=cortex-a72`, KMS-Fenster) nach `.build/armithlon-pi` und führt alle Tests aus;
+  - holt beide Systeme aus dem neuesten Image in `dist/pi4`;
+  - installiert Claude Code.
+
+  Mit `claude remote-control` im Repository kann eine Claude-Sitzung dann auf dem Pi bauen, testen
+  und messen. Das Skript ändert keine Boot-Einstellungen; Governor und `isolcpus` schlägt es nur vor.
+- `tools/armithlon/pi/bench-pi.sh [SEKUNDEN]` braucht für alle Messungen keinen Bildschirm:
+  - die JIT-Tests mit Zeiten;
+  - das 32-Bit-System mit dem Bildschirm im Speicher (`QRX_LIO_TEST`). Es misst `[BENCH]`-MIPS, und der Watchdog
+    startet bei einem Stillstand neu (`QRX_BOOT_WAIT`, Standard 15 s);
+  - QRX OS One 64 auf 1 und 2 Kernen;
+  - Takt, Temperatur und Drosselung.
+
+  Ergebnis in `~/qrx-test/bench-<datum>.txt`. Die Systeme holt es ohne root aus dem Image (FAT über
+  mtools, ext4 über debugfs).
+- Ablauf geprüft (2026-11-21), nicht auf einem Pi:
+  - Mit dem x86-64-Build hier (Interpreter, keine JITs): 32-Bit 9,3 MIPS nach zwei erkannten
+    Stillständen; QRX OS One 64 mit 34,8 Mio. Befehlen/s auf 1 Kern und 28,7 Mio. auf 2 Kernen.
+  - Unter qemu Cortex-A72 kam das 32-Bit-System in keinem der sechs Starts bis zur Systemdiskette.
+  - Diese Zahlen sagen nichts über den Pi.
+
 ## QRX OS One 64 ohne Mac neu gebaut (2026-11-21)
 
 Das Mac-Paket ist verloren; QRX OS One 64 ist jetzt aus dem Repository allein auf Linux gebaut:
