@@ -41,6 +41,9 @@ mk() { echo "== gmake $*"; gmake $J "$@" || { echo "== again with one job: $*"; 
 # 3. the kernel and the kickstart modules
 mk kernel-utility kernel-qrx-m68k64
 mk linklibs-romhack kernel-dos kernel-timer kernel-bootloader kernel-shell
+# dosboot links hiddstubs, which README's order only builds later with the graphics (on a tree
+# built step by step it was already there)
+mk linklibs-hiddstubs
 mk kernel-expansion-quick kernel-econsole-quick kernel-dosboot-quick kernel-shellcommands-quick
 mk kernel-aros-quick kernel-lddemon-quick kernel-filesystem-quick kernel-fs-afs-quick kernel-qrxdisk-quick
 mk compiler-m-m68k64 compiler-m-quick compiler-stdlib-m68k64 compiler-stdlib-quick \
