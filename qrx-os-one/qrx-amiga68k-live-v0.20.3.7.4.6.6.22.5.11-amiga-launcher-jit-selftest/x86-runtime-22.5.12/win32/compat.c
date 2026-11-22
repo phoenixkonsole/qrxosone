@@ -2071,7 +2071,7 @@ FN(c_atom_add) { static uint32_t n = 0xC100; UNUSED; return n++; }
 FN(c_BeginDeferWindowPos) { UNUSED; return 0x7E900001u; }
 
 /* ================================================================ COM */
-FN(c_CoCreateInstance) { if (a[4]) WR32(a[4], 0); UNUSED; return 0x80040154u; /* REGDB_E_CLASSNOTREG */ }
+FN(c_CoCreateInstance) { return qw_dx_cocreate(w, a); }   /* DirectX classes; else REGDB_E_CLASSNOTREG */
 
 /* ------------------------------------------------------------------ the C runtime of
  * Visual C++ 2015 and later (CrystalMark Retro): pointer encoding, interlocked singly linked

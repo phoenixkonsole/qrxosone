@@ -54,7 +54,7 @@ typedef struct { uint32_t *site, *stub; } XLink;
 typedef struct XjState {
     bool on, failed;
     uint32_t *arena, *next, *end;
-    uint32_t *enter_code, *epi_link, *epi_plain, *interp_thunk, *cond_thunk, *ibt_stub, *arena_blocks;
+    uint32_t *enter_code, *epi_link, *epi_plain, *interp_thunk, *cond_thunk, *fpu_thunk, *ibt_stub, *arena_blocks;
     XBlock *hash[XJ_HASH];
     XBlock **page_blocks;            /* per x86 page */
     uint8_t *page_kills;             /* per x86 page */
@@ -64,7 +64,7 @@ typedef struct XjState {
     XLink *links;
     size_t nlinks, caplinks;
     QRXFullCPU *cpu;
-    uint64_t blocks, flushes, kills, interp_ins, volatile_pages, enters;
+    uint64_t blocks, flushes, kills, interp_ins, volatile_pages, enters, hle_steps;
     uint64_t rep_fast, rep_elems;    /* REP MOVS/STOS portions done by xj_rep_fast, their elements */
     uint32_t *op_counts;             /* QRX86_JIT_STATS=1: interpreted instructions by opcode (0F xx: 0x100 + xx) */
 } XjState;
@@ -107,7 +107,7 @@ enum {
     K_SAHF                           /* SF ZF AF PF CF from AH into NZCV (NZ_SAHF); only while no lazy reader needs OF */
 };
 enum { FC_FCOM, FC_FCOMI, FC_FNSTSW };
-enum { FP_LDST, FP_XCH, FP_STST, FP_STSTP, FP_CHS, FP_ABS, FP_SQRT, FP_LD1, FP_LDZ, FP_ILD32, FP_IST32, FP_ISTP32, FP_LDCW, FP_STCW };
+enum { FP_LDST, FP_XCH, FP_STST, FP_STSTP, FP_CHS, FP_ABS, FP_SQRT, FP_LD1, FP_LDZ, FP_ILD32, FP_IST32, FP_ISTP32, FP_LDCW, FP_STCW, FP_D9MISC };
 typedef struct {
     int base, index;
     unsigned scale;
@@ -396,6 +396,10 @@ static bool xj_decode1(uint32_t eip, XIns *x) {
             else if (b == 0xD9 && sub == 0xFA) { y.kind = K_FPU; y.op = FP_SQRT; }
             else if (b == 0xD9 && sub == 0xE8) { y.kind = K_FPU; y.op = FP_LD1; }
             else if (b == 0xD9 && sub == 0xEE) { y.kind = K_FPU; y.op = FP_LDZ; }
+            /* FXAM, FTST, the constants, the transcendental and the like: the interpreter's code on the x87 state */
+            else if (b == 0xD9 && (sub == 0xE4 || sub == 0xE5 || (sub >= 0xE9 && sub <= 0xED) || (sub >= 0xF0 && sub != 0xFA))) {
+                y.kind = K_FPU; y.op = FP_D9MISC; y.imm = sub;
+            }
             /* compares: FCOM(P) ST(i), FCOMPP, FUCOM(P) ST(i), FUCOMPP, F(U)COMI(P), FNSTSW AX */
             else if ((b == 0xD8 || b == 0xDC) && (y.reg == 2 || y.reg == 3)) { y.kind = K_FCMP; y.op = FC_FCOM; y.cc = y.reg == 3; }
             else if (b == 0xDE && sub == 0xD9) { y.kind = K_FCMP; y.op = FC_FCOM; y.cc = 2; y.rm = 1; }
@@ -644,12 +648,13 @@ static void xj_analyse(XIns *ins, int n, unsigned end_live) {
             case K_INCDEC: nz = NZ_INCDEC; break;
             case K_FCMP: if (x->op == FC_FCOMI) nz = NZ_FCOMI; break;
             case K_SAHF: nz = NZ_SAHF; break;
+            case K_NEG: nz = NZ_SUB; break;   /* 0 - x: SUBS from zero */
             case K_JCC: case K_SETCC: case K_CMOV:
                 /* An interpreter re-run of a memory form reads the lazy flags. */
                 x->native_cc = !x->has_mem && xj_a64_cc(nz, x->cc) >= 0;
                 if (!x->native_cc) nz = NZ_NONE;
                 break;
-            case K_SHIFT: case K_NEG: case K_IMUL: case K_MUL1: case K_FALL: case K_FALL_END: nz = NZ_NONE; break;
+            case K_SHIFT: case K_IMUL: case K_MUL1: case K_FALL: case K_FALL_END: nz = NZ_NONE; break;
             default: break;
             }
         }
@@ -680,10 +685,15 @@ static void xj_analyse(XIns *ins, int n, unsigned end_live) {
                 if (x->op == FC_FCOMI) { x->need_lf = live != 0; live = 0; }
                 break;
             case K_SAHF:
-                /* a later reader through the lazy flags (OF among them, which SAHF keeps): the interpreter */
-                if (live) { x->kind = K_FALL; changed = true; live = L_ALL; }
+                /* a later reader through the lazy flags: SAHF writes eflags, with the OF it keeps */
+                x->need_lf = live != 0;
+                live = x->need_lf ? L_OTHER : 0;
                 break;
-            case K_NEG: case K_IMUL: case K_MUL1:
+            case K_NEG:
+                x->need_lf = live != 0;
+                live = 0;
+                break;
+            case K_IMUL: case K_MUL1:
                 if (live) { x->kind = K_FALL; changed = true; live = L_ALL; }
                 /* DIV and IDIV can fault (#DE): the flags from before are then what is seen */
                 else if (x->kind == K_MUL1 && x->op >= 6) live = L_ALL;
@@ -1093,6 +1103,7 @@ static void gen_fpu(XT *t, const XIns *x) {
         fp_push_d0(e);
         break;
     case FP_LD1: E(e, 0x1E6E1000u); fp_push_d0(e); break;                  /* fmov d0,#1.0 */
+    case FP_D9MISC: mov_w(e, 1, x->imm); bl_to(e, xj.fpu_thunk); break;
     case FP_LDZ: E(e, 0x9E6703E0u); fp_push_d0(e); break;                  /* fmov d0,xzr */
     case FP_XCH: {                                 /* FXCH ST(i): the values and the exactness records */
         static const struct { size_t off; uint32_t ld, st; } arr[4] = {
@@ -1330,21 +1341,26 @@ static void gen_ins(XT *t, XIns *x, int *nz, XOut *outs, int *nouts) {
             reg_write(e, x->rm, x->sz, 1);
         }
         break;
-    case K_NEG:
-        /* Only with dead flags, see xj_analyse */
+    case K_NEG: {
+        /* SUBS w0,wzr,v: NZCV as for SUB 0,v (CF = v != 0); lf_b keeps v for the lazy flags */
+        unsigned sh = 32u - x->sz;
         if (x->has_mem) {
             addr = ea(t, &x->m);
             if (addr == 0) { movr(e, 5, 0); addr = 5; }
             load(t, 1, addr, x->sz, false);
-            E(e, R3(0x4B000000u, 1, WZR, 1));
-            store(t, 1, addr, x->sz);
+            v = 1;
         } else {
             v = reg_read(e, x->rm, x->sz, 1);
-            E(e, R3(0x4B000000u, 1, WZR, v));
-            reg_write(e, x->rm, x->sz, 1);
+            if (x->need_lf && v != 1) { movr(e, 1, v); v = 1; }
         }
-        *nz = NZ_NONE;
+        if (x->sz != 32) { lsl_i(e, 3, v, sh); E(e, R3(0x6B000000u, 0, WZR, 3)); lsr_i(e, 0, 0, sh); }
+        else E(e, R3(0x6B000000u, 0, WZR, v));
+        if (x->has_mem) store(t, 0, addr, x->sz);
+        else reg_write(e, x->rm, x->sz, 0);
+        if (x->need_lf) lf_store(e, LF_NEG, x->sz, 0, WZR, v);
+        *nz = NZ_SUB;
         break;
+    }
     case K_SHIFT: gen_shift(t, x); *nz = NZ_NONE; break;
     case K_IMUL:
         /* Only with dead flags, see xj_analyse */
@@ -1454,6 +1470,21 @@ static void gen_ins(XT *t, XIns *x, int *nz, XOut *outs, int *nouts) {
     case K_FPU: gen_fpu(t, x); break;
     case K_FCMP: gen_fcmp(t, x, nz); break;
     case K_SAHF:                                   /* NZCV = SF ZF !CF PF from AH (bits 15 14 8 10 of EAX) */
+        if (x->need_lf) {                          /* eflags as the interpreter: AH & 0xD5, OF from before */
+            mov_w(e, 1, 0);
+            bl_to(e, xj.cond_thunk);               /* w0 = OF of the lazy flags */
+            ldr_cpu(e, 10, offsetof(x86cpu, eflags));
+            mov_w(e, 11, X86_ARITH);
+            E(e, R3(0x0A200000u, 10, 10, 11));     /* bic */
+            lsl_i(e, 0, 0, 11);
+            E(e, R3(0x2A000000u, 10, 10, 0));
+            ubfm(e, 9, XR(X86_EAX), 8, 15);
+            mov_w(e, 11, 0xD5u);
+            E(e, R3(0x0A000000u, 9, 9, 11));       /* and */
+            E(e, R3(0x2A000000u, 10, 10, 9));
+            str_cpu(e, 10, offsetof(x86cpu, eflags));
+            str_cpu(e, WZR, offsetof(x86cpu, lf_op));
+        }
         ubfm(e, 9, XR(X86_EAX), 15, 15); lsl_i(e, 9, 9, 31);
         ubfm(e, 10, XR(X86_EAX), 14, 14); lsl_i(e, 10, 10, 30); E(e, R3(0x2A000000u, 9, 9, 10));
         ubfm(e, 10, XR(X86_EAX), 8, 8); E(e, 0x52000000u | (10u << 5) | 10u);   /* eor w10,w10,#1 */
@@ -1676,6 +1707,7 @@ static uint64_t xj_interp_helper(x86cpu *c, uint32_t eip, uint32_t next) {
     return (uint64_t)(c->xj_abort != 0 || c->eip != next);
 }
 static uint64_t xj_cond_helper(x86cpu *c, uint32_t cc) { return (uint64_t)cond(c, (int)cc); }
+static void xj_fpu_helper(x86cpu *c, uint32_t sub) { (void)fpu_d9_misc(c, (uint8_t)sub); }
 
 static inline unsigned xj_hash(uint32_t eip) { return (eip ^ (eip >> 15)) & (XJ_HASH - 1u); }
 static XBlock *xj_lookup(uint32_t eip) {
@@ -1807,6 +1839,17 @@ static bool xj_gen_runtime(void) {
     mov_x(&e, 16, (uint64_t)(uintptr_t)xj_interp_helper);
     E(&e, 0xD63F0000u | (16u << 5));               /* blr x16 */
     ldp_cpu(&e, 19, 20, 0); ldp_cpu(&e, 21, 22, 8); ldp_cpu(&e, 23, 24, 16); ldp_cpu(&e, 25, 26, 24);
+    E(&e, 0xA8C227FEu);                            /* ldp x30,x9,[sp],#32 */
+    E(&e, 0xD51B4209u);                            /* msr nzcv,x9 */
+    E(&e, 0xD65F03C0u);
+
+    /* w1 = a D9 code for fpu_d9_misc: only the x87 state changes, NZCV is kept */
+    xj.fpu_thunk = e.p;
+    E(&e, 0xD53B4209u);                            /* mrs x9,nzcv */
+    E(&e, 0xA9BE27FEu);                            /* stp x30,x9,[sp,#-32]! */
+    E(&e, R3(0xAA0003E0u, 0, 0, XCPU));
+    mov_x(&e, 16, (uint64_t)(uintptr_t)xj_fpu_helper);
+    E(&e, 0xD63F0000u | (16u << 5));
     E(&e, 0xA8C227FEu);                            /* ldp x30,x9,[sp],#32 */
     E(&e, 0xD51B4209u);                            /* msr nzcv,x9 */
     E(&e, 0xD65F03C0u);
@@ -2278,6 +2321,8 @@ static int xj_run(x86cpu *c, uint32_t stop_eip) {
         if (!b) {
             c->left--;
             xj.interp_ins++;
+            if (eip - c->hle_base < c->hle_count) xj.hle_steps++;
+            else xj_count_op(eip);
             exec_one(c);
             continue;
         }
@@ -2295,8 +2340,8 @@ static int xj_run(x86cpu *c, uint32_t stop_eip) {
     return c->fault;
 }
 static void xj_report_one(void) {
-    if (xj.blocks) fprintf(stderr, "[QRX86-JIT] blocks=%llu enters=%llu interp=%llu kills=%llu volatile=%llu flushes=%llu code=%zuKB rep_fast=%llu/%llu elements\n",
-        (unsigned long long)xj.blocks, (unsigned long long)xj.enters, (unsigned long long)xj.interp_ins, (unsigned long long)xj.kills,
+    if (xj.blocks) fprintf(stderr, "[QRX86-JIT] blocks=%llu enters=%llu interp=%llu (api thunks %llu) kills=%llu volatile=%llu flushes=%llu code=%zuKB rep_fast=%llu/%llu elements\n",
+        (unsigned long long)xj.blocks, (unsigned long long)xj.enters, (unsigned long long)xj.interp_ins, (unsigned long long)xj.hle_steps, (unsigned long long)xj.kills,
         (unsigned long long)xj.volatile_pages, (unsigned long long)xj.flushes, (size_t)((char *)xj.next - (char *)xj.arena) / 1024u,
         (unsigned long long)xj.rep_fast, (unsigned long long)xj.rep_elems);
     if (xj.op_counts && xj.volatile_pages) {

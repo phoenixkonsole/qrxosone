@@ -92,7 +92,7 @@ static void gen_flagged(void) {
 }
 static void gen_one(void) {
     unsigned sz;
-    switch (pick(36)) {
+    switch (pick(40)) {
     case 0: case 1: sz = osz(); c8((pick(8) << 3) | (pick(2) << 1) | (sz != 8)); modrm(rsz(sz), sz, true); break;
     case 2: sz = osz(); c8(sz == 8 ? 0x80 : 0x81); modrm(pick(8), sz, true); imm_sz(sz); break;
     case 3: sz = osz(); c8(0x88 | (pick(2) << 1) | (sz != 8)); modrm(rsz(sz), sz, true); break;
@@ -249,6 +249,27 @@ static void gen_one(void) {
         default: { unsigned at; c8(0x70 | pick(16)); at = cp; c8(0); c8(0xB8 | r32()); c32(rnd()); code[at] = (uint8_t)(cp - at - 1); break; }
         }
         break;
+    case 35: case 36:                                                    /* NEG (register or memory, any size), then a reader */
+        sz = osz();
+        if (!pick(4)) { c8(0x31); c8(0xC0 | 0 << 3 | 0); }               /* sometimes neg of zero: xor eax,eax */
+        c8(0xF6 | (sz != 8)); modrm(3, sz, true);
+        switch (pick(4)) {
+        case 0: c8(0x0F); c8(0x90 | pick(16)); c8(0xC0 | r8()); break;
+        case 1: c8(0x0F); c8(0x40 | pick(16)); c8(0xC0 | r32() << 3 | r32()); break;
+        case 2: c8(pick(2) ? 0x1B : 0x13); c8(0xC0 | r32() << 3 | r32()); break;   /* sbb/adc reg,reg: CF */
+        default: { unsigned at; c8(0x70 | pick(16)); at = cp; c8(0); c8(0xB8 | r32()); c32(rnd()); code[at] = (uint8_t)(cp - at - 1); break; }
+        }
+        break;
+    case 37: case 38: {                                                  /* D9 constants, FXAM, FTST, transcendental */
+        static const uint8_t ops[] = { 0xE4, 0xE5, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5,
+                                       0xF6, 0xF7, 0xF8, 0xF9, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF };
+        c8(0xDD); c8(0x83); c32(128 + 8 * pick(8));                      /* fld m64 */
+        c8(0xDD); c8(0x83); c32(128 + 8 * pick(8));
+        for (unsigned k = 1 + pick(3); k; k--) { c8(0xD9); c8(ops[pick(sizeof ops)]); }
+        if (pick(2)) { c8(0xDF); c8(0xE0); c8(0x9E); { unsigned at; c8(0x70 | pick(16)); at = cp; c8(0); c8(0xB8 | r32()); c32(rnd()); code[at] = (uint8_t)(cp - at - 1); } }
+        c8(0xDD); c8(0x9B); c32(128 + 8 * pick(8));                      /* fstp m64 */
+        break;
+    }
     default: gen_flagged(); break;
     }
 }
@@ -294,6 +315,10 @@ static void show(uint32_t seed, x86cpu *a, x86cpu *b) {
     printf("seed %u: fault %d/%d eip %08x/%08x\n", seed, a->fault, b->fault, a->eip, b->eip);
     for (int i = 0; i < 8; i++) printf(" r%d %08x %08x%s\n", i, a->r[i], b->r[i], a->r[i] != b->r[i] ? " <" : "");
     printf(" flags %03x %03x\n", x86_get_flags(a) & 0x8D5, x86_get_flags(b) & 0x8D5);
+    printf(" top %u %u ftw %04x %04x fsw %04x %04x\n", a->top, b->top, a->ftw, b->ftw, a->fsw, b->fsw);
+    for (int i = 0; i < 8; i++) if (memcmp(&a->st[i], &b->st[i], 8)) printf(" st[%d] %.17g %.17g <\n", i, a->st[i], b->st[i]);
+    if (!same_mem(a, b, DATA, 0x2000)) printf(" DATA differs\n");
+    if (!same_mem(a, b, STACK, 0x1000)) printf(" STACK differs\n");
     printf(" code:");
     for (unsigned i = 0; i < cp; i++) printf(" %02x", code[i]);
     printf("\n");

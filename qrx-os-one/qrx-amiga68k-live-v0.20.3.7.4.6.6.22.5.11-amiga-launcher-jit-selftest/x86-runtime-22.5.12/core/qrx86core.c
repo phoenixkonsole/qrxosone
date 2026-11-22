@@ -862,6 +862,55 @@ static int trig_range(x86cpu *c)
     return 0;
 }
 
+/* D9 E0..FF without a memory operand (constants, FXAM, transcendental and the like): only the
+ * x87 state. 0 for a code that is not one of these. The host JIT calls it directly. */
+static int fpu_d9_misc(x86cpu *c, uint8_t sub)
+{
+            switch (sub) {
+            case 0xD0: return 1;                                         /* FNOP */
+            case 0xE0: ST(0) = -ST(0); return 1;
+            case 0xE1: ST(0) = fabs(ST(0)); return 1;
+            case 0xE4: fcompare(c, ST(0), 0.0); return 1;
+            case 0xE5: fxam(c); return 1;
+            case 0xE8: fpush(c, 1.0); return 1;
+            case 0xE9: fpush(c, 3.321928094887362347870); return 1;     /* log2(10) */
+            case 0xEA: fpush(c, 1.442695040888963407360); return 1;     /* log2(e) */
+            case 0xEB: fpush(c, 3.141592653589793238463); return 1;
+            case 0xEC: fpush(c, 0.301029995663981195214); return 1;     /* log10(2) */
+            case 0xED: fpush(c, 0.693147180559945309417); return 1;     /* ln(2) */
+            case 0xEE: fpush(c, 0.0); return 1;
+            case 0xF0: { double a = ST(0); ST(0) = nanfix(expm1(a * 0.693147180559945309417), a, a); return 1; }
+            case 0xF1: { double a = ST(0), b = ST(1); ST(1) = nanfix(b * (log(a) / 0.693147180559945309417), a, b); fpop(c); return 1; }
+            case 0xF2: if (trig_range(c)) return 1; { double a = ST(0); ST(0) = nanfix(tan(a), a, a); } fpush(c, 1.0); fset_cc(c, 0, 0, 0, 0); return 1;
+            case 0xF3: { double a = ST(0), b = ST(1); ST(1) = nanfix(atan2(b, a), a, b); fpop(c); return 1; }
+            case 0xF4: {                                               /* FXTRACT */
+                double v = ST(0);
+                if (isnan(v)) { fpush(c, v); return 1; }
+                if (isinf(v)) { ST(0) = INFINITY; fpush(c, v); return 1; }      /* exponent +inf, significand v */
+                if (v == 0.0) { ST(0) = -INFINITY; fpush(c, v); return 1; }     /* exponent -inf, significand v */
+                int e = 0; double fr = frexp(v, &e); ST(0) = (double)(e - 1); fpush(c, fr * 2.0); return 1;
+            }
+            case 0xF5: case 0xF8: {
+                double a = ST(0), b = ST(1), r, q;
+                r = sub == 0xF8 ? fmod(a, b) : remainder(a, b);
+                q = (a - r) / b;
+                ST(0) = r;
+                { int64_t qi = fabs(q) < 9.2e18 ? x86_d2i64(fabs(q)) : 0; fset_cc(c, (qi >> 1) & 1, 0, qi & 1, (qi >> 2) & 1); }
+                return 1;
+            }
+            case 0xF6: c->top = (c->top - 1) & 7; return 1;
+            case 0xF7: c->top = (c->top + 1) & 7; return 1;
+            case 0xF9: { double a = ST(0), b = ST(1); ST(1) = nanfix(b * (log1p(a) / 0.693147180559945309417), a, b); fpop(c); return 1; }
+            case 0xFA: { double a = ST(0); ST(0) = nanfix(a < 0 ? bits2d(X87_INDEFINITE) : qm_sqrt(a), a, a); return 1; }
+            case 0xFB: { double v = ST(0); if (trig_range(c)) return 1; ST(0) = nanfix(sin(v), v, v); fpush(c, nanfix(cos(v), v, v)); fset_cc(c, 0, 0, 0, 0); return 1; }
+            case 0xFC: ST(0) = fround(c, ST(0)); return 1;
+            case 0xFD: { double s = ST(1); s = s < 0 ? ceil(s) : floor(s); ST(0) = ldexp(ST(0), (int)s); return 1; }
+            case 0xFE: if (trig_range(c)) return 1; { double a = ST(0); ST(0) = nanfix(sin(a), a, a); } fset_cc(c, 0, 0, 0, 0); return 1;
+            case 0xFF: if (trig_range(c)) return 1; { double a = ST(0); ST(0) = nanfix(cos(a), a, a); } fset_cc(c, 0, 0, 0, 0); return 1;
+            }
+    return 0;
+}
+
 static void fpu_exec(x86cpu *c, const prefix_t *p, uint8_t op)
 {
     modrm_t m;
@@ -975,42 +1024,7 @@ static void fpu_exec(x86cpu *c, const prefix_t *p, uint8_t op)
                 c->st_int[pi] = si; c->st_was[pi] = sw; c->st_exact[pi] = se;
                 return;
             }
-            switch (sub) {
-            case 0xD0: return;                                         /* FNOP */
-            case 0xE0: ST(0) = -ST(0); return;
-            case 0xE1: ST(0) = fabs(ST(0)); return;
-            case 0xE4: fcompare(c, ST(0), 0.0); return;
-            case 0xE5: fxam(c); return;
-            case 0xE8: fpush(c, 1.0); return;
-            case 0xE9: fpush(c, 3.321928094887362347870); return;     /* log2(10) */
-            case 0xEA: fpush(c, 1.442695040888963407360); return;     /* log2(e) */
-            case 0xEB: fpush(c, 3.141592653589793238463); return;
-            case 0xEC: fpush(c, 0.301029995663981195214); return;     /* log10(2) */
-            case 0xED: fpush(c, 0.693147180559945309417); return;     /* ln(2) */
-            case 0xEE: fpush(c, 0.0); return;
-            case 0xF0: { double a = ST(0); ST(0) = nanfix(expm1(a * 0.693147180559945309417), a, a); return; }
-            case 0xF1: { double a = ST(0), b = ST(1); ST(1) = nanfix(b * (log(a) / 0.693147180559945309417), a, b); fpop(c); return; }
-            case 0xF2: if (trig_range(c)) return; { double a = ST(0); ST(0) = nanfix(tan(a), a, a); } fpush(c, 1.0); fset_cc(c, 0, 0, 0, 0); return;
-            case 0xF3: { double a = ST(0), b = ST(1); ST(1) = nanfix(atan2(b, a), a, b); fpop(c); return; }
-            case 0xF4: { int e; double fr = frexp(ST(0), &e); ST(0) = (double)(e - 1); fpush(c, fr * 2.0); return; }
-            case 0xF5: case 0xF8: {
-                double a = ST(0), b = ST(1), r, q;
-                r = sub == 0xF8 ? fmod(a, b) : remainder(a, b);
-                q = (a - r) / b;
-                ST(0) = r;
-                { int64_t qi = fabs(q) < 9.2e18 ? x86_d2i64(fabs(q)) : 0; fset_cc(c, (qi >> 1) & 1, 0, qi & 1, (qi >> 2) & 1); }
-                return;
-            }
-            case 0xF6: c->top = (c->top - 1) & 7; return;
-            case 0xF7: c->top = (c->top + 1) & 7; return;
-            case 0xF9: { double a = ST(0), b = ST(1); ST(1) = nanfix(b * (log1p(a) / 0.693147180559945309417), a, b); fpop(c); return; }
-            case 0xFA: { double a = ST(0); ST(0) = nanfix(a < 0 ? bits2d(X87_INDEFINITE) : qm_sqrt(a), a, a); return; }
-            case 0xFB: { double v = ST(0); if (trig_range(c)) return; ST(0) = nanfix(sin(v), v, v); fpush(c, nanfix(cos(v), v, v)); fset_cc(c, 0, 0, 0, 0); return; }
-            case 0xFC: ST(0) = fround(c, ST(0)); return;
-            case 0xFD: { double s = ST(1); s = s < 0 ? ceil(s) : floor(s); ST(0) = ldexp(ST(0), (int)s); return; }
-            case 0xFE: if (trig_range(c)) return; { double a = ST(0); ST(0) = nanfix(sin(a), a, a); } fset_cc(c, 0, 0, 0, 0); return;
-            case 0xFF: if (trig_range(c)) return; { double a = ST(0); ST(0) = nanfix(cos(a), a, a); } fset_cc(c, 0, 0, 0, 0); return;
-            }
+            if (fpu_d9_misc(c, sub)) return;
             break;
         case 0xDA:
             if (grp <= 3) {     /* FCMOVB/E/BE/U */

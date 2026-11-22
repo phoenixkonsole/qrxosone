@@ -1029,6 +1029,15 @@ FN(x_DirectDrawEnumerateA) {             /* (callback(guid, desc, name, ctx), ct
     qw_call(w, a[0], 4, 0, d, n, a[1]);
     return DD_OK;
 }
+FN(x_DirectDrawEnumerateW) {             /* the same with UTF-16 strings */
+    uint32_t d = qw_alloc(w, 128), n = qw_alloc(w, 32);
+    static const char desc[] = "QRX DirectDraw (HLE)", name[] = "display";
+    uint32_t i;
+    for (i = 0; i < sizeof(desc); i++) x86_wr16(C, d + 2 * i, (uint8_t)desc[i]);
+    for (i = 0; i < sizeof(name); i++) x86_wr16(C, n + 2 * i, (uint8_t)name[i]);
+    qw_call(w, a[0], 4, 0, d, n, a[1]);
+    return DD_OK;
+}
 
 /* ================================================================== DirectSound */
 static uint64_t now_ms(qwin *w) { return w->be->now(w); }
@@ -1811,6 +1820,26 @@ const qhle *qw_find_dx(const char *name)
     return NULL;
 }
 FN(x_DirectDrawCreate_init) { dx_init(w); return x_DirectDrawCreate(w, a); }
+/* CoCreateInstance (clsid, outer, context, iid, ppv) for the DirectX classes: Final Reality and
+ * other DirectX 3-5 programs create DirectDraw that way (then call Initialize, which is DD_OK).
+ * Returns REGDB_E_CLASSNOTREG for any other class. */
+uint32_t qw_dx_cocreate(qwin *w, uint32_t *a)
+{
+    uint32_t tmp, c[3], q[3], r;
+    int dd = guid_is(w, a[0], 0xD7B70EE0u), ds = guid_is(w, a[0], 0x47D4D946u);   /* CLSID_DirectDraw, CLSID_DirectSound */
+    if (a[4]) WR32(a[4], 0);
+    if (!dd && !ds) return 0x80040154u;
+    dx_init(w);
+    tmp = qw_alloc(w, 4);
+    c[0] = 0; c[1] = tmp; c[2] = 0;
+    r = dd ? x_DirectDrawCreate(w, c) : x_DirectSoundCreate(w, c);
+    if (r != DD_OK) return r;
+    if (ds) { WR32(a[4], RD32(tmp)); return DD_OK; }   /* IDirectSound: the one interface */
+    q[0] = RD32(tmp); q[1] = a[3]; q[2] = a[4];
+    r = dd_QueryInterface(w, q);
+    if (w->verbose) qw_log(w, "CoCreateInstance(CLSID_DirectDraw) -> %08x", r);
+    return r;
+}
 FN(x_DirectSoundCreate_init) { dx_init(w); return x_DirectSoundCreate(w, a); }
 FN(x_DirectInputCreateA_init) { dx_init(w); return x_DirectInputCreateA(w, a); }
 
@@ -1851,6 +1880,7 @@ const qhle qw_dx[] = {
     { "ddraw", "DirectDrawCreateEx", 4, x_DirectDrawCreateEx_init }, { "ddraw", "DirectDrawEnumerateExA", 3, x_DirectDrawEnumerateExA },
     { "ddraw", "DirectDrawCreateClipper", 3, x_DirectDrawCreateClipper_init },
     { "ddraw", "DirectDrawCreate", 3, x_DirectDrawCreate_init }, { "ddraw", "DirectDrawEnumerateA", 2, x_DirectDrawEnumerateA },
+    { "ddraw", "DirectDrawEnumerateW", 2, x_DirectDrawEnumerateW },
     { "dsound", "DirectSoundCreate", 3, x_DirectSoundCreate_init }, { "dsound", "DirectSoundEnumerateA", 2, x_DirectSoundEnumerateA },
     { "dsound", "#1", 3, x_DirectSoundCreate_init }, { "dsound", "#2", 2, x_DirectSoundEnumerateA },
     { "dinput", "DirectInputCreateA", 4, x_DirectInputCreateA_init },
