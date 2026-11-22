@@ -237,6 +237,19 @@ static void exceptions(void)
     { enum qec64_status s2 = run(W(0x4E71)); CHECK(s2 == QEC64_STOPPED, "no VBR: %d", s2); }
 }
 #define COUNTER UINT64_C(0x150000000)
+static void interpreter_fallback(void)
+{
+    uint32_t active = 1;
+    fresh();
+    c.active_mask = &active;
+    c.pc = HIGH;
+    put16(HIGH, 0x4E71);  /* NOP */
+    enum qec64_status st = qec64_jit_run(&c, 1);  /* no code map, so always interpreted */
+    CHECK(st == QEC64_RUNNING && c.pc == HIGH + 2, "interpreter fallback executes NOP");
+    CHECK(c.ordered, "interpreter fallback publishes ordered state for waking peers");
+    c.active_mask = NULL;
+}
+
 /* Two cores on the machine: core 0 starts core 1 and core 1 signals back; both timers run. */
 static void machine(void)
 {
@@ -347,6 +360,7 @@ int main(void)
     if (ram == MAP_FAILED) { puts("no 6 GB of address space"); return 1; }
     rules();
     exceptions();
+    interpreter_fallback();
     machine();
     assembled_program();
     smp();
