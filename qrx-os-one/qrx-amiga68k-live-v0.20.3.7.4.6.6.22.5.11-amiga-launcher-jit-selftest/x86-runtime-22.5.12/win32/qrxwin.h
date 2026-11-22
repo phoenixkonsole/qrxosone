@@ -413,6 +413,7 @@ int qw_dinput_ready(qwin *w, uint32_t handles, uint32_t n);   /* dx.c */
 void user_input_event(qwin *w, qevent *ev);       /* feed one backend event into the window system */
 void qw_dib_register(qwin *w, uint32_t hbm, uint32_t mem, uint32_t bmi, int bw, int bh, int bpp, uint32_t stride);
 uint32_t qw_dib_colortable(qwin *w, uint32_t hdc, uint32_t start, uint32_t n, uint32_t rgbq);
+int qw_user_has_window(qwin *w, const char *title);   /* test scripts: waitfor */
 uint32_t qw_dx_cocreate(qwin *w, uint32_t *a);   /* CoCreateInstance of DirectDraw, DirectSound */
 const qhle *qw_find_dx(const char *name);   /* COM method thunks "IDirectDraw::CreateSurface" */
 FILE *qw_stream_host(qwin *w, uint32_t gfile);    /* host FILE of a guest fopen() stream, NULL otherwise */

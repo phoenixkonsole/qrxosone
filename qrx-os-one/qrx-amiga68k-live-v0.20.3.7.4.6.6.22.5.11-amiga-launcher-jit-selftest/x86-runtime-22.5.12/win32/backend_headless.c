@@ -30,6 +30,7 @@ typedef struct hl {
     int script_done;                      /* the script has ended */
     int line;
     char typebuf[256];
+    char waitfor[128];                    /* waitfor TITLE: the script holds until such a window shows */
     int typepos, typeup;
     uint8_t *fb[2];                       /* RTG-direct test double: display buffers */
     int fbn, fbpitch, fbw, fbh;
@@ -150,6 +151,11 @@ static int hl_wait(qwin *w, uint32_t timeout, qevent *ev)
     char line[512], *cmd, *rest;
     hl_tick(w);
     for (;;) {
+        if (g_hl.waitfor[0]) {
+            if (!qw_user_has_window(w, g_hl.waitfor)) { g_hl.now += timeout; return 0; }
+            qw_log(w, "script: window \"%s\" is there", g_hl.waitfor);
+            g_hl.waitfor[0] = 0;
+        }
         if (g_hl.pending) {
             uint64_t adv = timeout < g_hl.pending ? timeout : g_hl.pending;
             g_hl.now += adv;
@@ -238,6 +244,8 @@ static int hl_wait(qwin *w, uint32_t timeout, qevent *ev)
             snprintf(ev->arg, sizeof(ev->arg), "%s", e);
             return 1;
         }
+        if (!strcmp(cmd, "trace")) { w->trace = atoi(rest); continue; }   /* API trace from here on (-T) */
+        if (!strcmp(cmd, "waitfor")) { snprintf(g_hl.waitfor, sizeof(g_hl.waitfor), "%s", rest); continue; }
         if (!strcmp(cmd, "close")) { ev->type = QE_CLOSE; return 1; }
         if (!strcmp(cmd, "quit")) { ev->type = QE_QUIT; return 1; }
         qw_log(w, "script line %d: unknown command '%s'", g_hl.line, cmd);

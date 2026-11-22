@@ -549,14 +549,42 @@ uninitialisierten Exponenten; jetzt wie die x87 (+∞ / −∞, NaN bleibt NaN).
 prüft jetzt auch `NEG` und die D9-Befehle mit einem Leser direkt danach; ein Fehlerfall zeigt den
 x87-Zustand. Gegenprobe: ein absichtlich falscher Code wird jeweils erkannt.
 
-**Final Reality 1.01 (`fr101.exe`):** Das Setup ist ein InstallShield-3-Archiv.
-`tools/armithlon/is3-extract.py ARCHIV ZIEL` packt es ohne das Setup aus (eigener Decoder für
-PKWARE DCL; alle 28 Dateien mit der Größe aus dem Archiv geprüft). Die Gruppen ordnen sich so:
-`Group1` ins Programmverzeichnis, `Group3` (`d3d_mfc.dll`) nach `e2driver/`, `Group4` (Musik) ins
-Programmverzeichnis. Dazu neu: `CoCreateInstance` für `CLSID_DirectDraw`/`CLSID_DirectSound` und
-`DirectDrawEnumerateW`. Das Programm läuft mit seiner eigenen `MSVCRT.DLL`, lädt MFC und alle
-seine DLLs und zeigt seinen Lizenzdialog („Accept“/„Quit“). **Noch offen:** Der Lizenztext bleibt
-leer, und weiter als bis zu diesem Dialog ist es noch nicht getestet.
+**Final Reality 1.01 (`fr101.exe`): das Original-Setup installiert.** `SETUP.EXE` ist der
+16-Bit-Starter von InstallShield 3; die Laufzeit packt dessen 32-Bit-Engine aus `_INST32I.EX_`
+aus und startet sie. Getestet auf der Pi-Engine (Kopfloser Modus mit Testskript, der x86-Code läuft
+echt auf dem Ziel, das Bild geht in den Speicher) und auf dem Host: alle Seiten (Willkommen,
+Zielordner `C:\Program Files\Final Reality`, Programmordner, Kopieren, Registrieren, Verknüpfungen)
+bis „Setup Complete“, ohne Fehlermeldung. Die 28 installierten Programmdateien sind Byte für Byte
+gleich denen, die `tools/armithlon/is3-extract.py` auspackt; dazu die drei Deinstallationsdateien
+von InstallShield, `C:\WINDOWS\uninst.exe` und die Registry-Einträge (App Paths, Uninstall).
+
+Dafür behoben bzw. neu:
+- `CreateDIBitmap` war ein Platzhalter (fester Griff, kein Bild): jetzt ein echtes Bitmap; das
+  Setup-Bild erscheint. `CreateDCA` gibt einen Speicher-DC.
+- Registry: `ProgramFilesDir`, `CommonFilesDir`, `RegisteredOwner`, `RegisteredOrganization` wie
+  unter Windows vorbelegt (vorher Zielordner `\Final Reality` ohne Laufwerk).
+- `ole32!CoLoadLibrary`/`CoFreeLibrary` (Selbstregistrierung von MFC42.DLL).
+- MSVCRT für MFC42: `_EH_prolog`, die `_mbs*`-Funktionen, Zeitfunktionen (UTC, gegen libc geprüft)
+  und gut 30 weitere. Die C++-Ausnahmebehandlung (`__CxxFrameHandler`, `_CxxThrowException`) fehlt
+  noch; sie meldet sich, falls ein Programm sie wirklich braucht.
+- INI-Dateien: Auf AROS hing das Setup in `WritePrivateProfileString` mit leerem Dateinamen (`""` ist
+  auf AROS das aktuelle Verzeichnis, das Öffnen zum Schreiben blockiert); jetzt ein Fehler wie
+  unter Windows. INI-Pfade mit Laufwerk gehen jetzt dorthin, wo auch `CreateFile` sie hinlegt (vorher
+  relativ zum aktuellen Verzeichnis).
+- Testskripte (`qrx-win32 -s`): `waitfor TITEL` wartet auf ein Fenster mit diesem Titel (die
+  Installation braucht auf dem Host so 30 s statt 7,5 min mit festen Wartezeiten), `trace 1`
+  schaltet das API-Trace ab dieser Stelle ein. Ein Skript-`click` zählt relativ zum aktiven
+  Fenster; auf dem Bildschirm bringt jedes Mausereignis sein Fenster selbst mit.
+
+Noch offen: Der Haken „Final Reality jetzt starten“ erscheint nicht (nur „README ansehen“), einzelne
+Absätze werden unten abgeschnitten (unsere Schrift hat etwas höhere Zeilen als MS Sans Serif), und
+das installierte Programm bleibt beim leeren Lizenztext stehen (siehe unten). Das Setup selbst
+wurde nur über das Testskript bedient, noch nicht mit Maus auf dem echten Bildschirm.
+
+Vorher, ohne Setup: `tools/armithlon/is3-extract.py ARCHIV ZIEL` packt das Archiv mit eigenem
+PKWARE-DCL-Decoder aus (`Group3` gehört nach `e2driver/`). Mit `CoCreateInstance` für
+`CLSID_DirectDraw`/`CLSID_DirectSound` und `DirectDrawEnumerateW` läuft `FR.exe` mit seiner eigenen
+`MSVCRT.DLL` bis zu seinem Lizenzdialog; der Lizenztext bleibt leer, weiter ist es nicht getestet.
 
 **3DMark99 Max:** noch nicht lauffähig (braucht Direct3D 6 und MFC; etwa 126 fehlende Importe).
 

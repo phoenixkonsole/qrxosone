@@ -1696,6 +1696,23 @@ static int script_event(qwin *w, qevent *ev)
     return 0;
 }
 void user_input_event(qwin *w, qevent *ev) { script_event(w, ev); }
+/* For the test script's waitfor: a visible window whose title holds this text (any case). */
+int qw_user_has_window(qwin *w, const char *title)
+{
+    int i;
+    for (i = 1; i < QW_MAXWND; i++) {
+        qwnd *x = &w->wnd[i];
+        char t[512], *p;
+        if (!x->used || x->destroyed || !x->visible) continue;
+        w2a(t, x->text, sizeof(t));
+        for (p = t; *p; p++) {
+            size_t k = 0;
+            while (title[k] && p[k] && tolower((unsigned char)p[k]) == tolower((unsigned char)title[k])) k++;
+            if (!title[k]) return 1;
+        }
+    }
+    return 0;
+}
 
 static qwnd *first_dirty(qwin *w, uint32_t parent, int top)
 {

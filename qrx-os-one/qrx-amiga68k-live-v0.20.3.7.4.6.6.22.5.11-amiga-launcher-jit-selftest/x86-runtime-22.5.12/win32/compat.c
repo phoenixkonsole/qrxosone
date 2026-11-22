@@ -843,6 +843,9 @@ static void ini_path(qwin *w, uint32_t path, char *out, size_t max)
 {
     char p[300], *s;
     rd_str(w, path, p, sizeof(p));
+    /* A full or relative Windows path goes where CreateFile puts it (C:\ = the program's
+     * drive, C:\WINDOWS shared): InstallShield writes C:\_ISTMP0.DIR\~reg.tmp. */
+    if (p[0] && (strchr(p, '\\') || (isalpha((unsigned char)p[0]) && p[1] == ':'))) { qw_fs_map(w, p, out, max); return; }
     for (s = p; *s; s++) if (*s == '\\') *s = '/';
     s = p;
     if (isalpha((unsigned char)s[0]) && s[1] == ':') s += 2;
@@ -857,6 +860,7 @@ static FILE *ini_open(qwin *w, uint32_t path)
     char s[310];
     FILE *f;
     ini_path(w, path, s, sizeof(s));
+    if (!s[0]) return NULL;                                 /* "" is no file (AROS: the current directory) */
     /* Windows paths from a game: a plain name lives in \WINDOWS, here beside the game. */
     f = fopen(s, "r");
     if (!f) { char *b = strrchr(s, '/'); if (b) f = fopen(b + 1, "r"); }
@@ -922,11 +926,15 @@ static int ini_update(const char *file, const char *sec, const char *key, const 
 }
 FN(c_WritePrivateProfileStringA) {
     char file[310], sec[128], key[128], val[512];
-    if (!a[3]) return 1;                                    /* flush */
+    if (!a[3] || !a[0]) return 1;                           /* flush (no file, or no section) */
     ini_path(w, a[3], file, sizeof(file));
+    /* An empty name is no file (on AROS "" is the current directory, and opening that to
+     * write blocks): fail as Windows does. */
+    if (!file[0]) { w->last_error = 2; return 0; }
     rd_str(w, a[0], sec, sizeof(sec));
     rd_str(w, a[1], key, sizeof(key));
     rd_str(w, a[2], val, sizeof(val));
+    if (w->verbose) { char raw[300]; rd_str(w, a[3], raw, sizeof(raw)); qw_log(w, "WritePrivateProfileString(%s -> %s) [%s] %s", raw, file, sec, a[1] ? key : "(section)"); }
     return (uint32_t)ini_update(file, sec, a[1] ? key : NULL, a[2] ? val : NULL);
 }
 FN(c_GetPrivateProfileSectionA) {
@@ -957,6 +965,7 @@ FN(c_WritePrivateProfileSectionA) {
     char file[310], sec[128], line[512];
     uint32_t p = a[1];
     ini_path(w, a[2], file, sizeof(file));
+    if (!file[0]) { w->last_error = 2; return 0; }
     rd_str(w, a[0], sec, sizeof(sec));
     ini_update(file, sec, NULL, NULL);
     for (; p && RD8(p); ) {
