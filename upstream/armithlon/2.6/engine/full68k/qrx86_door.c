@@ -100,21 +100,87 @@ typedef struct {
 } DoorProc;
 static DoorProc door_procs[DOOR_PROCS];
 static DoorProc *cur_proc=&door_procs[0];
+/* Each process slot keeps its own shadow of its page tables (host.dir with the guest's serial)
+ * and, with the host JIT, its own JIT (xj_ctx in qrx86_hostjit.c). Two Windows programs run at
+ * the same addresses (0x400000): switching between them only switches these, so neither
+ * program's code is remapped, killed or, after repeated switches, given up as volatile. */
+static x86page *slot_dir[DOOR_PROCS][1024];
+static uint32_t slot_serial[DOOR_PROCS],slot_shadow_dir[DOOR_PROCS];
+static bool slot_valid[DOOR_PROCS];
+static unsigned cur_slot;
+static void slot_switch(unsigned k){
+    if(k==cur_slot)return;
+    memcpy(slot_dir[cur_slot],host.dir,sizeof host.dir);
+    slot_serial[cur_slot]=shadow_serial;slot_shadow_dir[cur_slot]=shadow_dir;slot_valid[cur_slot]=shadow_valid;
+    memcpy(host.dir,slot_dir[k],sizeof host.dir);
+    shadow_serial=slot_serial[k];shadow_dir=slot_shadow_dir[k];shadow_valid=slot_valid[k];
+#ifdef QRX86_HOST_JIT_ACTIVE
+    xjp=&xj_ctx[k];
+#endif
+    cur_slot=k;
+    tlb_flush(&host);
+}
+/* The current slot goes to another program: its translations and page tables go with it. */
+static void slot_clear(void){
+#ifdef QRX86_HOST_JIT_ACTIVE
+    if(xj.on)xj_flush_all();
+#endif
+    for(unsigned i=0;i<1024;i++){
+        x86page *t=host.dir[i];
+        if(!t)continue;
+#ifdef QRX86_HOST_JIT_ACTIVE
+        for(unsigned j=0;j<1024;j++){t[j].mem=NULL;t[j].flags=0;xj_table_page((i<<10)|j,&t[j]);}
+#endif
+        free(t);host.dir[i]=NULL;
+    }
+    shadow_valid=false;
+    tlb_flush(&host);
+}
 static void proc_select(uint32_t dir){
     static unsigned victim;
     DoorProc *free_slot=NULL;
     if(cur_proc->dir==dir)return;
     for(unsigned i=0;i<DOOR_PROCS;i++){
-        if(door_procs[i].dir==dir){cur_proc=&door_procs[i];return;}
+        if(door_procs[i].dir==dir){slot_switch(i);cur_proc=&door_procs[i];return;}
         if(!door_procs[i].dir&&!free_slot)free_slot=&door_procs[i];
     }
     if(!free_slot){
         do{free_slot=&door_procs[victim];victim=(victim+1u)%DOOR_PROCS;}while(free_slot==cur_proc);
         memset(free_slot,0,sizeof(*free_slot));
     }
+    slot_switch((unsigned)(free_slot-door_procs));
+    slot_clear();                 /* whatever an earlier program left in this slot */
     free_slot->dir=dir;
     cur_proc=free_slot;
 }
+#ifdef QRX86_HOST_JIT_ACTIVE
+_Static_assert(DOOR_PROCS<=XJ_CTX,"one JIT per process slot");
+/* A 68k write into RAM that holds translated x86 code: every slot whose JIT has code there. */
+static void xj_notify_all(QRXFullCPU *c,uint32_t addr,uint32_t len){
+    unsigned home=cur_slot;
+    if(!len)return;
+    for(unsigned k=0;k<DOOR_PROCS;k++){
+        XjState *st=&xj_ctx[k];
+        bool hit=false;
+        if(!st->on)continue;
+        for(uint64_t a=addr;a<(uint64_t)addr+len;a=(a|0xFFFu)+1u){
+            uint32_t rp=(uint32_t)(a>>12);
+            if((uint64_t)rp<<12>=st->cpu->vm.ram.size)break;
+            if(st->ram_virt[rp]){hit=true;break;}
+        }
+        if(!hit)continue;
+        slot_switch(k);
+        xj_ram_written(c,addr,len);
+    }
+    slot_switch(home);
+}
+/* The 68k JIT rebuilt its write map: gate the code pages of every slot again. */
+static void xj_regate_all(QRXFullCPU *c){
+    XjState *keep=xjp;
+    for(unsigned k=0;k<DOOR_PROCS;k++){xjp=&xj_ctx[k];xj_regate(c);}
+    xjp=keep;
+}
+#endif
 /* A new program: its page directory may sit where a finished one's did, and its code where
  * that one's code was, so nothing known about that address carries over. */
 static void proc_begin(uint32_t dir){

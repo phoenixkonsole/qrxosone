@@ -515,6 +515,38 @@ Stücke (`rep_fast`).
 **Geprüft:** Der Differenztest erzeugt `REP MOVS`/`STOS` aller Größen mit Überlappung, Anzahl 0,
 `DF=1` und Seitengrenze. 200 000 Fälle stimmen mit dem Interpreter überein.
 
+### Eigener JIT je Windows-Programm (2026-11-22)
+
+**Vorher:** Die Tür hatte einen Spiegel der x86-Seitentabellen und einen JIT. Beim Wechsel zu einem
+anderen Windows-Prozess glich sie den Spiegel an dessen Speicher an. Jede Codeseite, die nun auf
+anderen Speicher zeigte, wurde verworfen und gezählt. Nach 16 Wechseln galt sie als flüchtig und
+lief nur noch im Interpreter. Zwei Programme liegen fast immer beide bei `0x400000`.
+
+**Jetzt:** Jeder der 8 Prozess-Plätze der Tür hat seinen eigenen Spiegel samt Änderungszähler und
+seinen eigenen JIT (Code-Bereich, Blöcke, Tabellen, Zähler; `xj_ctx` in `qrx86_hostjit.c`).
+- Ein Wechsel schaltet nur um: 8 KB Seitenverzeichnis kopieren, einen Zeiger setzen.
+- Schreibzugriffe der 68k-Seite auf RAM mit x86-Code erreichen jeden Platz, der dort Code hat;
+  das Neu-Absichern nach einem Umbau der 68k-Schreibkarte deckt alle Plätze ab.
+- Bekommt ein Platz ein neues Programm, werden sein JIT und sein Spiegel geleert.
+- Ein frischer Platz legt seinen JIT beim ersten x86-Lauf an (Speicher wird erst bei Benutzung
+  belegt).
+- Die JIT-Statistik zeigt jeden Platz einzeln.
+
+**Gemessen** (`qrxclock.exe` und `dxtest.exe` gleichzeitig im 32-Bit-System, qemu Cortex-A72):
+
+| | vorher | jetzt |
+| --- | --- | --- |
+| verworfene Codeseiten | 128 | 0 |
+| flüchtige Seiten | 8 | 0 |
+| x86-Befehle im Interpreter | 39,7 Mio. von 115 Mio. | 92 715 von 116 Mio. |
+
+Der Vorher-Wert stammt aus der Zeit vor den x87-Verbesserungen; fast der ganze Unterschied kommt
+von den flüchtigen Seiten. `dxtest` meldet RESULT PASS.
+
+**Geprüft:**
+- Alle AArch64-Tests, darunter der JIT-Differenztest mit 200 000 Fällen; Python-Tests 20 von 20.
+- Der x86-64-Build mit der geänderten Tür und seine Tests.
+
 ### x86-JIT: Gleitkomma → Ganzzahl wie in MSVC-Programmen (2026-11-21)
 
 **Messwerkzeug:** `QRX86_JIT_STATS=1` zählt, welche x86-Befehle an den Interpreter gehen, und
@@ -526,8 +558,8 @@ listet Codeseiten, die der JIT als flüchtig aufgegeben hat.
   MSVCs Muster für Gleitkomma → Ganzzahl (`_ftol`): Rundung mit `FNSTCW`/`FLDCW` auf
   „abschneiden“ stellen, `FISTP`, Rundung zurück.
 - Laufen zwei Windows-Programme gleichzeitig, liegen beide bei `0x400000`. Jeder Wechsel
-  überschreibt den Code des anderen, und der JIT gibt die Seiten auf: rund ein Drittel lief dann
-  im Interpreter. Das ist noch offen; dafür bräuchte jedes Programm einen eigenen JIT-Bereich.
+  überschrieb den Code des anderen, und der JIT gab die Seiten auf: rund ein Drittel lief dann
+  im Interpreter. Behoben, siehe „Eigener JIT je Windows-Programm“.
 
 **Jetzt nativ:**
 - `FIST`/`FISTP m32` mit allen vier Rundungsarten des Steuerworts (`FCVTNS`/`FCVTMS`/

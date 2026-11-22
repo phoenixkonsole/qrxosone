@@ -51,7 +51,7 @@ typedef struct XBlock {
 typedef struct { uint64_t eip; void *code; } XIbt;
 typedef struct { uint32_t *site, *stub; } XLink;
 
-static struct {
+typedef struct XjState {
     bool on, failed;
     uint32_t *arena, *next, *end;
     uint32_t *enter_code, *epi_link, *epi_plain, *interp_thunk, *cond_thunk, *ibt_stub, *arena_blocks;
@@ -67,7 +67,17 @@ static struct {
     uint64_t blocks, flushes, kills, interp_ins, volatile_pages, enters;
     uint64_t rep_fast, rep_elems;    /* REP MOVS/STOS portions done by xj_rep_fast, their elements */
     uint32_t *op_counts;             /* QRX86_JIT_STATS=1: interpreted instructions by opcode (0F xx: 0x100 + xx) */
-} xj;
+} XjState;
+/* One JIT per Windows process of the door (DOOR_PROCS in qrx86_door.c): its own code arena,
+ * blocks, page tables and kill counts, so switching between two programs at the same
+ * addresses keeps both translations instead of killing and, after 16 switches, giving up the
+ * pages. xj is the one in use; the door switches it with xj_ctx_select. */
+#define XJ_CTX 8u
+static XjState xj_ctx[XJ_CTX];
+static XjState *xjp = &xj_ctx[0];
+#define xj (*xjp)
+static void xj_notify_all(QRXFullCPU *c, uint32_t addr, uint32_t len);
+static void xj_regate_all(QRXFullCPU *c);
 
 typedef void (*xj_enter_fn)(x86cpu *c, void *code, uintptr_t *rt);
 
@@ -1620,8 +1630,9 @@ static bool xj_rep_fast(x86cpu *c, uint32_t eip, uint32_t next) {
  * prefixes, two-byte opcodes as 0x100 + the second byte; F3/F2 prefixed as +0x200) */
 static void xj_count_op(uint32_t eip) {
     static int on = -1;
-    if (on < 0) { on = getenv("QRX86_JIT_STATS") != NULL; if (on) xj.op_counts = calloc(0x400, sizeof(uint32_t)); if (!xj.op_counts) on = 0; }
+    if (on < 0) on = getenv("QRX86_JIT_STATS") != NULL;
     if (!on) return;
+    if (!xj.op_counts && !(xj.op_counts = calloc(0x400, sizeof(uint32_t)))) return;
     const uint8_t *q;
     uint32_t room, pos = 0, rep = 0;
     if (!xj_fetch_ok(eip, &q, &room)) return;
@@ -1844,8 +1855,8 @@ static bool xj_init(QRXFullCPU *c) {
         if (!t) continue;
         for (unsigned j = 0; j < 1024; j++) xj_table_page((i << 10) | j, &t[j]);
     }
-    qrx_x86code_notify = xj_ram_written;
-    qrx_x86code_regate = xj_regate;
+    qrx_x86code_notify = xj_notify_all;          /* every process's JIT, see qrx86_door.c */
+    qrx_x86code_regate = xj_regate_all;
     return true;
 }
 static void xj_flush_all(void) {
@@ -2262,7 +2273,7 @@ static int xj_run(x86cpu *c, uint32_t stop_eip) {
     c->jb = old;
     return c->fault;
 }
-static void xj_report(void) {
+static void xj_report_one(void) {
     if (xj.blocks) fprintf(stderr, "[QRX86-JIT] blocks=%llu enters=%llu interp=%llu kills=%llu volatile=%llu flushes=%llu code=%zuKB rep_fast=%llu/%llu elements\n",
         (unsigned long long)xj.blocks, (unsigned long long)xj.enters, (unsigned long long)xj.interp_ins, (unsigned long long)xj.kills,
         (unsigned long long)xj.volatile_pages, (unsigned long long)xj.flushes, (size_t)((char *)xj.next - (char *)xj.arena) / 1024u,
@@ -2283,5 +2294,13 @@ static void xj_report(void) {
         }
         fprintf(stderr, "\n");
     }
+}
+static void xj_report(void) {
+    XjState *keep = xjp;
+    for (unsigned k = 0; k < XJ_CTX; k++) {
+        xjp = &xj_ctx[k];
+        if (xj.on && xj.blocks) { if (k) fprintf(stderr, "[QRX86-JIT] process slot %u:\n", k); xj_report_one(); }
+    }
+    xjp = keep;
 }
 #endif
