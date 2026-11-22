@@ -613,6 +613,18 @@ static void reg_load(void)
         val_set("hklm\\software\\microsoft\\directx", "Version", 1, (const uint8_t *)ver, sizeof(ver));
         val_set("hklm\\software\\microsoft\\directx", "InstalledVersion", 3, inst, sizeof(inst));
     }
+    {   /* What every Windows has there: installers (InstallShield) build their default folder
+         * from ProgramFilesDir and show the owner on their user information page. Only where
+         * the registry file has no value of its own. */
+        static const char *const cv[][2] = {
+            { "ProgramFilesDir", "C:\\Program Files" }, { "CommonFilesDir", "C:\\Program Files\\Common Files" },
+            { "RegisteredOwner", "QRX User" }, { "RegisteredOrganization", "" },
+        };
+        const char *k = "hklm\\software\\microsoft\\windows\\currentversion";
+        size_t i;
+        for (i = 0; i < sizeof(cv) / sizeof(cv[0]); i++)
+            if (!val_find(k, cv[i][0])) val_set(k, cv[i][0], 1, (const uint8_t *)cv[i][1], (uint32_t)strlen(cv[i][1]) + 1u);
+    }
     if (strcmp(REG_FILE, REG_FILE_OLD) && (old = fopen(REG_FILE_OLD, "r")) != NULL) {
         fclose(old);
         reg_read(REG_FILE_OLD);
@@ -675,7 +687,7 @@ FN(c_RegQueryValueExA) {
     reg_path(w, a[0], 0, p, sizeof(p));
     rd_str(w, a[1], n, sizeof(n));
     v = val_find(p, n);
-    if (!v) return 2;
+    if (!v) { if (w->verbose) qw_log(w, "RegQueryValueEx(%s, %s): not found", p, n); return 2; }
     if (a[3]) WR32(a[3], v->type);
     if (a[5]) {
         uint32_t cap = RD32(a[5]);
@@ -1934,6 +1946,23 @@ FN(c_LoadLibraryExA) {
     b[0] = a[0];
     return e ? e->fn(w, b) : 0;
 }
+/* CoLoadLibrary (name, autofree) and CoFreeLibrary: InstallShield loads a DLL that way to call
+ * its DllRegisterServer. Same as LoadLibraryW and FreeLibrary. */
+FN(c_CoLoadLibrary) {
+    const qhle *e = qw_find_hle("kernel32", "LoadLibraryW");
+    uint32_t b[16];
+    memset(b, 0, sizeof(b));
+    b[0] = a[0];
+    return e ? e->fn(w, b) : 0;
+}
+FN(c_CoFreeLibrary) {
+    const qhle *e = qw_find_hle("kernel32", "FreeLibrary");
+    uint32_t b[16];
+    memset(b, 0, sizeof(b));
+    b[0] = a[0];
+    if (e) (void)e->fn(w, b);
+    return 0;
+}
 FN(c_StringFromGUID2) {
     char t[64];
     int i, n;
@@ -2317,6 +2346,7 @@ const qhle qw_compat[] = {
     { "ole32", "StringFromGUID2", 3, c_StringFromGUID2 }, { "ole32", "CoRegisterClassObject", 5, c_CoRegisterClassObject },
     { "ole32", "CoRevokeClassObject", 1, c_ok0 },
     /* ole32 */
+    { "ole32", "CoLoadLibrary", 2, c_CoLoadLibrary }, { "ole32", "CoFreeLibrary", 1, c_CoFreeLibrary },
     { "ole32", "CoInitialize", 1, c_ok0 }, { "ole32", "CoUninitialize", 0, c_ok0 }, { "ole32", "CoCreateInstance", 5, c_CoCreateInstance },
     { NULL, NULL, 0, NULL }
 };

@@ -906,6 +906,31 @@ FN(g_SetDIBits) {                        /* (hdc, bitmap, first line, lines, bit
     if (bh < 0) bh = -bh;
     return dib_draw(w, &d, 0, 0, o->bmp.w, o->bmp.h, 0, 0, o->bmp.w, bh, a[4], a[5], a[6]) ? a[3] : 0;
 }
+/* (hdc, BITMAPINFOHEADER, init, bits, BITMAPINFO, usage): a device bitmap of the header's size,
+ * with the picture drawn in when init has CBM_INIT (4). InstallShield's dialog picture. */
+FN(g_CreateDIBitmap) {
+    uint32_t h = gdi_new(w, GO_BITMAP);
+    qobj *o = O(w, h, GO_BITMAP);
+    int bw, bh;
+    if (!o || !a[1]) return h;
+    bw = (int32_t)RD32(a[1] + 4); bh = (int32_t)RD32(a[1] + 8);
+    if (bh < 0) bh = -bh;
+    if (bw <= 0 || bh <= 0 || bw > 4096 || bh > 4096) { surf_resize(&o->bmp, 1, 1); return h; }
+    surf_resize(&o->bmp, bw, bh);
+    if ((a[2] & 4u) && a[3] && a[4]) {
+        qdc d;
+        int ih = (int32_t)RD32(a[4] + 8);
+        memset(&d, 0, sizeof(d));
+        d.s = &o->bmp;
+        d.cx1 = bw; d.cy1 = bh;
+        if (ih < 0) ih = -ih;
+        (void)dib_draw(w, &d, 0, 0, bw, bh, 0, 0, bw, ih, a[3], a[4], a[5]);
+    }
+    return h;
+}
+/* (driver, device, output, devmode): "DISPLAY" and the like; a memory DC answers what programs
+ * ask such a DC (GetDeviceCaps) and takes what they draw into it. */
+FN(g_CreateDCA) { uint32_t b[1] = { 0 }; (void)a; return g_CreateCompatibleDC(w, b); }
 FN(g_BitBlt) { return (uint32_t)blt(w, DCP(w, a[0]), (int32_t)a[1], (int32_t)a[2], (int32_t)a[3], (int32_t)a[4], DCP(w, a[5]), (int32_t)a[6], (int32_t)a[7], (int32_t)a[3], (int32_t)a[4], a[8]); }
 FN(g_StretchBlt) { return (uint32_t)blt(w, DCP(w, a[0]), (int32_t)a[1], (int32_t)a[2], (int32_t)a[3], (int32_t)a[4], DCP(w, a[5]), (int32_t)a[6], (int32_t)a[7], (int32_t)a[8], (int32_t)a[9], a[10]); }
 FN(g_PatBlt) { return (uint32_t)blt(w, DCP(w, a[0]), (int32_t)a[1], (int32_t)a[2], (int32_t)a[3], (int32_t)a[4], NULL, 0, 0, 0, 0, a[5]); }
@@ -1307,6 +1332,7 @@ const qhle qw_gdi32[] = {
     G("CreateFontW", g_CreateFontW, 14), G("CreateFontIndirectW", g_CreateFontIndirectW, 1),
     G("GetBitmapBits", g_GetBitmapBits, 3),
     G("SelectObject", g_SelectObject, 2), G("DeleteObject", g_DeleteObject, 1), G("GetObjectW", g_GetObjectW, 3),
+    G("CreateDIBitmap", g_CreateDIBitmap, 6), G("CreateDCA", g_CreateDCA, 4),
     G("BitBlt", g_BitBlt, 9), G("StretchBlt", g_StretchBlt, 11), G("PatBlt", g_PatBlt, 6),
     G("SetPixel", g_SetPixel, 4), G("SetPixelV", g_SetPixel, 4), G("GetPixel", g_GetPixel, 3),
     G("MoveToEx", g_MoveToEx, 4), G("LineTo", g_LineTo, 3), G("Rectangle", g_Rectangle, 5), G("Ellipse", g_Ellipse, 5),

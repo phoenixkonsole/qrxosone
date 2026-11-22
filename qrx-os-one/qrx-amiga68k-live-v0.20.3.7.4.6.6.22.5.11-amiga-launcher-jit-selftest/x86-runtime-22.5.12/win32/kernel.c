@@ -277,6 +277,8 @@ uint32_t qw_data_import(qwin *w, const char *dll, const char *name)
     if (!strcmp(name, "__initenv") || !strcmp(name, "_environ")) { if (!g_initenv) { uint32_t arr = qw_data(w, 8); g_initenv = qw_data(w, 4); WR32(g_initenv, arr); } return g_initenv; }
     if (!strcmp(name, "__lc_codepage")) { static uint32_t g_codepage; if (!g_codepage) { g_codepage = qw_data(w, 4); WR32(g_codepage, 1252); } return g_codepage; }
     if (!strcmp(name, "__mb_cur_max")) { static uint32_t g_mbmax; if (!g_mbmax) { g_mbmax = qw_data(w, 4); WR32(g_mbmax, 1); } return g_mbmax; }
+    if (!strcmp(name, "_adjust_fdiv")) { static uint32_t g_adj; if (!g_adj) g_adj = qw_data(w, 4); return g_adj; }   /* 0: no Pentium FDIV fix */
+    if (!strcmp(name, "_mbctype")) { static uint32_t g_mbt; if (!g_mbt) g_mbt = qw_data(w, 260); return g_mbt; }
     if (!strcmp(name, "_fmode")) { if (!g_fmode) g_fmode = qw_data(w, 4); return g_fmode; }
     if (!strcmp(name, "_commode")) { if (!g_commode) g_commode = qw_data(w, 4); return g_commode; }
     return 0;
@@ -793,6 +795,171 @@ static void seh_dispatch(qwin *w, uint32_t rec, uint32_t frame)
     c->eip = RD32(frame + 4);
 }
 
+/* ---- more of msvcrt, for MFC42 and programs of its time (single-byte code page 1252, so the
+ * _mbs functions are the str ones; time functions in UTC, QRX has no time zone) */
+static uint32_t call_hle(qwin *w, const char *dll, const char *name, uint32_t *a)
+{
+    const qhle *e = qw_find_hle(dll, name);
+    return e ? e->fn(w, a) : 0;
+}
+#define FWD(fn, dll, target) FN(fn) { return call_hle(w, dll, target, a); }
+FWD(m_mbschr, "msvcrt", "strchr")
+FWD(m_mbsrchr, "msvcrt", "strrchr")
+FWD(m_mbsstr, "msvcrt", "strstr")
+FWD(m_mbscmp, "msvcrt", "strcmp")
+FWD(m_mbsicmp, "msvcrt", "_stricmp")
+FWD(m_mbsnbcmp, "msvcrt", "strncmp")
+FWD(m_mbsnbicmp, "msvcrt", "_strnicmp")
+FWD(m_mbscspn, "msvcrt", "strcspn")
+FWD(m_mbsrev, "msvcrt", "_strrev")
+FWD(m_mbslwr, "msvcrt", "_strlwr")
+FWD(m_mbsupr, "msvcrt", "_strupr")
+FWD(m_itoa, "msvcrt", "_ltoa")
+FWD(m_atol, "msvcrt", "atoi")
+FWD(m_ismbcdigit, "msvcrt", "isdigit")
+FWD(m_ismbcspace, "msvcrt", "isspace")
+FWD(m_terminate, "msvcrt", "abort")
+FWD(m_beginthreadex, "kernel32", "CreateThread")     /* same arguments, same stdcall start routine */
+FWD(m_endthreadex, "kernel32", "ExitThread")
+FN(m_mbsinc) { (void)w; return a[0] + 1; }
+FN(m_mbsdec) { (void)w; return a[1] > a[0] ? a[1] - 1 : 0; }
+FN(m_mbclen) { UNUSED; return 1; }
+FN(m_abs) { int32_t v = (int32_t)a[0]; (void)w; return (uint32_t)(v < 0 ? -v : v); }
+static int in_set(qwin *w, uint32_t set, uint8_t ch)
+{
+    uint8_t c;
+    for (; (c = x86_rd8(C, set)) != 0; set++) if (c == ch) return 1;
+    return 0;
+}
+FN(m_mbsspn) { uint32_t p = a[0]; uint8_t c; while ((c = x86_rd8(C, p)) && in_set(w, a[1], c)) p++; return p - a[0]; }
+FN(m_mbspbrk) { uint32_t p = a[0]; uint8_t c; for (; (c = x86_rd8(C, p)) != 0; p++) if (in_set(w, a[1], c)) return p; return 0; }
+FN(m_strtod) {
+    char b[512], *end;
+    double v;
+    qw_rd_str(w, a[0], b, sizeof(b));
+    v = qf_strtod(b, &end);
+    if (a[1]) WR32(a[1], a[0] + (uint32_t)(end - b));
+    return retd(w, v);
+}
+FN(m_purecall) {
+    qw_log(w, "pure virtual function call (_purecall)");
+    C->fault = X86_FAULT_HOST;
+    snprintf(C->fault_msg, sizeof(C->fault_msg), "pure virtual function call");
+    C->fault_eip = C->cur_eip;
+    return 0;
+}
+FN(m_expand) { UNUSED; return 0; }                 /* cannot grow in place: NULL, as allowed */
+FN(m_type_info_dtor) { UNUSED; return 0; }        /* thiscall, nothing to free */
+static uint32_t g_doserrno, g_pargc, g_pargv, g_mbctype;
+FN(m_doserrno) { (void)a; if (!g_doserrno) g_doserrno = qw_data(w, 4); return g_doserrno; }
+FN(m_p_argc) { (void)a; build_args(w); if (!g_pargc) { g_pargc = qw_data(w, 4); WR32(g_pargc, g_argc); } return g_pargc; }
+FN(m_p_argv) { (void)a; build_args(w); if (!g_pargv) { g_pargv = qw_data(w, 4); WR32(g_pargv, g_argv); } return g_pargv; }
+FN(m_p_mbctype) { (void)a; if (!g_mbctype) g_mbctype = qw_data(w, 260); return g_mbctype; }   /* no lead bytes */
+/* _splitpath(path, drive, dir, fname, ext) */
+FN(m_splitpath) {
+    char p[600], *s, *slash, *dot;
+    const char *dir_end;
+    size_t n;
+    qw_rd_str(w, a[0], p, sizeof(p));
+    s = p;
+    if (a[1]) { if (isalpha((unsigned char)s[0]) && s[1] == ':') { x86_wr8(C, a[1], (uint8_t)s[0]); x86_wr8(C, a[1] + 1, ':'); x86_wr8(C, a[1] + 2, 0); } else x86_wr8(C, a[1], 0); }
+    if (isalpha((unsigned char)s[0]) && s[1] == ':') s += 2;
+    slash = NULL;
+    for (char *q = s; *q; q++) if (*q == '\\' || *q == '/') slash = q;
+    dir_end = slash ? slash + 1 : s;
+    if (a[2]) { n = (size_t)(dir_end - s); for (size_t i = 0; i < n; i++) x86_wr8(C, a[2] + (uint32_t)i, (uint8_t)s[i]); x86_wr8(C, a[2] + (uint32_t)n, 0); }
+    dot = strrchr(dir_end, '.');
+    n = dot ? (size_t)(dot - dir_end) : strlen(dir_end);
+    if (a[3]) { for (size_t i = 0; i < n; i++) x86_wr8(C, a[3] + (uint32_t)i, (uint8_t)dir_end[i]); x86_wr8(C, a[3] + (uint32_t)n, 0); }
+    if (a[4]) { const char *e = dot ? dot : ""; size_t i; for (i = 0; e[i]; i++) x86_wr8(C, a[4] + (uint32_t)i, (uint8_t)e[i]); x86_wr8(C, a[4] + (uint32_t)i, 0); }
+    return 0;
+}
+/* _fullpath(buffer, path, max) through GetFullPathNameA; a NULL buffer gets one from the heap */
+FN(m_fullpath) {
+    uint32_t b[16], buf = a[0], max = a[0] ? a[2] : 260u, r;
+    memset(b, 0, sizeof(b));
+    if (!buf) buf = qw_alloc(w, max);
+    b[0] = a[1]; b[1] = max; b[2] = buf; b[3] = 0;
+    r = call_hle(w, "kernel32", "GetFullPathNameA", b);
+    return r && r < max ? buf : 0;
+}
+/* struct tm: sec min hour mday mon year wday yday isdst (ints) */
+static uint32_t g_tm;
+static int64_t days_from_civil(int64_t y, unsigned m, unsigned d)
+{
+    y -= m <= 2;
+    int64_t era = (y >= 0 ? y : y - 399) / 400;
+    unsigned yoe = (unsigned)(y - era * 400);
+    unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + (int64_t)doe - 719468;
+}
+static void tm_write(qwin *w, uint32_t at, int64_t t)
+{
+    int64_t days = t >= 0 ? t / 86400 : (t - 86399) / 86400, sec = t - days * 86400, z = days + 719468;
+    int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+    unsigned doe = (unsigned)(z - era * 146097), yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    int64_t y = (int64_t)yoe + era * 400;
+    unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
+    unsigned d = doy - (153 * mp + 2) / 5 + 1, m = mp < 10 ? mp + 3 : mp - 9;
+    y += m <= 2;
+    WR32(at, (uint32_t)(sec % 60)); WR32(at + 4, (uint32_t)(sec / 60 % 60)); WR32(at + 8, (uint32_t)(sec / 3600));
+    WR32(at + 12, d); WR32(at + 16, m - 1); WR32(at + 20, (uint32_t)(y - 1900));
+    WR32(at + 24, (uint32_t)((days % 7 + 11) % 7));                 /* 1970-01-01 was a Thursday */
+    WR32(at + 28, (uint32_t)(days - days_from_civil(y, 1, 1)));
+    WR32(at + 32, 0);
+}
+FN(m_gmtime) {                                     /* (time_t *) -> static struct tm */
+    if (!a[0]) return 0;
+    if (!g_tm) g_tm = qw_data(w, 36);
+    tm_write(w, g_tm, (int64_t)(int32_t)RD32(a[0]));
+    return g_tm;
+}
+FN(m_mktime) {                                     /* normalises the struct, UTC */
+    int64_t y = 1900 + (int32_t)RD32(a[0] + 20), mon = (int32_t)RD32(a[0] + 16), t;
+    y += mon >= 0 ? mon / 12 : (mon - 11) / 12;
+    mon = ((mon % 12) + 12) % 12;
+    t = days_from_civil(y, (unsigned)mon + 1, 1) + (int32_t)RD32(a[0] + 12) - 1;
+    t = t * 86400 + (int64_t)(int32_t)RD32(a[0] + 8) * 3600 + (int64_t)(int32_t)RD32(a[0] + 4) * 60 + (int32_t)RD32(a[0]);
+    if (t < 0 || t > 0x7FFFFFFF) return 0xFFFFFFFFu;
+    tm_write(w, a[0], t);
+    return (uint32_t)t;
+}
+FN(m_strftime) {                                   /* (buf, max, format, tm) in the "C" locale */
+    char f[256], out[512];
+    struct tm t;
+    size_t n, i;
+    memset(&t, 0, sizeof(t));
+    qw_rd_str(w, a[2], f, sizeof(f));
+    t.tm_sec = (int32_t)RD32(a[3]); t.tm_min = (int32_t)RD32(a[3] + 4); t.tm_hour = (int32_t)RD32(a[3] + 8);
+    t.tm_mday = (int32_t)RD32(a[3] + 12); t.tm_mon = (int32_t)RD32(a[3] + 16); t.tm_year = (int32_t)RD32(a[3] + 20);
+    t.tm_wday = (int32_t)RD32(a[3] + 24); t.tm_yday = (int32_t)RD32(a[3] + 28); t.tm_isdst = 0;
+    n = strftime(out, sizeof(out), f, &t);
+    if (!n || n >= a[1]) { if (a[1]) x86_wr8(C, a[0], 0); return 0; }
+    for (i = 0; i <= n; i++) x86_wr8(C, a[0] + (uint32_t)i, (uint8_t)out[i]);
+    return (uint32_t)n;
+}
+
+/* _EH_prolog of the Visual C++ runtime (eax = the function's EH handler): builds the frame that
+ * MSVC's code would, so it cannot return like a function. As the runtime's own code:
+ *   push -1; push eax; push fs:[0]; mov fs:[0],esp; ebp saved over the return address,
+ *   ebp = its slot, esp 12 lower, eax = the return address, on at the return address. */
+FN(m_EH_prolog) {
+    x86cpu *c = &w->cpu;
+    uint32_t s = c->r[X86_ESP], ret = RD32(s), teb = qw_thread_current_teb();
+    (void)a;
+    WR32(s - 4, 0xFFFFFFFFu);
+    WR32(s - 8, c->r[X86_EAX]);
+    WR32(s - 12, RD32(teb));
+    WR32(teb, s - 12);
+    WR32(s, c->r[X86_EBP]);
+    c->r[X86_EBP] = s;
+    c->r[X86_ESP] = s - 12;
+    c->r[X86_EAX] = ret;
+    c->eip = ret;
+    qw_api_jump();
+    return ret;
+}
 FN(k_RaiseException) {
     x86cpu *c = &w->cpu;
     uint32_t sp = c->r[X86_ESP], rec = (sp - SEH_RESERVE) & ~3u, ctx = rec + SEH_CTX, n = a[2] > 15u ? 15u : a[2], i;
@@ -1100,6 +1267,16 @@ static uint32_t s_ShellAboutW(qwin *w, uint32_t *a)
 const qhle qw_misc[] = {
     MS("__wgetmainargs", m___wgetmainargs), MS("__getmainargs", m___getmainargs),
     MS("__set_app_type", m_nop), MS("__setusermatherr", m_nop), MS("__lconv_init", m_nop), MS("_fpreset", m_nop),
+    MS("_EH_prolog", m_EH_prolog), 
+    MS("_mbschr", m_mbschr), MS("_mbsrchr", m_mbsrchr), MS("_mbsstr", m_mbsstr), MS("_mbscmp", m_mbscmp), MS("_mbsicmp", m_mbsicmp),
+    MS("_mbsnbcmp", m_mbsnbcmp), MS("_mbsnbicmp", m_mbsnbicmp), MS("_mbscspn", m_mbscspn), MS("_mbsspn", m_mbsspn), MS("_mbspbrk", m_mbspbrk),
+    MS("_mbsrev", m_mbsrev), MS("_mbslwr", m_mbslwr), MS("_mbsupr", m_mbsupr), MS("_mbsinc", m_mbsinc), MS("_mbsdec", m_mbsdec), MS("_mbclen", m_mbclen),
+    MS("_ismbcdigit", m_ismbcdigit), MS("_ismbcspace", m_ismbcspace), MS("_itoa", m_itoa), MS("atol", m_atol), MS("abs", m_abs), MS("labs", m_abs),
+    MS("strtod", m_strtod), MS("_purecall", m_purecall), MS("_expand", m_expand), MS("??1type_info@@UAE@XZ", m_type_info_dtor),
+    MS("?terminate@@YAXXZ", m_terminate), MS("__doserrno", m_doserrno), MS("__p___argc", m_p_argc), MS("__p___argv", m_p_argv),
+    MS("__p__mbctype", m_p_mbctype), MS("_splitpath", m_splitpath), MS("_fullpath", m_fullpath),
+    MS("gmtime", m_gmtime), MS("localtime", m_gmtime), MS("mktime", m_mktime), MS("strftime", m_strftime),
+    MS("_beginthreadex", m_beginthreadex), MS("_endthreadex", m_endthreadex),
     MS("_initterm", m_initterm), MS("_initterm_e", m_initterm_e), MS("_onexit", m_onexit), MS("__dllonexit", m_dllonexit), MS("atexit", m_atexit),
     MS("exit", m_exit), MS("_exit", m__exit), MS("_cexit", m_nop), MS("_c_exit", m_nop), MS("abort", m_abort), MS("_amsg_exit", m_amsg_exit),
     MS("_lock", m_nop), MS("_unlock", m_nop), MS("signal", m_signal), MS("_controlfp", m_controlfp), MS("_control87", m_controlfp),

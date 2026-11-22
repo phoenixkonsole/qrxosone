@@ -402,8 +402,6 @@ FN(x_RegNotFound) { UNUSED; return REG_NOT_FOUND; }
 FN(x_RegCreateKeyA) { if (a[2]) x86_wr32(C, a[2], 0x7E000001u); return 0; }
 FN(x_MidiFail) { UNUSED; return 2u; /* MMSYSERR_BADDEVICEID */ }
 FN(x_DeviceIoControl) { UNUSED; return 0; }
-FN(x_CreateDCA) { UNUSED; return 0x7E100001u; }
-FN(x_CreateDIBitmap) { UNUSED; return 0x7E100002u; }
 #define K(n, f, c) { "kernel32", n, c, f }
 #define U(n, f, c) { "user32", n, c, f }
 #define G(n, f, c) { "gdi32", n, c, f }
@@ -431,7 +429,7 @@ const qhle qw_extra[] = {
     W_("midiStreamOpen", x_MidiFail, 6), W_("midiStreamClose", x_ok0, 1), W_("midiStreamOut", x_MidiFail, 3),
     W_("midiStreamPause", x_ok0, 1), W_("midiStreamRestart", x_ok0, 1), W_("midiStreamProperty", x_MidiFail, 3),
     W_("midiOutPrepareHeader", x_MidiFail, 3), W_("midiOutUnprepareHeader", x_ok0, 3), W_("midiOutReset", x_ok0, 1),
-    G("CreateDCA", x_CreateDCA, 4), G("CreateDIBitmap", x_CreateDIBitmap, 6),
+
     K("GetEnvironmentVariableA", x_GetEnvironmentVariableA, 3), K("GetEnvironmentVariableW", x_GetEnvironmentVariableW, 3),
     K("SetEnvironmentVariableA", x_SetEnvironmentVariableA, 2), K("FormatMessageA", x_ok0, 7), K("GetLocaleInfoA", x_GetLocaleInfoA, 4),
     K("GetCPInfo", x_GetCPInfo, 2), K("IsDBCSLeadByte", x_ok0, 1), K("GetFileInformationByHandle", x_ok0, 2),
