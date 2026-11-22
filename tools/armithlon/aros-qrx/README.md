@@ -62,9 +62,9 @@ it takes the next input character.
 
 ```sh
 E=upstream/armithlon/2.6/engine
-cc -std=gnu11 -O2 -I$E/include tools/armithlon/aros-qrx/boot/qrxboot.c $E/full68k/qrx68100ec64.c \
-   $E/full68k/qrx68100ec64_machine.c $E/full68k/qrx_ec64_board.c -lpthread -o qrxboot
-./qrxboot core.elf <seconds> <cores> <RAM MB> <module>...
+cmake -S "$E" -B "$E/build" -DQRX_ENABLE_MUSASHI=ON
+cmake --build "$E/build" --target qrxboot
+"$E/build/qrxboot" core.elf <seconds> <cores> <RAM MB> <module>...
 ```
 
 - `$QRXBOOT_CMDLINE` is the kernel command line, `selftest` by default.
@@ -109,11 +109,31 @@ To the shell without a disk: the modules utility.library, timer.device, expansio
 dos.library, econsole-handler, shell.resource, shellcommands.resource and dosboot.resource, and
 `QRXBOOT_CMDLINE=econsole`.
 
-`CLANG=<clang wrapper> boot/run-tests.sh <build-qrx/bin/native-m68k64>` runs all of it: the selftest on
+With `QRXBOOT` set to the built executable and `CLANG` set to the
+m68k64 clang wrapper, `boot/run-tests.sh <build-qrx/bin/native-m68k64>` runs the selftest on
 1, 2, 4 and 8 cores, the reboot, exec's alert for a fault, the DOS boot with shell commands from the
 console input, and the boot from an FFS disk with `boot/tests/hello.c`, built with the m68k64 clang
 against the AROS C library: printf, arguments, qsort, soft float, malloc, and a file written and read
 back on the disk.
+
+### Native Gecko runtime checks
+
+Build the AROS SDK with `QRX_BUILD_PTHREAD=1` when calling `build-linux.sh`.
+For a previously built SDK, run `gmake -C "$WORK/build-qrx" pthread-includes-copy linklibs-pthread`.
+Then run from the repository root:
+
+```sh
+QRXBOOT="$PWD/upstream/armithlon/2.6/engine/build/qrxboot" \
+CLANG="$WORK/tc/bin/clang" CLANGXX="$WORK/tc/bin/clang++" \
+tools/armithlon/aros-qrx/boot/run-tests.sh --gecko "$WORK/build-qrx/bin/native-m68k64" "$WORK/gecko-tests"
+```
+
+The runner builds `GeckoPThread` and `GeckoRuntime` separately and records the compiler,
+linker and guest console output. Each linked program boots from its own FFS image with two
+EC64 cores and the standard task affinity. A passing probe requires its success line and normal
+guest shutdown. The pthread probe covers per-thread keys and their destructors independently
+of C++. The C++ probe requires a target C++ standard library, exception unwinding and C++
+thread-local storage support. These components still need to be ported and verified.
 
 The host needs gawk, netpbm and Python's mako. The AROS build downloads third-party source archives
 (zlib, libpng, freetype and others) by itself, without checksums.

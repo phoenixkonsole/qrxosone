@@ -15,4 +15,5 @@ cmake -G Ninja -S "$V/llvm" -B build -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_T
   -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_LIBXML2=OFF -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_OPTIMIZED_TABLEGEN=ON \
   "-DLLVM_ENABLE_PROJECTS=clang;lld" -DCLANG_ENABLE_ARCMT=OFF -DCLANG_ENABLE_STATIC_ANALYZER=OFF -DCLANG_INCLUDE_TESTS=OFF \
   ${LLVM_CMAKE_EXTRA:-}   # e.g. -DLLVM_PARALLEL_LINK_JOBS=1 on machines with little memory
-ninja -C build clang lld llc llvm-mc llvm-objcopy llvm-nm llvm-objdump llvm-readelf
+ninja -C build clang lld llc llvm-mc llvm-ar llvm-ranlib llvm-as llvm-strip \
+  llvm-objcopy llvm-nm llvm-objdump llvm-readelf

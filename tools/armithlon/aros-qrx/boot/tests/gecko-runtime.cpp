@@ -30,6 +30,21 @@ struct ThreadState {
 };
 
 thread_local ThreadState state;
+
+struct UnwindCheck {
+    bool &destroyed;
+
+    ~UnwindCheck()
+    {
+        destroyed = true;
+    }
+};
+
+[[gnu::noinline]] void throw_across_frame(bool &destroyed)
+{
+    UnwindCheck check{destroyed};
+    throw std::runtime_error("guest exception");
+}
 }
 
 int main()
@@ -46,13 +61,14 @@ int main()
                 ++ready;
                 while (!start.load())
                     std::this_thread::yield();
+                if (state.value != 0)
+                    return;
+                state.value = i + 1;
+                bool unwound = false;
                 try {
-                    if (state.value != 0)
-                        return;
-                    state.value = i + 1;
-                    throw std::runtime_error("guest exception");
+                    throw_across_frame(unwound);
                 } catch (const std::runtime_error &) {
-                    passed[i] = state.value == i + 1;
+                    passed[i] = unwound && state.value == i + 1;
                 }
             });
         }
