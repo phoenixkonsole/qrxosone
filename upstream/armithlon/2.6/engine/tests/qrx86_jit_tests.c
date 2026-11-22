@@ -386,6 +386,49 @@ static void test_budget(void) {
     assert(host.left == 0);
     puts("budget ends a linked loop");
 }
+/* Calls to API thunks the host serves (SetLastError, GetLastError) from a loop: the translated
+ * thunk blocks against the interpreter, and the loop must not go back to the dispatcher per call. */
+static uint32_t t_setlasterror(x86cpu *c, const uint32_t *a) { x86_wr32(c, c->sbase[X86_FS] + 0x34u, a[0]); return 0; }
+static uint32_t t_getlasterror(x86cpu *c, const uint32_t *a) { (void)a; return x86_rd32(c, c->sbase[X86_FS] + 0x34u); }
+static const QRXHostApi t_api[2] = { { "SetLastError", 1, t_setlasterror }, { "GetLastError", 0, t_getlasterror } };
+static void test_api_thunks(void) {
+    static const uint32_t HLE = 0x7F000000u;
+    x86cpu *cs[2] = { &ref, &host };
+    cp = 0;
+    c8(0xB9); c32(50);                                      /* mov ecx,50 */
+    c8(0x31); c8(0xD2);                                     /* xor edx,edx */
+    unsigned loop = cp;
+    c8(0x51);                                               /* push ecx */
+    c8(0xB8); c32(HLE);                                     /* mov eax,SetLastError */
+    c8(0xFF); c8(0xD0);                                     /* call eax */
+    c8(0xB8); c32(HLE + 1);                                 /* mov eax,GetLastError */
+    c8(0xFF); c8(0xD0);                                     /* call eax */
+    c8(0x01); c8(0xC2);                                     /* add edx,eax */
+    c8(0x49);                                               /* dec ecx */
+    c8(0x75); c8((uint8_t)(loop - (cp + 1)));               /* jnz loop */
+    c8(0xE9); c32(END - (CODE + cp + 4));
+    cur_proc->api_bound[0] = &t_api[0];
+    cur_proc->api_bound[1] = &t_api[1];
+    xj_kill_page(CODE >> 12);
+    xj.page_kills[CODE >> 12] = 0;
+    for (int k = 0; k < 2; k++) {
+        reset(cs[k], 1);
+        cs[k]->hle_base = HLE; cs[k]->hle_count = 16; cs[k]->hle_hook = door_hle_hook;
+        cs[k]->sbase[X86_FS] = DATA + 0x100;                /* the TEB: last error at +0x34 */
+    }
+    (void)x86_run(&ref, END);
+    uint64_t before = xj.hle_steps, enters = xj.enters;
+    (void)xj_run(&host, END);
+    assert(!ref.fault && !host.fault);
+    assert(!memcmp(ref.r, host.r, sizeof ref.r) && host.eip == ref.eip);
+    assert(same_mem(&ref, &host, DATA, 0x2000) && same_mem(&ref, &host, STACK, 0x1000));
+    assert(host.r[X86_EDX] == 50u * 51u / 2u);
+    assert(xj.hle_steps - before == 100);                   /* every call ran, through the thunk blocks */
+    assert(xj.enters - enters < 10);                        /* not one dispatcher round per call */
+    for (int k = 0; k < 2; k++) { cs[k]->hle_count = 0; cs[k]->hle_hook = NULL; cs[k]->sbase[X86_FS] = 0; }
+    cur_proc->api_bound[0] = cur_proc->api_bound[1] = NULL;
+    puts("API thunks run in translated code");
+}
 /* A crash in generated code: say where, and what the generated code around it is. */
 static void on_crash(int sig, siginfo_t *si, void *uc) {
     ucontext_t *u = uc;
@@ -493,6 +536,7 @@ int main(int argc, char **argv) {
     if (bench) { bench_rep(); xj_report(); return 0; }
     test_self_modifying();
     test_budget();
+    test_api_thunks();
     test_rep_large();
     xj_report();
     printf("%u cases, %u differ\n", cases, failed);

@@ -1702,7 +1702,8 @@ static uint64_t xj_interp_helper(x86cpu *c, uint32_t eip, uint32_t next) {
     c->eip = eip;
     c->left--;
     xj.interp_ins++;
-    xj_count_op(eip);
+    if (eip - c->hle_base < c->hle_count) xj.hle_steps++;
+    else xj_count_op(eip);
     if (!xj_rep_fast(c, eip, next)) exec_one(c);
     return (uint64_t)(c->xj_abort != 0 || c->eip != next);
 }
@@ -2098,6 +2099,37 @@ static XBlock *xj_translate(uint32_t eip) {
     xj.blocks++;
     return b;
 }
+/* An API thunk the host serves (door_thunk_bound): a block that runs it through the interpreter
+ * thunk (registers synced, the door's hook does the call and the stack) and goes on at the return
+ * address through the indirect branch table, so a call to TlsGetValue and the like stays in
+ * translated code instead of a round trip through the dispatcher. */
+static bool door_thunk_bound(uint32_t index);
+static XBlock *xj_translate_thunk(uint32_t eip) {
+    if ((size_t)(xj.end - xj.next) < 256) {
+        xj_flush_all();
+        host.xj_abort = 1;
+    }
+    xj_w_enable(true);
+    uint32_t *start = xj.next;
+    XE e = { start };
+    mov_w(&e, 0, eip);
+    mov_w(&e, 2, eip);                             /* "next" = eip: the thunk always leaves */
+    bl_to(&e, xj.interp_thunk);
+    ldr_cpu(&e, 1, offsetof(x86cpu, eip));
+    b_to(&e, xj.ibt_stub);
+    xj.next = e.p;
+    xj_w_enable(false);
+    xj_sync(start, (size_t)((char *)e.p - (char *)start));
+    qrx_perfmap(start, (size_t)((char *)e.p - (char *)start), "x86_api_%08x", (unsigned)eip);
+    XBlock *b = malloc(sizeof *b);
+    if (!b) return NULL;
+    b->eip = eip; b->n = 0; b->code = start;
+    unsigned h = xj_hash(eip);
+    b->hash_next = xj.hash[h]; xj.hash[h] = b;
+    b->page_next = xj.page_blocks[eip >> 12]; xj.page_blocks[eip >> 12] = b;
+    xj.blocks++;
+    return b;
+}
 /* A linked site's stub is found again by decoding the branch that is still in it. */
 static void xj_link(uint32_t *site, XBlock *b) {
     if (xj.nlinks == xj.caplinks) {
@@ -2316,6 +2348,10 @@ static int xj_run(x86cpu *c, uint32_t stop_eip) {
             b = xj_lookup(eip);
             if (!b) b = xj_translate(eip);
             /* Translating can flush the cache: the site is gone with it. */
+            if (c->xj_abort) { site = NULL; c->xj_abort = 0; }
+        } else if (door_thunk_bound(eip - c->hle_base)) {
+            b = xj_lookup(eip);
+            if (!b) b = xj_translate_thunk(eip);
             if (c->xj_abort) { site = NULL; c->xj_abort = 0; }
         }
         if (!b) {

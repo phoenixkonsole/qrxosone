@@ -515,6 +515,51 @@ Stücke (`rep_fast`).
 **Geprüft:** Der Differenztest erzeugt `REP MOVS`/`STOS` aller Größen mit Überlappung, Anzahl 0,
 `DF=1` und Seitengrenze. 200 000 Fälle stimmen mit dem Interpreter überein.
 
+### Benchmark-Programme: CrystalMark Retro, Final Reality, 3DMark99 (2026-11-22)
+
+Getestet im 32-Bit-System auf der Pi-Engine (qemu Cortex-A72, also langsamer und ungenauer als
+ein echter Pi 4; die Zahlen taugen nur zum Vergleich untereinander).
+
+**CrystalMark Retro 2.1, CPU-Teil (`CMRCPU32.exe`, Tests 1 bis 6, je 10 s):** läuft. Dafür nötig
+waren Funktionen der Visual-C++-2019-Laufzeit (SList, `EncodePointer`, `GetModuleHandleExW`,
+`CommandLineToArgvW` …), `ProcessParameters` im PEB, und `TlsGetValue`/`GetLastError` direkt
+auf dem Host. Danach im x86-JIT:
+- `NEG` mit lebenden Flags nativ (`SUBS` von null; vorher 4,5 Mio. Befehle im Interpreter).
+- `SAHF` mit lebenden Flags nativ: schreibt EFLAGS wie der Interpreter (AH & 0xD5, OF bleibt),
+  die bedingten Sprünge danach lesen NZCV direkt (vorher 4,8 Mio. im Interpreter).
+- `FSIN`, `FCOS`, `FPATAN`, `FXAM`, die Konstanten usw.: der Code des Interpreters
+  (`fpu_d9_misc`) direkt über einen schlanken Aufruf, ohne Register-Abgleich und Dekodieren.
+- Aufrufe von API-Funktionen, die der Host selbst bedient (`TlsGetValue` …), laufen in einem
+  übersetzten Block weiter, statt jedes Mal über den Dispatcher (15,2 Mio. → 0,47 Mio. Eintritte).
+
+| Test | vorher | nach NEG/SAHF/x87 | mit API-Blöcken |
+| --- | --- | --- | --- |
+| 1 | 383 | 388 | 448 |
+| 2 | 592 | 569 | 581 |
+| 3 | 280 | 319 | 302 |
+| 4 | 87 | 96 | 96 |
+| 5 | 104 | 111 | 110 |
+| 6 | 332 | 376 | 375 |
+
+Unter qemu schwanken die Werte um etwa 5 %. Die API-Blöcke helfen nur Test 1 deutlich: Teuer ist
+der Aufruf selbst (Register sichern, Host-Funktion), nicht der Weg über den Dispatcher.
+
+Unterwegs gefunden: `FXTRACT` des Interpreters las bei Unendlich, Null und NaN einen
+uninitialisierten Exponenten; jetzt wie die x87 (+∞ / −∞, NaN bleibt NaN). Der JIT-Differenztest
+prüft jetzt auch `NEG` und die D9-Befehle mit einem Leser direkt danach; ein Fehlerfall zeigt den
+x87-Zustand. Gegenprobe: ein absichtlich falscher Code wird jeweils erkannt.
+
+**Final Reality 1.01 (`fr101.exe`):** Das Setup ist ein InstallShield-3-Archiv.
+`tools/armithlon/is3-extract.py ARCHIV ZIEL` packt es ohne das Setup aus (eigener Decoder für
+PKWARE DCL; alle 28 Dateien mit der Größe aus dem Archiv geprüft). Die Gruppen ordnen sich so:
+`Group1` ins Programmverzeichnis, `Group3` (`d3d_mfc.dll`) nach `e2driver/`, `Group4` (Musik) ins
+Programmverzeichnis. Dazu neu: `CoCreateInstance` für `CLSID_DirectDraw`/`CLSID_DirectSound` und
+`DirectDrawEnumerateW`. Das Programm läuft mit seiner eigenen `MSVCRT.DLL`, lädt MFC und alle
+seine DLLs und zeigt seinen Lizenzdialog („Accept“/„Quit“). **Noch offen:** Der Lizenztext bleibt
+leer, und weiter als bis zu diesem Dialog ist es noch nicht getestet.
+
+**3DMark99 Max:** noch nicht lauffähig (braucht Direct3D 6 und MFC; etwa 126 fehlende Importe).
+
 ### Eigener JIT je Windows-Programm (2026-11-22)
 
 **Vorher:** Die Tür hatte einen Spiegel der x86-Seitentabellen und einen JIT. Beim Wechsel zu einem

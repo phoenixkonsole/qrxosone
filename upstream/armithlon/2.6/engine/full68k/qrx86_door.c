@@ -216,6 +216,10 @@ static int door_hle_hook(x86cpu *h,uint32_t index){
     h->eip=ret;
     return 1;
 }
+/* Thunks the host serves itself: the host JIT translates calls to them (xj_translate_thunk). */
+static bool door_thunk_bound(uint32_t index){
+    return index<QW_THUNKS&&(cur_proc->api_bound[index]||qrx_d3d_thunks[index]);
+}
 static int door_int_hook(x86cpu *h,int vector){(void)vector;h->eip=h->cur_eip;h->stop=1;return 1;}
 
 /* ---- DirectSound mixer. Runs on the CPU thread between x86 quanta, so the shadow
