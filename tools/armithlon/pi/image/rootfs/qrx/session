@@ -1,0 +1,68 @@
+#!/bin/sh
+# QRX OS One on the whole screen: the 32-bit system (68100, AROS m68k) or QRX OS One 64 (the
+# 68100EC64), as /boot/qrx.txt says (the FAT partition, editable on any computer):
+#   system=64        QRX OS One 64; its files in /boot/qrx64/ (core.elf, modules.txt and the
+#                    modules, from ARMithlon.app/Contents/Resources/qrx64) and /boot/QRXOS64.img
+#   cores64=2        its cores, 1 to 4 (default 2)
+#   ram64=1024       its RAM in MB (default: half the Pi's memory, at most 2048)
+#   boot_wait=15     the 32-bit system's boot watchdog in seconds (restarts a stalled boot)
+# Without those files the 32-bit system starts.
+# The emulated CPU cores run alone on host core 3, which the kernel keeps free (isolcpus=3), and
+# then 2, 1; everything else runs on the cores left.
+export PATH=/usr/sbin:/usr/bin HOME=/root
+# The screen, keyboard, mouse and sound are the engine's own (KMS/DRM, evdev, ALSA, no SDL);
+# Ctrl+Alt+F2 switches to the emergency shell, Ctrl+Alt+F1 back.
+export QRX_NETCTL=/qrx/netctl
+# sound: HDMI when a screen with sound is there, else the 3.5 mm jack; /data/qrx-audio can name
+# an ALSA card (e.g. "Headphones" or "vc4hdmi0") to choose for good
+if [ -s /data/qrx-audio ]; then export ALSA_CARD="$(head -1 /data/qrx-audio)"
+elif grep -q vc4hdmi0 /proc/asound/cards 2>/dev/null; then export ALSA_CARD=vc4hdmi0
+else export ALSA_CARD=Headphones; fi
+
+conf() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([0-9A-Za-z]*\).*/\1/p" /boot/qrx.txt 2>/dev/null | tail -1; }
+K=/boot/qrx64
+if [ "$(conf system)" = 64 ] && [ -x /qrx/bin/armithlon64 ] && [ -s $K/core.elf ] && [ -s $K/modules.txt ] && [ -s /boot/QRXOS64.img ]; then
+    cores=$(conf cores64); case "$cores" in 1|2|3|4) ;; *) cores=2 ;; esac
+    mem=$(awk '/^MemTotal:/ {print int($2 / 2048)}' /proc/meminfo)
+    ram=$(conf ram64); [ -n "$ram" ] || ram=$(( mem > 2048 ? 2048 : mem ))
+    [ "$ram" -ge 256 ] 2>/dev/null || ram=256
+    case $cores in 1) export QRX_EC64_CPUS=3 rest=0-2 ;; 2) export QRX_EC64_CPUS=3,2 rest=0-1 ;;
+                   *) export QRX_EC64_CPUS=3,2,1,0 rest=0 ;; esac
+    set --
+    while read -r m; do [ -n "$m" ] && set -- "$@" "$K/$m"; done < $K/modules.txt
+    cd /qrx
+    taskset -c "$rest" /qrx/bin/armithlon64 --window --cores "$cores" --ram "$ram" \
+        --disk /boot/QRXOS64.img --disk-write --cmdline econsole-startup \
+        $K/core.elf "$@" >/run/armithlon64.log 2>&1
+    rc=$?
+    sync
+else
+    export QRX_APPS_DIR=/data/Apps QRX_FULL_ADF=/qrx/boot.adf QRX_CPU_CORE=3
+    cd /qrx
+    # Boot watchdog: the AROS ROM sometimes loses a timer.device interrupt before the first floppy
+    # read and then idles forever (see docs/armithlon/raspberry-pi-image.md). Its boot disk writes
+    # hostfs-boot-marker.txt once the system volume is mounted, normally after about 5 s; without
+    # it after boot_wait seconds (qrx.txt, default 15) the engine starts again, up to 6 times.
+    wait_s=$(conf boot_wait); [ "$wait_s" -ge 5 ] 2>/dev/null || wait_s=15
+    marker=/qrx/System/hostfs-boot-marker.txt
+    try=1
+    while :; do
+        rm -f "$marker"
+        taskset -c 0-2 /qrx/bin/armithlon --window --rom /qrx/aros-rom.bin --ext-rom /qrx/aros-ext.bin \
+          --share /qrx/System --share-rw >/run/armithlon.log 2>&1 &
+        pid=$!
+        n=0
+        while [ ! -e "$marker" ] && kill -0 $pid 2>/dev/null && [ $n -lt $((wait_s * 5)) ]; do
+            sleep 0.2; n=$((n + 1))
+        done
+        if [ -e "$marker" ] || ! kill -0 $pid 2>/dev/null || [ $try -ge 6 ]; then break; fi
+        echo "boot attempt $try: no system volume after ${wait_s} s, starting again" >>/run/armithlon-watchdog.log
+        kill $pid; wait $pid 2>/dev/null
+        try=$((try + 1))
+    done
+    wait $pid
+    rc=$?
+fi
+# QRX OS One shut down: power off; a crash restarts it (init respawns this script)
+if [ $rc = 0 ]; then poweroff; fi
+sleep 1

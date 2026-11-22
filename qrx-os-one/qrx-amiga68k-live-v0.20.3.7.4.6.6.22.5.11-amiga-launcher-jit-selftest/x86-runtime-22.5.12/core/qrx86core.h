@@ -84,6 +84,7 @@ typedef int (*x86_hle_fn)(x86cpu *c, uint32_t index);  /* return 0 to fault */
 typedef struct x86page { uint8_t *mem; uint32_t flags; } x86page;
 #define X86_PG_W 1u
 #define X86_PG_EXT 2u      /* mem belongs to the host (frame buffer): never freed */
+#define X86_PG_CODE 4u     /* host JIT: translated code on this page */
 
 struct x86cpu {
     uint32_t r[8];
@@ -98,6 +99,11 @@ struct x86cpu {
     struct { uint32_t base, limit; int used; } tls[3];   /* set_thread_area GDT slots 6..8 */
     /* x87 */
     double st[8];
+    /* A real x87 holds a 64-bit integer exactly, and old memory copies go through FILD and
+     * FISTP. A register still holding what FILD put there writes those exact bits back. */
+    int64_t st_int[8];
+    double st_was[8];
+    uint8_t st_exact[8];
     int top;
     uint16_t fsw, fcw, ftw;
     /* memory */
@@ -121,6 +127,11 @@ struct x86cpu {
     x86_int_fn int_hook;
     x86_hle_fn hle_hook;
     void *user;
+    /* ARMithlon host door: x86_door_enable hands runs to the Mac's own core. */
+    int door;
+    uint32_t (*door_alloc)(x86cpu *c, uint32_t size);   /* memory requests from the host */
+    uint32_t map_serial;                 /* bumped on any page mapping change */
+    void (*yield_hook)(x86cpu *c);       /* lets other guest threads run between door quanta */
     int stop;                            /* set by hooks to leave run() normally */
     int fault;
     uint32_t fault_eip, fault_addr;
@@ -129,6 +140,10 @@ struct x86cpu {
     uint32_t cur_eip;                    /* eip of the instruction being executed */
     jmp_buf *jb;
     struct x86jit *jit;                 /* owned; NEVER share in a CPU clone */
+#ifdef QRX86_HOST_JIT
+    uint32_t *xj_site;                  /* branch to link to the next block */
+    int xj_abort;                       /* the block running may be stale */
+#endif
 #ifdef QRX_EXEC_PROFILE
     /* Diagnostic build only: dispatcher counts; native block interiors excluded. */
     uint32_t prof_ops[512], prof_pc[4096], prof_pc_hits[4096];
@@ -164,6 +179,12 @@ uint32_t x86_get_flags(x86cpu *c);
 void     x86_set_flags(x86cpu *c, uint32_t f);
 
 /* --- execution --- */
+/* Only on an ARMithlon board: the door register bus-faults anywhere else.
+ * Returns 0 when the board does not answer with the door's magic value. */
+int      x86_door_enable(x86cpu *c);
+/* Host service call: `words` big-endian longwords at block, block[0] the service.
+ * Results come back in the block. Returns 0 when no door is active. */
+int      x86_door_call(x86cpu *c, uint32_t *block);
 /* Run until a hook sets c->stop, a fault happens or eip == stop_eip. Returns c->fault. */
 int      x86_run(x86cpu *c, uint32_t stop_eip);
 int      x86_step(x86cpu *c);

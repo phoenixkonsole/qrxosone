@@ -2,7 +2,7 @@
 #include "m68k.h"
 #include <string.h>
 extern unsigned int m68k_read_memory_32(unsigned int);
-typedef struct { unsigned regs[5], irq, typ; } Context;
+typedef struct { unsigned regs[18], irq, typ; } Context;
 static Context cpu;
 void m68k_init(void){memset(&cpu,0,sizeof(cpu));}
 void m68k_set_cpu_type(unsigned int t){cpu.typ=t;}

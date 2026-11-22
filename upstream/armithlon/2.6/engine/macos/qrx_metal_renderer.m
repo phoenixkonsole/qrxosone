@@ -73,10 +73,15 @@ static void quad(QRXAccelVertex out[6],float x,float y,float w,float h,
     for(int i=0;i<6;i++)out[i]=(QRXAccelVertex){xx[i],yy[i],z,uu[i],vv[i],r,g,b,a};
 }
 - (BOOL)drawFrame:(const QRXAccelFrame *)frame onView:(MTKView *)view commandQueue:(id<MTLCommandQueue>)queue {
-    if(!frame || !queue)return NO;
     id<CAMetalDrawable> drawable=view.currentDrawable;
     MTLRenderPassDescriptor *base=view.currentRenderPassDescriptor;
     if(!drawable||!base)return NO;
+    return [self drawFrame:frame pass:base drawable:drawable commandQueue:queue wait:NO];
+}
+- (BOOL)drawFrame:(const QRXAccelFrame *)frame pass:(MTLRenderPassDescriptor *)base
+           drawable:(id<CAMetalDrawable>)drawable
+       commandQueue:(id<MTLCommandQueue>)queue wait:(BOOL)wait {
+    if(!frame || !queue || !base)return NO;
     id<MTLCommandBuffer> cb=[queue commandBuffer];
     if(!cb)return NO;
     id<MTLRenderCommandEncoder> encoder=nil;
@@ -147,8 +152,9 @@ static void quad(QRXAccelVertex out[6],float x,float y,float w,float h,
         encoder=[cb renderCommandEncoderWithDescriptor:desc];
     }
     [encoder endEncoding];
-    [cb presentDrawable:drawable];
+    if(drawable)[cb presentDrawable:drawable];
     [cb commit];
+    if(wait)[cb waitUntilCompleted];
     /* Descriptor textures and setVertexBytes payloads are copied/retained by
      * Metal command buffers. This is independent of guest RAM lifetime. */
     return YES;

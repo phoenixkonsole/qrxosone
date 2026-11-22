@@ -2,10 +2,29 @@ cmake_minimum_required(VERSION 3.16)
 project(qrx68100_foundation C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-add_library(qrx68100_core STATIC src/interpreter.c src/jit_a64.c src/virt.c src/media.c src/gpu2d.c src/glide3d.c src/accel.c src/gl_compat.c src/bench_scene.c src/x11_bridge.c src/qrx86_gpu.c src/qrx86_ipc.c src/qrx86_input.c src/media_demo.c src/cpu_vm.c src/boot_monitor.c src/qrx_block.c src/qrx_hostfs.c src/qrx_memory.c src/qrx_hunk.c bootshell/qrx_bootshell.c)
+add_library(qrx68100_core STATIC src/interpreter.c src/jit_a64.c src/virt.c src/media.c src/gpu2d.c src/glide3d.c src/accel.c src/gl_compat.c src/bench_scene.c src/x11_bridge.c src/qrx86_gpu.c src/qrx86_ipc.c src/qrx86_input.c src/media_demo.c src/cpu_vm.c src/boot_monitor.c src/qrx_block.c src/qrx_hostfs.c src/qrx_memory.c src/qrx_hunk.c full68k/qrx_hostnet.c full68k/qrx_netpolicy.c full68k/qrx_vault.c full68k/qrx_hostctl.c bootshell/qrx_bootshell.c)
 target_include_directories(qrx68100_core PUBLIC include)
 find_package(Threads REQUIRED)
 target_link_libraries(qrx68100_core PUBLIC Threads::Threads)
+# The users' encrypted homes (qrx_vault.c) need OpenSSL 3.5 or later: ML-KEM and Argon2id. Linked
+# statically, so the bundle needs no OpenSSL of its own. Without it the system has no users.
+set(QRX_OPENSSL_ROOT "/opt/homebrew/opt/openssl@3.6" CACHE PATH "OpenSSL 3.5+ with a static libcrypto")
+if(NOT APPLE)
+  # Linux (Raspberry Pi OS 13 "Trixie" ships OpenSSL 3.5): the system's libcrypto
+  find_package(OpenSSL 3.5 QUIET COMPONENTS Crypto)
+endif()
+if(EXISTS "${QRX_OPENSSL_ROOT}/lib/libcrypto.a")
+  set(QRX_VAULT_CRYPTO "${QRX_OPENSSL_ROOT}/lib/libcrypto.a")
+  set_source_files_properties(full68k/qrx_vault.c PROPERTIES
+    COMPILE_DEFINITIONS QRX_HAVE_OPENSSL INCLUDE_DIRECTORIES "${QRX_OPENSSL_ROOT}/include")
+elseif(OPENSSL_FOUND)
+  set(QRX_VAULT_CRYPTO OpenSSL::Crypto)
+  set_source_files_properties(full68k/qrx_vault.c PROPERTIES COMPILE_DEFINITIONS QRX_HAVE_OPENSSL)
+else()
+  message(WARNING "no OpenSSL 3.5+ at ${QRX_OPENSSL_ROOT}: QRX OS One will have no user accounts")
+  set(QRX_VAULT_CRYPTO "")
+endif()
+target_link_libraries(qrx68100_core PUBLIC ${QRX_VAULT_CRYPTO})
 target_compile_options(qrx68100_core PRIVATE -Wall -Wextra -Wpedantic)
 if(NOT APPLE)
   target_link_libraries(qrx68100_core PUBLIC m)
@@ -181,18 +200,61 @@ if(QRX_ENABLE_MUSASHI)
   set(QRX_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/musashi_generated")
   file(MAKE_DIRECTORY "${QRX_GENERATED_DIR}")
   add_custom_command(OUTPUT "${QRX_GENERATED_DIR}/m68kops.c" "${QRX_GENERATED_DIR}/m68kops.h"
-    COMMAND "$<TARGET_FILE:qrx_m68kmake>" "${QRX_GENERATED_DIR}" "${QRX_MUSASHI_DIR}/m68k_in.c"
-    DEPENDS qrx_m68kmake "${QRX_MUSASHI_DIR}/m68k_in.c"
+    COMMAND qrx_m68kmake "${QRX_GENERATED_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/musashi_patched/m68k_in.c"
+    DEPENDS qrx_m68kmake "${CMAKE_CURRENT_BINARY_DIR}/musashi_patched/m68k_in.c"
     COMMENT "Generate pin-verified Motorola 680x0 opcode tables"
     VERBATIM)
-  add_library(qrx_musashi STATIC "${QRX_MUSASHI_DIR}/m68kcpu.c"
+  # ARMITHLON 2.7: FSAVE-(An) IDLE-frame fix on a build-tree COPY of the pinned
+  # Musashi sources (vendor tree stays pristine for fetch-musashi.sh).
+  # Real 68040 FSAVE (An) stores the IDLE frame without adjusting An; upstream
+  # Musashi fatalerror()s on this mode, which AROS cpu_detect.S uses to probe
+  # the FPU, so the AROS ROM cannot boot without it.
+  if(NOT Python3_Interpreter_FOUND)
+    message(FATAL_ERROR "Musashi backend needs python3 for the FSAVE build-tree patch.")
+  endif()
+  set(QRX_MUSASHI_PATCHED_DIR "${CMAKE_CURRENT_BINARY_DIR}/musashi_patched")
+  file(MAKE_DIRECTORY "${QRX_MUSASHI_PATCHED_DIR}")
+  add_custom_command(OUTPUT "${QRX_MUSASHI_PATCHED_DIR}/m68kcpu.c" "${QRX_MUSASHI_PATCHED_DIR}/m68kfpu.c" "${QRX_MUSASHI_PATCHED_DIR}/m68k_in.c"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/patch-musashi-fsave-an.py"
+      "${QRX_MUSASHI_DIR}" "${QRX_MUSASHI_PATCHED_DIR}"
+    DEPENDS "${QRX_MUSASHI_DIR}/m68kcpu.c" "${QRX_MUSASHI_DIR}/m68kfpu.c" "${QRX_MUSASHI_DIR}/m68k_in.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tools/patch-musashi-fsave-an.py"
+    COMMENT "Copy pinned Musashi CPU with FSAVE-(An) boot fix"
+    VERBATIM)
+  add_library(qrx_musashi STATIC "${QRX_MUSASHI_PATCHED_DIR}/m68kcpu.c"
     "${QRX_GENERATED_DIR}/m68kops.c" "${QRX_MUSASHI_DIR}/softfloat/softfloat.c")
   target_include_directories(qrx_musashi PUBLIC "${QRX_MUSASHI_DIR}" "${QRX_GENERATED_DIR}")
   target_compile_definitions(qrx_musashi PRIVATE M68K_INSTRUCTION_HOOK=1 M68K_EMULATE_INT_ACK=1 M68K_EMULATE_ADDRESS_ERROR=1)
+  # BSD setjmp saves the signal mask with two syscalls; m68k_execute takes one
+  # per time slice.
+  if(APPLE)
+    target_compile_definitions(qrx_musashi PRIVATE setjmp=_setjmp longjmp=_longjmp)
+  endif()
   target_link_libraries(qrx_musashi PUBLIC m)
-  add_library(qrx68100_full STATIC full68k/qrx68100_full.c full68k/qrx68100_dual.c full68k/qrx68100_parallel.c full68k/qrx68100_vampire.c)
+  add_library(qrx68100_full STATIC full68k/qrx68100_full.c full68k/qrx68100_dual.c full68k/qrx68100_parallel.c full68k/qrx68100_vampire.c full68k/qrx68100_jit.c)
   target_include_directories(qrx68100_full PUBLIC full68k include "${QRX_MUSASHI_DIR}")
-  target_link_libraries(qrx68100_full PUBLIC qrx68100_core qrx_musashi)
+  # The JIT reads Musashi's CPU struct, so it shares that library's options.
+  set_source_files_properties(full68k/qrx68100_jit.c PROPERTIES COMPILE_DEFINITIONS
+    "M68K_INSTRUCTION_HOOK=1;M68K_EMULATE_INT_ACK=1;M68K_EMULATE_ADDRESS_ERROR=1")
+  # Core 1 of the 68100: its own copy of Musashi and the JIT with every global renamed,
+  # so it runs on a second host thread and core 0 pays nothing for it.
+  set(QRX_CORE1_RENAME "${CMAKE_CURRENT_BINARY_DIR}/qrx_core1_rename.h")
+  add_custom_command(OUTPUT "${QRX_CORE1_RENAME}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen-core1-rename.py"
+      "$<TARGET_FILE:qrx_musashi>" "${QRX_CORE1_RENAME}"
+    DEPENDS qrx_musashi "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen-core1-rename.py"
+    COMMENT "Generate symbol renames for 68100 core 1" VERBATIM)
+  add_custom_target(qrx_core1_rename DEPENDS "${QRX_CORE1_RENAME}")
+  add_library(qrx_core1 STATIC full68k/qrx68100_core1.c full68k/qrx68100_jit.c
+    "${QRX_MUSASHI_PATCHED_DIR}/m68kcpu.c" "${QRX_GENERATED_DIR}/m68kops.c" "${QRX_MUSASHI_DIR}/softfloat/softfloat.c")
+  add_dependencies(qrx_core1 qrx_core1_rename)
+  target_include_directories(qrx_core1 PRIVATE full68k include "${QRX_MUSASHI_DIR}" "${QRX_GENERATED_DIR}")
+  target_compile_definitions(qrx_core1 PRIVATE M68K_INSTRUCTION_HOOK=1 M68K_EMULATE_INT_ACK=1 M68K_EMULATE_ADDRESS_ERROR=1)
+  target_compile_options(qrx_core1 PRIVATE -include "${QRX_CORE1_RENAME}")
+  if(APPLE)
+    target_compile_definitions(qrx_core1 PRIVATE setjmp=_setjmp longjmp=_longjmp)
+  endif()
+  target_link_libraries(qrx68100_full PUBLIC qrx68100_core qrx_musashi qrx_core1)
   target_compile_options(qrx68100_full PRIVATE -Wall -Wextra -Wpedantic)
   # Full 68040 QRX68: same HUNK/Exec/DOS HLE as portable interpreter,
   # but the CPU, exceptions, instructions and FPU come from real Musashi.
@@ -209,8 +271,182 @@ if(QRX_ENABLE_MUSASHI)
   target_compile_options(qrx68-musashi-exceptions PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)
   add_test(NAME QRX68_REAL_MUSASHI_68040_ILLEGAL_supervisor_RTE_exception
     COMMAND qrx68-musashi-exceptions)
-  add_executable(qrx68100_full_run full68k/full_main.c)
-  target_link_libraries(qrx68100_full_run PRIVATE qrx68100_full)
+  # The door builds the same x86 interpreter the guest runs, for the host.
+  set(QRX86_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../qrx-os-one/qrx-amiga68k-live-v0.20.3.7.4.6.6.22.5.11-amiga-launcher-jit-selftest/x86-runtime-22.5.12")
+  file(GLOB QRX86_QMATH_SOURCES "${QRX86_RUNTIME_DIR}/qmath/*.c")
+  # as qmath/build-qmath.sh: its own math.h (glibc's clashes with the renamed functions)
+  set_source_files_properties(${QRX86_QMATH_SOURCES} PROPERTIES COMPILE_OPTIONS "-w;-std=gnu11;-fno-builtin"
+    INCLUDE_DIRECTORIES "${QRX86_RUNTIME_DIR}/qmath/include;${QRX86_RUNTIME_DIR}/qmath")
+  if(NOT APPLE)
+    # Linux (Raspberry Pi): the GL door runs on EGL with the desktop GL API (Mesa V3D).
+    find_library(QRX_EGL_LIB EGL REQUIRED)
+    # glvnd's libOpenGL (OpenGL without GLX, so without X11) before libGL: the engine only uses EGL
+    find_library(QRX_GL_LIB NAMES OpenGL GL REQUIRED)
+    set(QRX_LINUX_GL_LIBS ${QRX_EGL_LIB} ${QRX_GL_LIB} ${CMAKE_DL_LIBS})
+    # the host GPU behind Direct3D/Glide (macos/qrx_hostgpu.m on the Mac)
+    set(QRX_LINUX_HOSTGPU linux/qrx_hostgpu_gl.c)
+    # The window (macos/qrx_aros_window.m on the Mac). kms: straight on the console, no display
+    # server and no SDL: KMS/DRM through the kernel's ioctls, evdev, ALSA (linux/qrx_lio.c), the
+    # Raspberry Pi appliance. sdl: an SDL2 window on an X11/Wayland desktop.
+    set(QRX_LINUX_FRONTEND "kms" CACHE STRING "Linux window: kms (console: KMS/DRM, evdev, ALSA) or sdl (SDL2)")
+    if(QRX_LINUX_FRONTEND STREQUAL "kms")
+      find_path(QRX_ALSA_INCLUDE alsa/asoundlib.h)
+      find_library(QRX_ALSA_LIB asound)
+      find_path(QRX_DRM_INCLUDE drm/drm_mode.h)
+      if(QRX_ALSA_INCLUDE AND QRX_ALSA_LIB AND QRX_DRM_INCLUDE)
+        set(QRX_LINUX_WINDOW linux/qrx_aros_window_kms.c linux/qrx_lio.c)
+        set(QRX_LINUX_EC64_WINDOW linux/qrx_ec64_window_kms.c linux/qrx_lio.c)
+        set(QRX_LINUX_IO ${QRX_ALSA_LIB} pthread m)
+      else()
+        message(WARNING "ALSA (libasound2-dev) or the kernel's DRM headers missing: qrx68100_full_run runs headless only")
+      endif()
+    else()
+      find_package(SDL2 CONFIG QUIET)
+      if(SDL2_FOUND)
+        set(QRX_LINUX_WINDOW linux/qrx_aros_window_sdl.c)
+        set(QRX_LINUX_EC64_WINDOW linux/qrx_ec64_window_sdl.c)
+        if(TARGET SDL2::SDL2)
+          set(QRX_LINUX_IO SDL2::SDL2)
+        else()
+          set(QRX_LINUX_IO ${SDL2_LIBRARIES})
+        endif()
+      else()
+        message(WARNING "SDL2 not found: qrx68100_full_run runs headless only (apt install libsdl2-dev)")
+      endif()
+    endif()
+  endif()
+  add_executable(qrx68100_full_run full68k/full_main.c ${QRX_LINUX_HOSTGPU} full68k/qrx86_door.c full68k/qrx_gl68k.c full68k/qrx_hostapi.c full68k/qrx_hostapi_gl.c full68k/qrx_hostapi_glide.c full68k/qrx_hostapi_d3d.c full68k/qrx_hostapi_vk.c ${QRX86_QMATH_SOURCES})
+  target_include_directories(qrx68100_full_run PRIVATE "${QRX86_RUNTIME_DIR}/core")
+  set_source_files_properties(full68k/qrx86_door.c PROPERTIES COMPILE_OPTIONS "-w;-std=gnu11")
+  target_link_libraries(qrx68100_full_run PRIVATE qrx68100_full ${QRX_LINUX_GL_LIBS})
+  if(QRX_LINUX_WINDOW)
+    target_sources(qrx68100_full_run PRIVATE ${QRX_LINUX_WINDOW})
+    target_compile_definitions(qrx68100_full_run PRIVATE QRX_SDL_FRONTEND)   # "a Linux window is linked", either kind
+    target_link_libraries(qrx68100_full_run PRIVATE ${QRX_LINUX_IO})
+  endif()
+  if(QRX_LINUX_WINDOW AND QRX_LINUX_FRONTEND STREQUAL "kms")
+    # the console window without hardware (QRX_LIO_TEST): formats, scaling, evdev keys and mouse
+    add_executable(qrx_lio_window_tests tests/lio_window_tests.c ${QRX_LINUX_WINDOW} ${QRX_LINUX_HOSTGPU})
+    target_compile_options(qrx_lio_window_tests PRIVATE -UNDEBUG -Wall -Wextra)
+    target_link_libraries(qrx_lio_window_tests PRIVATE qrx68100_core ${QRX_LINUX_IO} ${QRX_LINUX_GL_LIBS})
+    add_test(NAME linux_console_window_formats_scaling_evdev COMMAND qrx_lio_window_tests)
+    set_tests_properties(linux_console_window_formats_scaling_evdev PROPERTIES ENVIRONMENT "QRX_ALSA_DEVICE=null")
+  elseif(QRX_LINUX_WINDOW)
+    # the window without a display (SDL's offscreen driver): formats, keys, mouse
+    add_executable(qrx_sdl_window_tests tests/sdl_window_tests.c ${QRX_LINUX_WINDOW} ${QRX_LINUX_HOSTGPU})
+    target_compile_definitions(qrx_sdl_window_tests PRIVATE QRX_SDL_FRONTEND)
+    target_compile_options(qrx_sdl_window_tests PRIVATE -UNDEBUG -Wall -Wextra)
+    target_link_libraries(qrx_sdl_window_tests PRIVATE qrx68100_core ${QRX_LINUX_IO} ${QRX_LINUX_GL_LIBS})
+    add_test(NAME linux_sdl_window_rtg_formats_keys_mouse COMMAND qrx_sdl_window_tests)
+    set_tests_properties(linux_sdl_window_rtg_formats_keys_mouse PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=offscreen;SDL_AUDIODRIVER=dummy")
+  endif()
+  # Headers for the Vulkan wrapper: brew install vulkan-headers. The driver, MoltenVK, is only
+  # looked for at run time.
+  find_path(QRX_VULKAN_INCLUDE vulkan/vulkan.h HINTS /opt/homebrew/include /usr/local/include "${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/include")
+  if(NOT QRX_VULKAN_INCLUDE)
+    message(FATAL_ERROR "vulkan/vulkan.h not found: brew install vulkan-headers")
+  endif()
+  set_source_files_properties(full68k/qrx_hostapi_vk.c PROPERTIES INCLUDE_DIRECTORIES "${QRX_VULKAN_INCLUDE}")
+  if(APPLE)
+    target_sources(qrx68100_full_run PRIVATE macos/qrx_aros_window.m macos/qrx_keycapture.m macos/qrx_metal_renderer.m macos/qrx_hostgpu.m macos/qrx_midi.m)
+    set_source_files_properties(macos/qrx_aros_window.m macos/qrx_keycapture.m macos/qrx_metal_renderer.m macos/qrx_hostgpu.m macos/qrx_midi.m PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+    target_include_directories(qrx68100_full_run PRIVATE macos)
+    target_link_libraries(qrx68100_full_run PRIVATE ${COCOA_FRAMEWORK} "-framework Metal" "-framework MetalKit" "-framework QuartzCore" "-framework CoreVideo" "-framework AudioToolbox" "-framework OpenGL")
+  endif()
+  add_executable(qrx68100_cpu_bench full68k/cpu_bench.c)
+  target_link_libraries(qrx68100_cpu_bench PRIVATE qrx68100_full)
+  add_executable(qrx68100_jit_diff_tests tests/jit_diff_tests.c)
+  target_link_libraries(qrx68100_jit_diff_tests PRIVATE qrx68100_full)
+  # Reads Musashi's CPU struct for the FPU state, so it shares that library's options.
+  target_compile_definitions(qrx68100_jit_diff_tests PRIVATE M68K_INSTRUCTION_HOOK=1 M68K_EMULATE_INT_ACK=1 M68K_EMULATE_ADDRESS_ERROR=1)
+  target_compile_options(qrx68100_jit_diff_tests PRIVATE -UNDEBUG -Wall -Wextra)
+  add_test(NAME jit_a64_differential_against_musashi COMMAND qrx68100_jit_diff_tests)
+  # The test includes qrx86_door.c, which serves the GL door (service 8) from qrx_gl68k.c.
+  add_executable(qrx86_jit_tests tests/qrx86_jit_tests.c ${QRX_LINUX_HOSTGPU} full68k/qrx_gl68k.c ${QRX86_QMATH_SOURCES})
+  target_include_directories(qrx86_jit_tests PRIVATE "${QRX86_RUNTIME_DIR}/core" full68k include)
+  target_link_libraries(qrx86_jit_tests PRIVATE qrx68100_full ${QRX_LINUX_GL_LIBS})
+  if(APPLE)
+    target_link_libraries(qrx86_jit_tests PRIVATE "-framework OpenGL")
+  endif()
+  target_compile_options(qrx86_jit_tests PRIVATE -w -std=gnu11 -UNDEBUG)
+  add_test(NAME qrx86_host_jit_differential_against_interpreter COMMAND qrx86_jit_tests)
+  add_executable(qrx68100_core1_tests tests/core1_tests.c)
+  target_link_libraries(qrx68100_core1_tests PRIVATE qrx68100_full)
+  target_compile_options(qrx68100_core1_tests PRIVATE -UNDEBUG -Wall -Wextra)
+  add_test(NAME core1_second_host_thread_atomics_and_faults COMMAND qrx68100_core1_tests)
+  # 68100EC64: its 32-bit mode against Musashi's 68040. Musashi with no options the bus needs.
+  add_library(qrx_ec64 STATIC full68k/qrx68100ec64.c full68k/qrx68100ec64_jit.c full68k/qrx68100ec64_machine.c
+    full68k/qrx_ec64_board.c full68k/qrx_ec64_boot.c full68k/qrx_hostnet.c full68k/qrx_netpolicy.c full68k/qrx_vault.c full68k/qrx_hostctl.c)
+  target_include_directories(qrx_ec64 PUBLIC include)
+  target_link_libraries(qrx_ec64 PUBLIC ${QRX_VAULT_CRYPTO})
+  # the board's GL service (HOST_CALL service 8)
+  target_sources(qrx_ec64 PRIVATE full68k/qrx_gl68k.c)
+  # generated code with unused locals; built without -Wall -Wextra elsewhere too
+  set_source_files_properties(full68k/qrx_gl68k.c TARGET_DIRECTORY qrx_ec64 PROPERTIES COMPILE_OPTIONS "-w")
+  if(APPLE)
+    target_link_libraries(qrx_ec64 PUBLIC "-framework OpenGL")
+  else()
+    target_link_libraries(qrx_ec64 PUBLIC ${QRX_LINUX_GL_LIBS})
+  endif()
+  target_compile_options(qrx_ec64 PRIVATE -Wall -Wextra)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")   # the long-mode JIT exists only there
+    add_executable(qrx_ec64_jit_tests tests/ec64_jit_tests.c)
+    target_link_libraries(qrx_ec64_jit_tests PRIVATE qrx_ec64)
+    add_test(NAME ec64_jit_against_interpreter COMMAND qrx_ec64_jit_tests 3000)
+  endif()
+  add_executable(qrx_ec64_diff_tests tests/ec64_diff_tests.c)
+  target_include_directories(qrx_ec64_diff_tests PRIVATE "${QRX_MUSASHI_DIR}")
+  target_link_libraries(qrx_ec64_diff_tests PRIVATE qrx_ec64 qrx_musashi)
+  target_compile_options(qrx_ec64_diff_tests PRIVATE -UNDEBUG -Wall -Wextra)
+  add_test(NAME ec64_32bit_mode_against_musashi_68040 COMMAND qrx_ec64_diff_tests)
+  add_executable(qrx_ec64_tests tests/ec64_tests.c)
+  target_link_libraries(qrx_ec64_tests PRIVATE qrx_ec64 pthread)
+  target_compile_options(qrx_ec64_tests PRIVATE -UNDEBUG -Wall -Wextra)
+  add_test(NAME ec64_long_mode_above_4gb_and_two_cores COMMAND qrx_ec64_tests)
+  # The 64-bit QRX OS One: AROS on the 68100EC64, headless or in a Mac window. qrx68100_full_run
+  # (the 32-bit QRX OS One) does not link any of it.
+  if(APPLE)
+    add_executable(qrx_ec64_run full68k/qrx_ec64_main.c macos/qrx_ec64_window.m macos/qrx_keycapture.m)
+    target_link_libraries(qrx_ec64_run PRIVATE qrx_ec64 pthread ${COCOA_FRAMEWORK} "-framework AudioToolbox")
+    set_source_files_properties(macos/qrx_ec64_window.m macos/qrx_keycapture.m PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+  else()
+    add_executable(qrx_ec64_run full68k/qrx_ec64_main.c)
+    target_link_libraries(qrx_ec64_run PRIVATE qrx_ec64 pthread)
+    if(QRX_LINUX_EC64_WINDOW)
+      # the window on Linux (the Raspberry Pi console, or SDL2 with QRX_LINUX_FRONTEND=sdl)
+      target_sources(qrx_ec64_run PRIVATE ${QRX_LINUX_EC64_WINDOW})
+      target_compile_definitions(qrx_ec64_run PRIVATE QRX_SDL_FRONTEND)
+      target_link_libraries(qrx_ec64_run PRIVATE ${QRX_LINUX_IO})
+      if(QRX_LINUX_FRONTEND STREQUAL "kms")
+        add_executable(qrx_ec64_window_tests tests/ec64_lio_window_tests.c ${QRX_LINUX_EC64_WINDOW})
+        set(QRX_EC64_WINDOW_TEST_ENV "QRX_ALSA_DEVICE=null")
+      else()
+        add_executable(qrx_ec64_window_tests tests/ec64_window_tests.c ${QRX_LINUX_EC64_WINDOW})
+        set(QRX_EC64_WINDOW_TEST_ENV "SDL_VIDEODRIVER=offscreen;SDL_AUDIODRIVER=dummy")
+      endif()
+      target_compile_options(qrx_ec64_window_tests PRIVATE -UNDEBUG -Wall -Wextra)
+      target_link_libraries(qrx_ec64_window_tests PRIVATE qrx_ec64 pthread ${QRX_LINUX_IO})
+      add_test(NAME linux_ec64_window_console_framebuffer_keys_mouse COMMAND qrx_ec64_window_tests)
+      set_tests_properties(linux_ec64_window_console_framebuffer_keys_mouse PROPERTIES ENVIRONMENT "${QRX_EC64_WINDOW_TEST_ENV}")
+    endif()
+  endif()
+  target_compile_options(qrx_ec64_run PRIVATE -Wall -Wextra)
+  add_executable(qrx_ec64_board_tests tests/ec64_board_tests.c)
+  target_link_libraries(qrx_ec64_board_tests PRIVATE qrx_ec64 pthread)
+  target_compile_options(qrx_ec64_board_tests PRIVATE -UNDEBUG -Wall -Wextra)
+  add_test(NAME ec64_board_devices_and_console_queue COMMAND qrx_ec64_board_tests)
+  add_executable(qrx_hostnet_tests tests/hostnet_tests.c full68k/qrx_hostnet.c full68k/qrx_netpolicy.c full68k/qrx_vault.c)
+  target_include_directories(qrx_hostnet_tests PRIVATE include)
+  target_link_libraries(qrx_hostnet_tests PRIVATE ${QRX_VAULT_CRYPTO} Threads::Threads)
+  add_executable(qrx_vault_tests tests/vault_tests.c full68k/qrx_vault.c)
+  target_include_directories(qrx_vault_tests PRIVATE include)
+  target_link_libraries(qrx_vault_tests PRIVATE ${QRX_VAULT_CRYPTO} Threads::Threads)
+  target_compile_options(qrx_vault_tests PRIVATE -UNDEBUG -Wall -Wextra)
+  if(QRX_VAULT_CRYPTO)   # without OpenSSL 3.5 there are no users to test
+    add_test(NAME vault_users_admin_xts_argon2id_mlkem COMMAND qrx_vault_tests)
+  endif()
+  target_compile_options(qrx_hostnet_tests PRIVATE -UNDEBUG -Wall -Wextra)
+  add_test(NAME winsock_host_sockets_tcp_udp_errors COMMAND qrx_hostnet_tests)
   add_executable(qrx68100_full_tests full68k/full_tests.c)
   target_link_libraries(qrx68100_full_tests PRIVATE qrx68100_full)
   target_compile_options(qrx68100_full_tests PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)

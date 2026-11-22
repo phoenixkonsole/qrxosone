@@ -1,0 +1,30 @@
+Each demo from test-apps started without input, without its installer, for about 26 seconds.
+Columns: name | program | capture at 26 s, share of pixels not black | frame rate | last notable log line
+tr2demo1 | TOMB2.EXE |  |  | AROS backend: present 00010008 576x404
+mdkpcw95 | MDKDEM95.EXE |  |  | AROS backend: window 00010004 opened at 0,0 inner 640x480 (+0 menu bar)
+nfighter | NEBULA95.EXE | 640 480 nonblack=0.00 |  | CreateFile(gfx\LOGO2.VGA) -> SYS:X86/G/gfx/LOGO2.VGA
+nrse95d | NORSE95.EXE |  | DirectDraw: 31 frames per second | DirectDraw: 31 frames per second
+abeodd | AbeDemo.exe | 640 480 nonblack=0.00 |  | CreateFile(.\s1.lvl) -> SYS:X86/G/s1.lvl
+s3d_demo | PCSONIC.EXE | 320 240 nonblack=1.00 |  | DirectDraw: CreateSurface flags=00000007 caps=00000840 back=0 size=352x256
+nevdemo_full | NEVDEMO.EXE | 640 480 nonblack=1.00 | DirectDraw: 25 frames per second | debug:
+daytona | DAYTONAD.EXE | 640 480 nonblack=0.72 | DirectDraw: 20 frames per second | DirectDraw: 20 frames per second
+gextrial | GEX.EXE |  |  | MessageBox: Please run LOADER.EXE in order to play GEX.
+roguedemo | Rogue Squadron Demo.exe | 640 480 nonblack=0.00 |  | MessageBox: Assertion failed!
+shadowsdemo | shadows.exe |  |  | AROS backend: present 00010008 588x235
+vsquad | PPJDD.EXE | 640 480 nonblack=0.95 | DirectDraw: 13 frames per second | DirectDraw: 13 frames per second
+vf2_demo | VF2DEMO.EXE | 640 480 nonblack=1.00 |  | unimplemented API called: GetBitmapBits ; program stopped: host hook error at eip=7f00009b addr=00000000 bytes=0000000000000000 (unimplemented API GetBi
+sega_rally | RALLY.EXE |  | DirectDraw: 8 frames per second | DirectDraw: 8 frames per second
+descent3demo2 | main.exe |  |  | MessageBox: You cannot run this program directly.  Please run "Descent 3 Demo.exe".
+nfs2sea | NFS2SEA.EXE |  |  | program stopped: page fault at eip=00000000 addr=00000000 bytes=0000000000000000 (read from unmapped memory) e
+rashdemo | demorash.exe |  |  | MessageBox: Can not find primary language file.
+FinalFantasy | demo1.exe | 640 480 nonblack=1.00 |  | program stopped: page fault at eip=0042c8b5 addr=00000270 bytes=668b0c82898dd8fd (read from unmapped memory) e
+MSIFDEMO | MSIF2000.EXE | 640 480 nonblack=1.00 |  | program stopped: page fault at eip=00000000 addr=00000000 bytes=0000000000000000 (read from unmapped memory) e
+turok3dfx | Turok3DfxDemo.exe |  |  | CreateFile(data\default.key -> SYS:X86/G/data/default.key): failed
+w95turokdemov101 | TurokDemo.exe |  |  | program stopped: page fault at eip=004812e6 addr=0000000c bytes=8b460ca88374798b (read from unmapped memory) e
+b2demoa | Client.exe |  |  | MessageBox: <invalid resource DLL>
+pbdemo | PINBALL.EXE |  |  | CreateFile(RESOURCE.001) -> SYS:X86/G/RESOURCE.001
+fury3x | FURY3X.EXE |  |  | MessageBox: Cannot raise my priority!  Bool!
+socdemo | SOCTRIAL.EXE |  |  | AROS backend: present 00010004 512x239
+ch2setup | charlie2.exe | 1024 768 nonblack=0.86 |  | x86 runs on the host door
+sonic_cd | SONICCD.EXE |  |  | MessageBox: Your computer display setting must be 256 color to play Sonic the Hedgehog CD.
+beavislg | BBLOOGIE.EXE |  |  | unimplemented API called: #6 ; program stopped: host hook error at eip=7f000089 addr=00000000 bytes=0000000000000000 (unimplemented API #6) e

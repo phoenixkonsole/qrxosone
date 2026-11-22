@@ -7,7 +7,7 @@ CC="${AROS_CC:-m68k-aros-gcc}"
 OUT="${1:-$HERE/build}"
 command -v "$CC" >/dev/null || { echo "AROS cross compiler '$CC' unavailable; supply AROS_CC" >&2; exit 2; }
 mkdir -p "$OUT"
-for name in QRXShare QRXSmpInfo QRXBoardInfo; do
+for name in QRXShare QRXSmpInfo QRXBoardInfo QRXSmpBench; do
   "$CC" -O2 -m68040 -DQRX_NATIVE_040=1 -I"$HERE" -I"$HERE/../.." "$HERE/$name.c" -o "$OUT/$name"
   echo "built $OUT/$name"
 done

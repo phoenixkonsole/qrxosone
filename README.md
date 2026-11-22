@@ -14,10 +14,40 @@ Experimental QRX86 m68k JIT work (default **off**):
 [compatibility](docs/QRX86_COMPATIBILITY_MATRIX.md),
 [cross-build and FS-UAE](docs/QRX86_BUILD.md).
 PrBoom currently runs slower with this experimental QRX86 backend.
+On ARMithlon the [QRX86 host door](docs/armithlon/performance-2026-11-03.md) replaces it.
 FS-UAE’s separate host m68k JIT now works using the
 [patched emulator and validated profile](tools/qrx86/fsuae/README.md).
 
 ARMithlon 1.1 cumulative source and native host integration:
 [build and M1 validation](docs/ARMITHLON_INTEGRATION.md).
 
+ARMithlon on Apple Silicon (68k JIT, Metal RTG, HostFS, AHI, QRX86 host door):
+[measurements, changes and open work](docs/armithlon/performance-2026-11-03.md).
+FPU in the 68k JIT and two FPU faults fixed: [docs/armithlon/fpu-jit-2026-11-07.md](docs/armithlon/fpu-jit-2026-11-07.md).
+Amiga, PC and Mac volumes side by side, and the road to historical Mac
+filesystems (MFS/HFS/HFS+, DiskCopy/NDIF, AppleDouble):
+[docs/armithlon/roadmap-volumes-2026-11.md](docs/armithlon/roadmap-volumes-2026-11.md).
+Read-only Mac image containers (raw, DiskCopy 4.2, NDIF data forks, Apple
+Partition Map) plus MFS, HFS and HFS+/HFSX readers (resource forks, Finder
+info, HFS wrapper) and AppleSingle/AppleDouble/MacBinary II/BinHex 4.0 fork
+containers, all with synthetic guest tests:
+[tools/armithlon/macimage](tools/armithlon/macimage).
+
 Linux i386 GUI work: [embedded X11 subset and AROS windows](docs/QRX_X11.md).
+
+Blender 2.79b as a 68k AROS program, headless stage with the second 68100 core:
+[plan, state and measurements](docs/BLENDER_AROS68K.md), [build](tools/blender/README.md).
+
+QRXPPC PPC32 integer/FPU reference interpreter, Tier-1 PPC→68k-JIT with
+lazy CR0, CR0…CR7 compare forms, block chaining for direct, conditional and
+indirect branches, byte/halfword JIT accesses, guarded boundary checks,
+deterministic differential fuzzing
+(valid and fault paths, full 32-bit and boundary addresses), guest tests and a
+byte/halfword-check [mutation test](tools/qrxppc/mutation_test.sh):
+[specification](docs/QRXPPC_SPEC.md), [build](tools/qrxppc/build.sh).
+
+IPFS client with a complete guest-side CLI (`QRXIPFSPub`: add, ls, get,
+pin/unpin, version, repo), native local 68K node (`QRXIPFSD`), native
+libp2p peer (`QRXIPFSP2P`: Noise, Yamux, Bitswap 1.2, Kademlia), public
+`IPFS:` drive (assign) with revisions, and encrypted volume images for
+QRX Drive: [docs/QRX_IPFS.md](docs/QRX_IPFS.md).

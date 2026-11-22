@@ -46,6 +46,7 @@ typedef struct qobj {
     int style, width;                 /* pen style / brush style (0 solid, 1 null) */
     int font;                         /* index in qfont_table */
     qsurf bmp;                        /* bitmap pixels */
+    uint32_t *pal; int npal;          /* palette entries, 0x00RRGGBB */
     int mono;                         /* 1-bpp bitmap / brush: 0x000000 -> text colour, 0xFFFFFF -> background colour */
     int x, y, w, h;                   /* rect region / icon size */
     void *dc;                         /* GO_DC: struct qdc */
@@ -105,6 +106,7 @@ typedef struct qwnd {
     uint8_t *extra;                   /* cbWndExtra bytes */
     int nextra;
     int visible, enabled, destroyed;
+    int app_activated;                /* got its WM_ACTIVATEAPP */
     int dirty, erase;                 /* needs WM_PAINT / WM_ERASEBKGND */
     int ux0, uy0, ux1, uy1;           /* update region bounds (client coords) */
     /* top-level */
@@ -118,11 +120,14 @@ typedef struct qwnd {
     uint32_t font;
     uint32_t dlgproc;                 /* dialogs: guest DLGPROC */
     int modal_done, modal_result, is_dialog;
+    void *sheet;                      /* property sheet frame: its pages and buttons */
     uint32_t focus_child;
     int caret;
     uint32_t tme;                     /* TrackMouseEvent flags */
     uint32_t icon;
     int fs_w, fs_h, fs_bpp;           /* DirectDraw exclusive mode: show on an own screen (backend permitting) */
+    int force_frame;                  /* fullscreen program kept in a normal window */
+    int frame_direct;                 /* DirectDraw frames reach the window directly: surf holds no image */
 } qwnd;
 
 typedef struct qmsg { uint32_t hwnd, msg, wp, lp, time; int x, y; } qmsg;
@@ -165,6 +170,10 @@ typedef struct qbackend {
     int  (*fb_open)(struct qwin *w, qwnd *top, int nbuf, uint8_t **buf, int *pitch);
     uint8_t *(*fb_show)(struct qwin *w, qwnd *top, int i, const uint32_t *pal);
     void (*fb_close)(struct qwin *w, qwnd *top);
+    /* own 16/32-bit screen: copy one frame of little-endian guest pixels to it; 0 if not possible */
+    int (*present_deep)(struct qwin *w, struct qwnd *t, uint32_t guest, int pitch, int sw, int sh, int bpp);
+    /* A whole frame converted by the host. Returns 0 when it cannot, then the slower paths run. */
+    int (*present_frame)(struct qwin *w, struct qwnd *t, uint32_t guest, int pitch, int sw, int sh, int bpp, const uint32_t *pal);
 } qbackend;
 
 /* ------------------------------------------------------------------ instance */
@@ -182,13 +191,18 @@ typedef struct qhle {
 } qhle;
 
 /* a loaded PE image: the program (mod[0]) or a program-supplied DLL */
-#define QW_MAXMOD 16
+#define QW_MAXMOD 64
 #define QW_DLL_BASE  0x40000000u      /* relocated DLLs go here */
 #define QW_DLL_LIMIT 0x7C000000u
 typedef struct qmod {
     char name[64];                    /* lower-case file name, e.g. "cards.dll" */
     uint32_t base, size, entry, res_rva, exp_rva, exp_size;
     int is_dll, inited;
+    /* A DLL from LoadLibrary can really go away; another module's import keeps it. */
+    int refs, pinned, unloaded;
+    uint8_t *snap;                    /* its writable sections as they were before DllMain */
+    uint32_t snap_va[16], snap_size[16];
+    int snap_n;
 } qmod;
 
 typedef struct qwin {
@@ -197,10 +211,14 @@ typedef struct qwin {
     void *beh;                        /* backend private */
     FILE *log;
     int trace, verbose;
+    int windowed;                     /* fullscreen programs stay in a window, --fullscreen turns it off */
+    int no_vsync;                     /* benchmarks: Flip does not wait for the display rate */
     uint16_t lang;
     /* image */
     uint32_t image_base, image_size, entry, res_rva, res_size;
     char exe_path[1024];
+    char exe_win[600];                /* Windows path of a program started by another one */
+    char log_path[512];
     qmod mod[QW_MAXMOD];
     int nmod;
     int init_order[QW_MAXMOD], ninit;   /* DLLs in dependency order (DllMain) */
@@ -217,7 +235,8 @@ typedef struct qwin {
     struct qblk *blocks;              /* allocation map */
     struct qblk *freel;
     /* kernel */
-    uint32_t last_error, exit_code;
+    uint32_t last_error, net_error;   /* of the running thread: threads.c swaps them on a switch */
+    uint32_t exit_code;
     int exiting;
     uint32_t unhandled_filter;
     uint32_t onexit[64];
@@ -264,6 +283,19 @@ typedef struct qwin {
 int  qw_load(qwin *w, const char *path, int argc, char **argv);
 int  qw_run(qwin *w);
 uint32_t qw_thunk(qwin *w, const char *dll, const char *name);
+/* Functions the host implements through the ARMithlon door (3D APIs). */
+void qw_api_report(struct qwin *w);
+void qw_dd_toggle_window(struct qwin *w);
+int qw_needs_256_colours(struct qwin *w);
+uint32_t qw_gdi_AnimatePalette(struct qwin *w, uint32_t *a);
+uint32_t qw_gdi_GetPaletteEntries(struct qwin *w, uint32_t *a);
+uint32_t qw_gdi_SetPaletteEntries(struct qwin *w, uint32_t *a);
+uint32_t qw_gdi_GetSystemPaletteEntries(struct qwin *w, uint32_t *a);
+uint32_t qw_gdi_CreatePalette(struct qwin *w, uint32_t *a);
+uint32_t qw_gdi_RealizePalette(struct qwin *w, uint32_t *a);
+const uint32_t *qw_sys_palette(void);
+int qw_host_bind(qwin *w, uint32_t idx);
+int qw_host_has(qwin *w, const char *name);
 uint32_t qw_alloc(qwin *w, uint32_t n);
 void qw_free(qwin *w, uint32_t a);
 uint32_t qw_size(qwin *w, uint32_t a);
@@ -287,6 +319,7 @@ qmod *pe_find_module(qwin *w, uint32_t hmod);            /* by handle (= base) *
 qmod *pe_module_by_name(qwin *w, const char *name);
 qmod *pe_load_dll(qwin *w, const char *name);            /* load or return loaded; NULL if absent */
 uint32_t pe_export(qwin *w, qmod *m, const char *name, uint32_t ordinal);   /* 0 if missing */
+void pe_free_dll(qwin *w, qmod *m);                      /* FreeLibrary: DllMain(PROCESS_DETACH) at the last reference */
 void pe_init_dlls(qwin *w);                              /* DllMain(PROCESS_ATTACH) of pending DLLs */
 int  qw_is_hle_dll(const char *dll);
 /* find resource; type/name: id if < 0x10000 else guest pointer to string */
@@ -340,11 +373,48 @@ extern const qhle qw_ansi[];   /* ansi.c */
 extern const qhle qw_files[];  /* files.c */
 extern const qhle qw_dx[];     /* dx.c: DirectDraw/DirectSound/DirectInput */
 extern const qhle qw_extra[];  /* extra.c */
+extern const qhle qw_compat[]; /* compat.c */
+extern const qhle qw_net[];    /* net.c */
+extern const qhle qw_dplay[];  /* dplay.c */
+/* Host socket calls through the door. q is 16 words: q[4..] arguments, q[12] result, q[13] error, q[14] ip, q[15] port. */
+enum { NET_SOCKET = 1, NET_BIND, NET_LISTEN, NET_ACCEPT, NET_CONNECT, NET_SEND, NET_RECV, NET_SENDTO, NET_RECVFROM,
+       NET_POLL, NET_CLOSE, NET_SHUTDOWN, NET_SETOPT, NET_GETOPT, NET_SOCKNAME, NET_PEERNAME, NET_RESOLVE, NET_HOSTNAME };
+int qw_net_call(struct qwin *w, uint32_t *q, uint32_t op);
+/* threads.c */
+void qw_thread_yield(qwin *w);
+void qw_thread_tick(qwin *w);
+void qw_thread_block(qwin *w, uint32_t max_rest_ms);
+void qw_thread_sleep(qwin *w, uint32_t ms);
+int  qw_be_wait(qwin *w, uint32_t timeout, qevent *ev);
+void qw_thread_spawn_service(qwin *w, void (*fn)(qwin *));
+uint32_t qw_thread_current_handle(qwin *w);
+uint32_t qw_thread_current_id(void);
+uint32_t qw_thread_current_teb(void);
+int  qw_thread_handle_index(uint32_t h);
+int  qw_thread_finished(int idx);
+/* compat.c: child processes */
+int  qw_proc_signalled(qwin *w, uint32_t h);     /* -1 not a process handle, else 1 when it has ended */
+int  qw_proc_close(uint32_t h);
+int  qw_proc_resume(qwin *w, uint32_t h);
+/* files.c: the drive a child inherits */
+void qw_fs_map(qwin *w, const char *win, char *host, size_t max);
+void qw_fs_rel(qwin *w, const char *win, char *rel, size_t max);
+void qw_fs_state(qwin *w, char *root, size_t rmax, char *cwd, size_t cmax);
+void qw_fs_inherit(const char *root, const char *cwd);
+void qw_fs_cwd_win(qwin *w, char *out, int max);
+uint32_t qw_api_CreateThread(qwin *w, uint32_t *a);
+uint32_t qw_api_ExitThread(qwin *w, uint32_t *a);
+uint32_t qw_api_ResumeThread(qwin *w, uint32_t *a);
+uint32_t qw_api_SuspendThread(qwin *w, uint32_t *a);
+uint32_t qw_api_TerminateThread(qwin *w, uint32_t *a);
+uint32_t qw_api_GetExitCodeThread(qwin *w, uint32_t *a);
 void qw_env_set(const char *name, const char *value);
 int qw_dinput_ready(qwin *w, uint32_t handles, uint32_t n);   /* dx.c */
 void user_input_event(qwin *w, qevent *ev);       /* feed one backend event into the window system */
 void qw_dib_register(qwin *w, uint32_t hbm, uint32_t mem, uint32_t bmi, int bw, int bh, int bpp, uint32_t stride);
 uint32_t qw_dib_colortable(qwin *w, uint32_t hdc, uint32_t start, uint32_t n, uint32_t rgbq);
+int qw_user_has_window(qwin *w, const char *title);   /* test scripts: waitfor */
+uint32_t qw_dx_cocreate(qwin *w, uint32_t *a);   /* CoCreateInstance of DirectDraw, DirectSound */
 const qhle *qw_find_dx(const char *name);   /* COM method thunks "IDirectDraw::CreateSurface" */
 FILE *qw_stream_host(qwin *w, uint32_t gfile);    /* host FILE of a guest fopen() stream, NULL otherwise */
 int  qw_file_close(qwin *w, uint32_t h);          /* CloseHandle for file/find handles */
@@ -449,4 +519,13 @@ int headless_set_script(qwin *w, const char *path);
 #define WS_EX_STATICEDGE 0x00020000u
 #define WS_EX_DLGMODALFRAME 0x00000001u
 
+/* user.c: take waiting input before a direct query of the keys */
+void qw_input_poll(qwin *w);
+/* dx.c: a key change for DirectInput's buffered keyboard data */
+void qw_dinput_key(qwin *w, int vk, int down);
+/* sound_ec64.c: DirectSound and waveOut voices mixed for the 68100EC64 board */
+void qw_ec64_mix(qwin *w);
+int qw_ec64_sound(qwin *w, uint32_t *q);
+int qw_ec64_sound_ok(void);
+int qw_ec64_playing(void);
 #endif

@@ -1,7 +1,12 @@
 /* Capability-style host share with directory-fd confinement. This is not a
- * general passthrough mount: only one path component and regular files. */
+ * general passthrough mount: the legacy flat ABI and the hierarchical ABI share a confined root. */
+#ifndef __APPLE__
 #define _POSIX_C_SOURCE 200809L
+#else
+#define _DARWIN_C_SOURCE
+#endif
 #include "qrx_hostfs.h"
+#include "qrx_hostnet.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -11,7 +16,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
+#include <time.h>
+#include <pthread.h>
 #ifndef O_NOFOLLOW
 #error "QRXHostFS needs O_NOFOLLOW to protect against symlink traversal"
 #endif
@@ -37,8 +45,25 @@ static int regular(int dirfd,const char *name,struct stat *s){
     return 0;
 }
 static uint32_t status_errno(int e){return e==ENOENT?QRX_HOSTFS_NOENT:QRX_HOSTFS_IOERR;}
+static uint32_t net_rd32(const uint8_t *p){return ((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|((uint32_t)p[2]<<8)|p[3];}
+static void net_wr32(uint8_t *p,uint32_t v){p[0]=(uint8_t)(v>>24);p[1]=(uint8_t)(v>>16);p[2]=(uint8_t)(v>>8);p[3]=(uint8_t)v;}
+static void execute_net(QRXVM *v,QRXHostFS *fs){
+    uint32_t a[12];
+    if(fs->length<QRX_HOSTFS_NET_WORDS*4u||!bounds(v,fs->data_dma,QRX_HOSTFS_NET_WORDS*4u)){
+        fs->status=QRX_HOSTFS_INVALID;return;
+    }
+    uint8_t *p=v->ram.data+fs->data_dma;
+    for(unsigned i=0;i<12;i++)a[i]=net_rd32(p+4u*(i+1u));
+    qrx_hostnet_call(net_rd32(p),a,v->ram.data);
+    for(unsigned i=0;i<12;i++)net_wr32(p+4u*(i+1u),a[i]);
+    v->ram_write_epoch++;
+    fs->result=0;fs->status=QRX_HOSTFS_OK;
+}
+#include "qrx_hostfs_tree.inc"
 static void execute(QRXVM *v,QRXHostFS *fs,uint32_t op){
+    if(op>=0x101&&op<=0x10a){execute_tree(v,fs,op-0x100);return;}
     fs->status=QRX_HOSTFS_INVALID; fs->result=0;fs->size=0;
+    if(op==QRX_HOSTFS_CMD_NET){execute_net(v,fs);return;}
     if(op<1||op>QRX_HOSTFS_CMD_TRUNCATE)return;
     if((op==QRX_HOSTFS_CMD_WRITE||op==QRX_HOSTFS_CMD_DELETE||op==QRX_HOSTFS_CMD_TRUNCATE)&&fs->readonly){
         fs->status=QRX_HOSTFS_RDONLY;return;
@@ -143,17 +168,21 @@ bool qrx_hostfs_mount(QRXHostFS *fs,const char *dir,bool readonly){
 }
 void qrx_hostfs_unmount(QRXHostFS *fs){
     if(!fs)return;
+    hfs_cache_free(fs);
+    qrx_hostfs_sync();
     if(fs->mounted && fs->dirfd>=0)close(fs->dirfd);
     memset(fs,0,sizeof(*fs));fs->dirfd=-1;
 }
 void qrx_hostfs_attach(QRXVM *v,QRXHostFS *fs){if(v)v->hostfs=fs;}
+void qrx_hostfs_attach2(QRXVM *v,QRXHostFS *fs){if(v)v->hostfs2=fs;}
 static bool addr_ok(QRXVM *v,uint32_t a,unsigned n){return v&&v->hostfs&&v->hostfs->mounted&&n==4&&!(a&3u)&&a>=QRX_HOSTFS_BASE&&a<=QRX_HOSTFS_SIZE;}
+static bool addr2_ok(QRXVM *v,uint32_t a,unsigned n){return v&&v->hostfs2&&v->hostfs2->mounted&&n==4&&!(a&3u)&&a>=QRX_HOSTFS2_BASE&&a<=QRX_HOSTFS2_SIZE;}
 bool qrx_hostfs_read(QRXVM *v,uint32_t a,unsigned n,uint32_t *out){
     if(!out||!addr_ok(v,a,n))return false;
     QRXHostFS *s=v->hostfs;
     switch(a){
     case QRX_HOSTFS_MAGIC:*out=0x51525846u;return true;
-    case QRX_HOSTFS_FEATURES:*out=1u+(s->readonly?0u:2u);return true;
+    case QRX_HOSTFS_FEATURES:*out=0x15u+(s->readonly?0u:2u);return true;
     case QRX_HOSTFS_NAME_DMA:*out=s->name_dma;return true;
     case QRX_HOSTFS_DATA_DMA:*out=s->data_dma;return true;
     case QRX_HOSTFS_OFFSET:*out=s->offset;return true;
@@ -173,6 +202,34 @@ bool qrx_hostfs_write(QRXVM *v,uint32_t a,unsigned n,uint32_t val){
     case QRX_HOSTFS_OFFSET:s->offset=val;return true;
     case QRX_HOSTFS_LENGTH:s->length=val;return true;
     case QRX_HOSTFS_COMMAND:execute(v,s,val);return true;
+    default:return false;
+    }
+}
+bool qrx_hostfs2_read(QRXVM *v,uint32_t a,unsigned n,uint32_t *out){
+    if(!out||!addr2_ok(v,a,n))return false;
+    QRXHostFS *s=v->hostfs2;
+    switch(a){
+    case QRX_HOSTFS2_MAGIC:*out=0x51525846u;return true;
+    case QRX_HOSTFS2_FEATURES:*out=0x15u+(s->readonly?0u:2u);return true;
+    case QRX_HOSTFS2_NAME_DMA:*out=s->name_dma;return true;
+    case QRX_HOSTFS2_DATA_DMA:*out=s->data_dma;return true;
+    case QRX_HOSTFS2_OFFSET:*out=s->offset;return true;
+    case QRX_HOSTFS2_LENGTH:*out=s->length;return true;
+    case QRX_HOSTFS2_STATUS:*out=s->status;return true;
+    case QRX_HOSTFS2_RESULT:*out=s->result;return true;
+    case QRX_HOSTFS2_SIZE:*out=s->size;return true;
+    default:return false;
+    }
+}
+bool qrx_hostfs2_write(QRXVM *v,uint32_t a,unsigned n,uint32_t val){
+    if(!addr2_ok(v,a,n))return false;
+    QRXHostFS *s=v->hostfs2;
+    switch(a){
+    case QRX_HOSTFS2_NAME_DMA:s->name_dma=val;return true;
+    case QRX_HOSTFS2_DATA_DMA:s->data_dma=val;return true;
+    case QRX_HOSTFS2_OFFSET:s->offset=val;return true;
+    case QRX_HOSTFS2_LENGTH:s->length=val;return true;
+    case QRX_HOSTFS2_COMMAND:execute(v,s,val);return true;
     default:return false;
     }
 }

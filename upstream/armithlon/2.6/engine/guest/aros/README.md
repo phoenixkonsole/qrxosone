@@ -32,3 +32,6 @@ To boot AROS natively under QRX68100 still requires:
 
 The provided adapter is source groundwork, **not a booting AROS graphics.hidd,
 AHI or input.device implementation**. Do not install it as a system driver.
+
+`bsp/QRXSmpBench.c` runs one job on each 68100 core and prints the times. Core 1 stays
+outside AROS Exec; see `../qrx68100_smp.h` for what a job may do.

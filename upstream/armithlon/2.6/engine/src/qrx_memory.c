@@ -1,5 +1,9 @@
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE
+#else
 #define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#endif
 #include "qrx_memory.h"
 #include <errno.h>
 #include <stdio.h>
@@ -8,6 +12,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #ifdef __APPLE__
+#include <sys/types.h>
 #include <sys/sysctl.h>
 #endif
 

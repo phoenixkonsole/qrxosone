@@ -5,7 +5,8 @@
 #   build-sdl.sh <SDL-1.2.15 source dir> <out dir>
 set -Eeuo pipefail
 S="${1:?SDL source dir}"; O="${2:?out dir}"; HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CC=i686-w64-mingw32-gcc; AR=i686-w64-mingw32-ar
+# qrx-win32 implements msvcrt, while current MinGW defaults to UCRT.
+CC="i686-w64-mingw32-gcc -U_UCRT -D__MSVCRT_VERSION__=0x0700 -mcrtdll=msvcrt-os"; AR=i686-w64-mingw32-ar
 mkdir -p "$O/obj" "$O/include/SDL"
 cp "$S"/include/*.h "$O/include/SDL/"; cp "$HERE/SDL_config.h" "$O/include/SDL/SDL_config.h"
 CF=(-O2 -march=i686 -mno-sse -mno-mmx -fno-strict-aliasing -w -I"$O/include/SDL" -I"$S/src" -I"$S/src/video" -I"$S/src/events" -I"$S/src/video/wincommon" -D_GNU_SOURCE -DNO_STDIO_REDIRECT)
@@ -18,10 +19,10 @@ objs=()
 for f in "${files[@]}"; do
   case "$f" in *SDL_yuv_mmx.c) continue;; esac
   o="$O/obj/$(basename "$(dirname "$f")")_$(basename "${f%.c}").o"
-  "$CC" "${CF[@]}" -c "$f" -o "$o"
+  $CC "${CF[@]}" -c "$f" -o "$o"
   objs+=("$o")
 done
 rm -f "$O/libSDL.a"; "$AR" rcs "$O/libSDL.a" "${objs[@]}"
-"$CC" "${CF[@]}" -c "$S/src/main/win32/SDL_win32_main.c" -o "$O/obj/SDL_win32_main.o"
+$CC "${CF[@]}" -c "$S/src/main/win32/SDL_win32_main.c" -o "$O/obj/SDL_win32_main.o"
 rm -f "$O/libSDLmain.a"; "$AR" rcs "$O/libSDLmain.a" "$O/obj/SDL_win32_main.o"
 echo "SDL $O/libSDL.a (${#objs[@]} objects) + libSDLmain.a"

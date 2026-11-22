@@ -1,0 +1,14 @@
+[package]
+name = "qrxnetd"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+arti-client = { version = "0.48.0", features = ["tokio", "rustls", "onion-service-client"] }
+base64 = "0.23.1"
+boringtun = { version = "0.7.1", default-features = false }
+futures = "0.3.34"
+smoltcp = { version = "0.14.0", default-features = false, features = ["std", "medium-ip", "proto-ipv4", "socket-tcp", "socket-udp"] }
+tokio = { version = "1.54.1", features = ["full"] }
+tor-rtcompat = { version = "0.48.0", features = ["tokio"] }

@@ -8,6 +8,9 @@
 #include <time.h>
 #include "../core/qrx_bigstack.h"
 #include "qrxwin.h"
+#ifdef __AROS__
+#include <proto/dos.h>
+#endif
 
 static qwin g_w;
 
@@ -18,13 +21,46 @@ static void usage(void)
                     "  No Windows/ReactOS DLLs are used; x86 code runs in the qrx86core interpreter.\n");
 }
 
-static int real_main(int argc, char **argv)
+/* Started by another Windows program: everything is in the file it wrote (see compat.c). */
+static char g_status[80];
+static char g_cmdline[1100];
+static int read_child_file(qwin *w, const char *file, char **argv)
+{
+    static char host[1200];
+    char root[1024], cwd[512], log[600], num[32];
+    int report = 0;
+    FILE *f = fopen(file, "r");
+#define LINE(buf) do { if (!fgets(buf, sizeof(buf), f)) { fclose(f); return 0; } buf[strcspn(buf, "\r\n")] = 0; } while (0)
+    if (!f) return 0;
+    LINE(host); LINE(w->exe_win); LINE(root); LINE(cwd); LINE(g_cmdline); LINE(log);
+    LINE(num); w->windowed = atoi(num);
+    LINE(num); w->verbose = atoi(num);
+    LINE(num); report = atoi(num);
+#undef LINE
+    fclose(f);
+    if (log[0]) {
+        FILE *lf = fopen(log, "w");
+        if (lf) { w->log = lf; snprintf(w->log_path, sizeof(w->log_path), "%s", log); }
+    }
+    qw_fs_inherit(root, cwd);
+    if (report) snprintf(g_status, sizeof(g_status), "%s.x", file);
+    remove(file);
+    argv[0] = host;
+    return 1;
+}
+
+static int run_main(int argc, char **argv)
 {
     qwin *w = &g_w;
     const char *script = NULL;
-    int i = 1, rc;
+    int i = 1, rc, chdir_exe = 0;
     uint64_t t0;
+    char *child_argv[2] = { NULL, NULL };
     memset(w, 0, sizeof(*w));
+    /* As on Windows: a program that asks for the display gets it. Alt+Enter toggles at any
+     * time; SetEnv QRX_WIN_MODE window starts in a window. */
+    w->windowed = getenv("QRX_WIN_MODE") && !strcmp(getenv("QRX_WIN_MODE"), "window");
+    w->no_vsync = getenv("QRX_WIN_NOVSYNC") != NULL;
     w->lang = 0x0407;
     w->log = stderr;
     snprintf(w->outdir, sizeof(w->outdir), ".");
@@ -34,14 +70,34 @@ static int real_main(int argc, char **argv)
         else if (!strcmp(argv[i], "-l") && i + 1 < argc) w->lang = (uint16_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(argv[i], "-v")) w->verbose = 1;
         else if (!strcmp(argv[i], "-vv")) w->verbose = 2;
-        else if (!strcmp(argv[i], "-L") && i + 1 < argc) { FILE *lf = fopen(argv[++i], "w"); if (lf) w->log = lf; }
+        else if (!strcmp(argv[i], "-L") && i + 1 < argc) { FILE *lf = fopen(argv[++i], "w"); if (lf) { w->log = lf; snprintf(w->log_path, sizeof(w->log_path), "%s", argv[i]); } }
+        else if (!strcmp(argv[i], "-P") && i + 1 < argc) {
+            if (!read_child_file(w, argv[i + 1], child_argv)) return 2;
+            argv = child_argv; argc = 1; i = -1;
+            break;
+        }
         else if (!strcmp(argv[i], "-e") && i + 1 < argc) { char kv[300], *eq; snprintf(kv, sizeof(kv), "%s", argv[++i]); eq = strchr(kv, '='); if (eq) { *eq = 0; qw_env_set(kv, eq + 1); } }
         else if (!strcmp(argv[i], "-G") && i + 2 < argc) { snprintf(w->grab_path, sizeof(w->grab_path), "%s", argv[i + 1]); w->grab_at = atoi(argv[i + 2]); i += 2; }
         else if (!strcmp(argv[i], "-T")) w->trace = 1;
+        else if (!strcmp(argv[i], "--chdir")) chdir_exe = 1;
+        else if (!strcmp(argv[i], "--fullscreen")) w->windowed = 0;
+        else if (!strcmp(argv[i], "--window")) w->windowed = 1;
         else { usage(); return 2; }
         i++;
     }
+    if (i < 0) i = 0;
     if (i >= argc) { usage(); return 2; }
+#ifdef __AROS__
+    /* Started from a file manager: a Windows program's current directory is its own. */
+    if (chdir_exe) {
+        char dir[512];
+        BPTR lock;
+        snprintf(dir, sizeof(dir), "%s", argv[i]);
+        *PathPart((STRPTR)dir) = 0;
+        lock = Lock((STRPTR)dir, ACCESS_READ);
+        if (lock) CurrentDir(lock);                 /* kept for the life of the process */
+    }
+#endif
     if(getenv("QRX_WIN_FRAME_MARKERS")){
         const char *first=getenv("QRX_WIN_FRAME_START"),*last=getenv("QRX_WIN_FRAME_END");
         char *aend,*bend;unsigned long a,b;
@@ -52,7 +108,7 @@ static int real_main(int argc, char **argv)
         snprintf(w->bench_marker_dir,sizeof w->bench_marker_dir,"%s",getenv("QRX_WIN_FRAME_MARKERS"));
     }
 
-#ifdef __AROS__
+#if defined(__AROS__) && !defined(QRX_NO_AROS_BACKEND)
     w->be = script ? &qw_headless : &qw_aros;
 #else
     w->be = &qw_headless;
@@ -64,6 +120,7 @@ static int real_main(int argc, char **argv)
     if (script && !headless_set_script(w, script)) { fprintf(stderr, "qrx-win32: cannot open script %s\n", script); return 2; }
     if (!w->be->init(w)) { fprintf(stderr, "qrx-win32: backend %s unavailable\n", w->be->name); return 20; }
     if (!qw_load(w, argv[i], argc - i, argv + i)) return 127;
+    if (g_cmdline[0]) a2w(w->cmdline, g_cmdline, 512);
     if (getenv("QRX_WIN_BUDGET")) w->cpu.budget = strtoull(getenv("QRX_WIN_BUDGET"), NULL, 0);   /* profiling: stop after N instructions */
     if (getenv("QRX86_JIT") && strcmp(getenv("QRX86_JIT"), "off")) {
         unsigned profile = 0;
@@ -120,6 +177,16 @@ static int real_main(int argc, char **argv)
     if (w->be->shutdown) w->be->shutdown(w);
     if (w->expect_ok || w->expect_fail) printf("QRXWIN-RESULT expect_ok=%d expect_fail=%d exit=%d\n", w->expect_ok, w->expect_fail, rc);
     if (w->expect_fail) return 1;
+    return rc;
+}
+
+static int real_main(int argc, char **argv)
+{
+    int rc = run_main(argc, argv);
+    if (g_status[0]) {
+        FILE *f = fopen(g_status, "w");
+        if (f) { fprintf(f, "%u\n", (unsigned)rc); fclose(f); }
+    }
     return rc;
 }
 

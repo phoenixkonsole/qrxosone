@@ -34,8 +34,8 @@ static int qrx_file_request(struct Window*w,int save,char*dest,int cap){
    ASLFR_InitialDrawer,"QRX:Documents",ASLFR_DoSaveMode,save?TRUE:FALSE,TAG_DONE);
  if(!fr)return 0;
  if(AslRequestTags(fr,TAG_DONE)){
-   const char*d=fr->fr_Drawer?fr->fr_Drawer:"QRX:Documents";
-   const char*f=fr->fr_File?fr->fr_File:"";
+   const char*d=fr->fr_Drawer?(const char*)fr->fr_Drawer:"QRX:Documents";
+   const char*f=fr->fr_File?(const char*)fr->fr_File:"";
    int dl=strlen(d);snprintf(dest,cap,"%s%s%s",d,(dl&&d[dl-1]!=':'&&d[dl-1]!='/')?"/":"",f);
    FreeAslRequest(fr);return 1;
  }

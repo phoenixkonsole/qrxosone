@@ -88,17 +88,35 @@ FN(a_CreateWindowExA) {
     return r;
 }
 /* text messages: ANSI <-> UTF-16 around the Unicode implementation */
+/* A text message already bridged to wide can pass through a program's ANSI window procedure
+ * and come back here in its DefWindowProcA: that buffer is wide and must stay so. */
+static uint32_t g_wide_buf;
 static uint32_t text_msg(qwin *w, const char *fn, uint32_t *a, int nargs_before)
 {
-    uint32_t r, msg = a[nargs_before + 1];
+    uint32_t r, msg = a[nargs_before + 1], outer = g_wide_buf;
     COPYARGS;
-    if (msg == WM_SETTEXT) {
+    if ((msg == WM_SETTEXT || msg == WM_GETTEXT) && g_wide_buf && a[nargs_before + 3] == g_wide_buf) {
+        r = callw(w, "user32", fn, b);
+    } else if (msg == WM_SETTEXT) {
+        b[nargs_before + 3] = g_wide_buf = tw(w, &t, a[nargs_before + 3], -1);
+        r = callw(w, "user32", fn, b);
+        g_wide_buf = outer;
+    } else if (msg == 0x0180 || msg == 0x0181 || msg == 0x018C || msg == 0x018F || msg == 0x01A2 ||
+               msg == 0x0143 || msg == 0x014A || msg == 0x014C || msg == 0x014D || msg == 0x0158) {
+        /* list and combo box entries */
         b[nargs_before + 3] = tw(w, &t, a[nargs_before + 3], -1);
         r = callw(w, "user32", fn, b);
+    } else if (msg == 0x0189 || msg == 0x0148) {           /* LB_GETTEXT, CB_GETLBTEXT */
+        uint32_t g = qw_alloc(w, 512);
+        b[nargs_before + 3] = g;
+        r = callw(w, "user32", fn, b);
+        if (r != 0xFFFFFFFFu) r = w2a_guest(w, a[nargs_before + 3], g, 256);
+        qw_free(w, g);
     } else if (msg == WM_GETTEXT && a[nargs_before + 2]) {
         uint32_t max = a[nargs_before + 2], g = qw_alloc(w, max * 2u + 2u);
-        b[nargs_before + 3] = g;
+        b[nargs_before + 3] = g_wide_buf = g;
         callw(w, "user32", fn, b);
+        g_wide_buf = outer;
         r = w2a_guest(w, a[nargs_before + 3], g, max);
         qw_free(w, g);
     } else r = callw(w, "user32", fn, b);
@@ -115,14 +133,26 @@ FN(a_SendDlgItemMessageA) {
     b[0] = h; b[1] = a[2]; b[2] = a[3]; b[3] = a[4];
     return text_msg(w, "SendMessageW", b, 0);
 }
-FN(a_CallWindowProcA) { return callw(w, "user32", "CallWindowProcW", a); }
-FN(a_SetWindowTextA) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], -1); r = CALL("user32", "SetWindowTextW"); tfree(w, &t); return r; }
+/* A program that subclasses one of our controls (Delphi's VCL does) hands its ANSI messages on
+ * to our window procedure, which works in UTF-16: text messages need the same bridge as
+ * SendMessageA. Its own procedures get them as they are. Inno Setup's wizard overran an
+ * 8-byte buffer with UTF-16 here and broke its heap. */
+FN(a_CallWindowProcA) {
+    if (a[0] - QW_THUNK_BASE < (uint32_t)w->nthunk) return text_msg(w, "CallWindowProcW", a, 1);
+    return callw(w, "user32", "CallWindowProcW", a);
+}
+FN(a_SetWindowTextA) { uint32_t r, outer = g_wide_buf; COPYARGS; b[1] = g_wide_buf = tw(w, &t, a[1], -1); r = CALL("user32", "SetWindowTextW"); g_wide_buf = outer; tfree(w, &t); return r; }
 FN(a_GetWindowTextA) {
     uint32_t g, r;
     COPYARGS;
     if (!a[2]) return 0;
     g = qw_alloc(w, a[2] * 2u + 2u);
-    b[1] = g; CALL("user32", "GetWindowTextW");
+    {
+        uint32_t outer = g_wide_buf;
+        b[1] = g_wide_buf = g;
+        CALL("user32", "GetWindowTextW");
+        g_wide_buf = outer;
+    }
     r = w2a_guest(w, a[1], g, a[2]);
     qw_free(w, g);
     (void)t;
@@ -151,7 +181,15 @@ FN(a_LoadStringA) {
     (void)t;
     return r;
 }
-FN(a_MessageBoxA) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], -1); b[2] = tw(w, &t, a[2], -1); r = CALL("user32", "MessageBoxW"); tfree(w, &t); return r; }
+FN(a_MessageBoxA) { uint32_t r; COPYARGS;
+    {   /* Always in the log. Benchmarks and unattended runs set QRX_WIN_AUTO_OK:
+         * nobody is there to click the box a timedemo ends with. */
+        char text[256];
+        qw_rd_str(w, a[1], text, sizeof(text));
+        qw_log(w, "MessageBox: %s", text);
+        if (getenv("QRX_WIN_AUTO_OK")) return 1;
+    }
+    b[1] = tw(w, &t, a[1], -1); b[2] = tw(w, &t, a[2], -1); r = CALL("user32", "MessageBoxW"); tfree(w, &t); return r; }
 FN(a_LoadBitmapA) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], -1); r = CALL("user32", "LoadBitmapW"); tfree(w, &t); return r; }
 FN(a_LoadImageA) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], -1); r = CALL("user32", "LoadImageW"); tfree(w, &t); return r; }
 FN(a_LoadMenuA) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], -1); r = CALL("user32", "LoadMenuW"); tfree(w, &t); return r; }
@@ -191,7 +229,9 @@ FN(a_GetClassInfoExA) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], -1); r = CA
 /* ---------------------------------------------------------------- gdi32 */
 FN(a_TextOutA) { uint32_t r; COPYARGS; b[3] = tw(w, &t, a[3], (int32_t)a[4]); r = CALL("gdi32", "TextOutW"); tfree(w, &t); return r; }
 FN(a_ExtTextOutA) { uint32_t r; COPYARGS; b[5] = tw(w, &t, a[5], (int32_t)a[6]); r = CALL("gdi32", "ExtTextOutW"); tfree(w, &t); return r; }
+FN(a_GetTextExtentExPointA) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], (int32_t)a[2]); r = CALL("gdi32", "GetTextExtentExPointW"); tfree(w, &t); return r; }
 FN(a_GetTextExtentPoint32A) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], (int32_t)a[2]); r = CALL("gdi32", "GetTextExtentPoint32W"); tfree(w, &t); return r; }
+FN(a_FindResourceA) { uint32_t r; COPYARGS; b[1] = tw(w, &t, a[1], -1); b[2] = tw(w, &t, a[2], -1); r = CALL("kernel32", "FindResourceW"); tfree(w, &t); return r; }
 FN(a_GetObjectA) { return callw(w, "gdi32", "GetObjectW", a); }    /* bitmaps: identical layout */
 FN(a_CreateFontA) { return callw(w, "gdi32", "CreateFontW", a); }  /* face name is not used */
 FN(a_CreateFontIndirectA) { return callw(w, "gdi32", "CreateFontIndirectW", a); }   /* first 28 bytes identical */
@@ -217,12 +257,13 @@ const qhle qw_ansi[] = {
     U("SetWindowTextA", a_SetWindowTextA, 2), U("GetWindowTextA", a_GetWindowTextA, 3), U("SetDlgItemTextA", a_SetDlgItemTextA, 3),
     U("GetDlgItemTextA", a_GetDlgItemTextA, 4), U("LoadStringA", a_LoadStringA, 4), U("MessageBoxA", a_MessageBoxA, 4),
     U("LoadBitmapA", a_LoadBitmapA, 2), U("LoadImageA", a_LoadImageA, 6), U("LoadMenuA", a_LoadMenuA, 2),
+    { "kernel32", "FindResourceA", 3, a_FindResourceA },
     U("LoadAcceleratorsA", a_LoadAcceleratorsA, 2), U("DialogBoxParamA", a_DialogBoxParamA, 5), U("CreateDialogParamA", a_CreateDialogParamA, 5),
     U("FindWindowA", a_FindWindowA, 2), U("RegisterWindowMessageA", a_RegisterWindowMessageA, 1), U("GetClassNameA", a_GetClassNameA, 3),
     U("AppendMenuA", a_AppendMenuA, 4), U("ModifyMenuA", a_ModifyMenuA, 5), U("DrawTextA", a_DrawTextA, 5),
     U("wvsprintfA", a_wvsprintfA, 3), U("CharUpperA", a_CharUpperA, 1), U("CharLowerA", a_CharLowerA, 1), U("CharNextA", a_CharNextA, 1),
     U("GetClassInfoExA", a_GetClassInfoExA, 3),
-    G("TextOutA", a_TextOutA, 5), G("ExtTextOutA", a_ExtTextOutA, 8), G("GetTextExtentPoint32A", a_GetTextExtentPoint32A, 4),
+    G("TextOutA", a_TextOutA, 5), G("ExtTextOutA", a_ExtTextOutA, 8), G("GetTextExtentPoint32A", a_GetTextExtentPoint32A, 4), G("GetTextExtentExPointA", a_GetTextExtentExPointA, 7),
     G("GetTextExtentPointA", a_GetTextExtentPoint32A, 4), G("GetObjectA", a_GetObjectA, 3), G("CreateFontA", a_CreateFontA, 14),
     G("CreateFontIndirectA", a_CreateFontIndirectA, 1), G("GetTextMetricsA", a_GetTextMetricsA, 2),
     { NULL, NULL, 0, NULL }

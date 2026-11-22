@@ -1,0 +1,3 @@
+interp result=2d0f3cd0 seconds=0.783 instructions=100459359 mips=128.3 rc=0
+jit result=2d0f3cd0 seconds=0.035 instructions=100459360 mips=2906.0 rc=0
+jit result=2d0f3cd0 seconds=0.035 instructions=100459360 mips=2892.6 rc=0

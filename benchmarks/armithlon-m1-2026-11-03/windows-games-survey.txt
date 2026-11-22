@@ -1,0 +1,70 @@
+Every program found in test-apps/windows_games, started once on the QRX desktop without input, for 44 seconds, on five engines at once, fullscreen unless the program asks for a window. Sonic CD ran without its RDX libraries here.
+Columns: name | program | window size | last frame rates per 5 s | last notable log line.
+BB2001 | Baseball2001.exe | 640x480 |  | program stopped: page fault at eip=402074f9 addr=00000000 (read from unmapped memory)
+DiabloIIDemo | DiabloIIDemo.exe |  |  | AROS backend: screen 1024x768, truecolor WritePixelArray output
+FinalFantasy | demo1.exe | 640x480 |  | program stopped: page fault at eip=0042c8b5 addr=00000270 (read from unmapped memory)
+HaloTrial | GSArcade.exe | 1018x743 |  | program stopped: page fault at eip=745b27cf addr=00000008 (read from unmapped memory)
+J2swc123 | J2swc123.exe | 484x83 |  | MessageBox: This program will install Jazz Jackrabbit 2 Shareware. Would you like to continue?
+MSAoE | Empires.exe | 332x83 |  | MessageBox: Error: Open_new_ResFile, file sounds.drs not Found.
+MSIFDEMO | MSIF2000.EXE | 640x480 |  | DirectDraw: primary 640x480x16 + back buffer
+MSpuzzle | Ratpoker.exe |  |  | AROS backend: code at 0225bd26, signals: port 16, timer 17
+MaxPayne2DemoSetup | MaxPayne2DemoSetup.exe |  |  | AROS backend: screen 1024x768, truecolor WritePixelArray output
+MaxPayneDemo1-05 | MaxPayneDemo.exe |  |  | unimplemented API called: _EH_prolog ; program stopped: host hook error at eip=7f00002d addr=00000000 (unimplemented API _EH_prolog) eax
+MtM2trial | Monsterx.exe |  |  | program stopped: page fault at eip=005d6dc1 addr=00000038 (read from unmapped memory)
+SCDemo | SCDemo.exe | 205x83 |  | MessageBox: No program start menu found.
+Worms2Demo23Feb98i | SETUP.EXE |  |  | setup.exe: no PE header
+abeodd | AbeDemo.exe | 640x480 |  | API time over the last 10 s, 2 frames so far:
+aoe2demo(Japanese) | EMPIRES2.EXE | 200x83 |  | MessageBox: MEM_BAD_POINTER
+b2demoa | Client.exe | 200x83 |  | MessageBox: <invalid resource DLL>
+beavislg | BBLOOGIE.EXE |  |  | API time over the last 10 s, 0 frames so far:
+bossw13 | bos.exe |  |  | LoadLibrary(C:\bos.12): not available in QRX (program continues without it)
+bunghole | DXMEDIA.EXE |  |  | x86 runs on the host door
+ch2setup | charlie2.exe |  |  | x86 runs on the host door
+clawdins | clawdins.exe | 231x83 |  | MessageBox: Extract failed: return from extract=-1
+cursedemo | WebCurse.exe |  |  | program stopped: page fault at eip=74694243 addr=74694243 (read from unmapped memory)
+daytona | DAYTONAD.EXE | 320x240 | 19,20,19 | DirectDraw: 19 frames per second
+descent3demo2 | main.exe | 434x83 |  | MessageBox: You cannot run this program directly.  Please run "Descent 3 Demo.exe".
+diablosw | diablosw.exe | 427x318 |  | unimplemented API called: SHGetDesktopFolder ; program stopped: host hook error at eip=7f0000b2 addr=00000000 (unimplemented API SHGetDesktopFol
+dnmp_demo_101 | F1319_IDriver.exe |  |  | AROS backend: code at 0225bd26, signals: port 16, timer 17
+doom95 | DOOM95.EXE | 640x400 | 35,35,35 | DirectDraw: 35 frames per second
+ff7demo | SETUP.EXE |  |  | setup.exe: no PE header
+ff7demo(battle) | ff7demo.exe | 640x480 |  | API time over the last 10 s, 1 frames so far:
+freddi | Freddemo.exe |  |  | freddemo.exe: no PE header
+ft2dem31 | SETUP.EXE |  |  | setup.exe: no PE header
+ft2dem95 | MadDemo.exe | 640x480 |  | AROS backend: window 00010004 opened at 192,144 inner 640x480 (+19 menu bar)
+fury3x | FURY3X.EXE | 574x83 |  | MessageBox: Unable to open .POD file.  Verify that the Fury3 CD is inserted in the drive.  Or try re-installing Fury3.
+galac15 | GX1.EXE |  |  | gx1.exe: no PE header
+gextrial | LOADER.EXE | 426x323 |  | AROS backend: code at 0225134e, signals: port 16, timer 17
+gmdemins | gmdemins.exe | 231x83 |  | MessageBox: Extract failed: return from extract=-1
+heltrial | HELLBNDX.EXE | 346x83 |  | MessageBox: Insert Hellbender CD into the installation CD-ROM drive.
+islepro | Setup.exe |  |  | program stopped: page fault at eip=0040450d addr=00000004 (write to unmapped memory)
+jamxdemo | SETUP.EXE |  |  | setup.exe: no PE header
+mdkpcw95 | MDKDEM95.EXE | 640x480 |  | API time over the last 10 s, 0 frames so far:
+mj97 | mj97.exe |  |  | SetWindowsHookEx: hook type 5 is not delivered
+mscasinotrial | mscasino.exe |  |  | debug: Setting current dir to: [C:\WINDOWS]
+mtmtrial | MONSTERX.EXE | 410x83 |  | MessageBox: Insert the Monster Truck Madness CD-ROM into your CD-ROM drive.
+naboo | Gungan Frontier.exe |  |  | program stopped: page fault at eip=00480c36 addr=00000025 (read from unmapped memory)
+nevdemo_full | NEVDEMO.EXE | 640x480 | 28,26,24 | debug: 
+nfighter | NEBULA95.EXE | 640x480 |  | CreateFile(gfx\LOGO2.VGA) -> SYS:X86/G/gfx/LOGO2.VGA
+nfs2demo | nfsw.exe | 1024x768 |  | API time over the last 10 s, 0 frames so far:
+nfs2sea | NFS2SEA.EXE | 1024x768 |  | AROS backend: code at 0225bd26, signals: port 16, timer 17
+nrse95d | NORSE95.EXE | 640x480 | 31,31,31 | DirectDraw: 31 frames per second
+pbdemo | PINBALL.EXE | 317x200 |  | MessageBox: Snap back the plunger then let it rip!
+pitdroidsdemo_pc | Pit Droids Demo.exe |  |  | program stopped: page fault at eip=004799a6 addr=00090010 (read from unmapped memory)
+raptorshr | Raptor.exe | 343x237 |  | API time over the last 10 s, 0 frames so far:
+rashdemo | demorash.exe | 227x83 |  | MessageBox: Can not find primary language file.
+roguedemo | Rogue Squadron Demo.exe | 374x226 |  | MessageBox: Assertion failed!
+s3d_demo | PCSONIC.EXE | 320x240 |  | AROS backend: code at 0225bd26, signals: port 16, timer 17
+sc3000_demo | sc3demo.exe |  |  | unimplemented API called: ??2@YAPAXI@Z ; program stopped: host hook error at eip=7f000104 addr=00000000 (unimplemented API ??2@YAPAXI@Z) e
+sega_rally | RALLY.EXE | 640x480 | 30,30,30 | DirectDraw: 30 frames per second
+shadowsdemo | shadows.exe | 588x235 |  | AROS backend: code at 0225bd26, signals: port 16, timer 17
+sk_demo | SONIC3K.EXE |  |  | program stopped: page fault at eip=007dee01 addr=08ff0000 (write to unmapped memory)
+socdemo | SOCTRIAL.EXE | 512x239 |  | AROS backend: code at 0225bd26, signals: port 16, timer 17
+sonic_cd | SONICCD.EXE | 320x225 |  | unimplemented API called: _srfCreate@16 ; program stopped: host hook error at eip=7f00002b addr=00000000 (unimplemented API _srfCreate@16) 
+tr2demo1 | TOMB2.EXE | 576x404 |  | AROS backend: code at 0225bd26, signals: port 16, timer 17
+tr2demo2 | TOMB2.EXE | 576x404 |  | AROS backend: code at 0225bd26, signals: port 16, timer 17
+turok2demo | Turok2Demo.exe | 316x122 |  | MessageBox: Low Virtual Memory Detected: TUROK may not run.
+turok3dfx | Turok3DfxDemo.exe | 640x460 |  | CreateFile(data\default.key -> SYS:X86/G/data/default.key): failed
+vf2_demo | VF2DEMO.EXE | 640x480 |  | program stopped: page fault at eip=00420ebb addr=00000000 (read from unmapped memory)
+vsquad | PPJDD.EXE | 640x480 | 30,30,30 | DirectDraw: 30 frames per second
+w95turokdemov101 | TurokDemo.exe |  |  | program stopped: page fault at eip=004812e6 addr=0000000c (read from unmapped memory)

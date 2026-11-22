@@ -1,6 +1,7 @@
 /* QRX OS One 22.5.12 - qrx-win32: PE image loader and resource lookup. */
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include "qrxwin.h"
 
 static uint16_t le16(const uint8_t *b) { return (uint16_t)(b[0] | (b[1] << 8)); }
@@ -72,15 +73,20 @@ static void apply_relocs(qwin *w, uint32_t base, uint32_t rva, uint32_t size, ui
     }
 }
 
+/* A program that brings its own MSVCRT.DLL runs on that one: the built-in table covers only a
+ * part of it, and heap and exceptions cannot be split between the two. */
+static int g_native_crt;
+
 int qw_is_hle_dll(const char *dll)
 {
-    static const char *hle[] = { "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll",
-                                 "ddraw", "dsound", "dinput", "ole32", "oleaut32", "version", "imm32", "comdlg32", "msvcrt40", "crtdll", NULL };
+    static const char *hle[] = { "lz32", "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll",
+                                 "ddraw", "dsound", "dinput", "ole32", "oleaut32", "version", "imm32", "comdlg32", "msvcrt40", "crtdll", "dsetup", NULL };
     char n[64];
     size_t k;
     int i;
     for (k = 0; dll[k] && dll[k] != '.' && k < 63; k++) n[k] = (char)tolower((unsigned char)dll[k]);
     n[k] = 0;
+    if (g_native_crt && !strcmp(n, "msvcrt")) return 0;
     for (i = 0; hle[i]; i++) if (!strcmp(n, hle[i])) return 1;
     return 0;
 }
@@ -95,7 +101,7 @@ uint32_t pe_export(qwin *w, qmod *m, const char *name, uint32_t ordinal)
     fns = m->base + x86_rd32(c, d + 28); names = m->base + x86_rd32(c, d + 32); ords = m->base + x86_rd32(c, d + 36);
     if (name) {
         for (i = 0; i < nnames; i++) {
-            char s[96];
+            char s[512];
             qw_rd_str(w, m->base + x86_rd32(c, names + i * 4), s, sizeof(s));
             if (!strcmp(s, name)) { uint16_t o = x86_rd16(c, ords + i * 2); if (o < nfn) rva = x86_rd32(c, fns + o * 4u); break; }
         }
@@ -123,16 +129,38 @@ static int find_dll_file(qwin *w, const char *name, char *out, size_t max)
     const char *sl = strrchr(w->exe_path, '/');
     DIR *d;
     struct dirent *e;
+    int searched_cwd = 0;
     lower_base(want, name, sizeof(want));
+    /* A full path such as C:\WINDOWS\is-XXXX.tmp\_shfoldr.dll (Inno Setup) is where the file
+       manager maps it, as for CreateFile. */
+    if (isalpha((unsigned char)name[0]) && name[1] == ':' && (name[2] == '\\' || name[2] == '/')) {
+        FILE *f;
+        qw_fs_map(w, name, out, max);
+        if ((f = fopen(out, "rb"))) { fclose(f); return 1; }
+    }
     if (sl) { size_t L = (size_t)(sl - w->exe_path); if (L >= sizeof(dir)) return 0; memcpy(dir, w->exe_path, L); dir[L] = 0; }
     else {
         const char *co = strrchr(w->exe_path, ':');
         if (co) { size_t L = (size_t)(co - w->exe_path) + 1; memcpy(dir, w->exe_path, L); dir[L] = 0; }
         else if (!getcwd(dir, sizeof(dir))) strcpy(dir, ".");   /* AROS posixc: "." is not a directory name */
     }
+    /* A path in the name, as in LoadLibrary("TITLE\\OPENING\\OPENING.DLL"): below the program. */
+    {
+        const char *p = name, *end = NULL, *q;
+        size_t L = strlen(dir);
+        if (p[0] && p[1] == ':') p += 2;
+        while (*p == '\\' || *p == '/' || (p[0] == '.' && (p[1] == '\\' || p[1] == '/'))) p += p[0] == '.' ? 2 : 1;
+        for (q = p; *q; q++) if (*q == '\\' || *q == '/') end = q;
+        if (end && L + 1 + (size_t)(end - p) + 1 < sizeof(dir)) {
+            if (L && dir[L - 1] != ':' && dir[L - 1] != '/') dir[L++] = '/';
+            for (q = p; q < end; q++) dir[L++] = *q == '\\' ? '/' : *q;
+            dir[L] = 0;
+        }
+    }
+    for (;;) {
     d = opendir(dir);
     if (!d && w->verbose) qw_log(w, "cannot list %s for %s", dir, want);
-    if (!d) return 0;
+    if (d) {
     while ((e = readdir(d))) {
         char low[256];
         size_t k;
@@ -146,7 +174,18 @@ static int find_dll_file(qwin *w, const char *name, char *out, size_t max)
         }
     }
     closedir(d);
-    return 0;
+    }
+    /* Then the current directory, as Windows does: Max Payne changes into its driver folder. */
+    if (!searched_cwd) {
+        extern int qw_fs_cwd_host(qwin *w, char *out, size_t max);
+        searched_cwd = 1;
+        if (qw_fs_cwd_host(w, dir, sizeof(dir))) continue;
+    }
+    /* Then where tools/armithlon/install-directx.sh puts Microsoft's helper DLLs. */
+    if (!strcmp(dir, "APPS:windows_system")) return 0;
+    if (strcmp(dir, "SYS:WINDOWS/SYSTEM")) strcpy(dir, "SYS:WINDOWS/SYSTEM");      /* what installers put there */
+    else strcpy(dir, "APPS:windows_system");
+    }
 }
 
 qmod *pe_load_dll(qwin *w, const char *name)
@@ -156,9 +195,21 @@ qmod *pe_load_dll(qwin *w, const char *name)
     long n;
     uint8_t *b;
     qmod *m = pe_module_by_name(w, name);
-    if (m) return m;
+    if (m) {
+        if (m->unloaded) {
+            /* Loaded again: its globals must be as new, games count on it. The pages and the
+               code stayed, so only the writable sections go back. */
+            uint32_t at = 0;
+            int i;
+            for (i = 0; i < m->snap_n; i++) { x86_write_mem(&w->cpu, m->base + m->snap_va[i], m->snap + at, m->snap_size[i]); at += m->snap_size[i]; }
+            m->unloaded = 0;
+            m->inited = 0;
+            if (w->started) pe_init_dlls(w);
+        }
+        return m;
+    }
     lower_base(low, name, sizeof(low));
-    if (!find_dll_file(w, low, path, sizeof(path))) return NULL;
+    if (!find_dll_file(w, name, path, sizeof(path))) return NULL;
     f = fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END); n = ftell(f); fseek(f, 0, SEEK_SET);
@@ -170,6 +221,16 @@ qmod *pe_load_dll(qwin *w, const char *name)
     if (m && w->verbose) qw_log(w, "loaded %s at %08x (%u bytes)", m->name, m->base, m->size);
     if (m && w->started) pe_init_dlls(w);
     return m;
+}
+
+void pe_free_dll(qwin *w, qmod *m)
+{
+    if (!m->is_dll || !m->snap || m->pinned || m->unloaded || m->refs <= 0 || --m->refs > 0) return;
+    if (m->entry && m->inited) {
+        uint32_t r = qw_call(w, m->base + m->entry, 3, m->base, 0 /* DLL_PROCESS_DETACH */, 0, 0);
+        if (w->verbose) qw_log(w, "DllMain(%s, PROCESS_DETACH) = %u", m->name, r);
+    }
+    m->unloaded = 1;
 }
 
 void pe_init_dlls(qwin *w)
@@ -184,6 +245,40 @@ void pe_init_dlls(qwin *w)
             if (w->verbose) qw_log(w, "DllMain(%s, PROCESS_ATTACH) = %u", m->name, r);
         }
     }
+}
+
+/* Static TLS (__declspec(thread), Delphi threadvars): every thread gets a copy of the image's
+ * template, found through fs:[2C][index]. That array is also what TlsAlloc hands out, from the
+ * bottom, so these indices come from the top. */
+#define PE_TLS_MAX 16
+static struct { uint32_t start, size, zero, index; } g_tls[PE_TLS_MAX];
+static int g_ntls;
+static void pe_tls_block(qwin *w, int i, uint32_t teb)
+{
+    x86cpu *c = &w->cpu;
+    uint32_t mem = qw_alloc(w, g_tls[i].size + g_tls[i].zero + 16u), k;
+    if (!mem) return;
+    for (k = 0; k < g_tls[i].size; k++) x86_wr8(c, mem + k, x86_rd8(c, g_tls[i].start + k));
+    for (k = 0; k < g_tls[i].zero; k++) x86_wr8(c, mem + g_tls[i].size + k, 0);
+    x86_wr32(c, teb + 0x1000u + g_tls[i].index * 4u, mem);
+}
+void qw_tls_new_thread(qwin *w, uint32_t teb)
+{
+    int i;
+    for (i = 0; i < g_ntls; i++) pe_tls_block(w, i, teb);
+}
+static void pe_tls_add(qwin *w, uint32_t dir, const char *name)
+{
+    extern uint32_t qw_thread_current_teb(void);
+    x86cpu *c = &w->cpu;
+    uint32_t start = x86_rd32(c, dir), end = x86_rd32(c, dir + 4), at = x86_rd32(c, dir + 8), cb = x86_rd32(c, dir + 12);
+    if (g_ntls >= PE_TLS_MAX || end < start) { qw_log(w, "%s: too much static TLS", name); return; }
+    g_tls[g_ntls].start = start; g_tls[g_ntls].size = end - start; g_tls[g_ntls].zero = x86_rd32(c, dir + 16);
+    g_tls[g_ntls].index = 63u - (uint32_t)g_ntls;
+    if (at) x86_wr32(c, at, g_tls[g_ntls].index);
+    if (w->started) pe_tls_block(w, g_ntls, qw_thread_current_teb());   /* before that: qw_load, once the TEB exists */
+    g_ntls++;
+    if (cb && x86_rd32(c, cb)) qw_log(w, "%s: TLS callbacks are not run", name);
 }
 
 static qmod *pe_map(qwin *w, const uint8_t *b, size_t n, const char *name, int is_dll)
@@ -230,7 +325,9 @@ static qmod *pe_map(qwin *w, const uint8_t *b, size_t n, const char *name, int i
         uint32_t vsz = le32(s + 8), va = le32(s + 12), rsz = le32(s + 16), rp = le32(s + 20);
         if (rsz > vsz && vsz) rsz = vsz;
         if ((uint64_t)rp + rsz > n) rsz = rp < n ? (uint32_t)(n - rp) : 0;
-        if (rsz) x86_write_mem(c, base + va, b + rp, rsz);
+        /* Raw pointer 0 means uninitialised data, whatever the size field says
+         * (Watcom-linked programs such as Doom95 fill it in for .bss). */
+        if (rsz && rp) x86_write_mem(c, base + va, b + rp, rsz);
     }
     if (base != pref) {
         apply_relocs(w, base, rel_rva, rel_size, base - pref);
@@ -244,6 +341,7 @@ static qmod *pe_map(qwin *w, const uint8_t *b, size_t n, const char *name, int i
     m->entry = le32(b + opt + 16);
     m->res_rva = le32(b + opt + 112);
     m->exp_rva = le32(b + opt + 96);
+    if (optsz >= 96u + 10u * 8u && le32(b + opt + 96 + 9 * 8)) pe_tls_add(w, base + le32(b + opt + 96 + 9 * 8), name);
     m->exp_size = le32(b + opt + 100);
     /* imports: HLE DLLs bind to host thunks, other DLLs are loaded from the program directory */
     if (imp_rva) {
@@ -256,13 +354,18 @@ static qmod *pe_map(qwin *w, const uint8_t *b, size_t n, const char *name, int i
             qw_rd_str(w, base + nm, dll, sizeof(dll));
             if (!qw_is_hle_dll(dll)) {
                 dm = pe_load_dll(w, dll);
+                if (dm) dm->pinned = 1;
                 m = &w->mod[idx];                       /* (array is static; keep the pointer obvious) */
-                if (!dm) qw_log(w, "%s imports %s: not found next to the program", name, dll);
+                if (!dm) {
+                    qw_log(w, "%s imports %s: not found next to the program", name, dll);
+                    if (!strncasecmp(dll, "d3dx", 4) || !strncasecmp(dll, "xinput", 6) || !strncasecmp(dll, "d3dcompiler", 11) || !strncasecmp(dll, "x3daudio", 8) || !strncasecmp(dll, "xapofx", 6))
+                        qw_log(w, "%s belongs to Microsoft's DirectX runtime: run tools/armithlon/install-directx.sh on the Mac", dll);
+                }
             }
             if (!ilt) ilt = iat;
             for (k = 0; ; k++) {
                 uint32_t e = x86_rd32(c, base + ilt + k * 4), addr = 0;
-                char fn[96];
+                char fn[512];
                 if (!e) break;
                 if (e & 0x80000000u) snprintf(fn, sizeof(fn), "#%u", e & 0xFFFF);
                 else qw_rd_str(w, base + e + 2, fn, sizeof(fn));
@@ -271,6 +374,19 @@ static qmod *pe_map(qwin *w, const uint8_t *b, size_t n, const char *name, int i
                 x86_wr32(c, base + iat + k * 4, addr);
             }
         }
+    }
+    if (is_dll && w->started) {                  /* LoadLibrary: keep what a later reload restores */
+        uint32_t total = 0, at = 0;
+        for (i = 0; i < nsec && m->snap_n < 16; i++) {
+            const uint8_t *s = b + opt + optsz + i * 40;
+            uint32_t sz = le32(s + 8) ? le32(s + 8) : le32(s + 16);
+            if (!(le32(s + 36) & 0x80000000u) || !sz) continue;
+            m->snap_va[m->snap_n] = le32(s + 12);
+            m->snap_size[m->snap_n++] = sz;
+            total += sz;
+        }
+        m->snap = total ? (uint8_t *)malloc(total) : NULL;
+        if (m->snap) for (i = 0; i < (uint32_t)m->snap_n; i++) { x86_read_mem(c, base + m->snap_va[i], m->snap + at, m->snap_size[i]); at += m->snap_size[i]; }
     }
     if (is_dll && w->ninit < QW_MAXMOD) w->init_order[w->ninit++] = idx;   /* after its own imports */
     /* read-only protection is not applied: many old programs write to .rdata-adjacent data */
@@ -282,6 +398,14 @@ int pe_load(qwin *w, const uint8_t *b, size_t n)
     char name[64];
     qmod *m;
     lower_base(name, w->exe_path, sizeof(name));
+    {
+        char dll[1400];
+        const char *sl = strrchr(w->exe_path, '/');
+        size_t dl = sl ? (size_t)(sl - w->exe_path) : 0;
+        /* Only beside the program: the search also looks in the shared system folders. */
+        g_native_crt = sl && find_dll_file(w, "msvcrt.dll", dll, sizeof(dll)) && !strncmp(dll, w->exe_path, dl) && dll[dl] == '/';
+        if (g_native_crt) qw_log(w, "running on the program's own MSVCRT.DLL");
+    }
     m = pe_map(w, b, n, name, 0);
     if (!m) return 0;
     w->image_base = m->base;
@@ -296,6 +420,12 @@ static int name_match(qwin *w, uint32_t dir_base, uint32_t ent, uint32_t name)
 {
     x86cpu *c = &w->cpu;
     uint32_t id = x86_rd32(c, ent);
+    if (name >= 0x10000u && x86_rd16(c, name) == '#') {    /* "#1024" is resource number 1024 */
+        uint32_t n = 0, at = name + 2;
+        uint16_t ch;
+        while ((ch = x86_rd16(c, at)) >= '0' && ch <= '9') { n = n * 10u + (uint32_t)(ch - '0'); at += 2; }
+        name = n;
+    }
     if (name < 0x10000u) return !(id & 0x80000000u) && (id & 0xFFFF) == name;
     if (!(id & 0x80000000u)) return 0;
     {

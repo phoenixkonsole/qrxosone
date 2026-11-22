@@ -1,0 +1,43 @@
+# never pulled into the image (init, package management, interpreters, docs)
+# (No SDL: what only SDL2 needed stays out. Ubuntu's Mesa still links a few X11/Wayland client
+# libraries, which come with it; no X server or compositor ever runs.)
+systemd
+systemd-dev
+systemd-sysv
+libsystemd-shared
+libpam-systemd
+perl-base
+perl
+python3
+debconf
+dpkg
+apt
+adduser
+init-system-helpers
+sensible-utils
+usr-is-merged
+libpam0g
+libpam-modules
+libpam-modules-bin
+libpam-runtime
+login
+passwd
+dbus-session-bus-common
+dbus-user-session
+dbus-bin
+libpipewire-0.3-0t64
+libsndio7.0
+libjack-jackd2-0
+libsdl2-2.0-0
+libpulse0
+libdecor-0-0
+libxkbcommon0
+libxcursor1
+libxi6
+libxrandr2
+libxss1
+libxinerama1
+libgles2
+libglx-mesa0
+libglx0
+libgl1

@@ -1,0 +1,5 @@
+TAS spinlock: 3000000 increments, exact
+CAS.L: 3000000 increments, exact
+message passing: 0 order violations
+parallel: one loop 1.029 s, both 1.037 s, speedup 1.98x, core 1 ran 2999999986 instructions
+core 1: all checks passed

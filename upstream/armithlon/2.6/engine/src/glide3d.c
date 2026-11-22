@@ -11,7 +11,7 @@ static uint32_t be32(const uint8_t *p){return ((uint32_t)p[0]<<24)|((uint32_t)p[
 static int32_t sbe32(const uint8_t *p){return (int32_t)be32(p);}
 static int valid_region(const QRXVM *v,uint32_t addr,uint64_t bytes){
     uint64_t end=(uint64_t)addr+bytes;
-    return v->ram.data && !(addr&3u) && bytes>0 && end<=v->ram.size && end<=QRX_IO_BASE &&
+    return v->ram.data && !(addr&3u) && bytes>0 && end<=v->ram.size && (end<=QRX_IO_BASE||addr>=(uint64_t)QRX_IO_BASE+QRX_IO_LENGTH) &&
         (end<=QRX_GFX_FRAMEBUFFER || addr >= (uint64_t)QRX_GFX_FRAMEBUFFER+(uint64_t)QRX_GFX_PITCH*QRX_GFX_HEIGHT);
 }
 static uint8_t clamp8(double n){if(n<0.0)return 0;if(n>255.0)return 255;return (uint8_t)(n+0.5);}

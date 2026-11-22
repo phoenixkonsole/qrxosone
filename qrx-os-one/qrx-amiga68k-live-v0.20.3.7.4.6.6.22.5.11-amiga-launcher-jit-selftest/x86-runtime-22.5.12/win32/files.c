@@ -66,6 +66,10 @@ static int ieq(const char *a, const char *b)
     return *a == *b;
 }
 
+/* Levels above the program's folder that the last path climbed: games often keep their data
+ * in ..\\data, and the program's folder is the root of the Windows paths here. */
+static int g_above;
+
 /* Windows path -> path relative to the root ("a/b/c"), with . and .. resolved */
 static void win_rel(const char *in, char *out, size_t max)
 {
@@ -73,6 +77,7 @@ static void win_rel(const char *in, char *out, size_t max)
     int n = 0, i;
     size_t k = 0;
     const char *p = in;
+    g_above = 0;
     if (isalpha((unsigned char)p[0]) && p[1] == ':') p += 2;                     /* drive letter */
     if (p[0] == '\\' || p[0] == '/') snprintf(tmp, sizeof(tmp), "%s", p + 1);
     else snprintf(tmp, sizeof(tmp), "%s%s%s", g_cwd, g_cwd[0] ? "/" : "", p);
@@ -83,7 +88,7 @@ static void win_rel(const char *in, char *out, size_t max)
             t = strchr(s, '/');
             if (t) *t = 0;
             if (!*s || !strcmp(s, ".")) {}
-            else if (!strcmp(s, "..")) { if (n) n--; }
+            else if (!strcmp(s, "..")) { if (n) n--; else g_above++; }
             else if (n < 64) comp[n++] = s;
             s = t ? t + 1 : NULL;
         }
@@ -104,6 +109,14 @@ static void host_path(const char *rel, char *out, size_t max)
     char cur[1200], part[256];
     const char *s = rel;
     snprintf(cur, sizeof(cur), "%s", g_root[0] ? g_root : ".");
+    {
+        int up;
+        for (up = 0; up < g_above; up++) {
+            char *b = strrchr(cur, '/');
+            if (b) *b = 0;
+            else if ((b = strchr(cur, ':')) != NULL) b[1] = 0;
+        }
+    }
     while (*s) {
         const char *t = strchr(s, '/');
         size_t L = t ? (size_t)(t - s) : strlen(s);
@@ -134,7 +147,50 @@ static void map_path(qwin *w, const char *win, char *host, size_t max)
     char rel[1024];
     init_root(w);
     win_rel(win, rel, sizeof(rel));
+#ifdef __AROS__
+    /* C:\ is the program's folder, but C:\WINDOWS is one place for all of them: what an
+       installer puts there has to reach the game it installed. */
+    if (!g_above && !strncasecmp(rel, "windows", 7) && (rel[7] == 0 || rel[7] == '/') &&
+        ((isalpha((unsigned char)win[0]) && win[1] == ':') || win[0] == '\\' || win[0] == '/')) {
+        char keep[sizeof(g_root)];
+        static int made;
+        if (!made) { made = 1; mkdir("SYS:WINDOWS", 0777); mkdir("SYS:WINDOWS/SYSTEM", 0777); }
+        memcpy(keep, g_root, sizeof(keep));
+        strcpy(g_root, "SYS:");
+        host_path(rel, host, max);
+        memcpy(g_root, keep, sizeof(keep));
+        return;
+    }
+#endif
+    /* An installer running elsewhere stored C:\\GAMES\\X, and C:\\ here is GAMES\\X itself:
+       drop what the program's own folder already says. */
+    if (!g_above && ((isalpha((unsigned char)win[0]) && win[1] == ':') || win[0] == '\\')) {
+        size_t rl = strlen(g_root), k;
+        for (k = strlen(rel); k > 0; k--) {
+            if (rel[k] != 0 && rel[k] != '/') continue;
+            if (k < rl && (g_root[rl - k - 1] == '/' || g_root[rl - k - 1] == ':') && !strncasecmp(g_root + rl - k, rel, k)) {
+                memmove(rel, rel + k + (rel[k] == '/'), strlen(rel + k + (rel[k] == '/')) + 1);
+                break;
+            }
+        }
+    }
     host_path(rel, host, max);
+}
+
+/* For CreateProcess: a child sees the same drive C: as the program that started it. */
+void qw_fs_map(qwin *w, const char *win, char *host, size_t max) { map_path(w, win, host, max); }
+void qw_fs_rel(qwin *w, const char *win, char *rel, size_t max) { init_root(w); win_rel(win, rel, max); }
+void qw_fs_state(qwin *w, char *root, size_t rmax, char *cwd, size_t cmax)
+{
+    init_root(w);
+    snprintf(root, rmax, "%s", g_root);
+    snprintf(cwd, cmax, "%s", g_cwd);
+}
+void qw_fs_inherit(const char *root, const char *cwd)
+{
+    snprintf(g_root, sizeof(g_root), "%s", root);
+    snprintf(g_cwd, sizeof(g_cwd), "%s", cwd);
+    g_init = 1;
 }
 
 static void rd_path(qwin *w, uint32_t p, int wide, char *out, int max)
@@ -273,6 +329,25 @@ static uint32_t file_attrs(qwin *w, uint32_t p, int wide)
     return S_ISDIR(st.st_mode) ? 0x10u : 0x80u;               /* DIRECTORY / NORMAL */
 }
 FN(f_GetFileAttributesA) { return file_attrs(w, a[0], 0); }
+/* SearchPathA(path, file, ext, buflen, buf, filepart): the program's directory only. */
+FN(f_SearchPathA) {
+    char name[300], ext[32], host[1200], full[340];
+    struct stat st;
+    uint32_t i, n, part;
+    qw_rd_str(w, a[1], name, sizeof(name));
+    ext[0] = 0;
+    if (a[2] && !strchr(name, '.')) qw_rd_str(w, a[2], ext, sizeof(ext));
+    snprintf(full, sizeof(full), "%s%s", name, ext);
+    map_path(w, full, host, sizeof(host));
+    if (stat(host, &st)) return 0;
+    n = (uint32_t)strlen(full) + 3;
+    if (n + 1 > a[3]) return n + 1;
+    x86_wr8(C, a[4], 'C'); x86_wr8(C, a[4] + 1, ':'); x86_wr8(C, a[4] + 2, '\\');
+    for (i = 0; i <= strlen(full); i++) x86_wr8(C, a[4] + 3 + i, (uint8_t)full[i]);
+    part = a[4] + 3;
+    if (a[5]) WR32(a[5], part);
+    return n;
+}
 FN(f_GetFileAttributesW) { return file_attrs(w, a[0], 1); }
 FN(f_SetFileAttributesA) { UNUSED; return 1; }
 static uint32_t del_file(qwin *w, uint32_t p, int wide) { char win[600], host[1200]; rd_path(w, p, wide, win, sizeof(win)); map_path(w, win, host, sizeof(host)); return remove(host) == 0; }
@@ -303,6 +378,15 @@ static uint32_t put_str(qwin *w, uint32_t dst, uint32_t max, const char *s, int 
     for (i = 0; i <= n; i++) { if (wide) x86_wr16(C, dst + i * 2, (uint8_t)s[i]); else x86_wr8(C, dst + i, (uint8_t)s[i]); }
     return n;
 }
+int qw_fs_cwd_host(qwin *w, char *out, size_t max)
+{
+    size_t L;
+    init_root(w);
+    if (!g_cwd[0]) return 0;                     /* the root is the program's folder */
+    L = strlen(g_root);
+    return snprintf(out, max, "%s%s%s", g_root, L && g_root[L - 1] != ':' && g_root[L - 1] != '/' ? "/" : "", g_cwd) < (int)max;
+}
+void qw_fs_cwd_win(qwin *w, char *out, int max) { init_root(w); full_of(g_cwd, out, max); }
 FN(f_GetCurrentDirectoryA) { char b[600]; init_root(w); full_of(g_cwd, b, sizeof(b)); return put_str(w, a[1], a[0], b, 0); }
 FN(f_GetCurrentDirectoryW) { char b[600]; init_root(w); full_of(g_cwd, b, sizeof(b)); return put_str(w, a[1], a[0], b, 1); }
 static uint32_t set_cwd(qwin *w, uint32_t p, int wide)
@@ -454,7 +538,12 @@ static uint32_t do_fopen(qwin *w, const char *win, const char *mode)
     if (i < 0) { fclose(fp); return 0; }
     g_f[i].f = fp;
     g_f[i].text = !strchr(mode, 'b');
-    g_f[i].gfile = qw_alloc(w, 32);           /* opaque guest FILE (its fields are not used) */
+    /* The guest FILE: its fields are not used, but MinGW's C runtime locks a stream outside its
+     * own _iob table through the CRITICAL_SECTION that follows the 32-byte FILE (_FILEX), so
+     * that comes with it, zeroed (no owner). Without it fprintf waited in EnterCriticalSection
+     * on whatever the next allocation left there (a window's data in the AROS guest). */
+    g_f[i].gfile = qw_alloc(w, 32 + 24);
+    if (g_f[i].gfile) { uint32_t k; for (k = 0; k < 32 + 24; k += 4) WR32(g_f[i].gfile + k, 0); }
     if (w->verbose) qw_log(w, "fopen(%s, %s) -> %s", win, mode, host);
     return g_f[i].gfile;
 }
@@ -592,6 +681,33 @@ FN(f_stat) {
     WR32(a[1] + 24, (uint32_t)st.st_mtime); WR32(a[1] + 28, (uint32_t)st.st_mtime); WR32(a[1] + 32, (uint32_t)st.st_mtime);
     return 0;
 }
+/* struct _stati64: mode 6, nlink 8, size 24 (64-bit), atime 32, mtime 36, ctime 40 */
+static void fill_stati64(qwin *w, uint32_t out, const struct stat *st)
+{
+    uint32_t i;
+    for (i = 0; i < 48; i += 4) WR32(out + i, 0);
+    x86_wr16(C, out + 6, S_ISDIR(st->st_mode) ? 0x41FFu : 0x81B6u);
+    x86_wr16(C, out + 8, 1);
+    WR32(out + 24, (uint32_t)st->st_size);
+    WR32(out + 28, (uint32_t)((uint64_t)st->st_size >> 32));
+    WR32(out + 32, (uint32_t)st->st_mtime); WR32(out + 36, (uint32_t)st->st_mtime); WR32(out + 40, (uint32_t)st->st_mtime);
+}
+FN(f_stati64) {
+    char n[600], host[1200];
+    struct stat st;
+    qw_rd_str(w, a[0], n, sizeof(n));
+    map_path(w, n, host, sizeof(host));
+    if (stat(host, &st)) return 0xFFFFFFFFu;
+    fill_stati64(w, a[1], &st);
+    return 0;
+}
+FN(f_fstati64) {
+    qfile *f = fdf(a[0]);
+    struct stat st;
+    if (!f || fstat(fileno(f->f), &st)) return 0xFFFFFFFFu;
+    fill_stati64(w, a[1], &st);
+    return 0;
+}
 /* _findfirst: struct _finddata_t: attrib 0, time_create 4, time_access 8, time_write 12, size 16, name 20 */
 static int fd_conv(qwin *w, uint32_t tmp, uint32_t out)
 {
@@ -623,6 +739,7 @@ const qhle qw_files[] = {
     K("CreateFileA", f_CreateFileA, 7), K("CreateFileW", f_CreateFileW, 7), K("ReadFile", f_ReadFile, 5), K("WriteFile", f_WriteFile, 5),
     K("SetFilePointer", f_SetFilePointer, 4), K("GetFileSize", f_GetFileSize, 2), K("GetFileType", f_GetFileType, 1),
     K("FlushFileBuffers", f_FlushFileBuffers, 1), K("SetEndOfFile", f_SetEndOfFile, 1), K("GetFileTime", f_GetFileTime, 4),
+    K("SearchPathA", f_SearchPathA, 6),
     K("GetFileAttributesA", f_GetFileAttributesA, 1), K("GetFileAttributesW", f_GetFileAttributesW, 1), K("SetFileAttributesA", f_SetFileAttributesA, 2),
     K("DeleteFileA", f_DeleteFileA, 1), K("DeleteFileW", f_DeleteFileW, 1), K("CreateDirectoryA", f_CreateDirectoryA, 2),
     K("CreateDirectoryW", f_CreateDirectoryW, 2), K("RemoveDirectoryA", f_RemoveDirectoryA, 1), K("MoveFileA", f_MoveFileA, 2),
@@ -640,6 +757,7 @@ const qhle qw_files[] = {
     M("_open", f_open), M("_wopen", f_wopen), M("_read", f_read), M("_write", f_write), M("_close", f_close), M("_lseek", f_lseek),
     M("_tell", f_tell), M("_eof", f_eof), M("_filelength", f_filelength), M("_access", f_access), M("remove", f_remove),
     M("_unlink", f_remove), M("rename", f_rename), M("_mkdir", f_mkdir), M("_chdir", f_chdir), M("_getcwd", f_getcwd),
+    M("_stati64", f_stati64), M("_fstati64", f_fstati64),
     M("_stat", f_stat), M("_findfirst", f_findfirst), M("_findnext", f_findnext), M("_findclose", f_findclose),
     { NULL, NULL, 0, NULL }
 };

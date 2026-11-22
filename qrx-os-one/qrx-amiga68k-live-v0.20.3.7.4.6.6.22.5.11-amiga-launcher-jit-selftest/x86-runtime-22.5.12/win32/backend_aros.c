@@ -48,6 +48,7 @@ typedef struct bew {
     APTR lock[2];
     UBYTE *fbaddr[2];
     int fbn, fbshown;
+    uint32_t pal_gen, buf_pal_gen[2];
     ULONG fbpitch;
     char title[260];
     qsurf mb;
@@ -77,17 +78,18 @@ static void latin1(char *d, const wchar16 *s, int max)
     d[i] = 0;
 }
 
-/* DirectDraw exclusive mode: an own 8-bit screen with a borderless backdrop window,
- * like Amiga games; returns 0 if no such display mode/screen is available */
+/* DirectDraw exclusive mode: an own screen of the mode's depth with a borderless backdrop
+ * window, like Amiga games; returns 0 if no such display mode/screen is available */
 static int open_fullscreen(qwin *w, qwnd *t, bew *b)
 {
     ULONG id = INVALID_ID;
-    if (w->verbose) qw_log(w, "AROS backend: looking for a %dx%dx8 display mode", t->fs_w, t->fs_h);
-    if (CyberGfxBase) id = BestCModeIDTags(CYBRBIDTG_NominalWidth, (ULONG)t->fs_w, CYBRBIDTG_NominalHeight, (ULONG)t->fs_h, CYBRBIDTG_Depth, 8, TAG_DONE);
-    if (id == INVALID_ID) id = BestModeID(BIDTAG_NominalWidth, (ULONG)t->fs_w, BIDTAG_NominalHeight, (ULONG)t->fs_h, BIDTAG_Depth, 8, TAG_DONE);
+    ULONG depth = t->fs_bpp > 8 ? (ULONG)t->fs_bpp : 8;
+    if (w->verbose) qw_log(w, "AROS backend: looking for a %dx%dx%d display mode", t->fs_w, t->fs_h, (int)depth);
+    if (CyberGfxBase) id = BestCModeIDTags(CYBRBIDTG_NominalWidth, (ULONG)t->fs_w, CYBRBIDTG_NominalHeight, (ULONG)t->fs_h, CYBRBIDTG_Depth, depth, TAG_DONE);
+    if (id == INVALID_ID) if (depth == 8) id = BestModeID(BIDTAG_NominalWidth, (ULONG)t->fs_w, BIDTAG_NominalHeight, (ULONG)t->fs_h, BIDTAG_Depth, 8, TAG_DONE);
     if (id == INVALID_ID) { qw_log(w, "AROS: no %dx%d 8-bit display mode, staying in a window", t->fs_w, t->fs_h); return 0; }
     if (w->verbose) qw_log(w, "AROS backend: mode %08lx, opening screen", (unsigned long)id);
-    b->scr = OpenScreenTags(NULL, SA_DisplayID, id, SA_Width, (ULONG)t->fs_w, SA_Height, (ULONG)t->fs_h, SA_Depth, 8,
+    b->scr = OpenScreenTags(NULL, SA_DisplayID, id, SA_Width, (ULONG)t->fs_w, SA_Height, (ULONG)t->fs_h, SA_Depth, depth,
                             SA_Quiet, TRUE, SA_ShowTitle, FALSE, SA_Type, CUSTOMSCREEN, SA_Title, (IPTR)"QRX DirectDraw", TAG_DONE);
     if (!b->scr) { qw_log(w, "AROS: OpenScreen %dx%dx8 failed, staying in a window", t->fs_w, t->fs_h); return 0; }
     if (w->verbose) qw_log(w, "AROS backend: screen open, opening backdrop window");
@@ -106,13 +108,23 @@ static int open_fullscreen(qwin *w, qwnd *t, bew *b)
 static void ar_create(qwin *w, qwnd *t)
 {
     bew *b = (bew *)calloc(1, sizeof(bew));
-    int popup = (t->style & WS_POPUP) && !(t->style & WS_CAPTION);
+    int popup = (t->style & WS_POPUP) && !(t->style & WS_CAPTION) && !t->force_frame;
     if (!b) return;
+    if (t->force_frame && g_scr) {                  /* a fullscreen program in a window: centre it */
+        int bw = g_scr->WBorLeft + g_scr->WBorRight, bh = g_scr->WBorTop + g_scr->Font->ta_YSize + 1 + g_scr->WBorBottom;
+        t->x = (g_scr->Width - t->cw - bw) / 2 + g_scr->WBorLeft;
+        t->y = (g_scr->Height - t->ch - bh) / 2 + g_scr->WBorTop + g_scr->Font->ta_YSize + 1;
+        if (t->x < g_scr->WBorLeft) t->x = g_scr->WBorLeft;
+        if (t->y < g_scr->WBorTop + g_scr->Font->ta_YSize + 1) t->y = g_scr->WBorTop + g_scr->Font->ta_YSize + 1;
+    }
     if (t->fs_w > 0 && open_fullscreen(w, t, b)) {
         b->h = t->h;
         b->win->UserPort = g_port;
         b->win->UserData = (APTR)b;
-        ModifyIDCMP(b->win, IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_ACTIVEWINDOW);
+        ModifyIDCMP(b->win, IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_ACTIVEWINDOW | IDCMP_INACTIVEWINDOW);
+        /* A screen opened right after closing another one does not always get the input. */
+        ScreenToFront(b->scr);
+        ActivateWindow(b->win);
         t->be = b;
         t->present = 1;
         b->full = 1;
@@ -121,6 +133,10 @@ static void ar_create(qwin *w, qwnd *t)
     b->h = t->h;
     b->mbh = user_menubar_height(w, t);
     latin1(b->title, t->text, sizeof(b->title));
+    /* Programs centre their window with screen metrics of a display that is not this
+     * one: never leave a window off screen. */
+    if (t->x < 0 || (g_scr && t->x >= g_scr->Width)) t->x = g_scr ? (g_scr->Width > t->cw ? (g_scr->Width - t->cw) / 2 : 0) : 0;
+    if (t->y < 0 || (g_scr && t->y >= g_scr->Height)) t->y = g_scr ? (g_scr->Height > t->ch ? (g_scr->Height - t->ch) / 2 : b->mbh) : b->mbh;
     b->win = OpenWindowTags(NULL,
         WA_Left, t->x - (popup ? 0 : g_scr->WBorLeft), WA_Top, t->y - b->mbh - (popup ? 0 : g_scr->WBorTop + g_scr->Font->ta_YSize + 1),
         WA_InnerWidth, t->cw, WA_InnerHeight, t->ch + b->mbh,
@@ -133,7 +149,7 @@ static void ar_create(qwin *w, qwnd *t)
     if (!b->win) { free(b); qw_log(w, "AROS: OpenWindow failed"); return; }
     b->win->UserPort = g_port;
     b->win->UserData = (APTR)b;
-    ModifyIDCMP(b->win, IDCMP_CLOSEWINDOW | IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_ACTIVEWINDOW | IDCMP_REFRESHWINDOW | IDCMP_CHANGEWINDOW);
+    ModifyIDCMP(b->win, IDCMP_INACTIVEWINDOW | IDCMP_CLOSEWINDOW | IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_ACTIVEWINDOW | IDCMP_REFRESHWINDOW | IDCMP_CHANGEWINDOW);
     t->be = b;
     t->present = 1;
     b->full = 1;
@@ -222,6 +238,7 @@ static void ar_present(qwin *w, qwnd *t)
         user_render_menubar(w, t, &b->mb);
         blit(b->win, b->mb.pix, t->cw, b->win->BorderLeft, b->win->BorderTop, t->cw, mbh);
     }
+    if (t->frame_direct) { b->full = 0; return; }    /* the empty surf must not cover the frame */
     {
         int x0 = 0, y0 = 0, x1 = t->cw < t->surf.w ? t->cw : t->surf.w, y1 = t->ch < t->surf.h ? t->ch : t->surf.h;
         if (!b->full && t->px1 > t->px0 && t->py1 > t->py0) {       /* only the changed area */
@@ -257,7 +274,7 @@ static void ar_menu(qwin *w, qwnd *t) { t->present = 1; if (t->be) ((bew *)t->be
  * PrBoom-plus's screen melt run with negative tics, i.e. ~2^32 iterations) */
 static uint64_t g_last_now, g_back_max;
 static unsigned g_back_n;
-static uint64_t ar_now(qwin *w)
+static uint64_t ar_clock(qwin *w)
 {
     struct timeval tv;
     uint64_t t;
@@ -270,6 +287,16 @@ static uint64_t ar_now(qwin *w)
         return g_last_now;
     }
     return g_last_now = t;
+}
+/* Windows tick counts start small, at boot. Programs such as Doom95 multiply the value
+ * in 32 bits, which an epoch-sized number overflows into nonsense. */
+static uint64_t ar_now(qwin *w)
+{
+    static uint64_t base;
+    uint64_t t = ar_clock(w);
+    if (!base) base = t - 60000u;
+    qw_ec64_mix(w);                 /* QRX OS One 64: keep the board's sound ring filled */
+    return t - base;
 }
 
 /* raw key -> Windows virtual key */
@@ -297,6 +324,8 @@ static int vk_of_raw(UWORD code, int ch)
     return 0;
 }
 
+/* The virtual key each raw key went down as, so its release names the same key */
+static uint8_t g_down_vk[128];
 static int translate(qwin *w, struct IntuiMessage *im, qevent *ev)
 {
     bew *b = (bew *)im->IDCMPWindow->UserData;
@@ -331,18 +360,39 @@ static int translate(qwin *w, struct IntuiMessage *im, qevent *ev)
         case MIDDLEUP: ev->type = QE_MOUSEUP; ev->button = 3; return 1;
         }
         return 0;
+    case IDCMP_INACTIVEWINDOW: {                    /* key releases now go elsewhere: let go of all */
+        int vk;
+        for (vk = 1; vk < 256; vk++)
+            if (w->keystate[vk] & 0x80) { w->keystate[vk] = 0; qw_dinput_key(w, vk, 0); }
+        memset(g_down_vk, 0, sizeof(g_down_vk));
+        return 0; }
     case IDCMP_RAWKEY: {
         struct InputEvent ie;
         char buf[8];
         LONG n;
+        uint8_t *down_vk = g_down_vk;
+        UWORD raw = im->Code & 0x7F;
         memset(&ie, 0, sizeof(ie));
         ie.ie_Class = IECLASS_RAWKEY;
-        ie.ie_Code = im->Code & 0x7F;
+        ie.ie_Code = raw;
+        /* Games take their pace from the held state. Windows programs get the repeat. */
+        if ((im->Qualifier & IEQUALIFIER_REPEAT) && w->frames > 0) return 0;
         ie.ie_Qualifier = im->Qualifier;
         n = MapRawKey(&ie, (STRPTR)buf, sizeof(buf), NULL);
         ev->ch = n == 1 ? (unsigned char)buf[0] : 0;
-        ev->vk = vk_of_raw(im->Code & 0x7F, ev->ch);
-        ev->type = (im->Code & 0x80) ? QE_KEYUP : QE_KEYDOWN;
+        /* The virtual key is the key itself. Taken with Ctrl, Alt or Shift held, the
+         * character can be anything or nothing, and the key press would be lost. */
+        if (im->Code & 0x80) {
+            ev->vk = down_vk[raw];
+            ev->type = QE_KEYUP;
+            down_vk[raw] = 0;
+            return ev->vk != 0;
+        }
+        ie.ie_Qualifier = 0;
+        n = MapRawKey(&ie, (STRPTR)buf, sizeof(buf), NULL);
+        ev->vk = vk_of_raw(raw, n == 1 ? (unsigned char)buf[0] : 0);
+        down_vk[raw] = (uint8_t)ev->vk;
+        ev->type = QE_KEYDOWN;
         return ev->vk != 0;
     }
     }
@@ -351,6 +401,13 @@ static int translate(qwin *w, struct IntuiMessage *im, qevent *ev)
 
 static int ar_wait(qwin *w, uint32_t timeout, qevent *ev)
 {
+    {
+        static int said;
+        if (!said && w->verbose) {
+            said = 1;
+            qw_log(w, "AROS backend: code at %p, signals: port %d, timer %d", (void *)ar_init, g_port ? g_port->mp_SigBit : -1, g_topen ? g_tport->mp_SigBit : -1);
+        }
+    }
     for (;;) {
         struct IntuiMessage *im = (struct IntuiMessage *)GetMsg(g_port);
         if (im) {
@@ -362,6 +419,8 @@ static int ar_wait(qwin *w, uint32_t timeout, qevent *ev)
             continue;
         }
         if (!timeout) return 0;
+        /* While sound plays, wake often enough to mix: the board's ring holds about 85 ms. */
+        if (qw_ec64_playing() && timeout > 20) timeout = 20;
         {
             ULONG sigs = (1UL << g_port->mp_SigBit) | SIGBREAKF_CTRL_C, got;
             if (g_topen) {
@@ -471,6 +530,108 @@ static void ar_present8(qwin *w, qwnd *t, const uint8_t *pix, int pitch, const u
     }
 }
 
+/* Copies a whole 16 or 32-bit frame. The RTG bitmap is big endian, the guest writes little
+ * endian; even at 640x480 this loop is about a millisecond on the 68k JIT. */
+static int ar_present_deep(qwin *w, qwnd *t, uint32_t guest, int pitch, int sw, int sh, int bpp)
+{
+    bew *b = (bew *)t->be;
+    IPTR addr = 0;
+    ULONG bpr = 0, fmt = 0;
+    APTR lock;
+    int y;
+    if (!b || !b->scr || !CyberGfxBase) return 0;
+    lock = LockBitMapTags(b->scr->RastPort.BitMap, LBMI_BASEADDRESS, (IPTR)&addr, LBMI_BYTESPERROW, (IPTR)&bpr, LBMI_PIXFMT, (IPTR)&fmt, TAG_DONE);
+    if (!lock) return 0;
+    for (y = 0; y < sh; y++) {
+        uint8_t *d = (uint8_t *)addr + (size_t)y * bpr;
+        x86_read_mem(&w->cpu, guest + (uint32_t)y * (uint32_t)pitch, d, (uint32_t)sw * (uint32_t)bpp / 8u);
+        if (bpp == 16 && fmt != PIXFMT_RGB16PC) {
+            uint16_t *p = (uint16_t *)d;
+            int x;
+            for (x = 0; x < sw; x++) p[x] = (uint16_t)((p[x] << 8) | (p[x] >> 8));
+        } else if (bpp == 32 && fmt != PIXFMT_BGRA32) {
+            uint32_t *p = (uint32_t *)d;
+            int x;
+            for (x = 0; x < sw; x++) {
+                uint32_t v = p[x];
+                p[x] = (v >> 24) | ((v >> 8) & 0xFF00u) | ((v << 8) & 0xFF0000u) | (v << 24);
+            }
+        }
+    }
+    UnLockBitMap(lock);
+    return 1;
+}
+
+/* Host conversion through the door. dst is guest RAM, in the format asked for. */
+enum { DOOR_FMT_LUT8 = 0, DOOR_FMT_ARGB32 = 1, DOOR_FMT_BGRA32 = 2, DOOR_FMT_RGB16 = 3, DOOR_FMT_RGB16PC = 4 };
+static int door_frame(qwin *w, uint32_t guest, int pitch, int sw, int sh, int bpp, void *dst, ULONG bpr, int fmt, const uint32_t *pal)
+{
+    static uint32_t q[32];
+    q[0] = 5;
+    q[3] = guest; q[4] = (uint32_t)pitch; q[5] = (uint32_t)sw; q[6] = (uint32_t)sh; q[7] = (uint32_t)bpp;
+    q[8] = (uint32_t)(uintptr_t)dst; q[9] = (uint32_t)bpr; q[10] = (uint32_t)fmt; q[11] = (uint32_t)(uintptr_t)pal;
+    q[12] = 0;
+    if (!x86_door_call(&w->cpu, q)) return 0;
+    return q[12] != 0;
+}
+static int ar_present_frame(qwin *w, qwnd *t, uint32_t guest, int pitch, int sw, int sh, int bpp, const uint32_t *pal)
+{
+    static uint8_t *buf;
+    static size_t bufn;
+    bew *b = (bew *)t->be;
+    if (!b || !b->win || !w->cpu.door || !CyberGfxBase) return 0;
+    if (b->scr) {                                   /* own screen: straight into its bitmap */
+        IPTR addr = 0;
+        ULONG bpr = 0, fmt = 0;
+        APTR lock;
+        int dfmt, ok;
+        if (sw > t->fs_w || sh > t->fs_h) return 0;
+        if (b->scr8) {
+            if (bpp != 8) return 0;
+            if (memcmp(b->pal, pal, sizeof(b->pal))) {
+                static ULONG tab[256 * 3 + 2];
+                int i;
+                tab[0] = (256UL << 16) | 0;
+                for (i = 0; i < 256; i++) {
+                    tab[1 + i * 3] = ((pal[i] >> 16) & 0xFF) * 0x01010101u;
+                    tab[2 + i * 3] = ((pal[i] >> 8) & 0xFF) * 0x01010101u;
+                    tab[3 + i * 3] = (pal[i] & 0xFF) * 0x01010101u;
+                }
+                tab[1 + 256 * 3] = 0;
+                LoadRGB32(&b->scr->ViewPort, tab);
+                memcpy(b->pal, pal, sizeof(b->pal));
+            }
+        }
+        lock = LockBitMapTags(b->scr->RastPort.BitMap, LBMI_BASEADDRESS, (IPTR)&addr, LBMI_BYTESPERROW, (IPTR)&bpr, LBMI_PIXFMT, (IPTR)&fmt, TAG_DONE);
+        if (!lock) return 0;
+        switch (fmt) {
+        case PIXFMT_LUT8: dfmt = DOOR_FMT_LUT8; break;
+        case PIXFMT_ARGB32: dfmt = DOOR_FMT_ARGB32; break;
+        case PIXFMT_BGRA32: dfmt = DOOR_FMT_BGRA32; break;
+        case PIXFMT_RGB16: dfmt = DOOR_FMT_RGB16; break;
+        case PIXFMT_RGB16PC: dfmt = DOOR_FMT_RGB16PC; break;
+        default: dfmt = -1; break;
+        }
+        ok = dfmt >= 0 && door_frame(w, guest, pitch, sw, sh, bpp, (void *)addr, bpr, dfmt, pal);
+        UnLockBitMap(lock);
+        return ok;
+    }
+    /* A window: other windows can cover it, so the system must do the last copy. */
+    if (!g_truecolor) return 0;
+    {
+        size_t n = (size_t)sw * (size_t)sh * 4;
+        int x0 = b->win->BorderLeft, y0 = b->win->BorderTop + b->mbh;
+        if (n > bufn) { free(buf); buf = (uint8_t *)malloc(n); bufn = buf ? n : 0; }
+        if (!buf) return 0;
+        if (sw > t->cw) sw = t->cw;
+        if (sh > t->ch) sh = t->ch;
+        if (!door_frame(w, guest, pitch, sw, sh, bpp, buf, (ULONG)sw * 4, DOOR_FMT_ARGB32, pal)) return 0;
+        WritePixelArray(buf, 0, 0, (UWORD)(sw * 4), b->win->RPort, (UWORD)x0, (UWORD)y0, (UWORD)sw, (UWORD)sh, RECTFMT_ARGB);
+        t->frame_direct = 1;
+        return 1;
+    }
+}
+
 static void ar_reopen(qwin *w, qwnd *t)
 {
     if (w->verbose) qw_log(w, "AROS backend: reopening window %08x (%s)", t->h, t->fs_w ? "own screen" : "Workbench");
@@ -535,27 +696,40 @@ static void grab_fb(qwin *w, const UBYTE *p, ULONG pitch, const uint32_t *pal, i
     fclose(f);
     qw_log(w, "AROS backend: display buffer captured after %d frames -> %s", w->frames, w->grab_path);
 }
+static void ar_load_palette(bew *b, const uint32_t *pal)
+{
+    static ULONG tab[256 * 3 + 2];
+    int k;
+    tab[0] = (256UL << 16) | 0;
+    for (k = 0; k < 256; k++) {
+        tab[1 + k * 3] = ((pal[k] >> 16) & 0xFF) * 0x01010101u;
+        tab[2 + k * 3] = ((pal[k] >> 8) & 0xFF) * 0x01010101u;
+        tab[3 + k * 3] = (pal[k] & 0xFF) * 0x01010101u;
+    }
+    tab[1 + 256 * 3] = 0;
+    LoadRGB32(&b->scr->ViewPort, tab);
+}
 static uint8_t *ar_fb_show(qwin *w, qwnd *t, int i, const uint32_t *pal)
 {
     bew *b = (bew *)t->be;
     if (!b || i < 0 || i >= b->fbn) return NULL;
     if (memcmp(b->pal, pal, sizeof(b->pal))) {
-        static ULONG tab[256 * 3 + 2];
-        int k;
-        tab[0] = (256UL << 16) | 0;
-        for (k = 0; k < 256; k++) {
-            tab[1 + k * 3] = ((pal[k] >> 16) & 0xFF) * 0x01010101u;
-            tab[2 + k * 3] = ((pal[k] >> 8) & 0xFF) * 0x01010101u;
-            tab[3 + k * 3] = (pal[k] & 0xFF) * 0x01010101u;
-        }
-        tab[1 + 256 * 3] = 0;
-        LoadRGB32(&b->scr->ViewPort, tab);
+        ar_load_palette(b, pal);
         memcpy(b->pal, pal, sizeof(b->pal));
+        b->pal_gen++;
+        b->buf_pal_gen[b->fbshown] = b->pal_gen;
     }
     if (b->fbn > 1 && i != b->fbshown) {             /* page flip */
         int k;
         for (k = 0; k < 50 && !ChangeScreenBuffer(b->scr, b->sb[i]); k++) WaitTOF();
         b->fbshown = i;
+        /* The driver keeps a palette per bitmap and loads it on every flip, so a
+         * buffer that missed the last change would show the old colours, and until
+         * its first load nothing but black. */
+        if (b->buf_pal_gen[i] != b->pal_gen) {
+            ar_load_palette(b, pal);
+            b->buf_pal_gen[i] = b->pal_gen;
+        }
         {   /* the driver may have moved the bitmap into video memory to show it */
             IPTR addr = 0;
             APTR l = LockBitMapTags(b->sb[i]->sb_BitMap, LBMI_BASEADDRESS, (IPTR)&addr, TAG_DONE);
@@ -567,5 +741,5 @@ static uint8_t *ar_fb_show(qwin *w, qwnd *t, int i, const uint32_t *pal)
 }
 
 const qbackend qw_aros = { "aros", ar_init, ar_create, ar_destroy, ar_present, ar_title, ar_menu, ar_wait, ar_now, ar_shutdown, ar_present8, ar_reopen,
-                           ar_fb_open, ar_fb_show, ar_fb_close };
+                           ar_fb_open, ar_fb_show, ar_fb_close, ar_present_deep, ar_present_frame };
 #endif

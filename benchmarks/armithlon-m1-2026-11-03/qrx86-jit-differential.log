@@ -1,0 +1,5 @@
+100% tests passed out of 60
+[QRX86-JIT] blocks=536360 enters=536361 interp=599922 kills=200003 volatile=0 flushes=1 code=68624KB
+self-modifying code seen
+budget ends a linked loop
+200000 cases, 0 differ

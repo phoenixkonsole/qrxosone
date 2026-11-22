@@ -1,0 +1,42 @@
+#!/bin/sh
+# QRX ARMithlon Pi 4: everything the appliance needs before QRX OS One starts.
+export PATH=/usr/sbin:/usr/bin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mkdir -p /dev/pts /dev/shm
+mount -t devpts devpts /dev/pts
+for d in /run /tmp /dev/shm; do mount -t tmpfs -o mode=1777 tmpfs $d; done
+mount -o remount,rw,noatime /
+mount -t vfat -o noatime /dev/mmcblk0p1 /boot 2>/dev/null
+echo /sbin/mdev > /proc/sys/kernel/hotplug
+mdev -s
+hostname -F /etc/hostname
+ip link set lo up
+
+# Performance: the governor stays at the highest clock (kernel default), the scheduler keeps
+# core 3 for the 68k CPU (isolcpus=3 in cmdline.txt, the session pins it there).
+for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo performance > "$g" 2>/dev/null; done
+echo never > /sys/kernel/mm/transparent_hugepage/defrag 2>/dev/null
+
+# First start: the root partition grows to the whole SD card (one reboot).
+if [ -x /usr/sbin/qrx-grow ] && [ ! -e /etc/qrx/grown ]; then /usr/sbin/qrx-grow; fi
+
+[ -s /etc/machine-id ] || tr -d - < /proc/sys/kernel/random/uuid > /etc/machine-id
+mkdir -p /run/dbus /run/wpa_supplicant /var/lib/bluetooth /data/Apps
+
+# Ethernet and Wi-Fi with DHCP; Wi-Fi networks come from QRX OS One's settings
+[ -s /etc/qrx/wpa_supplicant.conf ] || cat > /etc/qrx/wpa_supplicant.conf <<W
+ctrl_interface=/run/wpa_supplicant
+update_config=1
+country=DE
+W
+if [ -e /sys/class/net/eth0 ]; then ip link set eth0 up; udhcpc -b -S -i eth0 -p /run/udhcpc.eth0.pid >/dev/null 2>&1; fi
+if [ -e /sys/class/net/wlan0 ]; then
+  wpa_supplicant -B -D nl80211 -i wlan0 -c /etc/qrx/wpa_supplicant.conf -P /run/wpa_supplicant.pid
+  udhcpc -b -S -i wlan0 -p /run/udhcpc.wlan0.pid >/dev/null 2>&1
+fi
+
+# Bluetooth: the UART's hci0 comes up by itself (device tree + hci_uart in the kernel)
+dbus-daemon --system --fork
+/usr/libexec/bluetooth/bluetoothd -n >/run/bluetoothd.log 2>&1 &

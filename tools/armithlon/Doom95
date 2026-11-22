@@ -1,0 +1,4 @@
+; Start Doom95 from APPS:. Arguments are passed on, e.g. Execute S:Doom95 -timedemo demo3
+.KEY args/F
+CD APPS:windows_games/doom95
+C:qrx-win32 APPS:windows_games/doom95/DOOM95.EXE <args>

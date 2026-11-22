@@ -1,0 +1,172 @@
+SetClock LOAD
+
+FailAt 21
+
+If NOT EXISTS "RAM:Clipboards"
+    MakeDir "RAM:Clipboards"
+EndIf
+If NOT EXISTS "RAM:T"
+    MakeDir "RAM:T"
+EndIf
+If NOT EXISTS "RAM:ENV"
+    MakeDir "RAM:ENV"
+    Assign "ENV:" "RAM:ENV"
+EndIf
+
+Assign "T:"       "RAM:T"
+Assign "CLIPS:"   "RAM:Clipboards"
+
+; IPFS: is an assign to a normal drawer; QRX Drive shows it as a volume.
+; QRXIPFSD is the local node; QRXIPFSSync publishes changes through it.
+; Everything published there is public.
+If NOT EXISTS "SYS:Storage/IPFS"
+    MakeDir "SYS:Storage/IPFS"
+EndIf
+Assign "IPFS:" "SYS:Storage/IPFS"
+If EXISTS "C:QRXIPFSD"
+    Run >NIL: C:QRXIPFSD
+EndIf
+If EXISTS "C:QRXIPFSSync"
+    Run >NIL: C:QRXIPFSSync
+EndIf
+
+Assign "KEYMAPS:" "DEVS:Keymaps"
+Assign "LOCALE:"  "SYS:Locale"
+Assign "LIBS:"    "SYS:Classes" ADD
+Assign "FONTS:"   "SYS:Fonts"
+Assign "HELP:"    "LOCALE:Help" DEFER
+Assign "THEMES:"  "SYS:Prefs/Presets/Themes" >NIL:
+Assign "IMAGES:"  "SYS:System/Images" DEFER
+Assign "PRINTERS:" "DEVS:Printers"
+Assign "WANDERER:" "SYS:System/Wanderer" DEFER
+
+; QRX persistent payload assign - prevents volume requester for QRX:
+Assign "QRX:" "SYS:QRX" >NIL:
+If EXISTS "C:SetPatch"
+    C:SetPatch QUIET
+EndIf
+
+If EXISTS "SYS:Classes/USB"
+    Assign "USBCLASSES:" "SYS:Classes/USB"
+    ; Input is supplied by QRXHostInput on ARMithlon
+EndIf
+
+If EXISTS "SYS:DiskImages"
+    Assign "FDSK:" "SYS:DiskImages"
+EndIf
+
+; HostFS mounted by bootstrap
+; PIPE mount deferred
+
+; PIPE probe deferred
+
+Path "C:" "SYS:System" "S:" "SYS:Prefs" "SYS:Tools" "SYS:Utilities" QUIET
+
+If EXISTS "SYS:Tools/Commodities"
+    Path "SYS:Tools/Commodities" QUIET ADD
+EndIf
+
+If EXISTS "SYS:Demos"
+    Path "SYS:Demos" ADD QUIET
+EndIf
+
+If EXISTS "Sys:RexxC"
+    Path "Sys:RexxC" ADD QUIET
+EndIf
+
+Copy >NIL: "ENVARC:" "ENV:" ALL NOPRO NOREQ PAT "~(def_#?.info)"
+
+If EXISTS "ENV:SYS/theme.var"
+    Assign "THEME:" "${SYS/theme.var}"
+Else
+    Assign "THEME:" "THEMES:AROSDefault"
+EndIf
+If EXISTS "THEME:Images"
+    Assign "IMAGES:"  "THEME:Images" PREPEND
+EndIf
+
+Touch >NIL: "FONTS:__TEST__"
+If WARN
+    Makedir "RAM:Fonts"
+    Assign "FONTS:" "RAM:Fonts"
+    Copy >NIL: "SYS:Fonts" "FONTS:" ALL CLONE NOREQ
+EndIf
+Assign >NIL: "FONTS:" "FONTS:Russian" ADD
+
+If EXISTS "FONTS:__TEST__"
+    Delete "FONTS:__TEST__" QUIET
+EndIf
+
+If NOT EXISTS "FONTS:fixed.font"
+    FixFonts
+EndIf
+
+AddDataTypes REFRESH QUIET
+Assign LIBS: DEVS:Drivers ADD
+DEVS:Monitors/SAGA
+SetEnv QRXSCREEN rtg
+; QRX86 runs x86 code on the host CPU through the ARMithlon door
+C:QRXMoreMemory
+SetEnv QRX86_HOST 1
+Run <NIL: >SYS:input.log C:QRXHostInput
+QRX:C/QRXDesktop >SYS:desktop.log
+
+If EXISTS "C:PsdStackLoader"
+    PsdStackLoader >NIL:
+EndIf
+Run <NIL: >NIL: QUIET ConClip
+
+If EXISTS "C:RexxMast"
+    Assign "REXX:" "S:"
+    Run <NIL: >NIL: QUIET C:RexxMast
+EndIf
+
+If EXISTS "C:Decoration"
+    If EXISTS "ENV:SYS/theme.var"
+        C:Decoration <NIL: >NIL:
+    EndIf
+EndIf
+
+Assign EXISTS "Extras:" >NIL:
+If WARN
+    If EXISTS "$EXTRASPATH"
+        Assign "Extras:" "$EXTRASPATH"
+    Else
+        Assign "Extras:" "SYS:Extras" >NIL:
+        If WARN
+            Assign "Extras:" "NIL:" >NIL:
+        EndIf
+    EndIf
+EndIf
+
+If EXISTS "ENV:SYS/Packages"
+    List "ENV:SYS/Packages" NOHEAD FILES TO "T:P" LFORMAT="If EXISTS ${SYS/Packages/%N}*NCD ${SYS/Packages/%N}*NIf EXISTS S/%N-Startup*NExecute S/%N-Startup*NElse*NIf EXISTS S/Package-Startup*NExecute S/Package-Startup*NEndIf*NEndIf*NEndIf*N"
+    Execute "T:P"
+    Delete "T:P" QUIET
+    CD "SYS:"
+EndIf
+
+Protect "S:PCD" "s" ADD QUIET
+Protect "S:SPat" "s" ADD QUIET
+Protect "S:DPat" "s" ADD QUIET
+
+If EXISTS "S:User-Startup"
+    Execute "S:User-Startup"
+EndIf
+
+If EXISTS "WANDERER:Wanderer"
+    Echo "QRX: launching Wanderer on preserved Workbench screen" >>RAM:QRX-Startup.log
+    If EXISTS QRX:C/QRXDesktop
+        Echo "QRX: starting native QRXDesktop primary session" >>RAM:QRX-Startup.log
+        QRX:C/QRXDesktop >SYS:desktop.log
+        Echo "QRX: QRXDesktop returned; starting Wanderer fallback" >>RAM:QRX-Startup.log
+    Else
+        Echo "QRX: QRXDesktop missing; starting Wanderer fallback" >>RAM:QRX-Startup.log
+    EndIf
+    WANDERER:Wanderer
+    Echo "QRX: Wanderer command returned" >>RAM:QRX-Startup.log
+
+    If NOT ERROR
+        EndCLI
+    EndIf
+EndIf

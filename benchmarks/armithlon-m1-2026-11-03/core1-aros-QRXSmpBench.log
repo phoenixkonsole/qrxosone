@@ -1,0 +1,2 @@
+QRXSmpBench: one job 48 ticks, two jobs in parallel 53 ticks (of 50/s)
+core 0 result 371AEC01, core 1 result C996DC02, core 1 instructions 1999999992

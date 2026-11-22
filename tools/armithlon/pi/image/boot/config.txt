@@ -1,0 +1,18 @@
+# QRX ARMithlon, Raspberry Pi 4 Model B
+arm_64bit=1
+kernel=kernel8.img
+device_tree=bcm2711-rpi-4-b.dtb
+# KMS display and the V3D 3D unit (DRM_VC4 and DRM_V3D are built into the kernel)
+dtoverlay=vc4-kms-v3d-pi4
+max_framebuffers=2
+disable_overscan=1
+# sound: HDMI (vc4-hdmi) and the 3.5 mm jack (bcm2835 audio)
+dtparam=audio=on
+# the highest clock the firmware allows without overclocking (1.8 GHz on newer boards)
+arm_boost=1
+disable_splash=1
+boot_delay=0
+# Overclocking is at your own risk and needs good cooling, e.g.:
+#over_voltage=6
+#arm_freq=2000
+#gpu_freq=750

@@ -1,0 +1,102 @@
+#!/bin/sh
+# QRX ARMithlon Pi 4: Wi-Fi, Bluetooth and power for QRX OS One's settings (C:QRXWireless).
+# The engine runs this with separate arguments (door service 11, no shell in between); every
+# answer is plain text, one item per line, fields separated by tabs.
+#
+#   status                          eth0, wlan0 and Bluetooth state
+#   wifi-scan | wifi-list           start a scan | networks found: signal, security, SSID
+#   wifi-connect SSID [PASSWORD]    connect (saved for the next start), WPA-PSK or open; without a
+#                                   password: a saved network, else exit 3 "password needed" if secured
+#   wifi-forget SSID | wifi-saved   forget a network | saved networks
+#   bt-power on|off                 Bluetooth on or off
+#   bt-scan | bt-list               search for 12 s | devices: address, paired, connected, name
+#   bt-pair ADDRESS                 pair, trust and connect (in the background)
+#   bt-remove ADDRESS
+#   system 32|64                    which QRX OS One starts next (/boot/qrx.txt), then restart
+#   reboot | poweroff
+PATH=/usr/sbin:/usr/bin
+W="wpa_cli -p /run/wpa_supplicant -i wlan0"
+cmd=$1; shift 2>/dev/null
+
+mac_ok() { echo "$1" | grep -qE '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'; }
+addr_of() { ip -4 -o addr show dev "$1" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1; }
+# a value inside wpa_supplicant's double quotes: no quote, backslash or newline allowed
+wpa_text_ok() { case "$1" in *\"*|*\\*|"") return 1;; esac; [ "$(printf %s "$1" | wc -l)" -eq 0 ]; }
+net_id() { $W list_networks | awk -F'\t' -v s="$1" 'NR>1 && $2==s {print $1; exit}'; }
+
+case "$cmd" in
+status)
+    printf 'eth0\t%s\t%s\n' "$(cat /sys/class/net/eth0/operstate 2>/dev/null || echo none)" "$(addr_of eth0)"
+    if [ -e /sys/class/net/wlan0 ]; then
+        st=$($W status 2>/dev/null)
+        printf 'wlan0\t%s\t%s\t%s\n' "$(echo "$st" | sed -n 's/^wpa_state=//p')" "$(addr_of wlan0)" "$(echo "$st" | sed -n 's/^ssid=//p')"
+    else printf 'wlan0\tnone\n'; fi
+    printf 'bt\t%s\n' "$(bluetoothctl show 2>/dev/null | sed -n 's/^[[:space:]]*Powered: //p' | head -1)"
+    ;;
+wifi-scan) $W scan >/dev/null && echo ok ;;
+wifi-list)
+    $W scan_results | awk -F'\t' 'NR>1 && $5!="" {
+        sec = ($4 ~ /WPA|RSN|WEP/) ? "secured" : "open"
+        if (!($5 in best) || $3 > best[$5]) { best[$5] = $3; s[$5] = sec } }
+        END { for (n in best) printf "%s\t%s\t%s\n", best[n], s[n], n }' | sort -t"$(printf '\t')" -k1,1nr
+    ;;
+wifi-connect)
+    ssid=$1; pass=$2
+    wpa_text_ok "$ssid" || { echo "bad SSID"; exit 2; }
+    [ -z "$pass" ] || wpa_text_ok "$pass" || { echo "bad password"; exit 2; }
+    [ -z "$pass" ] || [ ${#pass} -ge 8 ] || { echo "password too short"; exit 2; }
+    id=$(net_id "$ssid")
+    if [ -z "$pass" ] && [ -n "$id" ]; then      # saved: connect with what is stored
+        $W select_network "$id" >/dev/null && $W save_config >/dev/null && echo ok; exit $?
+    fi
+    if [ -z "$pass" ] && $W scan_results | awk -F'\t' -v s="$ssid" 'NR>1 && $5==s && $4 ~ /WPA|RSN|WEP/ {f=1} END {exit !f}'; then
+        echo "password needed"; exit 3
+    fi
+    [ -n "$id" ] && $W remove_network "$id" >/dev/null
+    id=$($W add_network | tail -1)
+    $W set_network "$id" ssid "\"$ssid\"" >/dev/null || exit 1
+    if [ -n "$pass" ]; then
+        # the saved configuration holds the derived 256-bit key, not the password itself
+        key=$(wpa_passphrase "$ssid" "$pass" 2>/dev/null | sed -n 's/^[[:space:]]*psk=\([0-9a-f]\{64\}\)$/\1/p')
+        if [ -n "$key" ]; then $W set_network "$id" psk "$key" >/dev/null || exit 1
+        else $W set_network "$id" psk "\"$pass\"" >/dev/null || exit 1; fi
+    else $W set_network "$id" key_mgmt NONE >/dev/null; fi
+    $W enable_network "$id" >/dev/null && $W select_network "$id" >/dev/null && $W save_config >/dev/null && echo ok
+    ;;
+wifi-forget)
+    id=$(net_id "$1"); [ -n "$id" ] || { echo "unknown"; exit 1; }
+    $W remove_network "$id" >/dev/null && $W save_config >/dev/null && echo ok
+    ;;
+wifi-saved) $W list_networks | awk -F'\t' 'NR>1 {print $2 "\t" $4}' ;;
+bt-power)
+    case "$1" in on|off) bluetoothctl power "$1" | tail -1 ;; *) echo "on or off"; exit 2 ;; esac ;;
+bt-scan)
+    bluetoothctl power on >/dev/null 2>&1
+    (bluetoothctl --timeout 12 scan on >/dev/null 2>&1 &) ; echo ok ;;
+bt-list)
+    bluetoothctl devices | while read -r _ mac name; do
+        info=$(bluetoothctl info "$mac" 2>/dev/null)
+        p=$(echo "$info" | sed -n 's/^[[:space:]]*Paired: //p'); c=$(echo "$info" | sed -n 's/^[[:space:]]*Connected: //p')
+        printf '%s\t%s\t%s\t%s\n' "$mac" "${p:-no}" "${c:-no}" "$name"
+    done ;;
+bt-pair)
+    mac_ok "$1" || { echo "bad address"; exit 2; }
+    ( bluetoothctl --timeout 20 pair "$1"; bluetoothctl trust "$1"; bluetoothctl connect "$1" ) >/run/bt-pair.log 2>&1 &
+    echo started ;;
+bt-remove)
+    mac_ok "$1" || { echo "bad address"; exit 2; }
+    bluetoothctl remove "$1" | tail -1 ;;
+system)
+    case "$1" in 32|64) ;; *) echo "32 or 64"; exit 2 ;; esac
+    if [ "$1" = 64 ] && ! { [ -s /boot/qrx64/core.elf ] && [ -s /boot/QRXOS64.img ]; }; then
+        echo "QRX OS One 64 is not on the card (qrx64/ and QRXOS64.img on QRXBOOT)"; exit 1
+    fi
+    touch /boot/qrx.txt
+    if grep -q '^[[:space:]]*system[[:space:]]*=' /boot/qrx.txt; then
+        sed -i "s/^[[:space:]]*system[[:space:]]*=.*/system=$1/" /boot/qrx.txt
+    else echo "system=$1" >> /boot/qrx.txt; fi
+    sync; (sleep 2; reboot) >/dev/null 2>&1 & echo "restarting into the $1-bit system" ;;
+reboot) (sleep 1; reboot) >/dev/null 2>&1 & echo ok ;;
+poweroff) (sleep 1; poweroff) >/dev/null 2>&1 & echo ok ;;
+*) echo "unknown command"; exit 2 ;;
+esac

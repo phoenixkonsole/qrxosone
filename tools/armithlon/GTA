@@ -1,0 +1,3 @@
+; Start Grand Theft Auto from APPS:. Install it first with tools/armithlon/install-gta1.sh
+CD APPS:windows_games/gta1/WINO
+C:qrx-win32 "APPS:windows_games/gta1/WINO/Grand Theft Auto.exe"

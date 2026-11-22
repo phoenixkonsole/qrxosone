@@ -106,6 +106,7 @@ static x86page *pg(x86cpu *c, uint32_t a)
 
 int x86_map(x86cpu *c, uint32_t addr, uint32_t size, int writable)
 {
+    c->map_serial++;
     uint32_t a = addr & ~X86_PAGE_MASK;
     uint64_t end = (uint64_t)addr + size;
     tlb_flush(c);
@@ -129,6 +130,7 @@ int x86_map(x86cpu *c, uint32_t addr, uint32_t size, int writable)
 
 int x86_map_ext(x86cpu *c, uint32_t addr, uint32_t size, uint8_t *host, int writable)
 {
+    c->map_serial++;
     uint32_t a, off;
     if ((addr | size) & X86_PAGE_MASK) return 0;
     tlb_flush(c);
@@ -151,6 +153,7 @@ int x86_map_ext(x86cpu *c, uint32_t addr, uint32_t size, uint8_t *host, int writ
 
 int x86_protect(x86cpu *c, uint32_t addr, uint32_t size, int writable)
 {
+    c->map_serial++;
     uint32_t a = addr & ~X86_PAGE_MASK;
     uint64_t end = (uint64_t)addr + size;
     tlb_flush(c);
@@ -164,6 +167,7 @@ int x86_protect(x86cpu *c, uint32_t addr, uint32_t size, int writable)
 
 void x86_unmap(x86cpu *c, uint32_t addr, uint32_t size)
 {
+    c->map_serial++;
     uint32_t a = addr & ~X86_PAGE_MASK;
     uint64_t end = (uint64_t)addr + size;
     tlb_flush(c);
@@ -215,10 +219,16 @@ static uint8_t *rptr_slow(x86cpu *c, uint32_t a)
     c->tlb_rptr[i] = p->mem;
     return p->mem + (a & X86_PAGE_MASK);
 }
+#ifdef QRX86_HOST_JIT
+static void x86_host_code_write(x86cpu *c, uint32_t a);
+#endif
 static uint8_t *wptr_slow(x86cpu *c, uint32_t a)
 {
     x86page *p = pg(c, a);
     unsigned i = (a >> 12) & 63u;
+#ifdef QRX86_HOST_JIT
+    if (p && (p->flags & X86_PG_CODE)) x86_host_code_write(c, a);
+#endif
     if (!p || !(p->flags & X86_PG_W)) FAULT(c, X86_FAULT_PAGE, a, p ? "write to read-only memory" : "write to unmapped memory");
     c->tlb_wtag[i] = (a & ~X86_PAGE_MASK) | 1u;
     c->tlb_wptr[i] = p->mem;
@@ -716,6 +726,7 @@ static void fpush(x86cpu *c, double v)
 {
     c->top = (c->top - 1) & 7;
     c->st[c->top] = v;
+    c->st_exact[c->top] = 0;
     c->ftw &= (uint16_t)~(3u << (c->top * 2));
 }
 static void fpop(x86cpu *c)
@@ -851,6 +862,55 @@ static int trig_range(x86cpu *c)
     return 0;
 }
 
+/* D9 E0..FF without a memory operand (constants, FXAM, transcendental and the like): only the
+ * x87 state. 0 for a code that is not one of these. The host JIT calls it directly. */
+static int fpu_d9_misc(x86cpu *c, uint8_t sub)
+{
+            switch (sub) {
+            case 0xD0: return 1;                                         /* FNOP */
+            case 0xE0: ST(0) = -ST(0); return 1;
+            case 0xE1: ST(0) = fabs(ST(0)); return 1;
+            case 0xE4: fcompare(c, ST(0), 0.0); return 1;
+            case 0xE5: fxam(c); return 1;
+            case 0xE8: fpush(c, 1.0); return 1;
+            case 0xE9: fpush(c, 3.321928094887362347870); return 1;     /* log2(10) */
+            case 0xEA: fpush(c, 1.442695040888963407360); return 1;     /* log2(e) */
+            case 0xEB: fpush(c, 3.141592653589793238463); return 1;
+            case 0xEC: fpush(c, 0.301029995663981195214); return 1;     /* log10(2) */
+            case 0xED: fpush(c, 0.693147180559945309417); return 1;     /* ln(2) */
+            case 0xEE: fpush(c, 0.0); return 1;
+            case 0xF0: { double a = ST(0); ST(0) = nanfix(expm1(a * 0.693147180559945309417), a, a); return 1; }
+            case 0xF1: { double a = ST(0), b = ST(1); ST(1) = nanfix(b * (log(a) / 0.693147180559945309417), a, b); fpop(c); return 1; }
+            case 0xF2: if (trig_range(c)) return 1; { double a = ST(0); ST(0) = nanfix(tan(a), a, a); } fpush(c, 1.0); fset_cc(c, 0, 0, 0, 0); return 1;
+            case 0xF3: { double a = ST(0), b = ST(1); ST(1) = nanfix(atan2(b, a), a, b); fpop(c); return 1; }
+            case 0xF4: {                                               /* FXTRACT */
+                double v = ST(0);
+                if (isnan(v)) { fpush(c, v); return 1; }
+                if (isinf(v)) { ST(0) = INFINITY; fpush(c, v); return 1; }      /* exponent +inf, significand v */
+                if (v == 0.0) { ST(0) = -INFINITY; fpush(c, v); return 1; }     /* exponent -inf, significand v */
+                int e = 0; double fr = frexp(v, &e); ST(0) = (double)(e - 1); fpush(c, fr * 2.0); return 1;
+            }
+            case 0xF5: case 0xF8: {
+                double a = ST(0), b = ST(1), r, q;
+                r = sub == 0xF8 ? fmod(a, b) : remainder(a, b);
+                q = (a - r) / b;
+                ST(0) = r;
+                { int64_t qi = fabs(q) < 9.2e18 ? x86_d2i64(fabs(q)) : 0; fset_cc(c, (qi >> 1) & 1, 0, qi & 1, (qi >> 2) & 1); }
+                return 1;
+            }
+            case 0xF6: c->top = (c->top - 1) & 7; return 1;
+            case 0xF7: c->top = (c->top + 1) & 7; return 1;
+            case 0xF9: { double a = ST(0), b = ST(1); ST(1) = nanfix(b * (log1p(a) / 0.693147180559945309417), a, b); fpop(c); return 1; }
+            case 0xFA: { double a = ST(0); ST(0) = nanfix(a < 0 ? bits2d(X87_INDEFINITE) : qm_sqrt(a), a, a); return 1; }
+            case 0xFB: { double v = ST(0); if (trig_range(c)) return 1; ST(0) = nanfix(sin(v), v, v); fpush(c, nanfix(cos(v), v, v)); fset_cc(c, 0, 0, 0, 0); return 1; }
+            case 0xFC: ST(0) = fround(c, ST(0)); return 1;
+            case 0xFD: { double s = ST(1); s = s < 0 ? ceil(s) : floor(s); ST(0) = ldexp(ST(0), (int)s); return 1; }
+            case 0xFE: if (trig_range(c)) return 1; { double a = ST(0); ST(0) = nanfix(sin(a), a, a); } fset_cc(c, 0, 0, 0, 0); return 1;
+            case 0xFF: if (trig_range(c)) return 1; { double a = ST(0); ST(0) = nanfix(cos(a), a, a); } fset_cc(c, 0, 0, 0, 0); return 1;
+            }
+    return 0;
+}
+
 static void fpu_exec(x86cpu *c, const prefix_t *p, uint8_t op)
 {
     modrm_t m;
@@ -919,8 +979,16 @@ static void fpu_exec(x86cpu *c, const prefix_t *p, uint8_t op)
             case 1: m_w16(c, a, (uint16_t)(int16_t)fto_int(c, ST(0), 16, 1)); fpop(c); return;
             case 2: m_w16(c, a, (uint16_t)(int16_t)fto_int(c, ST(0), 16, 0)); return;
             case 3: m_w16(c, a, (uint16_t)(int16_t)fto_int(c, ST(0), 16, 0)); fpop(c); return;
-            case 5: fpush(c, (double)(int64_t)m_r64(c, a)); return;
-            case 7: m_w64(c, a, (uint64_t)fto_int(c, ST(0), 64, 0)); fpop(c); return;
+            case 5: {
+                int64_t v = (int64_t)m_r64(c, a);
+                fpush(c, (double)v);
+                c->st_int[c->top] = v; c->st_was[c->top] = c->st[c->top]; c->st_exact[c->top] = 1;
+                return; }
+            case 7:
+                if (c->st_exact[c->top] && !memcmp(&c->st_was[c->top], &c->st[c->top], sizeof(double))) m_w64(c, a, (uint64_t)c->st_int[c->top]);
+                else m_w64(c, a, (uint64_t)fto_int(c, ST(0), 64, 0));
+                fpop(c);
+                return;
             }
             break;
         }
@@ -945,43 +1013,18 @@ static void fpu_exec(x86cpu *c, const prefix_t *p, uint8_t op)
             return;
         case 0xD9:
             if (grp == 0) { double v = ST(i); fpush(c, v); return; }
-            if (grp == 1) { double t = ST(0); ST(0) = ST(i); ST(i) = t; return; }
-            switch (sub) {
-            case 0xD0: return;                                         /* FNOP */
-            case 0xE0: ST(0) = -ST(0); return;
-            case 0xE1: ST(0) = fabs(ST(0)); return;
-            case 0xE4: fcompare(c, ST(0), 0.0); return;
-            case 0xE5: fxam(c); return;
-            case 0xE8: fpush(c, 1.0); return;
-            case 0xE9: fpush(c, 3.321928094887362347870); return;     /* log2(10) */
-            case 0xEA: fpush(c, 1.442695040888963407360); return;     /* log2(e) */
-            case 0xEB: fpush(c, 3.141592653589793238463); return;
-            case 0xEC: fpush(c, 0.301029995663981195214); return;     /* log10(2) */
-            case 0xED: fpush(c, 0.693147180559945309417); return;     /* ln(2) */
-            case 0xEE: fpush(c, 0.0); return;
-            case 0xF0: { double a = ST(0); ST(0) = nanfix(expm1(a * 0.693147180559945309417), a, a); return; }
-            case 0xF1: { double a = ST(0), b = ST(1); ST(1) = nanfix(b * (log(a) / 0.693147180559945309417), a, b); fpop(c); return; }
-            case 0xF2: if (trig_range(c)) return; { double a = ST(0); ST(0) = nanfix(tan(a), a, a); } fpush(c, 1.0); fset_cc(c, 0, 0, 0, 0); return;
-            case 0xF3: { double a = ST(0), b = ST(1); ST(1) = nanfix(atan2(b, a), a, b); fpop(c); return; }
-            case 0xF4: { int e; double fr = frexp(ST(0), &e); ST(0) = (double)(e - 1); fpush(c, fr * 2.0); return; }
-            case 0xF5: case 0xF8: {
-                double a = ST(0), b = ST(1), r, q;
-                r = sub == 0xF8 ? fmod(a, b) : remainder(a, b);
-                q = (a - r) / b;
-                ST(0) = r;
-                { int64_t qi = fabs(q) < 9.2e18 ? x86_d2i64(fabs(q)) : 0; fset_cc(c, (qi >> 1) & 1, 0, qi & 1, (qi >> 2) & 1); }
+            if (grp == 1) {
+                double t = ST(0);
+                int p0 = c->top & 7, pi = (c->top + i) & 7;
+                int64_t si = c->st_int[p0];
+                double sw = c->st_was[p0];
+                uint8_t se = c->st_exact[p0];
+                ST(0) = ST(i); ST(i) = t;
+                c->st_int[p0] = c->st_int[pi]; c->st_was[p0] = c->st_was[pi]; c->st_exact[p0] = c->st_exact[pi];
+                c->st_int[pi] = si; c->st_was[pi] = sw; c->st_exact[pi] = se;
                 return;
             }
-            case 0xF6: c->top = (c->top - 1) & 7; return;
-            case 0xF7: c->top = (c->top + 1) & 7; return;
-            case 0xF9: { double a = ST(0), b = ST(1); ST(1) = nanfix(b * (log1p(a) / 0.693147180559945309417), a, b); fpop(c); return; }
-            case 0xFA: { double a = ST(0); ST(0) = nanfix(a < 0 ? bits2d(X87_INDEFINITE) : qm_sqrt(a), a, a); return; }
-            case 0xFB: { double v = ST(0); if (trig_range(c)) return; ST(0) = nanfix(sin(v), v, v); fpush(c, nanfix(cos(v), v, v)); fset_cc(c, 0, 0, 0, 0); return; }
-            case 0xFC: ST(0) = fround(c, ST(0)); return;
-            case 0xFD: { double s = ST(1); s = s < 0 ? ceil(s) : floor(s); ST(0) = ldexp(ST(0), (int)s); return; }
-            case 0xFE: if (trig_range(c)) return; { double a = ST(0); ST(0) = nanfix(sin(a), a, a); } fset_cc(c, 0, 0, 0, 0); return;
-            case 0xFF: if (trig_range(c)) return; { double a = ST(0); ST(0) = nanfix(cos(a), a, a); } fset_cc(c, 0, 0, 0, 0); return;
-            }
+            if (fpu_d9_misc(c, sub)) return;
             break;
         case 0xDA:
             if (grp <= 3) {     /* FCMOVB/E/BE/U */
@@ -1498,6 +1541,79 @@ static uint32_t budget_refill(x86cpu *c)
     return c->left;
 }
 
+#if defined(__mc68000__) || defined(__m68k__)
+/* ARMithlon host door, see engine/full68k/qrx86_door.h: the Mac runs x86 code
+ * directly from guest RAM until it reaches something only this side can do (an
+ * API thunk, INT n, a fault), which then takes one trip through exec_one. */
+#define DOOR_REG_MAGIC (*(volatile uint32_t *)0xFF000880u)
+#define DOOR_REG_GO    (*(volatile uint32_t *)0xFF000884u)
+#define DOOR_MAGIC 0x51383644u
+#define DOOR_QUANTUM 250000u
+struct door_req {
+    uint32_t r[8], eip, eflags, sreg[6], sbase[6], tls[9];
+    double st[8];
+    uint32_t top, fsw, fcw, ftw;
+    uint32_t dir, map_serial, hle_base, hle_count, stop_eip, limit;
+    uint32_t executed, status;
+    uint32_t alloc, alloc_addr, alloc_done;
+} __attribute__((packed, aligned(4)));
+int x86_door_enable(x86cpu *c)
+{
+    if (DOOR_REG_MAGIC != DOOR_MAGIC) return 0;
+    c->door = 1;
+    return 1;
+}
+int x86_door_call(x86cpu *c, uint32_t *block)
+{
+    if (!c->door) return 0;
+    block[1] = c->map_serial;
+    block[2] = (uint32_t)(uintptr_t)c->dir;
+    (*(volatile uint32_t *)0xFF00088Cu) = (uint32_t)(uintptr_t)block;
+    __asm__ volatile("" ::: "memory");
+    return 1;
+}
+/* Returns 1 when the door wants to continue: the host asked for x86 memory. */
+static int door_quantum(x86cpu *c, uint32_t stop_eip)
+{
+    static struct door_req q;
+    int i;
+    uint32_t limit = c->left < DOOR_QUANTUM ? c->left : DOOR_QUANTUM;
+    for (i = 0; i < 8; i++) { q.r[i] = c->r[i]; q.st[i] = c->st[i]; }
+    q.eip = c->eip;
+    q.eflags = x86_get_flags(c);
+    for (i = 0; i < 6; i++) { q.sreg[i] = c->sreg[i]; q.sbase[i] = c->sbase[i]; }
+    for (i = 0; i < 3; i++) {
+        q.tls[i * 3] = c->tls[i].base; q.tls[i * 3 + 1] = c->tls[i].limit; q.tls[i * 3 + 2] = (uint32_t)c->tls[i].used;
+    }
+    q.top = (uint32_t)c->top; q.fsw = c->fsw; q.fcw = c->fcw; q.ftw = c->ftw;
+    q.dir = (uint32_t)(uintptr_t)c->dir;
+    q.map_serial = c->map_serial;
+    q.hle_base = c->hle_base; q.hle_count = c->hle_count;
+    q.stop_eip = stop_eip;
+    q.limit = limit;
+    q.executed = 0;
+    DOOR_REG_GO = (uint32_t)(uintptr_t)&q;
+    __asm__ volatile("" ::: "memory");
+    for (i = 0; i < 8; i++) { c->r[i] = q.r[i]; c->st[i] = q.st[i]; }
+    c->eip = q.eip;
+    x86_set_flags(c, q.eflags);
+    for (i = 0; i < 6; i++) { c->sreg[i] = (uint16_t)q.sreg[i]; c->sbase[i] = q.sbase[i]; }
+    c->top = (int)q.top; c->fsw = (uint16_t)q.fsw; c->fcw = (uint16_t)q.fcw; c->ftw = (uint16_t)q.ftw;
+    c->left -= q.executed < c->left ? q.executed : c->left;
+    q.alloc_done = 0;
+    if (q.alloc && c->door_alloc) {
+        q.alloc_addr = c->door_alloc(c, q.alloc);
+        q.alloc_done = q.alloc;
+        return 1;
+    }
+    return 0;
+}
+#else
+int x86_door_enable(x86cpu *c) { (void)c; return 0; }
+int x86_door_call(x86cpu *c, uint32_t *block) { (void)c; (void)block; return 0; }
+#define door_quantum(c, stop) 0
+#endif
+
 /* single = 1: exactly one instruction, no budget accounting (x86_step).
  * Preserve the established interpreter path independently of JIT tuning.  The loop tests only eip: faults longjmp out, and the
  * hook call sites in exec_one longjmp out when a hook set fault or stop. */
@@ -1516,6 +1632,12 @@ static int run_loop(x86cpu *c, uint32_t stop_eip, int single)
         while (c->eip != stop_eip) {
             if (!c->left && !budget_refill(c))
                 FAULT(c, X86_FAULT_BUDGET, c->eip, "instruction budget exhausted");
+            if (c->door) {
+                if (c->yield_hook) c->yield_hook(c);
+                if (door_quantum(c, stop_eip)) continue;
+                if (c->eip == stop_eip) break;
+                if (!c->left) continue;
+            }
             c->left--;                        /* counts the instruction: before exec_one, never wraps */
             exec_one(c);
         }

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "qrxwin.h"
+#include <ctype.h>
 
 #define FN(name) static uint32_t name(qwin *w, uint32_t *a)
 #define C (&w->cpu)
@@ -20,6 +21,12 @@ enum { B_NONE = 0, B_BUTTON, B_STATIC, B_EDIT, B_DIALOG, B_LISTBOX, B_SCROLLBAR,
 static uint32_t def_window_proc(qwin *w, uint32_t h, uint32_t msg, uint32_t wp, uint32_t lp);
 static void win_destroy(qwin *w, qwnd *x);
 static void set_focus(qwin *w, uint32_t h);
+static void activate_top(qwin *w, uint32_t h);
+static qwnd *find_ctl(qwin *w, qwnd *p, uint32_t id);
+struct qsheet;
+static int sheet_proc(qwin *w, struct qsheet *s, uint32_t *a, uint32_t *ret);
+static int sheet_key(qwin *w, qwnd *f, uint32_t hwnd, uint32_t msg, uint32_t wp);
+static int g_dlg_child;                                 /* the next dialog is a page inside a frame */
 
 /* ====================================================================== handles */
 qwnd *W(qwin *w, uint32_t h)
@@ -164,6 +171,8 @@ static void show_top(qwin *w, qwnd *x)
     w->active = x->h;
 }
 
+#define QW_MAXCBT 4
+static uint32_t g_cbthook[QW_MAXCBT];    /* WH_CBT */
 static uint32_t create_window(qwin *w, uint32_t exstyle, qclass *cls, const wchar16 *title, uint32_t style,
                               int32_t x, int32_t y, int32_t cx, int32_t cy, uint32_t parent, uint32_t menu,
                               uint32_t hinst, uint32_t param)
@@ -219,6 +228,17 @@ static uint32_t create_window(qwin *w, uint32_t exstyle, qclass *cls, const wcha
         WR32(cs + 16, (uint32_t)cy); WR32(cs + 20, (uint32_t)cx); WR32(cs + 24, (uint32_t)y); WR32(cs + 28, (uint32_t)x);
         WR32(cs + 32, style); WR32(cs + 36, tp); WR32(cs + 40, cp); WR32(cs + 44, exstyle);
     }
+    /* HCBT_CREATEWND, before the window's first message: MFC attaches its object here. */
+    {
+        int k;
+        for (k = 0; k < QW_MAXCBT; k++) if (g_cbthook[k]) {
+            uint32_t g = qw_alloc(w, 8);
+            WR32(g, cs); WR32(g + 4, 0);
+            qw_call(w, g_cbthook[k], 3, 3, h, g, 0);
+            qw_free(w, g);
+            if (!W(w, h)) return 0;
+        }
+    }
     r = win_send(w, h, WM_NCCREATE, 0, cs);
     if (!W(w, h)) return 0;
     if (!r) { qw_log(w, "WM_NCCREATE refused"); win_destroy(w, n); return 0; }
@@ -254,8 +274,21 @@ static void win_destroy(qwin *w, qwnd *x)
     if (w->focus == h) w->focus = 0;
     if (w->capture == h) w->capture = 0;
     if (w->active == h) {
+        /* Windows activates the owner (else the next top-level window) and tells it: games
+         * such as Freddi Fish pause their sound while a dialog is active and resume it on
+         * WM_ACTIVATE. */
+        qwnd *n = W(w, x->owner);
+        uint32_t old_focus = w->focus;
         w->active = 0;
-        for (i = QW_MAXWND - 1; i > 0; i--) { qwnd *t = &w->wnd[i]; if (t->used && !t->destroyed && !(t->style & WS_CHILD) && t->visible) { w->active = t->h; break; } }
+        if (!n || n->destroyed || (n->style & WS_CHILD) || !n->visible) {
+            n = NULL;
+            for (i = QW_MAXWND - 1; i > 0; i--) { qwnd *t = &w->wnd[i]; if (t->used && !t->destroyed && !(t->style & WS_CHILD) && t->visible) { n = t; break; } }
+        }
+        if (n && !w->exiting) {
+            qwnd *f = W(w, old_focus);
+            while (f && (f->style & WS_CHILD) && W(w, f->parent)) f = W(w, f->parent);
+            if (f == n) activate_top(w, n->h); else set_focus(w, n->h);
+        } else if (n) w->active = n->h;
     }
     if (w->main_wnd == h) w->main_wnd = 0;
     {   /* parent must repaint the uncovered area */
@@ -322,8 +355,7 @@ static void button_paint(qwin *w, qwnd *x, uint32_t hdc)
     br = ctlcolor(w, x, hdc, t == 0 || t == 1 ? WM_CTLCOLORBTN : WM_CTLCOLORSTATIC);
     if (t == 7) {                                    /* BS_GROUPBOX */
         int fh = gdi_font_height(0), tw = gdi_text_width(0, x->text, wlen16(x->text));
-        gdi_fill(d, 0, 0, x->cw, x->ch, brush_rgb(w, br, sys_color(15)));
-        d->cx0 = d->cx0; /* keep */
+        /* Only a frame: the controls inside it are its siblings and may be painted before it. */
         gdi_frame3d(d, 0, fh / 2, x->cw, x->ch, 1, 0);
         gdi_frame3d(d, 1, fh / 2 + 1, x->cw, x->ch, 0, 0);
         if (x->text[0]) {
@@ -408,6 +440,17 @@ static void radio_group_clear(qwin *w, qwnd *x)
     }
 }
 
+/* What a click does, for the keyboard and BM_CLICK as well. */
+static void button_activate(qwin *w, qwnd *x)
+{
+    int t = btype(x);
+    if (t == 3) x->state ^= 1;
+    else if (t == 6) x->state = (x->state & ~3) | (((x->state & 3) + 1) % 3);
+    else if (t == 9) { radio_group_clear(w, x); x->state |= 1; }
+    win_invalidate(w, x, 1);
+    notify_parent(w, x, 0);
+}
+
 static uint32_t button_proc(qwin *w, uint32_t *a)
 {
     qwnd *x = W(w, a[0]);
@@ -438,12 +481,7 @@ static uint32_t button_proc(qwin *w, uint32_t *a)
         x->state &= ~4;
         if (w->capture == x->h) w->capture = 0;
         win_invalidate(w, x, 1);
-        if (inside) {
-            if (t == 3) x->state ^= 1;
-            else if (t == 6) x->state = (x->state & ~3) | (((x->state & 3) + 1) % 3);
-            else if (t == 9) { radio_group_clear(w, x); x->state |= 1; }
-            notify_parent(w, x, 0);
-        }
+        if (inside) button_activate(w, x);
         (void)h;
         return 0; }
     case WM_MOUSEMOVE: return 0;
@@ -452,12 +490,12 @@ static uint32_t button_proc(qwin *w, uint32_t *a)
     case BM_GETSTATE: return (uint32_t)x->state;
     case BM_SETSTATE: if (a[2]) x->state |= 4; else x->state &= ~4; win_invalidate(w, x, 1); return 0;
     case BM_SETSTYLE: x->style = (x->style & ~0xFFFFu) | (a[2] & 0xFFFF); win_invalidate(w, x, 1); return 0;
-    case BM_CLICK: notify_parent(w, x, 0); return 0;
+    case BM_CLICK: button_activate(w, x); return 0;
     case WM_SETTEXT: def_window_proc(w, a[0], msg, a[2], a[3]); win_invalidate(w, x, 1); return 1;
     case WM_ENABLE: win_invalidate(w, x, 1); return 0;
     case WM_SETFOCUS: case WM_KILLFOCUS: if (t == 0 || t == 1) win_invalidate(w, x, 1); return 0;
     case WM_GETDLGCODE: return t == 1 ? 0x10 : t == 0 ? 0x20 : (t == 9 || t == 4) ? 0x40 : 0;
-    case WM_KEYUP: if (a[2] == ' ') { notify_parent(w, x, 0); } return 0;
+    case WM_KEYUP: if (a[2] == ' ') button_activate(w, x); return 0;
     }
     return def_window_proc(w, a[0], msg, a[2], a[3]);
 }
@@ -477,7 +515,8 @@ static uint32_t static_proc(qwin *w, uint32_t *a)
         if (d) {
             br = ctlcolor(w, x, hdc, WM_CTLCOLORSTATIC);
             rc[0] = 0; rc[1] = 0; rc[2] = x->cw; rc[3] = x->ch;
-            if (st == 4 || st == 7) gdi_fill(d, 0, 0, x->cw, x->ch, st == 4 ? 0 : sys_color(15));
+            if (st == 4) gdi_fill(d, 0, 0, x->cw, x->ch, 0);
+            else if (st == 7) gdi_frame3d(d, 0, 0, x->cw, x->ch, 1, 0);
             else if (st == 5 || st == 8) gdi_fill(d, 0, 0, x->cw, x->ch, 0x808080);
             else if (st == 6) gdi_fill(d, 0, 0, x->cw, x->ch, 0xFFFFFF);
             else if (st == 0x10) { gdi_fill(d, 0, 0, x->cw, 1, 0x808080); gdi_fill(d, 0, 1, x->cw, 2, 0xFFFFFF); }
@@ -551,7 +590,8 @@ static uint32_t edit_proc(qwin *w, uint32_t *a)
         win_invalidate(w, x, 1);
         notify_parent(w, x, 0x300);                                             /* EN_CHANGE */
         return 0; }
-    case WM_GETDLGCODE: return 0x81;
+    case WM_GETDLGCODE:                                    /* ES_MULTILINE with ES_WANTRETURN keeps Return */
+        return (x->style & 0x1004u) == 0x1004u && a[2] == 0x0D ? 0x85 : 0x81;
     case WM_SETTEXT: def_window_proc(w, a[0], msg, a[2], a[3]); win_invalidate(w, x, 1); return 1;
     case 0x00C5: x->caret = (int)a[2]; return 0;           /* EM_LIMITTEXT */
     case 0x00B1: return 0;                                 /* EM_SETSEL */
@@ -580,8 +620,54 @@ static uint32_t listbox_proc(qwin *w, uint32_t *a)
     qwnd *x = W(w, a[0]);
     qlb *l;
     uint32_t msg = a[1];
+    int combo;
     if (!x) return 0;
     l = lb_of(w, x);
+    combo = x->cls && x->cls->builtin == B_COMBOBOX;
+    if (combo) {                                           /* the same list, under other numbers */
+        static const struct { uint16_t cb, lb; } map[] = {
+            { 0x143, 0x180 }, { 0x144, 0x182 }, { 0x146, 0x18B }, { 0x147, 0x188 }, { 0x148, 0x189 }, { 0x149, 0x18A }, { 0x14A, 0x181 },
+            { 0x14B, 0x184 }, { 0x14C, 0x18F }, { 0x14D, 0x18C }, { 0x14E, 0x186 }, { 0x150, 0x199 }, { 0x151, 0x19A }, { 0x158, 0x1A2 },
+        };
+        unsigned k;
+        for (k = 0; k < sizeof(map) / sizeof(map[0]); k++) if (map[k].cb == msg) { msg = map[k].lb; break; }
+        switch (msg) {
+        case WM_CREATE: x->ch = gdi_font_height(0) + 8; break;    /* the template's height includes the open list */
+        case 0x0141: case 0x014F: case 0x0155: case 0x0157: return 0;   /* limit text, drop down, UI, dropped state */
+        case 0x0142: return 1;                                 /* CB_SETEDITSEL */
+        case 0x0153: return 0;                                 /* CB_SETITEMHEIGHT */
+        case 0x0154: return (uint32_t)gdi_font_height(0) + 2;  /* CB_GETITEMHEIGHT */
+        case WM_GETDLGCODE: return 1;                          /* wants the arrows */
+        case WM_GETTEXT: return l->sel >= 0 && l->sel < l->n ? (uint32_t)qw_wr_wstr(w, a[3], l->item[l->sel], (int)a[2]) : (a[2] ? (x86_wr16(C, a[3], 0), 0u) : 0u);
+        case WM_GETTEXTLENGTH: return l->sel >= 0 && l->sel < l->n ? (uint32_t)wlen16(l->item[l->sel]) : 0;
+        case WM_KEYDOWN:
+            if ((a[2] == 0x26 || a[2] == 0x28) && l->n) {
+                int to = l->sel + (a[2] == 0x28 ? 1 : -1);
+                if (to >= 0 && to < l->n && to != l->sel) { l->sel = to; win_invalidate(w, x, 1); notify_parent(w, x, 1); }
+            }
+            return 0;
+        case WM_LBUTTONDOWN:                                   /* no open list here: a click takes the next entry */
+            set_focus(w, x->h);
+            if (l->n) { l->sel = (l->sel + 1) % l->n; win_invalidate(w, x, 1); notify_parent(w, x, 1); }
+            return 0;
+        case WM_PAINT: {
+            uint32_t ps = qw_alloc(w, 64), hdc = qw_call(w, qw_thunk(w, "user32", "BeginPaint"), 2, x->h, ps, 0, 0);
+            qdc *d = DCP(w, hdc);
+            if (d) {
+                int rc[4];
+                gdi_fill(d, 0, 0, x->cw, x->ch, 0x808080);
+                gdi_fill(d, 1, 1, x->cw - 1, x->ch - 1, x->enabled ? 0xFFFFFF : sys_color(15));
+                gdi_fill(d, x->cw - 16, 1, x->cw - 1, x->ch - 1, sys_color(15));
+                rc[0] = 4; rc[1] = 2; rc[2] = x->cw - 18; rc[3] = x->ch - 2;
+                d->bkmode = 1; d->textcol = 0;
+                if (l->sel >= 0 && l->sel < l->n) gdi_drawtext(d, l->item[l->sel], wlen16(l->item[l->sel]), rc, 0x820);
+                { static wchar16 arrow[2] = { 'v', 0 }; rc[0] = x->cw - 13; rc[2] = x->cw - 2; gdi_drawtext(d, arrow, 1, rc, 0x820); }
+            }
+            qw_call(w, qw_thunk(w, "user32", "EndPaint"), 2, x->h, ps, 0, 0);
+            qw_free(w, ps);
+            return 0; }
+        }
+    }
     switch (msg) {
     case WM_PAINT: {
         uint32_t ps = qw_alloc(w, 64), hdc;
@@ -623,6 +709,19 @@ static uint32_t listbox_proc(qwin *w, uint32_t *a)
     case 0x0189: if ((int32_t)a[2] < 0 || (int)a[2] >= l->n) return 0xFFFFFFFFu; return (uint32_t)qw_wr_wstr(w, a[3], l->item[a[2]], 64);  /* LB_GETTEXT */
     case 0x018A: return (int32_t)a[2] >= 0 && (int)a[2] < l->n ? (uint32_t)wlen16(l->item[a[2]]) : 0xFFFFFFFFu;
     case 0x018B: return (uint32_t)l->n;                   /* LB_GETCOUNT */
+    case 0x018F: case 0x018C: case 0x01A2: {               /* LB_FINDSTRING, LB_SELECTSTRING, LB_FINDSTRINGEXACT */
+        wchar16 t[64];
+        int k, L, from = (int32_t)a[2] < 0 ? 0 : (int)a[2] + 1;
+        L = qw_rd_wstr(w, a[3], t, 64);
+        for (k = 0; k < l->n; k++) {
+            int at = (from + k) % l->n, c, same = 1;
+            if (msg == 0x01A2 && wlen16(l->item[at]) != L) continue;
+            for (c = 0; c < L && same; c++) same = toupper(l->item[at][c] & 255) == toupper(t[c] & 255) && l->item[at][c];
+            if (!same) continue;
+            if (msg == 0x018C) { l->sel = at; win_invalidate(w, x, 1); }
+            return (uint32_t)at;
+        }
+        return 0xFFFFFFFFu; }
     case 0x0199: return (int)a[2] < l->n ? l->data[a[2]] : 0xFFFFFFFFu;
     case 0x019A: if ((int)a[2] < l->n) l->data[a[2]] = a[3]; return 0;
     case WM_LBUTTONDOWN: {
@@ -658,6 +757,7 @@ static uint32_t dlg_proc(qwin *w, uint32_t *a)
     qwnd *x = W(w, a[0]);
     uint32_t msg = a[1], r = 0;
     if (!x) return 0;
+    if (x->sheet && sheet_proc(w, (struct qsheet *)x->sheet, a, &r)) return r;
     if (x->dlgproc) {
         r = qw_call(w, x->dlgproc, 4, a[0], msg, a[2], a[3]);
         x = W(w, a[0]);
@@ -677,8 +777,20 @@ static uint32_t dlg_proc(qwin *w, uint32_t *a)
         win_send(w, x->h, WM_COMMAND, 2, 0);    /* IDCANCEL */
         return 0;
     case WM_COMMAND:
-        if (!x->dlgproc && ((a[2] & 0xFFFF) == 1 || (a[2] & 0xFFFF) == 2)) { x->modal_done = 1; x->modal_result = (int)(a[2] & 0xFFFF); }
+        if (!x->dlgproc && (a[2] & 0xFFFF) >= 1 && (a[2] & 0xFFFF) <= 7) {       /* our message boxes */
+            uint32_t id = a[2] & 0xFFFF;
+            /* Escape and the close box: an OK box closes as OK, Yes/No ignores them. */
+            if (id == 2 && !find_ctl(w, x, 2)) { if (find_ctl(w, x, 1)) id = 1; else return 0; }
+            x->modal_done = 1; x->modal_result = (int)id;
+        }
         return 0;
+    case 0x0400: {                                         /* DM_GETDEFID */
+        int i;
+        for (i = 1; i < QW_MAXWND; i++) {
+            qwnd *c = &w->wnd[i];
+            if (c->used && !c->destroyed && c->parent == x->h && c->cls && c->cls->builtin == B_BUTTON && btype(c) == 1) return 0x534B0000u | (c->id & 0xFFFF);
+        }
+        return 0; }
     case WM_INITDIALOG: return 1;
     case WM_CTLCOLORDLG: case WM_CTLCOLORSTATIC: case WM_CTLCOLORBTN: return 0;
     }
@@ -716,6 +828,11 @@ static uint32_t create_dialog(qwin *w, uint32_t tpl, uint32_t parent, uint32_t d
     else { style = t32(w, &t); exstyle = t32(w, &t); }
     n = t16(w, &t);
     x = (int16_t)t16(w, &t); y = (int16_t)t16(w, &t); cx = (int16_t)t16(w, &t); cy = (int16_t)t16(w, &t);
+    if (g_dlg_child) {
+        style = (style & ~(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_VISIBLE | 0x80u)) | WS_CHILD;
+        g_dlg_child = 0;
+        x = y = 0;
+    }
     menuord = tsz(w, &t, menuname, 64);
     clsord = tsz(w, &t, clsname, 64);
     tsz(w, &t, title, 256);
@@ -785,7 +902,7 @@ static uint32_t create_dialog(qwin *w, uint32_t tpl, uint32_t parent, uint32_t d
         ch = create_window(w, cex, cc, ctext, (cstyle | WS_CHILD) & ~WS_VISIBLE, ix * BASEX / 4, iy * BASEY / 8, icx * BASEX / 4, icy * BASEY / 8, h, id, hinst, 0);
         if (ch) {
             qwnd *cw = W(w, ch);
-            if (cw) { cw->font = font; cw->visible = (cstyle & WS_VISIBLE) != 0; }
+            if (cw) { cw->font = font; cw->visible = (cstyle & WS_VISIBLE) != 0; if (cw->visible) cw->style |= WS_VISIBLE; }
             if (!focusctl && (cstyle & WS_TABSTOP) && !(cstyle & WS_DISABLED)) focusctl = ch;
         }
     }
@@ -799,11 +916,136 @@ static uint32_t create_dialog(qwin *w, uint32_t tpl, uint32_t parent, uint32_t d
     return h;
 }
 
-static uint32_t dialog_template(qwin *w, uint32_t name)
+static uint32_t dialog_template(qwin *w, uint32_t hmod, uint32_t name)
 {
     uint32_t d, s;
-    if (!res_find(w, 5, name, &d, &s)) { qw_log(w, "dialog resource %u not found", name); return 0; }
+    if (!res_find_in(w, hmod ? hmod : w->image_base, 5, name, &d, &s)) { qw_log(w, "dialog resource %u not found", name); return 0; }
     return d;
+}
+
+/* ---------------------------------------------------------------- keyboard in dialogs */
+#define DLG_MAXCTL 128
+static int dlg_controls(qwin *w, uint32_t hdlg, qwnd **out)
+{
+    int i, n = 0;
+    for (i = 1; i < QW_MAXWND && n < DLG_MAXCTL; i++) {
+        qwnd *c = &w->wnd[i];
+        if (c->used && !c->destroyed && c->parent == hdlg && (c->style & WS_CHILD)) out[n++] = c;
+    }
+    return n;
+}
+static int dlg_can_focus(qwnd *c)
+{
+    if (!c->visible || !c->enabled) return 0;
+    if (c->cls && c->cls->builtin == B_STATIC) return 0;
+    if (c->cls && c->cls->builtin == B_BUTTON && btype(c) == 7) return 0;
+    return 1;
+}
+/* The dialog's own child that holds h, or -1. */
+static int dlg_index(qwin *w, uint32_t hdlg, uint32_t h, qwnd **list, int n)
+{
+    qwnd *c = W(w, h);
+    int i;
+    while (c && c->parent != hdlg && (c->style & WS_CHILD)) c = W(w, c->parent);
+    for (i = 0; c && i < n; i++) if (list[i] == c) return i;
+    return -1;
+}
+static uint32_t dlg_next_tab(qwin *w, uint32_t hdlg, uint32_t from, int back)
+{
+    qwnd *list[DLG_MAXCTL];
+    int n = dlg_controls(w, hdlg, list), at = dlg_index(w, hdlg, from, list, n), k;
+    if (!n) return 0;
+    if (at < 0) at = back ? 0 : n - 1;
+    for (k = 1; k <= n; k++) {
+        qwnd *c = list[(at + (back ? n - k : k)) % n];
+        if (dlg_can_focus(c) && (c->style & WS_TABSTOP)) return c->h;
+    }
+    return 0;
+}
+static uint32_t dlg_next_group(qwin *w, uint32_t hdlg, uint32_t from, int back)
+{
+    qwnd *list[DLG_MAXCTL];
+    int n = dlg_controls(w, hdlg, list), at = dlg_index(w, hdlg, from, list, n), first, last, k, size;
+    if (at < 0) return 0;
+    for (first = at; first > 0 && !(list[first]->style & WS_GROUP); first--) {}
+    for (last = at + 1; last < n && !(list[last]->style & WS_GROUP); last++) {}
+    size = last - first;
+    for (k = 1; k < size; k++) {
+        qwnd *c = list[first + (at - first + (back ? size - k : k)) % size];
+        if (dlg_can_focus(c)) return c->h;
+    }
+    return 0;
+}
+static void dlg_command(qwin *w, uint32_t hdlg, uint32_t id)
+{
+    qwnd *d = W(w, hdlg), *c = d ? find_ctl(w, d, id) : NULL;
+    win_send(w, hdlg, WM_COMMAND, id & 0xFFFF, c ? c->h : 0);
+}
+/* The & letter of a control's text; 0 when it has none. */
+static int dlg_mnemonic(const wchar16 *t)
+{
+    int i;
+    for (i = 0; t[i]; i++) if (t[i] == '&') { if (t[i + 1] != '&') return t[i + 1]; i++; }
+    return 0;
+}
+static int dlg_char(qwin *w, uint32_t hdlg, uint32_t wp, uint32_t code)
+{
+    qwnd *list[DLG_MAXCTL];
+    uint32_t wanted;
+    int n, i;
+    if ((code & 0x80) || wp < 33 || wp > 255) return 0;
+    wanted = (uint32_t)toupper((int)wp);
+    n = dlg_controls(w, hdlg, list);
+    for (i = 0; i < n; i++) {
+        int m = dlg_mnemonic(list[i]->text), k;
+        if (!m || (uint32_t)toupper(m) != wanted) continue;
+        /* A label names the control after it. */
+        for (k = i; k < n && !dlg_can_focus(list[k]); k++) {}
+        if (k >= n) return 0;
+        set_focus(w, list[k]->h);
+        if (list[k]->cls && list[k]->cls->builtin == B_BUTTON) button_activate(w, list[k]);
+        return 1;
+    }
+    return 0;
+}
+static int dlg_key(qwin *w, uint32_t hdlg, uint32_t hwnd, uint32_t msg, uint32_t wp)
+{
+    uint32_t code, next;
+    qwnd *c;
+    if (msg != WM_KEYDOWN && msg != WM_CHAR) return 0;
+    c = W(w, hdlg);
+    if (c && c->sheet) return sheet_key(w, c, hwnd, msg, wp);
+    code = W(w, hwnd) && hwnd != hdlg ? win_send(w, hwnd, WM_GETDLGCODE, wp, 0) : 0;
+    if (code & 4) return 0;                                /* wants everything */
+    if (msg == WM_CHAR) return dlg_char(w, hdlg, wp, code);
+    switch (wp) {
+    case 0x09:                                             /* Tab */
+        if (code & 2) return 0;
+        next = dlg_next_tab(w, hdlg, hwnd, (w->keystate[0x10] & 0x80) != 0);
+        if (next) set_focus(w, next);
+        return 1;
+    case 0x25: case 0x26: case 0x27: case 0x28:            /* arrows: inside the group */
+        if (code & 1) return 0;
+        next = dlg_next_group(w, hdlg, hwnd, wp == 0x25 || wp == 0x26);
+        if (next) {
+            set_focus(w, next);
+            c = W(w, next);
+            if (c && c->cls && c->cls->builtin == B_BUTTON && btype(c) == 9) button_activate(w, c);
+        }
+        return 1;
+    case 0x0D: {                                           /* Return: the focused push button, or the default one */
+        uint32_t id = 1, def;
+        c = W(w, hwnd);
+        if (c && hwnd != hdlg && c->cls && c->cls->builtin == B_BUTTON && btype(c) <= 1) id = c->id;
+        else if (((def = win_send(w, hdlg, 0x0400, 0, 0)) >> 16) == 0x534B) id = def & 0xFFFF;
+        { qwnd *d = W(w, hdlg), *t = d ? find_ctl(w, d, id) : NULL; if (t && !t->enabled) return 1; }
+        dlg_command(w, hdlg, id);
+        return 1; }
+    case 0x1B:                                             /* Escape */
+        dlg_command(w, hdlg, 2);
+        return 1;
+    }
+    return 0;
 }
 
 static int run_modal(qwin *w, uint32_t h)
@@ -819,13 +1061,15 @@ static int run_modal(qwin *w, uint32_t h)
     show_top(w, x);
     win_invalidate(w, x, 1);
     w->modal_depth++;
-    while ((x = W(w, h)) && !x->modal_done && !w->exiting) {
+    /* A fault in a window procedure stops all guest code: nothing could end this loop. */
+    while ((x = W(w, h)) && !x->modal_done && !w->exiting && !C->fault) {
         if (!user_pump(w, 1, &m, 0)) { if (w->quit_posted) break; continue; }
         if (m.msg == WM_QUIT) { w->quit_posted = 1; break; }
-        qw_call(w, qw_thunk(w, "user32", "TranslateMessage"), 1, 0, 0, 0, 0);
+        if (dlg_key(w, h, m.hwnd, m.msg, m.wp)) continue;
         {
             uint32_t mm = qw_alloc(w, 28);
             WR32(mm, m.hwnd); WR32(mm + 4, m.msg); WR32(mm + 8, m.wp); WR32(mm + 12, m.lp); WR32(mm + 16, m.time);
+            qw_call(w, qw_thunk(w, "user32", "TranslateMessage"), 1, mm, 0, 0, 0);
             qw_call(w, qw_thunk(w, "user32", "DispatchMessageW"), 1, mm, 0, 0, 0);
             qw_free(w, mm);
         }
@@ -840,16 +1084,27 @@ static int run_modal(qwin *w, uint32_t h)
 
 uint32_t user_message_box(qwin *w, uint32_t owner, const wchar16 *text, const wchar16 *title, uint32_t type)
 {
-    static wchar16 dn[8], bn[8], sn[8], ok[4];
+    static const struct { int n; struct { const char *label; int id; } b[3]; } kinds[6] = {
+        { 1, { { "OK", 1 } } },
+        { 2, { { "OK", 1 }, { "Cancel", 2 } } },
+        { 3, { { "&Abort", 3 }, { "&Retry", 4 }, { "&Ignore", 5 } } },
+        { 3, { { "&Yes", 6 }, { "&No", 7 }, { "Cancel", 2 } } },
+        { 2, { { "&Yes", 6 }, { "&No", 7 } } },
+        { 2, { { "&Retry", 4 }, { "Cancel", 2 } } },
+    };
+    static wchar16 dn[8], bn[8], sn[8];
     qclass *dc, *bc, *sc;
-    uint32_t h, s, b;
-    int lines = 1, i, maxw = 0, cur = 0, wd, ht;
-    (void)type;
-    a2w(dn, "#32770", 8); a2w(bn, "Button", 8); a2w(sn, "Static", 8); a2w(ok, "OK", 4);
+    uint32_t h, s, focus = 0;
+    int lines = 1, i, maxw = 0, cur = 0, wd, ht, kind = (int)(type & 0xF), def = (int)((type >> 8) & 0xF), n, bw;
+    if (kind > 5) kind = 0;
+    n = kinds[kind].n;
+    if (def >= n) def = 0;
+    bw = n * 76 + (n - 1) * 8;
+    a2w(dn, "#32770", 8); a2w(bn, "Button", 8); a2w(sn, "Static", 8);
     dc = find_class(w, 0, dn); bc = find_class(w, 0, bn); sc = find_class(w, 0, sn);
     for (i = 0; text[i]; i++) { if (text[i] == '\n') { lines++; if (cur > maxw) maxw = cur; cur = 0; } else cur += gdi_text_width(0, &text[i], 1); }
     if (cur > maxw) maxw = cur;
-    wd = maxw + 40; if (wd < 200) wd = 200;
+    wd = maxw + 40; if (wd < 200) wd = 200; if (wd < bw + 40) wd = bw + 40;
     ht = lines * gdi_font_height(0) + 70;
     {
         qwnd *ow = W(w, owner);
@@ -860,9 +1115,15 @@ uint32_t user_message_box(qwin *w, uint32_t owner, const wchar16 *text, const wc
     W(w, h)->is_dialog = 1;
     W(w, h)->owner = owner;
     s = create_window(w, 0, sc, text, WS_CHILD | WS_VISIBLE, 20, 14, wd - 40, lines * gdi_font_height(0) + 4, h, 0xFFFF, 0, 0);
-    b = create_window(w, 0, bc, ok, WS_CHILD | WS_VISIBLE | WS_TABSTOP | 1, wd / 2 - 38, ht - 36, 76, 24, h, 1, 0, 0);
     (void)s;
-    set_focus(w, b);
+    for (i = 0; i < n; i++) {
+        wchar16 label[16];
+        uint32_t b;
+        a2w(label, kinds[kind].b[i].label, 16);
+        b = create_window(w, 0, bc, label, WS_CHILD | WS_VISIBLE | WS_TABSTOP | (i == def ? 1u : 0u) | (i == 0 ? WS_GROUP : 0u), (wd - bw) / 2 + i * 84, ht - 36, 76, 24, h, (uint32_t)kinds[kind].b[i].id, 0, 0);
+        if (i == def) focus = b;
+    }
+    set_focus(w, focus);
     return (uint32_t)run_modal(w, h);
 }
 
@@ -1107,9 +1368,28 @@ static uint32_t menu_popup_proc(qwin *w, uint32_t *a)
 }
 
 /* ====================================================================== focus / input */
+/* Windows tells a top-level window that it became active before it gets the keyboard. Games
+ * rely on this: Doom95 pauses, and ignores its keyboard, until WM_ACTIVATEAPP arrives. */
+static void activate_top(qwin *w, uint32_t h)
+{
+    qwnd *x = W(w, h);
+    uint32_t old;
+    while (x && (x->style & WS_CHILD) && W(w, x->parent)) x = W(w, x->parent);
+    if (!x) return;
+    old = w->active;
+    if (old != x->h && W(w, old)) win_send(w, old, WM_ACTIVATE, 0, x->h);
+    w->active = x->h;
+    if (!x->app_activated) {
+        x->app_activated = 1;
+        win_send(w, x->h, 0x001C /* WM_ACTIVATEAPP */, 1, 0);
+    }
+    if (old != x->h) win_send(w, x->h, WM_ACTIVATE, 1, old);
+}
+
 static void set_focus(qwin *w, uint32_t h)
 {
     uint32_t old = w->focus;
+    if (W(w, h)) activate_top(w, h);
     if (old == h) return;
     w->focus = h;
     if (W(w, old)) win_send(w, old, WM_KILLFOCUS, h, 0);
@@ -1177,19 +1457,104 @@ static void mouse_event(qwin *w, qwnd *top, int type, int x, int y, int button)
 }
 
 static uint8_t g_vkchar[256];
+/* WH_KEYBOARD hooks: Doom95 reads the keyboard only through one and leaves WM_KEYDOWN alone. */
+#define QW_MAXHOOKS 4
+static uint32_t g_kbhook[QW_MAXHOOKS];
+
+static uint32_t scan_of_vk(int vk)
+{
+    static const char *const top = "QWERTYUIOP", *const mid = "ASDFGHJKL", *const low = "ZXCVBNM";
+    const char *p;
+    if (vk >= '1' && vk <= '9') return 2u + (uint32_t)(vk - '1');
+    if (vk == '0') return 0x0B;
+    if (vk >= 'A' && vk <= 'Z') {
+        if ((p = strchr(top, vk)) != NULL) return 0x10u + (uint32_t)(p - top);
+        if ((p = strchr(mid, vk)) != NULL) return 0x1Eu + (uint32_t)(p - mid);
+        if ((p = strchr(low, vk)) != NULL) return 0x2Cu + (uint32_t)(p - low);
+    }
+    if (vk >= 0x70 && vk <= 0x79) return 0x3Bu + (uint32_t)(vk - 0x70);   /* F1-F10 */
+    switch (vk) {
+    case 0x08: return 0x0E; case 0x09: return 0x0F; case 0x0D: return 0x1C; case 0x10: return 0x2A;
+    case 0x11: return 0x1D; case 0x12: return 0x38; case 0x1B: return 0x01; case 0x20: return 0x39;
+    case 0x25: return 0x4B; case 0x26: return 0x48; case 0x27: return 0x4D; case 0x28: return 0x50;
+    case 0x7A: return 0x57; case 0x7B: return 0x58;
+    case 0xBC: return 0x33; case 0xBE: return 0x34; case 0xBF: return 0x35; case 0xBA: return 0x27;
+    case 0xBB: return 0x0D; case 0xBD: return 0x0C; case 0xC0: return 0x29;
+    case 0x21: return 0x49; case 0x22: return 0x51; case 0x23: return 0x4F; case 0x24: return 0x47;
+    case 0x2D: return 0x52; case 0x2E: return 0x53;
+    }
+    return 0;
+}
+
+/* True when a hook swallowed the key. */
+/* The scan code in lParam, with the extended bit that arrows and page keys carry. */
+static uint32_t key_scan_bits(int vk)
+{
+    uint32_t scan = scan_of_vk(vk) << 16;
+    if ((vk >= 0x21 && vk <= 0x28) || vk == 0x2D || vk == 0x2E) scan |= 0x01000000u;
+    return scan;
+}
+static int kb_hook(qwin *w, int vk, int up, int was_down)
+{
+    uint32_t lp = 1u | key_scan_bits(vk) | (was_down ? 0x40000000u : 0) | (up ? 0x80000000u : 0);
+    int i;
+    for (i = QW_MAXHOOKS - 1; i >= 0; i--) {
+        if (g_kbhook[i] && qw_call(w, g_kbhook[i], 3, 0 /* HC_ACTION */, (uint32_t)vk, lp, 0)) return 1;
+    }
+    return 0;
+}
+
+FN(u_SetWindowsHookEx) {
+    int i;
+    (void)w;
+    if (a[0] == 5 /* WH_CBT */) {
+        for (i = 0; i < QW_MAXCBT; i++) if (!g_cbthook[i]) { g_cbthook[i] = a[1]; return 0x4A00u + (uint32_t)i; }
+        return 0;
+    }
+    if (a[0] != 2 /* WH_KEYBOARD */) { qw_log(w, "SetWindowsHookEx: hook type %d is not delivered", (int)a[0]); return 0x4900u + a[0]; }
+    for (i = 0; i < QW_MAXHOOKS; i++) {
+        if (!g_kbhook[i]) { g_kbhook[i] = a[1]; return 0x4800u + (uint32_t)i; }
+    }
+    return 0;
+}
+FN(u_UnhookWindowsHookEx) {
+    uint32_t i = a[0] - 0x4800u;
+    (void)w;
+    if (i < QW_MAXHOOKS) g_kbhook[i] = 0;
+    if (a[0] - 0x4A00u < QW_MAXCBT) g_cbthook[a[0] - 0x4A00u] = 0;
+    return 1;
+}
+
 static void key_event(qwin *w, int type, int vk, int ch)
 {
+    int was_down = 0;
     qwnd *tgt = W(w, w->focus);
     qwnd *top = active_top(w);
-    if (!tgt || win_top(w, tgt) != top) tgt = top;
-    if (!tgt) return;
-    if (vk > 0 && vk < 256) {
-        w->keystate[vk] = type == QE_KEYDOWN ? 0x80 : 0;
+    /* The key state first: a key let go while no window has the focus must not stay held. */
+    if (vk > 0 && vk < 256 && type != QE_CHAR) {
+        int down = type == QE_KEYDOWN;
+        was_down = w->keystate[vk] != 0;
+        w->keystate[vk] = down ? 0x80 : 0;
+        if (was_down != down) qw_dinput_key(w, vk, down);
+        if (w->verbose > 1) qw_log(w, "key %02x %s%s", vk, down ? "down" : "up", was_down && down ? " repeat" : "");
         if (ch) g_vkchar[vk] = (uint8_t)ch;
     }
-    if (type == QE_KEYDOWN) win_post(w, tgt->h, WM_KEYDOWN, (uint32_t)vk, 1);
-    else if (type == QE_KEYUP) win_post(w, tgt->h, WM_KEYUP, (uint32_t)vk, 0xC0000001u);
-    else if (type == QE_CHAR) win_post(w, tgt->h, WM_CHAR, (uint32_t)ch, 1);
+    if (!tgt || win_top(w, tgt) != top) tgt = top;
+    if (!tgt) return;
+    /* Not a Windows function, but what people expect of it: works for every DirectDraw game. */
+    if (type == QE_KEYDOWN && vk == 0x0D && w->keystate[0x12] && w->frames > 0 && !was_down) {
+        qw_dd_toggle_window(w);
+        w->keystate[vk] = 0;
+        return;
+    }
+    if ((type == QE_KEYDOWN || type == QE_KEYUP) && kb_hook(w, vk, type == QE_KEYUP, was_down)) return;
+    /* Engines such as SciTech MGL read the scan code in lParam, not the virtual key. */
+    {
+        uint32_t scan = key_scan_bits(vk);
+        if (type == QE_KEYDOWN) win_post(w, tgt->h, WM_KEYDOWN, (uint32_t)vk, 1u | scan | (was_down ? 0x40000000u : 0));
+        else if (type == QE_KEYUP) win_post(w, tgt->h, WM_KEYUP, (uint32_t)vk, 0xC0000001u | scan);
+    }
+    if (type == QE_CHAR) win_post(w, tgt->h, WM_CHAR, (uint32_t)ch, 1);
 }
 
 static qwnd *find_ctl(qwin *w, qwnd *p, uint32_t id)
@@ -1331,6 +1696,23 @@ static int script_event(qwin *w, qevent *ev)
     return 0;
 }
 void user_input_event(qwin *w, qevent *ev) { script_event(w, ev); }
+/* For the test script's waitfor: a visible window whose title holds this text (any case). */
+int qw_user_has_window(qwin *w, const char *title)
+{
+    int i;
+    for (i = 1; i < QW_MAXWND; i++) {
+        qwnd *x = &w->wnd[i];
+        char t[512], *p;
+        if (!x->used || x->destroyed || !x->visible) continue;
+        w2a(t, x->text, sizeof(t));
+        for (p = t; *p; p++) {
+            size_t k = 0;
+            while (title[k] && p[k] && tolower((unsigned char)p[k]) == tolower((unsigned char)title[k])) k++;
+            if (!title[k]) return 1;
+        }
+    }
+    return 0;
+}
 
 static qwnd *first_dirty(qwin *w, uint32_t parent, int top)
 {
@@ -1392,7 +1774,7 @@ int user_pump(qwin *w, int block, qmsg *out, uint32_t filt)
             qevent ev;
             int r;
             memset(&ev, 0, sizeof(ev));
-            r = spins < 8 ? w->be->wait(w, 0, &ev) : 0;
+            r = spins < 8 ? qw_be_wait(w, 0, &ev) : 0;
             if (r > 0) { spins++; script_event(w, &ev); continue; }
             if (r < 0) {
                 qwnd *t = active_top(w);
@@ -1410,7 +1792,7 @@ int user_pump(qwin *w, int block, qmsg *out, uint32_t filt)
             for (i = 0; i < QW_MAXTIMER; i++) if (w->timer[i].used && w->timer[i].next < next) next = w->timer[i].next;
             memset(&ev, 0, sizeof(ev));
             if (w->verbose > 1) { static int nw; if (nw++ < 40) qw_log(w, "pump: wait %lu ms", (unsigned long)(next > now ? next - now : 0)); }
-            r = w->be->wait(w, (uint32_t)(next > now ? next - now : 0), &ev);
+            r = qw_be_wait(w, (uint32_t)(next > now ? next - now : 0), &ev);
             if (r < 0) {
                 /* backend finished (script end / window system gone): ask the program to close */
                 qwnd *t = active_top(w);
@@ -1421,6 +1803,23 @@ int user_pump(qwin *w, int block, qmsg *out, uint32_t filt)
             if (r > 0) script_event(w, &ev);
         }
     }
+}
+
+/* Input the program asks for directly (DirectInput, GetAsyncKeyState) must be current even when
+ * it has not pumped messages since: take what the window system has waiting. */
+void qw_input_poll(qwin *w)
+{
+    static int busy;
+    int n;
+    if (busy) return;
+    busy = 1;
+    for (n = 0; n < 64; n++) {
+        qevent ev;
+        memset(&ev, 0, sizeof(ev));
+        if (qw_be_wait(w, 0, &ev) <= 0) break;
+        script_event(w, &ev);
+    }
+    busy = 0;
 }
 
 /* ====================================================================== DefWindowProc */
@@ -1519,10 +1918,22 @@ FN(u_CreateWindowExW) {
     if (a[2] >= 0x10000u) qw_rd_wstr(w, a[2], t, 256); else t[0] = 0;
     return create_window(w, a[0], c, t, a[3], (int32_t)a[4], (int32_t)a[5], (int32_t)a[6], (int32_t)a[7], a[8], a[9], a[10], a[11]);
 }
+/* (hwnd, POINT by value in client coordinates): a direct child there, else the window itself. */
+FN(u_ChildWindowFromPoint) {
+    qwnd *p = W(w, a[0]), *c;
+    int x = (int32_t)a[1], y = (int32_t)a[2], i;
+    if (!p || x < 0 || y < 0 || x >= p->cw || y >= p->ch) return 0;
+    for (i = QW_MAXWND - 1; i > 0; i--) {
+        c = &w->wnd[i];
+        if (c->used && !c->destroyed && c->parent == p->h && (c->style & WS_CHILD) && x >= c->x && y >= c->y && x < c->x + c->cw && y < c->y + c->ch) return c->h;
+    }
+    return p->h;
+}
 FN(u_DestroyWindow) { qwnd *x = W(w, a[0]); if (!x) return 0; win_destroy(w, x); return 1; }
 FN(u_ShowWindow) {
     qwnd *x = W(w, a[0]);
     int was;
+    uint32_t old_active = w->active;
     if (!x) return 0;
     was = x->visible;
     x->visible = a[1] != 0;
@@ -1533,6 +1944,15 @@ FN(u_ShowWindow) {
         else if (x->be && w->be->destroy) { w->be->destroy(w, x); x->be = NULL; }
     }
     if (was != x->visible) win_send(w, x->h, WM_SHOWWINDOW, (uint32_t)x->visible, 0);
+    /* Showing a top-level window activates it, except SW_SHOWMINNOACTIVE, SW_SHOWNA and
+     * SW_SHOWNOACTIVATE. Freddi Fish runs its game only after WM_ACTIVATEAPP and WM_SETFOCUS. */
+    if (W(w, a[0]) && x->visible && !(x->style & WS_CHILD) && a[1] != 4 && a[1] != 7 && a[1] != 8) {
+        qwnd *f = W(w, w->focus);
+        while (f && (f->style & WS_CHILD) && W(w, f->parent)) f = W(w, f->parent);
+        w->active = old_active;
+        if (f == x) activate_top(w, x->h);             /* a control in it has the focus already */
+        else set_focus(w, x->h);
+    }
     return (uint32_t)was;
 }
 FN(u_UpdateWindow) {
@@ -1594,7 +2014,20 @@ FN(u_DispatchMessageW) {
     }
     return win_send(w, h, msg, wp, lp);
 }
-FN(u_IsDialogMessageW) { UNUSED; return 0; }
+/* As on Windows it handles every message for the dialog, the ordinary ones by dispatching them. */
+FN(u_IsDialogMessageW) {
+    qwnd *d = W(w, a[0]), *c;
+    uint32_t hwnd;
+    if (!d || !d->is_dialog || !a[1]) return 0;
+    hwnd = RD32(a[1]);
+    c = W(w, hwnd);
+    while (c && c != d && (c->style & WS_CHILD)) c = W(w, c->parent);
+    if (c != d) return 0;
+    if (dlg_key(w, a[0], hwnd, RD32(a[1] + 4), RD32(a[1] + 8))) return 1;
+    u_TranslateMessage(w, a + 1);
+    u_DispatchMessageW(w, a + 1);
+    return 1;
+}
 FN(u_BeginPaint) {
     qwnd *x = W(w, a[0]);
     uint32_t hdc;
@@ -1703,6 +2136,11 @@ FN(u_AdjustWindowRectEx) {
     return 1;
 }
 FN(u_AdjustWindowRect) { uint32_t b[4]; b[0] = a[0]; b[1] = a[1]; b[2] = a[2]; b[3] = 0; return u_AdjustWindowRectEx(w, b); }
+void qw_client_origin(qwin *w, uint32_t h, int *x, int *y)
+{
+    qwnd *t = W(w, h);
+    if (t) client_screen(w, t, x, y);
+}
 FN(u_ClientToScreen) { qwnd *x = W(w, a[0]); int sx, sy; if (!x) return 0; client_screen(w, x, &sx, &sy); WR32(a[1], RD32(a[1]) + (uint32_t)sx); WR32(a[1] + 4, RD32(a[1] + 4) + (uint32_t)sy); return 1; }
 FN(u_ScreenToClient) { qwnd *x = W(w, a[0]); int sx, sy; if (!x) return 0; client_screen(w, x, &sx, &sy); WR32(a[1], RD32(a[1]) - (uint32_t)sx); WR32(a[1] + 4, RD32(a[1] + 4) - (uint32_t)sy); return 1; }
 FN(u_MapWindowPoints) {
@@ -1852,6 +2290,7 @@ FN(u_LoadStringW) {
 }
 FN(u_LoadIconW) { uint32_t h = gdi_new(w, GO_ICON); (void)a; return h; }
 FN(u_LoadCursorW) { uint32_t h = gdi_new(w, GO_CURSOR); (void)a; return h; }
+FN(u_LoadCursorFromFile) { (void)a; return gdi_new(w, GO_CURSOR); }   /* drawn as the normal pointer */
 FN(u_LoadBitmapW) {
     uint32_t d, s;
     if (!a[0] || !res_find_in(w, a[0], 2, a[1], &d, &s)) { qobj *o; uint32_t h = gdi_new(w, GO_BITMAP); o = O(w, h, GO_BITMAP); if (o) surf_resize(&o->bmp, 1, 1); return h; }
@@ -1870,8 +2309,7 @@ FN(u_MessageBoxW) {
     wchar16 t[1024], c[256];
     qw_rd_wstr(w, a[1], t, 1024);
     if (a[2]) qw_rd_wstr(w, a[2], c, 256); else a2w(c, "Error", 256);
-    user_message_box(w, a[0], t, c, a[3]);
-    return 1;
+    return user_message_box(w, a[0], t, c, a[3]);
 }
 FN(u_MessageBeep) { UNUSED; return 1; }
 FN(u_wsprintfW) { return (uint32_t)qw_format(w, a[0], -1, 1, a[1], 1, C->r[X86_ESP] + 12); }
@@ -1884,8 +2322,8 @@ FN(u_CharUpperW) {
     return a[0];
 }
 FN(u_GetKeyState) { return w->keystate[a[0] & 0xFF] ? 0xFFFF8000u : 0; }
-FN(u_GetAsyncKeyState) { return w->keystate[a[0] & 0xFF] ? 0xFFFF8000u : 0; }
-FN(u_GetKeyboardState) { int i; for (i = 0; i < 256; i++) x86_wr8(C, a[0] + (uint32_t)i, w->keystate[i]); return 1; }
+FN(u_GetAsyncKeyState) { qw_input_poll(w); return w->keystate[a[0] & 0xFF] ? 0xFFFF8000u : 0; }
+FN(u_GetKeyboardState) { int i; qw_input_poll(w); for (i = 0; i < 256; i++) x86_wr8(C, a[0] + (uint32_t)i, w->keystate[i]); return 1; }
 FN(u_GetKeyboardLayout) { UNUSED; return 0x04070407u; }
 FN(u_MapVirtualKeyExW) { UNUSED; if (a[1] == 2) return g_vkchar[a[0] & 0xFF] ? g_vkchar[a[0] & 0xFF] : (a[0] >= 0x30 && a[0] <= 0x5A ? a[0] : 0); return a[0] & 0xFF; }
 FN(u_ToAsciiEx) { uint32_t ch = g_vkchar[a[0] & 0xFF]; if (!ch) return 0; x86_wr16(C, a[3], (uint16_t)ch); return 1; }
@@ -1926,7 +2364,32 @@ FN(u_GetMonitorInfoW) {
     WR32(a[1] + 20, 0); WR32(a[1] + 24, 0); WR32(a[1] + 28, 1024); WR32(a[1] + 32, 740); WR32(a[1] + 36, 1);
     UNUSED; return 1;
 }
+/* LOGFONT in the ANSI or wide form: as long as the structure's size says. */
+static void spi_font(qwin *w, uint32_t p, int wide)
+{
+    static const char face[] = "Arial";
+    uint32_t i, n = wide ? 92u : 60u;
+    for (i = 0; i < n; i += 4) WR32(p + i, 0);
+    WR32(p, (uint32_t)-11);                                /* lfHeight */
+    WR32(p + 16, 400);                                     /* lfWeight */
+    for (i = 0; face[i]; i++) { if (wide) x86_wr16(C, p + 28 + i * 2, (uint8_t)face[i]); else x86_wr8(C, p + 28 + i, (uint8_t)face[i]); }
+}
 FN(u_SystemParametersInfoW) {
+    if (a[0] == 0x29 && a[2]) {                            /* SPI_GETNONCLIENTMETRICS */
+        uint32_t m = a[2], size = RD32(m);
+        int wide = size >= 500;
+        uint32_t lf = wide ? 92u : 60u;
+        if (size != 340 && !wide) return 0;
+        WR32(m + 4, 1); WR32(m + 8, 16); WR32(m + 12, 16); WR32(m + 16, 18); WR32(m + 20, 18);
+        spi_font(w, m + 24, wide);
+        WR32(m + 24 + lf, 12); WR32(m + 28 + lf, 15);
+        spi_font(w, m + 32 + lf, wide);
+        WR32(m + 32 + lf * 2, 18); WR32(m + 36 + lf * 2, 18);
+        spi_font(w, m + 40 + lf * 2, wide);
+        spi_font(w, m + 40 + lf * 3, wide);
+        spi_font(w, m + 40 + lf * 4, wide);
+        return 1;
+    }
     if (a[0] == 0x30) { WR32(a[2], 0); WR32(a[2] + 4, 0); WR32(a[2] + 8, 1024); WR32(a[2] + 12, 740); return 1; }
     if (a[2] && a[1] && a[1] < 1024) { uint32_t i; for (i = 0; i < a[1]; i += 4) WR32(a[2] + i, 0); }
     UNUSED; return 0;
@@ -2004,12 +2467,12 @@ FN(u_SetClassLongW) {
 }
 FN(u_TrackMouseEvent) { qwnd *x = W(w, RD32(a[0] + 8)); if (x && (RD32(a[0] + 4) & 2)) x->tme = 2; return 1; }
 FN(u_CreateDialogParamW) {
-    uint32_t t = dialog_template(w, a[1]);
+    uint32_t t = dialog_template(w, a[0], a[1]);
     return t ? create_dialog(w, t, a[2], a[3], a[4], a[0]) : 0;
 }
 FN(u_CreateDialogIndirectParamW) { return create_dialog(w, a[1], a[2], a[3], a[4], a[0]); }
 FN(u_DialogBoxParamW) {
-    uint32_t t = dialog_template(w, a[1]), h;
+    uint32_t t = dialog_template(w, a[0], a[1]), h;
     if (!t) return 0xFFFFFFFFu;
     h = create_dialog(w, t, a[2], a[3], a[4], a[0]);
     if (!h) return 0xFFFFFFFFu;
@@ -2017,7 +2480,8 @@ FN(u_DialogBoxParamW) {
 }
 FN(u_DialogBoxIndirectParamW) { uint32_t h = create_dialog(w, a[1], a[2], a[3], a[4], a[0]); return h ? (uint32_t)run_modal(w, h) : 0xFFFFFFFFu; }
 FN(u_EndDialog) { qwnd *x = W(w, a[0]); if (!x) return 0; x->modal_done = 1; x->modal_result = (int)a[1]; if (!w->modal_depth) win_destroy(w, x); return 1; }
-FN(u_GetNextDlgTabItem) { UNUSED; return a[1]; }
+FN(u_GetNextDlgTabItem) { return dlg_next_tab(w, a[0], a[1], a[2] != 0); }
+FN(u_GetNextDlgGroupItem) { return dlg_next_group(w, a[0], a[1], a[2] != 0); }
 FN(u_MapDialogRect) {
     WR32(a[1], RD32(a[1]) * BASEX / 4); WR32(a[1] + 8, RD32(a[1] + 8) * BASEX / 4);
     WR32(a[1] + 4, RD32(a[1] + 4) * BASEY / 8); WR32(a[1] + 12, RD32(a[1] + 12) * BASEY / 8);
@@ -2081,6 +2545,36 @@ FN(u_AppendMenuW) {
     menu_changed(w, a[0]);
     return 1;
 }
+/* (menu, item, by position, MENUITEMINFO) */
+static uint32_t insert_menu_item(qwin *w, uint32_t *a, int wide)
+{
+    qmenu *m = M(w, a[0]);
+    uint32_t info = a[3], mask, type, state;
+    qmenuitem *it;
+    int at, i;
+    if (!m || m->n >= 48 || !info) return 0;
+    mask = RD32(info + 4); type = RD32(info + 8); state = RD32(info + 12);
+    at = m->n;
+    if (a[2]) { if ((int32_t)a[1] >= 0 && (int)a[1] < m->n) at = (int)a[1]; }
+    else for (i = 0; i < m->n; i++) if (m->it[i].id == a[1]) { at = i; break; }
+    for (i = m->n; i > at; i--) m->it[i] = m->it[i - 1];
+    m->n++;
+    it = &m->it[at];
+    memset(it, 0, sizeof(*it));
+    if (mask & 0x100u) type = 0;                           /* MIIM_FTYPE and string come separately */
+    if ((mask & 0x10u) && (type & 0x800u)) it->flags |= 0x800u;   /* separator */
+    if (mask & 1u) it->flags |= state & 0x0Bu;             /* disabled, grey, checked */
+    if (mask & 2u) it->id = RD32(info + 16);
+    if ((mask & 4u) && RD32(info + 20)) { it->sub = RD32(info + 20); it->flags |= 0x10u; }
+    if (((mask & 0x40u) || ((mask & 0x10u) && !(type & 0x900u))) && RD32(info + 36) >= 0x10000u) {
+        if (wide) qw_rd_wstr(w, RD32(info + 36), it->text, 64);
+        else { char t[64]; qw_rd_str(w, RD32(info + 36), t, sizeof(t)); a2w(it->text, t, 64); }
+    }
+    menu_changed(w, a[0]);
+    return 1;
+}
+FN(u_InsertMenuItemA) { return insert_menu_item(w, a, 0); }
+FN(u_InsertMenuItemW) { return insert_menu_item(w, a, 1); }
 FN(u_ModifyMenuW) {
     qmenuitem *it = menu_find(w, a[0], a[1], (a[2] & 0x400) != 0, NULL);
     if (!it) return 0;
@@ -2119,7 +2613,469 @@ static uint32_t h_ScrollBarProc(qwin *w, uint32_t *a) { return scrollbar_proc(w,
 static uint32_t h_MenuProc(qwin *w, uint32_t *a) { return menu_popup_proc(w, a); }
 
 #define U(n, f, c) { "user32", n, c, f }
+/* ====================================================================== property sheets
+ * The frame is a dialog of ours, with the pages as child dialogs under it. Pages are created
+ * when first shown, and everything a page decides reaches it as WM_NOTIFY. */
+#define QS_MAX 32
+#define QS_BACK 0x3023u
+#define QS_NEXT 0x3024u
+#define QS_FINISH 0x3025u
+#define QS_APPLY 0x3021u
+#define QS_TAB 0x3100u
+enum { PSN_SETACTIVE = -200, PSN_KILLACTIVE = -201, PSN_APPLY = -202, PSN_RESET = -203, PSN_WIZBACK = -206, PSN_WIZNEXT = -207, PSN_WIZFINISH = -208, PSN_QUERYCANCEL = -209 };
+typedef struct qspage { uint32_t psp, hwnd, tpl; } qspage;
+struct qsheet {
+    uint32_t h, flags, hinst, wizbtn;
+    int n, cur, wizard, wide, modeless, pw, ph, top, result, done, saved;
+    wchar16 caption[128];
+    qspage page[QS_MAX];
+};
+typedef struct qsheet qsheet;
+
+/* A string argument that may be a resource number. */
+static void sheet_text(qwin *w, qsheet *s, uint32_t hinst, uint32_t p, wchar16 *out, int max)
+{
+    out[0] = 0;
+    if (!p) return;
+    if (p < 0x10000u) {
+        uint32_t b[4], g = qw_alloc(w, (uint32_t)max * 2u);
+        b[0] = hinst; b[1] = p; b[2] = g; b[3] = (uint32_t)max;
+        u_LoadStringW(w, b);
+        qw_rd_wstr(w, g, out, max);
+        qw_free(w, g);
+    } else if (s->wide) qw_rd_wstr(w, p, out, max);
+    else { char t[260]; qw_rd_str(w, p, t, sizeof(t)); a2w(out, t, max); }
+}
+static uint32_t sheet_template(qwin *w, qsheet *s, uint32_t psp)
+{
+    uint32_t flags = RD32(psp + 4), name = RD32(psp + 12), hinst = RD32(psp + 8), r;
+    if (flags & 1u) return name;                           /* PSP_DLGINDIRECT */
+    if (!hinst) hinst = s->hinst;
+    if (name < 0x10000u || s->wide) return dialog_template(w, hinst, name);
+    {
+        wchar16 t[64];
+        uint32_t g = qw_alloc(w, 128);
+        char c[64];
+        qw_rd_str(w, name, c, sizeof(c));
+        a2w(t, c, 64);
+        qw_wr_wstr(w, g, t, 64);
+        r = dialog_template(w, hinst, g);
+        qw_free(w, g);
+    }
+    return r;
+}
+static int32_t sheet_notify(qwin *w, qsheet *s, int i, int code, uint32_t lp)
+{
+    uint32_t nm, r;
+    qwnd *x;
+    if (i < 0 || i >= s->n || !W(w, s->page[i].hwnd)) return 0;
+    nm = qw_alloc(w, 16);
+    WR32(nm, s->h); WR32(nm + 4, 0); WR32(nm + 8, (uint32_t)code); WR32(nm + 12, lp);
+    x = W(w, s->page[i].hwnd);
+    if (x->extra) memset(x->extra, 0, 4);
+    r = win_send(w, s->page[i].hwnd, WM_NOTIFY, 0, nm);
+    qw_free(w, nm);
+    x = W(w, s->page[i].hwnd);
+    if (!x || !r) return 0;
+    if (x->extra) { uint32_t mr; memcpy(&mr, x->extra, 4); return (int32_t)mr; }
+    return 0;
+}
+static void sheet_vis(qwin *w, uint32_t h, int on)
+{
+    qwnd *x = W(w, h);
+    if (!x) return;
+    x->visible = on;
+    if (on) x->style |= WS_VISIBLE; else x->style &= ~WS_VISIBLE;
+    win_send(w, h, WM_SHOWWINDOW, (uint32_t)on, 0);
+    x = W(w, h);
+    if (x) win_invalidate(w, on ? x : W(w, x->parent), 1);
+}
+static void sheet_button_style(qwin *w, qsheet *s, uint32_t id, int def)
+{
+    qwnd *b = find_ctl(w, W(w, s->h), id);
+    if (b) win_send(w, b->h, BM_SETSTYLE, def ? 1u : 0u, 0);
+}
+static void sheet_wiz_buttons(qwin *w, qsheet *s)
+{
+    qwnd *f = W(w, s->h), *b;
+    int fin = (s->wizbtn & 0xC) != 0;
+    if (!s->wizard || !f) return;
+    if ((b = find_ctl(w, f, QS_BACK)) != NULL) { b->enabled = (s->wizbtn & 1) != 0; win_invalidate(w, b, 1); }
+    if ((b = find_ctl(w, f, QS_NEXT)) != NULL) { b->enabled = (s->wizbtn & 2) != 0; sheet_vis(w, b->h, !fin); }
+    if ((b = find_ctl(w, f, QS_FINISH)) != NULL) { b->enabled = (s->wizbtn & 4) != 0; sheet_vis(w, b->h, fin); }
+    sheet_button_style(w, s, QS_NEXT, !fin);
+    sheet_button_style(w, s, QS_FINISH, fin);
+    /* The buttons usually change after the page is shown: focus must not stay on a hidden one. */
+    b = W(w, w->focus);
+    if (b && b->parent == s->h && (!b->visible || !b->enabled)) {
+        qwnd *d = find_ctl(w, f, fin ? QS_FINISH : QS_NEXT);
+        if (d && d->visible && d->enabled) set_focus(w, d->h);
+        else set_focus(w, s->h);
+    }
+}
+static int sheet_create_page(qwin *w, qsheet *s, int i)
+{
+    uint32_t psp = s->page[i].psp, flags = RD32(psp + 4), proc = RD32(psp + 24), hinst = RD32(psp + 8), cb = RD32(psp + 32);
+    qwnd *x;
+    if ((flags & 0x80u) && cb && !qw_call(w, cb, 3, 0, 2 /* PSPCB_CREATE */, psp, 0)) return 0;
+    if (!s->page[i].tpl) return 0;
+    g_dlg_child = 1;
+    s->page[i].hwnd = create_dialog(w, s->page[i].tpl, s->h, proc, psp, hinst ? hinst : s->hinst);
+    g_dlg_child = 0;
+    x = W(w, s->page[i].hwnd);
+    if (!x) { s->page[i].hwnd = 0; return 0; }
+    x->y = s->top;
+    return 1;
+}
+static int sheet_index_of_id(qwin *w, qsheet *s, uint32_t id)
+{
+    int i;
+    for (i = 0; i < s->n; i++) if (RD32(s->page[i].psp + 12) == id) return i;
+    (void)w;
+    return -1;
+}
+/* dir is where to go on when a page refuses to be shown. */
+static int sheet_select(qwin *w, qsheet *s, int i, int dir)
+{
+    int tries, old = s->cur;
+    uint32_t next;
+    wchar16 t[128];
+    for (tries = 0; tries <= s->n; tries++) {
+        int32_t r;
+        if (i < 0 || i >= s->n) return 0;
+        if (!s->page[i].hwnd && !sheet_create_page(w, s, i)) { i += dir; continue; }
+        s->cur = i;                                        /* a page asks the frame for the current one */
+        r = sheet_notify(w, s, i, PSN_SETACTIVE, 0);
+        if (r == -1) { i += dir; continue; }
+        if (r) { int k = sheet_index_of_id(w, s, (uint32_t)r); if (k < 0) { i += dir; continue; } i = k; continue; }
+        break;
+    }
+    if (tries > s->n) { s->cur = old; return 0; }
+    if (old >= 0 && old != i && old < s->n && s->page[old].hwnd) sheet_vis(w, s->page[old].hwnd, 0);
+    s->cur = i;
+    sheet_vis(w, s->page[i].hwnd, 1);
+    if (RD32(s->page[i].psp + 4) & 8u) sheet_text(w, s, RD32(s->page[i].psp + 8) ? RD32(s->page[i].psp + 8) : s->hinst, RD32(s->page[i].psp + 20), t, 128);
+    else t[0] = 0;
+    if (s->wizard && W(w, s->h)) {
+        qwnd *f = W(w, s->h);
+        const wchar16 *cap = t[0] ? t : s->caption;
+        int k;
+        for (k = 0; cap[k] && k < 255; k++) f->text[k] = cap[k];
+        f->text[k] = 0;
+        win_invalidate(w, f, 1);
+    }
+    /* Focus into the page, but not onto a push button such as Browse: Return must go on. */
+    next = dlg_next_tab(w, s->page[i].hwnd, 0, 0);
+    { qwnd *fc = W(w, next); if (fc && fc->cls && fc->cls->builtin == B_BUTTON && btype(fc) <= 1) next = 0; }
+    if (next) set_focus(w, next);
+    else { qwnd *b = find_ctl(w, W(w, s->h), s->wizard ? ((s->wizbtn & 0xC) ? QS_FINISH : QS_NEXT) : 1u); if (b) set_focus(w, b->h); else set_focus(w, s->h); }
+    return 1;
+}
+static void sheet_end(qwin *w, qsheet *s, int result)
+{
+    qwnd *f = W(w, s->h);
+    s->done = 1;
+    s->result = result;
+    if (f && !s->modeless) { f->modal_done = 1; f->modal_result = result; }
+}
+static void sheet_cancel(qwin *w, qsheet *s)
+{
+    int i;
+    if (sheet_notify(w, s, s->cur, PSN_QUERYCANCEL, 0)) return;
+    for (i = 0; i < s->n; i++) if (s->page[i].hwnd) sheet_notify(w, s, i, PSN_RESET, 0);
+    sheet_end(w, s, s->result ? s->result : s->saved);
+}
+static int sheet_apply(qwin *w, qsheet *s)
+{
+    int i;
+    if (sheet_notify(w, s, s->cur, PSN_KILLACTIVE, 0)) return 0;
+    for (i = 0; i < s->n; i++) if (s->page[i].hwnd && sheet_notify(w, s, i, PSN_APPLY, 0)) { sheet_select(w, s, i, 0); return 0; }
+    s->saved = 1;
+    return 1;
+}
+static void sheet_go(qwin *w, qsheet *s, int code, int dir)
+{
+    int32_t r = sheet_notify(w, s, s->cur, code, 0);
+    int k = s->cur + dir;
+    if (r == -1) return;
+    if (r) { k = sheet_index_of_id(w, s, (uint32_t)r); if (k < 0) return; }
+    sheet_select(w, s, k, dir);
+}
+static void sheet_command(qwin *w, qsheet *s, uint32_t id)
+{
+    if (s->done) return;
+    if (id == QS_BACK) sheet_go(w, s, PSN_WIZBACK, -1);
+    else if (id == QS_NEXT) sheet_go(w, s, PSN_WIZNEXT, 1);
+    else if (id == QS_FINISH) { if (!sheet_notify(w, s, s->cur, PSN_WIZFINISH, 0)) sheet_end(w, s, s->result ? s->result : 1); }
+    else if (id == 2) sheet_cancel(w, s);
+    else if (id == 1) { if (s->wizard) { /* Return with no button left: nothing to do */ } else if (sheet_apply(w, s)) sheet_end(w, s, s->result ? s->result : 1); }
+    else if (id == QS_APPLY) {
+        if (sheet_apply(w, s)) { qwnd *a = find_ctl(w, W(w, s->h), QS_APPLY); if (a) { a->enabled = 0; win_invalidate(w, a, 1); } }
+    } else if (id >= QS_TAB && id < QS_TAB + QS_MAX) {
+        if ((int)(id - QS_TAB) != s->cur && !sheet_notify(w, s, s->cur, PSN_KILLACTIVE, 0)) sheet_select(w, s, (int)(id - QS_TAB), 1);
+    }
+}
+static int sheet_add(qwin *w, qsheet *s, int at, uint32_t psp)
+{
+    int i;
+    if (s->n >= QS_MAX) return 0;
+    if (at < 0 || at > s->n) at = s->n;
+    for (i = s->n; i > at; i--) s->page[i] = s->page[i - 1];
+    s->page[at].psp = psp; s->page[at].hwnd = 0;
+    s->page[at].tpl = sheet_template(w, s, psp);
+    s->n++;
+    if (s->cur >= at && s->h) s->cur++;
+    return 1;
+}
+/* Returns 1 when the message was one of the frame's. */
+static int sheet_proc(qwin *w, struct qsheet *s, uint32_t *a, uint32_t *ret)
+{
+    uint32_t wp = a[2], lp = a[3];
+    int i;
+    *ret = 0;
+    switch (a[1]) {
+    case WM_COMMAND: sheet_command(w, s, wp & 0xFFFF); return 1;
+    case WM_CLOSE: sheet_command(w, s, 2); return 1;
+    case 0x0400: {                                         /* DM_GETDEFID */
+        qwnd *f = W(w, s->h), *b = f ? find_ctl(w, f, s->wizard ? ((s->wizbtn & 0xC) ? QS_FINISH : QS_NEXT) : 1u) : NULL;
+        *ret = b && b->enabled ? 0x534B0000u | (b->id & 0xFFFF) : 0;
+        return 1; }
+    case 0x0401: i = (int)wp; if (i < 0 || i >= s->n) { i = -1; { int k; for (k = 0; k < s->n; k++) if (s->page[k].psp == lp) i = k; } }  /* PSM_SETCURSEL */
+        if (i >= 0 && (s->cur < 0 || !sheet_notify(w, s, s->cur, PSN_KILLACTIVE, 0))) *ret = (uint32_t)sheet_select(w, s, i, i >= s->cur ? 1 : -1);
+        return 1;
+    case 0x0402: {                                         /* PSM_REMOVEPAGE */
+        i = (int)wp;
+        if (i < 0 || i >= s->n) return 1;
+        if (s->page[i].hwnd) win_destroy(w, W(w, s->page[i].hwnd));
+        for (; i + 1 < s->n; i++) s->page[i] = s->page[i + 1];
+        s->n--;
+        if (s->cur >= s->n) s->cur = s->n - 1;
+        return 1; }
+    case 0x0403: *ret = (uint32_t)sheet_add(w, s, -1, lp); return 1;                 /* PSM_ADDPAGE */
+    case 0x0477: *ret = (uint32_t)sheet_add(w, s, (int)wp, lp); return 1;            /* PSM_INSERTPAGE, by index */
+    case 0x0404: { qwnd *b = find_ctl(w, W(w, s->h), QS_APPLY); if (b) { b->enabled = 1; win_invalidate(w, b, 1); } return 1; }  /* PSM_CHANGED */
+    case 0x040D: return 1;                                 /* PSM_UNCHANGED */
+    case 0x0409: s->result = 2; return 1;                  /* PSM_RESTARTWINDOWS */
+    case 0x040A: s->result = 3; return 1;                  /* PSM_REBOOTSYSTEM */
+    case 0x040B: { qwnd *b = find_ctl(w, W(w, s->h), 2); if (b) { a2w(b->text, "Close", 256); win_invalidate(w, b, 1); } return 1; }  /* PSM_CANCELTOCLOSE */
+    case 0x040C:                                           /* PSM_QUERYSIBLINGS */
+        for (i = 0; i < s->n; i++) if (s->page[i].hwnd && (*ret = win_send(w, s->page[i].hwnd, 0x040C, wp, lp)) != 0) break;
+        return 1;
+    case 0x046E: *ret = (uint32_t)sheet_apply(w, s); return 1;                       /* PSM_APPLY */
+    case 0x046F: case 0x0478: {                            /* PSM_SETTITLE */
+        qwnd *f = W(w, s->h);
+        int was = s->wide, k;
+        s->wide = a[1] == 0x0478;
+        sheet_text(w, s, s->hinst, lp, s->caption, 128);
+        s->wide = was;
+        if (f) { for (k = 0; s->caption[k] && k < 255; k++) f->text[k] = s->caption[k]; f->text[k] = 0; win_invalidate(w, f, 1); }
+        return 1; }
+    case 0x0470: s->wizbtn = lp; sheet_wiz_buttons(w, s); return 1;                  /* PSM_SETWIZBUTTONS */
+    case 0x0471: {                                         /* PSM_PRESSBUTTON */
+        static const uint32_t ids[] = { QS_BACK, QS_NEXT, QS_FINISH, 1, QS_APPLY, 2, 9 };
+        if (wp < 7) sheet_command(w, s, ids[wp]);
+        return 1; }
+    case 0x0472: i = lp ? sheet_index_of_id(w, s, lp) : -1; if (i >= 0 && !sheet_notify(w, s, s->cur, PSN_KILLACTIVE, 0)) *ret = (uint32_t)sheet_select(w, s, i, 1); return 1;  /* PSM_SETCURSELID */
+    case 0x0473: case 0x0479: {                            /* PSM_SETFINISHTEXT */
+        qwnd *b = find_ctl(w, W(w, s->h), QS_FINISH);
+        int was = s->wide;
+        s->wide = a[1] == 0x0479;
+        if (b) sheet_text(w, s, s->hinst, lp, b->text, 64);
+        s->wide = was;
+        s->wizbtn |= 4;
+        sheet_wiz_buttons(w, s);
+        return 1; }
+    case 0x0474: return 1;                                 /* PSM_GETTABCONTROL: we have none */
+    case 0x0475: { uint32_t b[2]; b[0] = s->h; b[1] = lp; *ret = u_IsDialogMessageW(w, b); return 1; }  /* PSM_ISDIALOGMESSAGE */
+    case 0x0476: *ret = !s->done && s->cur >= 0 && s->cur < s->n ? s->page[s->cur].hwnd : 0; return 1;  /* PSM_GETCURRENTPAGEHWND */
+    case 0x0481: for (i = 0; i < s->n; i++) if (s->page[i].hwnd == wp) { *ret = (uint32_t)i; return 1; } *ret = 0xFFFFFFFFu; return 1;  /* PSM_HWNDTOINDEX */
+    case 0x0482: *ret = wp < (uint32_t)s->n ? s->page[wp].hwnd : 0; return 1;        /* PSM_INDEXTOHWND */
+    case 0x0483: for (i = 0; i < s->n; i++) if (s->page[i].psp == lp) { *ret = (uint32_t)i; return 1; } *ret = 0xFFFFFFFFu; return 1;  /* PSM_PAGETOINDEX */
+    case 0x0484: *ret = wp < (uint32_t)s->n ? s->page[wp].psp : 0; return 1;         /* PSM_INDEXTOPAGE */
+    case 0x0485: *ret = (uint32_t)sheet_index_of_id(w, s, lp); return 1;             /* PSM_IDTOINDEX */
+    case 0x0486: *ret = wp < (uint32_t)s->n ? RD32(s->page[wp].psp + 12) : 0; return 1;  /* PSM_INDEXTOID */
+    case 0x0487: *ret = (uint32_t)s->result; return 1;     /* PSM_GETRESULT */
+    case WM_DESTROY:
+        for (i = 0; i < s->n; i++) {
+            uint32_t psp = s->page[i].psp, cb = RD32(psp + 32);
+            if ((RD32(psp + 4) & 0x80u) && cb) qw_call(w, cb, 3, 0, 1 /* PSPCB_RELEASE */, psp, 0);
+        }
+        return 0;
+    }
+    return 0;
+}
+/* Tab runs through the page and then the frame's buttons; the rest goes to the page. */
+static int sheet_key(qwin *w, qwnd *f, uint32_t hwnd, uint32_t msg, uint32_t wp)
+{
+    qsheet *s = (qsheet *)f->sheet;
+    uint32_t page = s->cur >= 0 && s->cur < s->n ? s->page[s->cur].hwnd : 0;
+    qwnd *c = W(w, hwnd);
+    int in_page = 0;
+    uint32_t code;
+    { qwnd *q = c; while (q && q->h != page && (q->style & WS_CHILD)) q = W(w, q->parent); in_page = q && q->h == page; }
+    code = c && hwnd != f->h ? win_send(w, hwnd, WM_GETDLGCODE, wp, 0) : 0;
+    if (code & 4) return 0;
+    if (msg == WM_CHAR) return (in_page && dlg_char(w, page, wp, code)) || dlg_char(w, f->h, wp, code);
+    if (msg != WM_KEYDOWN) return 0;
+    switch (wp) {
+    case 0x09: {
+        uint32_t list[DLG_MAXCTL + 16], at = 0;
+        qwnd *pc[DLG_MAXCTL];
+        int n = 0, k, m, here = -1, back = (w->keystate[0x10] & 0x80) != 0;
+        if (code & 2) return 0;
+        m = page ? dlg_controls(w, page, pc) : 0;
+        for (k = 0; k < m; k++) if (dlg_can_focus(pc[k]) && (pc[k]->style & WS_TABSTOP)) list[n++] = pc[k]->h;
+        m = dlg_controls(w, f->h, pc);
+        for (k = 0; k < m && n < DLG_MAXCTL; k++) if (pc[k]->h != page && dlg_can_focus(pc[k]) && (pc[k]->style & WS_TABSTOP) && pc[k]->id < QS_TAB) list[n++] = pc[k]->h;
+        for (k = 0; k < n; k++) { qwnd *q = c; while (q && q->h != list[k] && (q->style & WS_CHILD)) q = W(w, q->parent); if (q && q->h == list[k]) here = k; }
+        if (!n) return 1;
+        at = (uint32_t)(here < 0 ? (back ? n - 1 : 0) : (here + (back ? n - 1 : 1)) % n);
+        set_focus(w, list[at]);
+        return 1; }
+    case 0x25: case 0x26: case 0x27: case 0x28:
+        return in_page ? dlg_key(w, page, hwnd, msg, wp) : 1;
+    case 0x0D: {
+        uint32_t def;
+        if (c && hwnd != f->h && c->cls && c->cls->builtin == B_BUTTON && btype(c) <= 1) { win_send(w, c->parent, WM_COMMAND, c->id & 0xFFFF, c->h); return 1; }
+        def = win_send(w, f->h, 0x0400, 0, 0);
+        if ((def >> 16) == 0x534B) sheet_command(w, s, def & 0xFFFF);
+        return 1; }
+    case 0x1B: sheet_command(w, s, 2); return 1;
+    }
+    return 0;
+}
+static uint32_t property_sheet(qwin *w, uint32_t *a, int wide)
+{
+    uint32_t hdr = a[0], flags = RD32(hdr + 4), parent = RD32(hdr + 8), hinst = RD32(hdr + 12), npages = RD32(hdr + 24), start = RD32(hdr + 28), pages = RD32(hdr + 32), cb = RD32(hdr + 36), h;
+    qsheet *s;
+    qclass *dc, *bc;
+    static wchar16 dn[8], bn[8];
+    int i, cw, ch, bw = 76, bh = 24, gap = 8, nb = 0, px, py, firstpage;
+    struct { const char *label; uint32_t id; } b[5];
+    qwnd tmp, *ow;
+    s = (qsheet *)calloc(1, sizeof(*s));
+    if (!s) return 0xFFFFFFFFu;
+    s->flags = flags; s->hinst = hinst; s->wide = wide; s->cur = -1; s->result = 0;
+    s->modeless = (flags & 0x400u) != 0;
+    s->wizard = (flags & (0x20u | 0x2000u | 0x1000000u)) != 0;
+    s->wizbtn = 3;
+    for (i = 0; i < (int)npages && i < QS_MAX; i++) {
+        uint32_t src = (flags & 8u) ? pages : RD32(pages + (uint32_t)i * 4u), psp;
+        /* An array of pages: each is as long as it says. */
+        if (flags & 8u) { uint32_t k; for (k = 0; k < (uint32_t)i; k++) src += RD32(src); }
+        {
+            uint32_t size = RD32(src), k;
+            psp = qw_alloc(w, size);
+            for (k = 0; k < size; k += 4) WR32(psp + k, RD32(src + k));
+        }
+        sheet_add(w, s, -1, psp);
+    }
+    if (!s->n) { free(s); return 0xFFFFFFFFu; }
+    for (i = 0; i < s->n; i++) {
+        uint32_t t = s->page[i].tpl;
+        int ex, cx, cy;
+        if (!t) continue;
+        ex = x86_rd16(C, t) == 1 && x86_rd16(C, t + 2) == 0xFFFF;
+        cx = (int16_t)x86_rd16(C, t + (ex ? 22 : 14)); cy = (int16_t)x86_rd16(C, t + (ex ? 24 : 16));
+        if (cx * BASEX / 4 > s->pw) s->pw = cx * BASEX / 4;
+        if (cy * BASEY / 8 > s->ph) s->ph = cy * BASEY / 8;
+    }
+    if (s->pw < 200) s->pw = 200;
+    if (s->ph < 100) s->ph = 100;
+    s->top = s->wizard ? 0 : 28;
+    sheet_text(w, s, hinst, RD32(hdr + 20), s->caption, 128);
+    if (s->wizard) {
+        b[nb].label = "< &Back"; b[nb++].id = QS_BACK;
+        b[nb].label = "&Next >"; b[nb++].id = QS_NEXT;
+        b[nb].label = "Finish"; b[nb++].id = QS_FINISH;
+        b[nb].label = "Cancel"; b[nb++].id = 2;
+    } else {
+        b[nb].label = "OK"; b[nb++].id = 1;
+        b[nb].label = "Cancel"; b[nb++].id = 2;
+        if (!(flags & 0x80u)) { b[nb].label = "&Apply"; b[nb++].id = QS_APPLY; }   /* PSH_NOAPPLYNOW */
+    }
+    cw = s->pw; ch = s->top + s->ph + 44;
+    memset(&tmp, 0, sizeof(tmp));
+    tmp.style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
+    nc_metrics(w, &tmp);
+    ow = W(w, parent);
+    ow = ow ? win_top(w, ow) : NULL;
+    px = ow ? ow->x + (ow->cw - cw) / 2 : 100;
+    py = ow ? ow->y + (ow->ch - ch) / 2 : 80;
+    if (px < 0) px = 0;
+    if (py < tmp.nt) py = tmp.nt;
+    a2w(dn, "#32770", 8); a2w(bn, "Button", 8);
+    dc = find_class(w, 0, dn); bc = find_class(w, 0, bn);
+    h = create_window(w, 0, dc, s->caption, WS_POPUP | WS_CAPTION | WS_SYSMENU, px - tmp.nl, py - tmp.nt, cw + tmp.nl + tmp.nr, ch + tmp.nt + tmp.nb, parent, 0, hinst, 0);
+    if (!h) { free(s); return 0xFFFFFFFFu; }
+    s->h = h;
+    W(w, h)->is_dialog = 1;
+    W(w, h)->owner = parent;
+    W(w, h)->sheet = s;
+    {   /* Finish takes Next's place. */
+        int shown = s->wizard ? nb - 1 : nb, k = 0;
+        int x0 = cw - shown * bw - (shown - 1) * gap - 10;
+        for (i = 0; i < nb; i++) {
+            wchar16 label[16];
+            uint32_t c;
+            int slot = k;
+            if (b[i].id == QS_FINISH) slot = k - 1; else k++;
+            a2w(label, b[i].label, 16);
+            c = create_window(w, 0, bc, label, WS_CHILD | WS_TABSTOP | (b[i].id == QS_FINISH ? 0u : WS_VISIBLE), x0 + slot * (bw + gap), ch - bh - 10, bw, bh, h, b[i].id, 0, 0);
+            if (c && W(w, c)) { W(w, c)->visible = b[i].id != QS_FINISH; }
+            if (c && b[i].id == QS_APPLY) W(w, c)->enabled = 0;
+        }
+    }
+    if (!s->wizard) for (i = 0; i < s->n; i++) {               /* tabs: a row of buttons */
+        wchar16 t[64];
+        char nm[16];
+        uint32_t psp = s->page[i].psp;
+        t[0] = 0;
+        if (RD32(psp + 4) & 8u) sheet_text(w, s, RD32(psp + 8) ? RD32(psp + 8) : hinst, RD32(psp + 20), t, 64);
+        if (!t[0] && s->page[i].tpl) {                         /* the page's own caption */
+            tplr r;
+            wchar16 skip[64];
+            r.p = s->page[i].tpl;
+            r.ex = x86_rd16(C, r.p) == 1 && x86_rd16(C, r.p + 2) == 0xFFFF;
+            r.p += r.ex ? 26 : 18;
+            tsz(w, &r, skip, 64);
+            tsz(w, &r, skip, 64);
+            tsz(w, &r, t, 64);
+        }
+        if (!t[0]) { snprintf(nm, sizeof(nm), "Page %d", i + 1); a2w(t, nm, 64); }
+        create_window(w, 0, bc, t, WS_CHILD | WS_VISIBLE, 4 + i * 84, 2, 80, 22, h, QS_TAB + (uint32_t)i, 0, 0);
+    }
+    sheet_wiz_buttons(w, s);
+    if (!s->wizard) sheet_button_style(w, s, 1, 1);
+    if ((flags & 0x100u) && cb) qw_call(w, cb, 3, h, 1 /* PSCB_INITIALIZED */, 0, 0);
+    firstpage = (flags & 0x40u) ? 0 : (int)start;              /* PSH_USEPSTARTPAGE names a title: start at the first */
+    if (firstpage >= s->n) firstpage = 0;
+    if (!sheet_select(w, s, firstpage, 1)) { sheet_end(w, s, 0); }
+    if (s->modeless) {
+        qwnd *x = W(w, h);
+        if (x) { x->visible = 1; x->style |= WS_VISIBLE; show_top(w, x); win_invalidate(w, x, 1); }
+        return h;
+    }
+    {
+        uint32_t r = (uint32_t)run_modal(w, h);
+        for (i = 0; i < s->n; i++) qw_free(w, s->page[i].psp);
+        free(s);
+        return r;
+    }
+}
+FN(u_PropertySheetA) { return property_sheet(w, a, 0); }
+FN(u_PropertySheetW) { return property_sheet(w, a, 1); }
+FN(u_CreatePropertySheetPage) {
+    uint32_t size = RD32(a[0]), p = qw_alloc(w, size), k;
+    for (k = 0; k < size; k += 4) WR32(p + k, RD32(a[0] + k));
+    return p;
+}
+FN(u_DestroyPropertySheetPage) { (void)w; (void)a; return 1; }
+
 const qhle qw_user32[] = {
+    { "comctl32", "PropertySheetA", 1, u_PropertySheetA }, { "comctl32", "PropertySheetW", 1, u_PropertySheetW },
+    { "comctl32", "CreatePropertySheetPageA", 1, u_CreatePropertySheetPage }, { "comctl32", "CreatePropertySheetPageW", 1, u_CreatePropertySheetPage },
+    { "comctl32", "DestroyPropertySheetPage", 1, u_DestroyPropertySheetPage },
     U("RegisterClassExW", u_RegisterClassExW, 1), U("RegisterClassW", u_RegisterClassW, 1), U("UnregisterClassW", u_UnregisterClassW, 2),
     U("GetClassInfoExW", u_GetClassInfoExW, 3),
     U("CreateWindowExW", u_CreateWindowExW, 12), U("DestroyWindow", u_DestroyWindow, 1), U("ShowWindow", u_ShowWindow, 2),
@@ -2141,11 +3097,11 @@ const qhle qw_user32[] = {
     U("SetDlgItemTextW", u_SetDlgItemTextW, 3), U("GetDlgItemTextW", u_GetDlgItemTextW, 4), U("SetDlgItemInt", u_SetDlgItemInt, 4),
     U("GetDlgItemInt", u_GetDlgItemInt, 4), U("CheckDlgButton", u_CheckDlgButton, 3), U("IsDlgButtonChecked", u_IsDlgButtonChecked, 2),
     U("CheckRadioButton", u_CheckRadioButton, 4), U("SendDlgItemMessageW", u_SendDlgItemMessageW, 5), U("GetClassNameW", u_GetClassNameW, 3),
-    U("EnumChildWindows", u_EnumChildWindows, 3), U("SetFocus", u_SetFocus, 1), U("GetFocus", u_GetFocus, 0),
+    U("EnumChildWindows", u_EnumChildWindows, 3), U("SetFocus", u_SetFocus, 1), U("ChildWindowFromPoint", u_ChildWindowFromPoint, 3), U("GetFocus", u_GetFocus, 0),
     U("SetCapture", u_SetCapture, 1), U("ReleaseCapture", u_ReleaseCapture, 0), U("GetCapture", u_GetCapture, 0),
     U("GetActiveWindow", u_GetActiveWindow, 0), U("GetForegroundWindow", u_GetActiveWindow, 0), U("SetActiveWindow", u_SetActiveWindow, 1),
     U("SetForegroundWindow", u_one, 1), U("BringWindowToTop", u_one, 1), U("FindWindowW", u_FindWindowW, 2),
-    U("LoadStringW", u_LoadStringW, 4), U("LoadIconW", u_LoadIconW, 2), U("LoadCursorW", u_LoadCursorW, 2), U("LoadCursorA", u_LoadCursorW, 2), U("LoadIconA", u_LoadIconW, 2), U("LoadBitmapW", u_LoadBitmapW, 2),
+    U("LoadStringW", u_LoadStringW, 4), U("LoadIconW", u_LoadIconW, 2), U("LoadCursorW", u_LoadCursorW, 2), U("LoadCursorFromFileA", u_LoadCursorFromFile, 1), U("LoadCursorFromFileW", u_LoadCursorFromFile, 1), U("LoadCursorA", u_LoadCursorW, 2), U("LoadIconA", u_LoadIconW, 2), U("LoadBitmapW", u_LoadBitmapW, 2),
     U("LoadImageW", u_LoadImageW, 6), U("DestroyIcon", u_DestroyIcon, 1), U("DestroyCursor", u_DestroyIcon, 1), U("SetCursor", u_SetCursor, 1),
     U("ShowCursor", u_ShowCursor, 1), U("GetCursorPos", u_GetCursorPos, 1), U("MessageBoxW", u_MessageBoxW, 4), U("MessageBeep", u_MessageBeep, 1),
     U("wsprintfW", u_wsprintfW, -1), U("wvsprintfW", u_wvsprintfW, 3), U("wsprintfA", u_wsprintfA, -1),
@@ -2171,21 +3127,21 @@ const qhle qw_user32[] = {
     U("PostMessageA", u_PostMessageW, 4), U("TranslateAcceleratorA", u_TranslateAcceleratorW, 3),
     U("IsDialogMessageA", u_IsDialogMessageW, 2), U("DefDlgProcA", u_DefDlgProcW, 4),
     U("SystemParametersInfoA", u_SystemParametersInfoW, 4), U("MapVirtualKeyA", u_MapVirtualKeyExW, 2),
-    U("GetWindowTextLengthA", u_GetWindowTextLengthW, 1), U("SetWindowsHookExA", u_zero, 4),
+    U("GetWindowTextLengthA", u_GetWindowTextLengthW, 1), U("SetWindowsHookExA", u_SetWindowsHookEx, 4),
     U("GetWindowLongPtrW", u_GetWindowLongW, 2), U("SetWindowLongPtrW", u_SetWindowLongW, 3),
     U("GetClassLongW", u_GetClassLongW, 2), U("SetClassLongW", u_SetClassLongW, 3),
     U("TrackMouseEvent", u_TrackMouseEvent, 1),
-    U("CreateDialogParamW", u_CreateDialogParamW, 5), U("CreateDialogIndirectParamW", u_CreateDialogIndirectParamW, 5),
+    U("CreateDialogParamW", u_CreateDialogParamW, 5), U("CreateDialogIndirectParamW", u_CreateDialogIndirectParamW, 5), U("CreateDialogIndirectParamA", u_CreateDialogIndirectParamW, 5), U("DialogBoxIndirectParamA", u_DialogBoxIndirectParamW, 5),
     U("DialogBoxParamW", u_DialogBoxParamW, 5), U("DialogBoxIndirectParamW", u_DialogBoxIndirectParamW, 5), U("EndDialog", u_EndDialog, 2),
-    U("GetNextDlgTabItem", u_GetNextDlgTabItem, 3), U("MapDialogRect", u_MapDialogRect, 2), U("GetDialogBaseUnits", u_GetDialogBaseUnits, 0),
+    U("GetNextDlgTabItem", u_GetNextDlgTabItem, 3), U("GetNextDlgGroupItem", u_GetNextDlgGroupItem, 3), U("MapDialogRect", u_MapDialogRect, 2), U("GetDialogBaseUnits", u_GetDialogBaseUnits, 0),
     U("LoadMenuW", u_LoadMenuW, 2), U("CreateMenu", u_CreateMenu, 0), U("CreatePopupMenu", u_CreateMenu, 0), U("DestroyMenu", u_DestroyMenu, 1),
     U("GetMenu", u_GetMenu, 1), U("SetMenu", u_SetMenu, 2), U("GetSubMenu", u_GetSubMenu, 2), U("GetMenuItemCount", u_GetMenuItemCount, 1),
     U("GetMenuItemID", u_GetMenuItemID, 2), U("CheckMenuItem", u_CheckMenuItem, 3), U("EnableMenuItem", u_EnableMenuItem, 3),
     U("CheckMenuRadioItem", u_CheckMenuRadioItem, 5), U("GetMenuState", u_GetMenuState, 3), U("AppendMenuW", u_AppendMenuW, 4),
-    U("ModifyMenuW", u_ModifyMenuW, 5), U("DeleteMenu", u_DeleteMenu, 3), U("RemoveMenu", u_DeleteMenu, 3), U("GetMenuStringW", u_GetMenuStringW, 5),
+    U("InsertMenuItemA", u_InsertMenuItemA, 4), U("InsertMenuItemW", u_InsertMenuItemW, 4), U("ModifyMenuW", u_ModifyMenuW, 5), U("DeleteMenu", u_DeleteMenu, 3), U("RemoveMenu", u_DeleteMenu, 3), U("GetMenuStringW", u_GetMenuStringW, 5),
     U("DrawMenuBar", u_DrawMenuBar, 1), U("TrackPopupMenu", u_TrackPopupMenu, 7), U("TrackPopupMenuEx", u_TrackPopupMenu, 6),
     U("GetSystemMenu", u_GetSystemMenu, 2), U("SetWindowContextHelpId", u_one, 2), U("WinHelpW", u_one, 4),
-    U("SetWindowsHookExW", u_zero, 4), U("UnhookWindowsHookEx", u_one, 1), U("CallNextHookEx", u_zero, 4),
+    U("SetWindowsHookExW", u_SetWindowsHookEx, 4), U("UnhookWindowsHookEx", u_UnhookWindowsHookEx, 1), U("CallNextHookEx", u_zero, 4),
     U("qrx_ButtonProc", h_ButtonProc, 4), U("qrx_StaticProc", h_StaticProc, 4), U("qrx_EditProc", h_EditProc, 4),
     U("qrx_DialogProc", h_DialogProc, 4), U("qrx_ListBoxProc", h_ListBoxProc, 4), U("qrx_ScrollBarProc", h_ScrollBarProc, 4),
     U("qrx_MenuProc", h_MenuProc, 4),

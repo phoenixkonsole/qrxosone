@@ -27,8 +27,10 @@ typedef struct hl {
     uint64_t now;
     uint64_t pending;
     uint64_t ic;                          /* guest instructions already turned into time */
+    int script_done;                      /* the script has ended */
     int line;
     char typebuf[256];
+    char waitfor[128];                    /* waitfor TITLE: the script holds until such a window shows */
     int typepos, typeup;
     uint8_t *fb[2];                       /* RTG-direct test double: display buffers */
     int fbn, fbpitch, fbw, fbh;
@@ -104,13 +106,30 @@ static uint64_t hl_ipms(void)       /* QRX_HL_IPMS: other CPU/clock ratios (e.g.
     if (!v) { const char *e = getenv("QRX_HL_IPMS"); v = e && strtoul(e, NULL, 0) ? strtoul(e, NULL, 0) : HL_IPMS; }
     return v;
 }
+/* Without a script nothing drives the clock but the program, and one that only sleeps would wait
+ * forever: then time is the real time, as on QRX OS One 64 where this is the only backend. */
+#if defined(__m68k64__)
+static uint64_t real_ms(void) { return *(volatile uint64_t *)0xFFFFFFFF00000300ull / 1000u; }   /* board clock */
+#else
+#include <time.h>
+static uint64_t real_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (uint64_t)t.tv_sec * 1000u + (uint64_t)t.tv_nsec / 1000000u; }
+#endif
 static void hl_tick(qwin *w)
 {
+    if (!g_hl.script || g_hl.script_done) {
+        static uint64_t base;
+        uint64_t r = real_ms();
+        if (!base) base = r - g_hl.now;
+        if (r - base > g_hl.now) g_hl.now = r - base;
+        qw_ec64_mix(w);
+        return;
+    }
     uint64_t ipms = hl_ipms(), d = (x86_icount(&w->cpu) - g_hl.ic) / ipms;
     if (!d) return;
     g_hl.ic += d * ipms;
     g_hl.now += d;
     g_hl.pending = g_hl.pending > d ? g_hl.pending - d : 0;
+    qw_ec64_mix(w);
 }
 static uint64_t hl_now(qwin *w) { hl_tick(w); return g_hl.now; }
 
@@ -132,6 +151,11 @@ static int hl_wait(qwin *w, uint32_t timeout, qevent *ev)
     char line[512], *cmd, *rest;
     hl_tick(w);
     for (;;) {
+        if (g_hl.waitfor[0]) {
+            if (!qw_user_has_window(w, g_hl.waitfor)) { g_hl.now += timeout; return 0; }
+            qw_log(w, "script: window \"%s\" is there", g_hl.waitfor);
+            g_hl.waitfor[0] = 0;
+        }
         if (g_hl.pending) {
             uint64_t adv = timeout < g_hl.pending ? timeout : g_hl.pending;
             g_hl.now += adv;
@@ -146,7 +170,10 @@ static int hl_wait(qwin *w, uint32_t timeout, qevent *ev)
             else { ev->type = QE_KEYUP; g_hl.typeup = 0; g_hl.typepos++; g_hl.pending = 30; }
             return 1;
         }
-        if (!g_hl.script || !fgets(line, sizeof(line), g_hl.script)) return -1;
+        if (!g_hl.script || !fgets(line, sizeof(line), g_hl.script)) {
+            if (g_hl.script) g_hl.script_done = 1;      /* from now on the clock is the real one */
+            return -1;
+        }
         g_hl.line++;
         line[strcspn(line, "\r\n")] = 0;
         cmd = line;
@@ -187,6 +214,11 @@ static int hl_wait(qwin *w, uint32_t timeout, qevent *ev)
             }
             return 1;
         }
+        if (!strcmp(cmd, "keydown") || !strcmp(cmd, "keyup")) {   /* held keys: games read several at once */
+            ev->vk = (int)strtol(rest, NULL, 0);
+            ev->type = cmd[3] == 'd' ? QE_KEYDOWN : QE_KEYUP;
+            return 1;
+        }
         if (!strcmp(cmd, "type")) { snprintf(g_hl.typebuf, sizeof(g_hl.typebuf), "%s", rest); g_hl.typepos = 0; g_hl.typeup = 0; continue; }
         if (!strcmp(cmd, "menubar")) { ev->type = QE_MENUBAR; ev->x = atoi(rest); return 1; }
         if (!strcmp(cmd, "menu")) { ev->type = QE_MENU; ev->id = (int)strtol(rest, NULL, 0); return 1; }
@@ -212,6 +244,8 @@ static int hl_wait(qwin *w, uint32_t timeout, qevent *ev)
             snprintf(ev->arg, sizeof(ev->arg), "%s", e);
             return 1;
         }
+        if (!strcmp(cmd, "trace")) { w->trace = atoi(rest); continue; }   /* API trace from here on (-T) */
+        if (!strcmp(cmd, "waitfor")) { snprintf(g_hl.waitfor, sizeof(g_hl.waitfor), "%s", rest); continue; }
         if (!strcmp(cmd, "close")) { ev->type = QE_CLOSE; return 1; }
         if (!strcmp(cmd, "quit")) { ev->type = QE_QUIT; return 1; }
         qw_log(w, "script line %d: unknown command '%s'", g_hl.line, cmd);

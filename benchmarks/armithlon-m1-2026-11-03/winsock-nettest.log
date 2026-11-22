@@ -1,0 +1,19 @@
+TCP: 524288 bytes echoed, 0 wrong, server saw 524288, thread exit 0, 350 ms
+UDP: select 1, received 4 bytes 'qrx' from 127.0.0.1
+refused: connect -1, error 10061
+NETTEST PASSED
+
+nettest.exe under AROS, 2026-11-06, with the two-sender test, before and after the n_send fix.
+Before, g_buf copied once per send call (2 of 2 runs failed; this is the first):
+race: both senders wait, 384764 and 384764 of 2097152 bytes sent
+race: connection 0: sent 2097152, received 2097152, 52336 wrong, first at 384764, thread exit 0, error 0
+race: connection 1: sent 2097152, received 2097152, 57344 wrong, first at 384764, thread exit 0, error 0
+NETTEST FAILED
+After, g_buf copied before each attempt (3 of 3 runs passed; this is the last):
+TCP: 524288 bytes echoed, 0 wrong, server saw 524288, thread exit 0, 315 ms
+UDP: select 1, received 4 bytes 'qrx' from 127.0.0.1
+refused: connect -1, error 10061
+race: both senders wait, 384764 and 384764 of 2097152 bytes sent
+race: connection 0: sent 2097152, received 2097152, 0 wrong, thread exit 0, error 0
+race: connection 1: sent 2097152, received 2097152, 0 wrong, thread exit 0, error 0
+NETTEST PASSED

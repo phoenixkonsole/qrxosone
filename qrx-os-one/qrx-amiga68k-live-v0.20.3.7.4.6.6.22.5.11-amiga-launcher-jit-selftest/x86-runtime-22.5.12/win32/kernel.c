@@ -16,8 +16,8 @@
 #define WR32(x, v) x86_wr32(C, (x), (v))
 #define UNUSED (void)w; (void)a
 
-static const char *known_dlls[] = { "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll", "ddraw", "dsound", "dinput", NULL };
-#define QW_NKNOWN 12
+static const char *known_dlls[] = { "lz32", "dsetup", "kernel32", "user32", "gdi32", "advapi32", "msvcrt", "comctl32", "shell32", "winmm", "ntdll", "ddraw", "dsound", "dinput", "opengl32", "glide2x", "glide3x", "d3d8", "d3d9", "vulkan-1", "dplayx", "dplay", "ole32", "imm32", "version", "msacm32", "dinput8", "wsock32", "ws2_32", NULL };
+#define QW_NKNOWN 27
 #define QW_MODBASE 0x7E000000u
 
 static double argd(qwin *w, uint32_t addr) { uint64_t u = (uint64_t)RD32(addr) | ((uint64_t)RD32(addr + 4) << 32); double d; memcpy(&d, &u, 8); return d; }
@@ -275,7 +275,10 @@ uint32_t qw_data_import(qwin *w, const char *dll, const char *name)
     }
     if (!strcmp(name, "__winitenv")) { if (!g_winitenv) { uint32_t arr = qw_data(w, 8); g_winitenv = qw_data(w, 4); WR32(g_winitenv, arr); } return g_winitenv; }
     if (!strcmp(name, "__initenv") || !strcmp(name, "_environ")) { if (!g_initenv) { uint32_t arr = qw_data(w, 8); g_initenv = qw_data(w, 4); WR32(g_initenv, arr); } return g_initenv; }
+    if (!strcmp(name, "__lc_codepage")) { static uint32_t g_codepage; if (!g_codepage) { g_codepage = qw_data(w, 4); WR32(g_codepage, 1252); } return g_codepage; }
     if (!strcmp(name, "__mb_cur_max")) { static uint32_t g_mbmax; if (!g_mbmax) { g_mbmax = qw_data(w, 4); WR32(g_mbmax, 1); } return g_mbmax; }
+    if (!strcmp(name, "_adjust_fdiv")) { static uint32_t g_adj; if (!g_adj) g_adj = qw_data(w, 4); return g_adj; }   /* 0: no Pentium FDIV fix */
+    if (!strcmp(name, "_mbctype")) { static uint32_t g_mbt; if (!g_mbt) g_mbt = qw_data(w, 260); return g_mbt; }
     if (!strcmp(name, "_fmode")) { if (!g_fmode) g_fmode = qw_data(w, 4); return g_fmode; }
     if (!strcmp(name, "_commode")) { if (!g_commode) g_commode = qw_data(w, 4); return g_commode; }
     return 0;
@@ -321,6 +324,8 @@ FN(m_initterm_e) {
     return 0;
 }
 FN(m_onexit) { if (w->nonexit < 64) w->onexit[w->nonexit++] = a[0]; return a[0]; }
+/* atexit reports success as 0, unlike _onexit, which returns the function. */
+FN(m_atexit) { if (w->nonexit < 64) w->onexit[w->nonexit++] = a[0]; return 0; }
 FN(m_dllonexit) { return m_onexit(w, a); }
 FN(m_exit) {
     while (w->nonexit > 0) { uint32_t fn = w->onexit[--w->nonexit]; qw_call(w, fn, 0, 0, 0, 0, 0); }
@@ -440,6 +445,7 @@ static double q_fabs(double x) { return __builtin_fabs(x); }
 MATH1(m_sqrt, q_sqrt) MATH1(m_floor, floor) MATH1(m_ceil, ceil) MATH1(m_fabs, q_fabs)
 FN(m_pow) { return retd(w, pow(dbl(a, 0), dbl(a, 2))); }
 FN(m_fmod) { return retd(w, fmod(dbl(a, 0), dbl(a, 2))); }
+FN(m_ldexp) { return retd(w, ldexp(dbl(a, 0), (int)(int32_t)a[2])); }
 FN(m_atan2) { return retd(w, atan2(dbl(a, 0), dbl(a, 2))); }
 FN(m_modf) {
     double ip, fr = modf(dbl(a, 0), &ip); uint64_t u;
@@ -475,6 +481,12 @@ FN(m_qsort) {
 }
 FN(m_errno) { if (!g_errno) g_errno = qw_data(w, 4); UNUSED; return g_errno; }
 FN(m_p_fmode) { return qw_data_import(w, 0, "_fmode"); (void)a; }
+FN(m_p_initenv) { return qw_data_import(w, 0, "__initenv"); (void)a; }
+FN(m_p_mb_cur_max) { return qw_data_import(w, 0, "__mb_cur_max"); (void)a; }
+FN(m_islower) { UNUSED; return (uint32_t)islower((int)(a[0] & 0xFF)); }
+FN(m_isupper) { UNUSED; return (uint32_t)isupper((int)(a[0] & 0xFF)); }
+FN(m_get_osfhandle) { UNUSED; return a[0]; }
+FN(m_setmode) { UNUSED; return 0x8000u; }
 FN(m_p_commode) { return qw_data_import(w, 0, "_commode"); (void)a; }
 FN(m_p_acmdln) { (void)a; return qw_data_import(w, 0, "_acmdln"); }
 FN(m_p_wcmdln) { (void)a; return qw_data_import(w, 0, "_wcmdln"); }
@@ -513,12 +525,22 @@ static void systime(qwin *w, uint32_t p, int local)
 FN(k_GetLocalTime) { systime(w, a[0], 1); return 0; }
 FN(k_GetSystemTime) { systime(w, a[0], 0); return 0; }
 FN(k_GetStartupInfo) { uint32_t i; for (i = 0; i < 68; i += 4) WR32(a[0] + i, 0); WR32(a[0], 68); return 0; }
-FN(k_GetVersion) { UNUSED; return 0x0A280105u; }    /* 5.1 build 2600 */
+/* Programs linked before 1998 were written for Windows 95, and some refuse NT outright. */
+static int is_win95_program(qwin *w)
+{
+    uint32_t t = RD32(w->image_base + RD32(w->image_base + 0x3C) + 8);
+    return t && t < 883612800u;
+}
+FN(k_GetVersion) { UNUSED; return is_win95_program(w) ? 0xC3B60004u : 0x0A280105u; }    /* 4.0 build 950, or 5.1 build 2600 */
 FN(k_GetVersionEx) {
     static const char sp[] = "Service Pack 3";
-    uint32_t i, wide = RD32(a[0]) >= 276;
-    WR32(a[0] + 4, 5); WR32(a[0] + 8, 1); WR32(a[0] + 12, 2600); WR32(a[0] + 16, 2);
-    for (i = 0; i < sizeof(sp); i++) { if (wide) x86_wr16(C, a[0] + 20 + i * 2, (uint8_t)sp[i]); else x86_wr8(C, a[0] + 20 + i, (uint8_t)sp[i]); }
+    uint32_t i, wide = RD32(a[0]) >= 276, old = (uint32_t)is_win95_program(w);
+    if (old) { WR32(a[0] + 4, 4); WR32(a[0] + 8, 0); WR32(a[0] + 12, 0x040003B6u); WR32(a[0] + 16, 1); }
+    else { WR32(a[0] + 4, 5); WR32(a[0] + 8, 1); WR32(a[0] + 12, 2600); WR32(a[0] + 16, 2); }
+    for (i = 0; i < sizeof(sp); i++) {
+        uint8_t c = old ? 0 : (uint8_t)sp[i];
+        if (wide) x86_wr16(C, a[0] + 20 + i * 2, c); else x86_wr8(C, a[0] + 20 + i, c);
+    }
     return 1;
 }
 static uint32_t modhandle_for(const char *name)
@@ -541,7 +563,8 @@ static uint32_t module_handle(qwin *w, const char *n, int load)
     qmod *m;
     if (h) return h;
     m = load ? pe_load_dll(w, n) : pe_module_by_name(w, n);
-    if (m) return m->base;
+    if (m && load) m->refs++;
+    if (m && !m->unloaded) return m->base;
     if (load) { qw_log(w, "LoadLibrary(%s): not available in QRX (program continues without it)", n); w->last_error = 126; }
     return 0;
 }
@@ -549,6 +572,7 @@ FN(k_GetModuleHandleA) { char n[64]; if (!a[0]) return w->image_base; qw_rd_str(
 FN(k_GetModuleHandleW) { wchar16 t[64]; char n[64]; if (!a[0]) return w->image_base; qw_rd_wstr(w, a[0], t, 64); w2a(n, t, 64); return module_handle(w, n, 0); }
 FN(k_LoadLibraryA) { char n[128]; qw_rd_str(w, a[0], n, 128); return module_handle(w, n, 1); }
 FN(k_LoadLibraryW) { wchar16 t[128]; char n[128]; qw_rd_wstr(w, a[0], t, 128); w2a(n, t, 128); return module_handle(w, n, 1); }
+FN(k_QrxLauncherPlay) { UNUSED; return 1; }
 FN(k_GetProcAddress) {
     char n[96];
     uint32_t idx = (a[0] - QW_MODBASE) / 0x10000u;
@@ -557,12 +581,16 @@ FN(k_GetProcAddress) {
     if (m) {
         if (a[1] < 0x10000u) return pe_export(w, m, NULL, a[1]);
         qw_rd_str(w, a[1], n, sizeof(n));
+        /* Doom95's launcher is a property-sheet dialog the game only needs to
+         * have closed with "play": the command line carries the settings. */
+        if (!strcmp(n, "_Launcher@4")) return qw_thunk(w, "kernel32", "QrxLauncherPlay");
         return pe_export(w, m, n, 0);
     }
     if (a[0] < QW_MODBASE || idx >= QW_NKNOWN) return 0;
     if (a[1] < 0x10000u) return 0;
     qw_rd_str(w, a[1], n, 64);
     e = qw_find_hle(known_dlls[idx], n);
+    if (!e && qw_host_has(w, n)) return qw_thunk(w, known_dlls[idx], n);
     if (!e) { if (w->verbose) qw_log(w, "GetProcAddress(%s, %s): not implemented", known_dlls[idx], n); return 0; }
     return qw_thunk(w, known_dlls[idx], n);
 }
@@ -570,7 +598,8 @@ FN(k_GetModuleFileNameW) {
     const char *b = strrchr(w->exe_path, '/');
     char p[300]; wchar16 t[300];
     int n;
-    snprintf(p, sizeof(p), "C:\\%s", b ? b + 1 : w->exe_path);
+    if (w->exe_win[0]) snprintf(p, sizeof(p), "%s", w->exe_win);
+    else snprintf(p, sizeof(p), "C:\\%s", b ? b + 1 : w->exe_path);
     a2w(t, p, 300);
     n = qw_wr_wstr(w, a[1], t, (int)a[2]);
     return (uint32_t)n;
@@ -578,7 +607,8 @@ FN(k_GetModuleFileNameW) {
 FN(k_GetModuleFileNameA) {
     const char *b = strrchr(w->exe_path, '/');
     char p[300]; uint32_t i;
-    snprintf(p, sizeof(p), "C:\\%s", b ? b + 1 : w->exe_path);
+    if (w->exe_win[0]) snprintf(p, sizeof(p), "%s", w->exe_win);
+    else snprintf(p, sizeof(p), "C:\\%s", b ? b + 1 : w->exe_path);
     for (i = 0; p[i] && i + 1 < a[2]; i++) x86_wr8(C, a[1] + i, (uint8_t)p[i]);
     if (a[2]) x86_wr8(C, a[1] + i, 0);
     return i;
@@ -621,10 +651,37 @@ FN(k_HeapFree) { qw_free(w, a[2]); return 1; }
 FN(k_HeapReAlloc) { uint32_t b[2]; b[0] = a[2]; b[1] = a[3]; return m_realloc(w, b); }
 FN(k_HeapSize) { return qw_size(w, a[2]); }
 FN(k_VirtualAlloc) {
-    uint32_t n = (a[1] + 0xFFFu) & ~0xFFFu, r = qw_alloc(w, n + 0x1000);
+    uint32_t n = (a[1] + 0xFFFu) & ~0xFFFu, r;
+    /* Reserve first, commit page by page later: a commit inside memory the program already got
+       is that memory. The heap of Microsoft's C runtime works this way. */
+    if (a[0] && x86_is_mapped(C, a[0]) && (!n || x86_is_mapped(C, a[0] + n - 1u))) return a[0] & ~0xFFFu;
+    /* An address that is free is the program's to have, as under Windows: Sonic & Knuckles asks
+       for fixed ones and then uses them without looking at the answer. A reservation starts on
+       a 64 KB boundary. */
+    if (a[0] && a[0] < QW_HEAP_BASE && !x86_is_mapped(C, a[0])) {
+        uint32_t from = (a[2] & 0x2000u) ? a[0] & ~0xFFFFu : a[0] & ~0xFFFu, len = (a[0] + n - from + 0xFFFu) & ~0xFFFu;
+        if (x86_map(C, from, len, 1)) return from;
+    }
+    /* A reservation starts on a 64 KB boundary, as under Windows. Delphi's heap commits and
+       decommits 16 KB units counted from the address: from 10002000 it left 8 KB of old data
+       committed and later read it as a block header (the Inno Setup of islepro). */
+    if (!a[0] && (a[2] & 0x2000u)) {
+        r = qw_alloc(w, n + 0x10000);
+        return r ? (r + 0xFFFFu) & ~0xFFFFu : 0;
+    }
+    r = qw_alloc(w, n + 0x1000);
     return (r + 0xFFFu) & ~0xFFFu;
 }
-FN(k_VirtualFree) { UNUSED; return 1; }
+/* Decommitted pages come back zero when they are committed again, and Delphi's heap counts on it.
+   Nothing is unmapped: a later commit there is what VirtualAlloc above answers. */
+FN(k_VirtualFree) {
+    if (a[2] & 0x4000u) {               /* MEM_DECOMMIT */
+        uint32_t i, from = a[0] & ~0xFFFu, n = (a[1] + (a[0] & 0xFFFu) + 0xFFFu) & ~0xFFFu;
+        if (x86_is_mapped(C, from) && n && x86_is_mapped(C, from + n - 1u)) for (i = 0; i < n; i += 4u) WR32(from + i, 0);
+    }
+    UNUSED;
+    return 1;
+}
 FN(k_VirtualProtect) { if (a[3]) WR32(a[3], 0x04); UNUSED; return 1; }
 FN(k_VirtualQuery) {
     uint32_t p = a[0] & ~0xFFFu, i;
@@ -664,7 +721,12 @@ FN(k_WideCharToMultiByte) {
 FN(k_GetEnvironmentVariableA) { UNUSED; return 0; }
 FN(k_GetEnvironmentVariableW) { UNUSED; return 0; }
 FN(k_SetUnhandledExceptionFilter) { uint32_t o = w->unhandled_filter; w->unhandled_filter = a[0]; return o; }
-FN(k_UnhandledExceptionFilter) { UNUSED; return 1; }
+FN(k_UnhandledExceptionFilter) {
+    uint32_t rec = RD32(a[0]), r;
+    if (w->unhandled_filter && (r = qw_call(w, w->unhandled_filter, 1, a[0], 0, 0, 0)) != 0) return r;
+    qw_log(w, "unhandled exception %08x at %08x", RD32(rec), RD32(rec + 12));
+    return 1;
+}
 FN(k_TlsAlloc) { static uint32_t n; UNUSED; return n < 64 ? n++ : 0xFFFFFFFFu; }
 FN(k_TlsGetValue) { return a[0] < 64 ? RD32(QW_TEB + 0x1000 + a[0] * 4) : 0; }
 FN(k_TlsSetValue) { if (a[0] < 64) WR32(QW_TEB + 0x1000 + a[0] * 4, a[1]); return 1; }
@@ -685,8 +747,275 @@ FN(k_GetSystemInfo) {
     WR32(a[0] + 24, 586); WR32(a[0] + 28, 0x10000); x86_wr16(C, a[0] + 32, 6);
     return 0;
 }
-FN(k_RaiseException) { qw_log(w, "RaiseException(%08x): structured exceptions are not supported", a[0]); w->exit_code = a[0]; w->exiting = 1; return 0; }
-FN(k_FreeLibrary) { UNUSED; return 1; }
+/* Structured exceptions, as far as software raises them. The record and the context lie on the
+ * guest stack below the raiser. A handler runs as plain guest code and returns to a thunk: it may
+ * also never return, as a C++ catch does, so nothing on the host side may wait for it. */
+#define SEH_CTX   0x50u                    /* the CONTEXT follows the EXCEPTION_RECORD */
+#define SEH_PTRS  (SEH_CTX + 0x2CCu)       /* EXCEPTION_POINTERS */
+#define SEH_BLOCK (SEH_PTRS + 8u)
+#define SEH_NONE  0xFFFFFFFFu
+#define SEH_RESERVE (SEH_BLOCK + 0x100u)   /* stays free below the raiser's stack pointer */
+void qw_api_jump(void);
+uint32_t qw_thread_current_teb(void);
+
+static const struct { uint8_t reg; uint8_t off; } seh_regs[] = {
+    { X86_EDI, 0x9C }, { X86_ESI, 0xA0 }, { X86_EBX, 0xA4 }, { X86_EDX, 0xA8 }, { X86_ECX, 0xAC }, { X86_EAX, 0xB0 }, { X86_EBP, 0xB4 }, { X86_ESP, 0xC4 }
+};
+
+static void seh_resume(qwin *w, uint32_t ctx)
+{
+    x86cpu *c = &w->cpu;
+    size_t i;
+    for (i = 0; i < sizeof(seh_regs) / sizeof(seh_regs[0]); i++) c->r[seh_regs[i].reg] = RD32(ctx + seh_regs[i].off);
+    c->eip = RD32(ctx + 0xB8);
+}
+
+static void seh_unhandled(qwin *w, uint32_t rec)
+{
+    x86cpu *c = &w->cpu;
+    uint32_t ptrs = rec + SEH_PTRS;
+    c->r[X86_ESP] = rec - 0x20u;
+    if (w->unhandled_filter && qw_call(w, w->unhandled_filter, 1, ptrs, 0, 0, 0) == SEH_NONE) { seh_resume(w, rec + SEH_CTX); return; }
+    qw_log(w, "unhandled exception %08x at %08x", RD32(rec), RD32(rec + 12));
+    w->exit_code = RD32(rec);
+    w->exiting = 1;
+}
+
+static void seh_dispatch(qwin *w, uint32_t rec, uint32_t frame)
+{
+    x86cpu *c = &w->cpu;
+    uint32_t guard = rec - 8u, sp = guard - 0x14u, teb = qw_thread_current_teb();
+    if (!frame || frame == SEH_NONE) { seh_unhandled(w, rec); return; }
+    /* As Windows does, a frame of its own is on the chain while the handler runs. The C++ runtime
+       counts on it: it takes the head of the chain, unwinds, and links that head in again. */
+    WR32(guard, RD32(teb)); WR32(guard + 4, qw_thunk(w, "kernel32", "QrxSehGuard")); WR32(teb, guard);
+    WR32(sp, qw_thunk(w, "kernel32", "QrxSehReturn"));
+    WR32(sp + 4, rec); WR32(sp + 8, frame); WR32(sp + 12, rec + SEH_CTX); WR32(sp + 16, 0);
+    c->r[X86_ESP] = sp;
+    c->eip = RD32(frame + 4);
+}
+
+/* ---- more of msvcrt, for MFC42 and programs of its time (single-byte code page 1252, so the
+ * _mbs functions are the str ones; time functions in UTC, QRX has no time zone) */
+static uint32_t call_hle(qwin *w, const char *dll, const char *name, uint32_t *a)
+{
+    const qhle *e = qw_find_hle(dll, name);
+    return e ? e->fn(w, a) : 0;
+}
+#define FWD(fn, dll, target) FN(fn) { return call_hle(w, dll, target, a); }
+FWD(m_mbschr, "msvcrt", "strchr")
+FWD(m_mbsrchr, "msvcrt", "strrchr")
+FWD(m_mbsstr, "msvcrt", "strstr")
+FWD(m_mbscmp, "msvcrt", "strcmp")
+FWD(m_mbsicmp, "msvcrt", "_stricmp")
+FWD(m_mbsnbcmp, "msvcrt", "strncmp")
+FWD(m_mbsnbicmp, "msvcrt", "_strnicmp")
+FWD(m_mbscspn, "msvcrt", "strcspn")
+FWD(m_mbsrev, "msvcrt", "_strrev")
+FWD(m_mbslwr, "msvcrt", "_strlwr")
+FWD(m_mbsupr, "msvcrt", "_strupr")
+FWD(m_itoa, "msvcrt", "_ltoa")
+FWD(m_atol, "msvcrt", "atoi")
+FWD(m_ismbcdigit, "msvcrt", "isdigit")
+FWD(m_ismbcspace, "msvcrt", "isspace")
+FWD(m_terminate, "msvcrt", "abort")
+FWD(m_beginthreadex, "kernel32", "CreateThread")     /* same arguments, same stdcall start routine */
+FWD(m_endthreadex, "kernel32", "ExitThread")
+FN(m_mbsinc) { (void)w; return a[0] + 1; }
+FN(m_mbsdec) { (void)w; return a[1] > a[0] ? a[1] - 1 : 0; }
+FN(m_mbclen) { UNUSED; return 1; }
+FN(m_abs) { int32_t v = (int32_t)a[0]; (void)w; return (uint32_t)(v < 0 ? -v : v); }
+static int in_set(qwin *w, uint32_t set, uint8_t ch)
+{
+    uint8_t c;
+    for (; (c = x86_rd8(C, set)) != 0; set++) if (c == ch) return 1;
+    return 0;
+}
+FN(m_mbsspn) { uint32_t p = a[0]; uint8_t c; while ((c = x86_rd8(C, p)) && in_set(w, a[1], c)) p++; return p - a[0]; }
+FN(m_mbspbrk) { uint32_t p = a[0]; uint8_t c; for (; (c = x86_rd8(C, p)) != 0; p++) if (in_set(w, a[1], c)) return p; return 0; }
+FN(m_strtod) {
+    char b[512], *end;
+    double v;
+    qw_rd_str(w, a[0], b, sizeof(b));
+    v = qf_strtod(b, &end);
+    if (a[1]) WR32(a[1], a[0] + (uint32_t)(end - b));
+    return retd(w, v);
+}
+FN(m_purecall) {
+    qw_log(w, "pure virtual function call (_purecall)");
+    C->fault = X86_FAULT_HOST;
+    snprintf(C->fault_msg, sizeof(C->fault_msg), "pure virtual function call");
+    C->fault_eip = C->cur_eip;
+    return 0;
+}
+FN(m_expand) { UNUSED; return 0; }                 /* cannot grow in place: NULL, as allowed */
+FN(m_type_info_dtor) { UNUSED; return 0; }        /* thiscall, nothing to free */
+static uint32_t g_doserrno, g_pargc, g_pargv, g_mbctype;
+FN(m_doserrno) { (void)a; if (!g_doserrno) g_doserrno = qw_data(w, 4); return g_doserrno; }
+FN(m_p_argc) { (void)a; build_args(w); if (!g_pargc) { g_pargc = qw_data(w, 4); WR32(g_pargc, g_argc); } return g_pargc; }
+FN(m_p_argv) { (void)a; build_args(w); if (!g_pargv) { g_pargv = qw_data(w, 4); WR32(g_pargv, g_argv); } return g_pargv; }
+FN(m_p_mbctype) { (void)a; if (!g_mbctype) g_mbctype = qw_data(w, 260); return g_mbctype; }   /* no lead bytes */
+/* _splitpath(path, drive, dir, fname, ext) */
+FN(m_splitpath) {
+    char p[600], *s, *slash, *dot;
+    const char *dir_end;
+    size_t n;
+    qw_rd_str(w, a[0], p, sizeof(p));
+    s = p;
+    if (a[1]) { if (isalpha((unsigned char)s[0]) && s[1] == ':') { x86_wr8(C, a[1], (uint8_t)s[0]); x86_wr8(C, a[1] + 1, ':'); x86_wr8(C, a[1] + 2, 0); } else x86_wr8(C, a[1], 0); }
+    if (isalpha((unsigned char)s[0]) && s[1] == ':') s += 2;
+    slash = NULL;
+    for (char *q = s; *q; q++) if (*q == '\\' || *q == '/') slash = q;
+    dir_end = slash ? slash + 1 : s;
+    if (a[2]) { n = (size_t)(dir_end - s); for (size_t i = 0; i < n; i++) x86_wr8(C, a[2] + (uint32_t)i, (uint8_t)s[i]); x86_wr8(C, a[2] + (uint32_t)n, 0); }
+    dot = strrchr(dir_end, '.');
+    n = dot ? (size_t)(dot - dir_end) : strlen(dir_end);
+    if (a[3]) { for (size_t i = 0; i < n; i++) x86_wr8(C, a[3] + (uint32_t)i, (uint8_t)dir_end[i]); x86_wr8(C, a[3] + (uint32_t)n, 0); }
+    if (a[4]) { const char *e = dot ? dot : ""; size_t i; for (i = 0; e[i]; i++) x86_wr8(C, a[4] + (uint32_t)i, (uint8_t)e[i]); x86_wr8(C, a[4] + (uint32_t)i, 0); }
+    return 0;
+}
+/* _fullpath(buffer, path, max) through GetFullPathNameA; a NULL buffer gets one from the heap */
+FN(m_fullpath) {
+    uint32_t b[16], buf = a[0], max = a[0] ? a[2] : 260u, r;
+    memset(b, 0, sizeof(b));
+    if (!buf) buf = qw_alloc(w, max);
+    b[0] = a[1]; b[1] = max; b[2] = buf; b[3] = 0;
+    r = call_hle(w, "kernel32", "GetFullPathNameA", b);
+    return r && r < max ? buf : 0;
+}
+/* struct tm: sec min hour mday mon year wday yday isdst (ints) */
+static uint32_t g_tm;
+static int64_t days_from_civil(int64_t y, unsigned m, unsigned d)
+{
+    y -= m <= 2;
+    int64_t era = (y >= 0 ? y : y - 399) / 400;
+    unsigned yoe = (unsigned)(y - era * 400);
+    unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + (int64_t)doe - 719468;
+}
+static void tm_write(qwin *w, uint32_t at, int64_t t)
+{
+    int64_t days = t >= 0 ? t / 86400 : (t - 86399) / 86400, sec = t - days * 86400, z = days + 719468;
+    int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+    unsigned doe = (unsigned)(z - era * 146097), yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    int64_t y = (int64_t)yoe + era * 400;
+    unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
+    unsigned d = doy - (153 * mp + 2) / 5 + 1, m = mp < 10 ? mp + 3 : mp - 9;
+    y += m <= 2;
+    WR32(at, (uint32_t)(sec % 60)); WR32(at + 4, (uint32_t)(sec / 60 % 60)); WR32(at + 8, (uint32_t)(sec / 3600));
+    WR32(at + 12, d); WR32(at + 16, m - 1); WR32(at + 20, (uint32_t)(y - 1900));
+    WR32(at + 24, (uint32_t)((days % 7 + 11) % 7));                 /* 1970-01-01 was a Thursday */
+    WR32(at + 28, (uint32_t)(days - days_from_civil(y, 1, 1)));
+    WR32(at + 32, 0);
+}
+FN(m_gmtime) {                                     /* (time_t *) -> static struct tm */
+    if (!a[0]) return 0;
+    if (!g_tm) g_tm = qw_data(w, 36);
+    tm_write(w, g_tm, (int64_t)(int32_t)RD32(a[0]));
+    return g_tm;
+}
+FN(m_mktime) {                                     /* normalises the struct, UTC */
+    int64_t y = 1900 + (int32_t)RD32(a[0] + 20), mon = (int32_t)RD32(a[0] + 16), t;
+    y += mon >= 0 ? mon / 12 : (mon - 11) / 12;
+    mon = ((mon % 12) + 12) % 12;
+    t = days_from_civil(y, (unsigned)mon + 1, 1) + (int32_t)RD32(a[0] + 12) - 1;
+    t = t * 86400 + (int64_t)(int32_t)RD32(a[0] + 8) * 3600 + (int64_t)(int32_t)RD32(a[0] + 4) * 60 + (int32_t)RD32(a[0]);
+    if (t < 0 || t > 0x7FFFFFFF) return 0xFFFFFFFFu;
+    tm_write(w, a[0], t);
+    return (uint32_t)t;
+}
+FN(m_strftime) {                                   /* (buf, max, format, tm) in the "C" locale */
+    char f[256], out[512];
+    struct tm t;
+    size_t n, i;
+    memset(&t, 0, sizeof(t));
+    qw_rd_str(w, a[2], f, sizeof(f));
+    t.tm_sec = (int32_t)RD32(a[3]); t.tm_min = (int32_t)RD32(a[3] + 4); t.tm_hour = (int32_t)RD32(a[3] + 8);
+    t.tm_mday = (int32_t)RD32(a[3] + 12); t.tm_mon = (int32_t)RD32(a[3] + 16); t.tm_year = (int32_t)RD32(a[3] + 20);
+    t.tm_wday = (int32_t)RD32(a[3] + 24); t.tm_yday = (int32_t)RD32(a[3] + 28); t.tm_isdst = 0;
+    n = strftime(out, sizeof(out), f, &t);
+    if (!n || n >= a[1]) { if (a[1]) x86_wr8(C, a[0], 0); return 0; }
+    for (i = 0; i <= n; i++) x86_wr8(C, a[0] + (uint32_t)i, (uint8_t)out[i]);
+    return (uint32_t)n;
+}
+
+/* _EH_prolog of the Visual C++ runtime (eax = the function's EH handler): builds the frame that
+ * MSVC's code would, so it cannot return like a function. As the runtime's own code:
+ *   push -1; push eax; push fs:[0]; mov fs:[0],esp; ebp saved over the return address,
+ *   ebp = its slot, esp 12 lower, eax = the return address, on at the return address. */
+FN(m_EH_prolog) {
+    x86cpu *c = &w->cpu;
+    uint32_t s = c->r[X86_ESP], ret = RD32(s), teb = qw_thread_current_teb();
+    (void)a;
+    WR32(s - 4, 0xFFFFFFFFu);
+    WR32(s - 8, c->r[X86_EAX]);
+    WR32(s - 12, RD32(teb));
+    WR32(teb, s - 12);
+    WR32(s, c->r[X86_EBP]);
+    c->r[X86_EBP] = s;
+    c->r[X86_ESP] = s - 12;
+    c->r[X86_EAX] = ret;
+    c->eip = ret;
+    qw_api_jump();
+    return ret;
+}
+FN(k_RaiseException) {
+    x86cpu *c = &w->cpu;
+    uint32_t sp = c->r[X86_ESP], rec = (sp - SEH_RESERVE) & ~3u, ctx = rec + SEH_CTX, n = a[2] > 15u ? 15u : a[2], i;
+    for (i = 0; i < SEH_BLOCK; i += 4) WR32(rec + i, 0);
+    WR32(rec, a[0]); WR32(rec + 4, a[1] & 1u); WR32(rec + 12, RD32(sp)); WR32(rec + 16, n);
+    for (i = 0; i < n; i++) WR32(rec + 20 + i * 4, RD32(a[3] + i * 4));
+    WR32(ctx, 0x10007u);
+    for (i = 0; i < sizeof(seh_regs) / sizeof(seh_regs[0]); i++) WR32(ctx + seh_regs[i].off, c->r[seh_regs[i].reg]);
+    WR32(ctx + 0xC4, sp + 20);          /* as after the return of this stdcall function */
+    WR32(ctx + 0xB8, RD32(sp));
+    WR32(ctx + 0xC0, c->eflags);
+    WR32(rec + SEH_PTRS, rec); WR32(rec + SEH_PTRS + 4, ctx);
+    seh_dispatch(w, rec, RD32(qw_thread_current_teb()));
+    qw_api_jump();
+    return 0;
+}
+
+/* A handler returned: [esp] is still its first argument. */
+FN(k_SehReturn) {
+    x86cpu *c = &w->cpu;
+    uint32_t rec = RD32(c->r[X86_ESP]), frame = RD32(c->r[X86_ESP] + 4);
+    UNUSED;
+    WR32(qw_thread_current_teb(), RD32(rec - 8u));
+    if (c->r[X86_EAX] == 0) {            /* ExceptionContinueExecution */
+        if (RD32(rec + 4) & 1u) seh_unhandled(w, rec);
+        else seh_resume(w, rec + SEH_CTX);
+    } else seh_dispatch(w, rec, RD32(frame));
+    qw_api_jump();
+    return c->r[X86_EAX];
+}
+
+FN(k_SehGuard) { UNUSED; return 1; }    /* ExceptionContinueSearch */
+
+/* (TargetFrame, TargetIp, ExceptionRecord, ReturnValue): the handlers run again, to clean up. */
+FN(k_RtlUnwind) {
+    x86cpu *c = &w->cpu;
+    uint32_t sp = c->r[X86_ESP], ret = RD32(sp), block = (sp - SEH_RESERVE) & ~3u, rec = a[2] ? a[2] : block, teb = qw_thread_current_teb(), frame, i;
+    uint32_t keep[4];
+    keep[0] = c->r[X86_EBX]; keep[1] = c->r[X86_ESI]; keep[2] = c->r[X86_EDI]; keep[3] = c->r[X86_EBP];
+    for (i = 0; i < SEH_BLOCK; i += 4) WR32(block + i, 0);
+    if (!a[2]) { WR32(rec, 0xC0000027u); WR32(rec + 12, ret); }      /* STATUS_UNWIND */
+    WR32(rec + 4, RD32(rec + 4) | 2u | (a[0] && a[0] != SEH_NONE ? 0u : 4u));   /* UNWINDING, EXIT_UNWIND */
+    c->r[X86_ESP] = block - 0x20u;
+    for (frame = RD32(teb); frame && frame != SEH_NONE && frame != a[0]; frame = RD32(teb)) {
+        qw_call(w, RD32(frame + 4), 4, rec, frame, block + SEH_CTX, 0);
+        if (c->fault || w->exiting) return 0;
+        WR32(teb, RD32(frame));
+    }
+    c->r[X86_EBX] = keep[0]; c->r[X86_ESI] = keep[1]; c->r[X86_EDI] = keep[2]; c->r[X86_EBP] = keep[3];
+    c->r[X86_ESP] = sp + 20;
+    c->r[X86_EAX] = a[3];
+    c->eip = a[1] ? a[1] : ret;
+    qw_api_jump();
+    return a[3];
+}
+FN(k_FreeLibrary) { qmod *m = pe_find_module(w, a[0]); if (m) pe_free_dll(w, m); return 1; }
 FN(k_IsBadReadPtr) { UNUSED; return !x86_is_mapped(C, a[0]); }
 FN(k_FindResourceW) { uint32_t d, s; if (!res_find_in(w, a[0], a[2], a[1], &d, &s)) return 0; { uint32_t h = qw_alloc(w, 8); WR32(h, d); WR32(h + 4, s); return h; } }
 FN(k_LoadResource) { UNUSED; return a[1] ? RD32(a[1]) : 0; }
@@ -875,7 +1204,8 @@ const qhle qw_kernel32[] = {
     K("PulseEvent", k_PulseEvent, 1), K("WaitForSingleObject", k_WaitForSingleObject, 2), K("WaitForMultipleObjects", k_WaitForMultipleObjects, 4),
     K("GetStdHandle", k_GetStdHandle, 1), K("WriteFile", k_WriteFile, 5), K("CloseHandle", k_CloseHandle, 1),
     K("OutputDebugStringA", k_OutputDebugStringA, 1), K("OutputDebugStringW", k_OutputDebugStringW, 1), K("IsDebuggerPresent", k_IsDebuggerPresent, 0),
-    K("GetSystemInfo", k_GetSystemInfo, 1), K("RaiseException", k_RaiseException, 4), K("IsBadReadPtr", k_IsBadReadPtr, 2),
+    K("GetSystemInfo", k_GetSystemInfo, 1), K("RaiseException", k_RaiseException, 4), K("RtlUnwind", k_RtlUnwind, 4), K("QrxSehReturn", k_SehReturn, 0), { "kernel32", "QrxSehGuard", -1, k_SehGuard }, K("IsBadReadPtr", k_IsBadReadPtr, 2),
+    K("QrxLauncherPlay", k_QrxLauncherPlay, 1),
     K("FindResourceW", k_FindResourceW, 3), K("LoadResource", k_LoadResource, 2), K("LockResource", k_LockResource, 1), K("SizeofResource", k_SizeofResource, 2),
     K("InterlockedIncrement", k_InterlockedIncrement, 1), K("InterlockedDecrement", k_InterlockedDecrement, 1),
     K("InterlockedExchange", k_InterlockedExchange, 2), K("InterlockedCompareExchange", k_InterlockedCompareExchange, 3),
@@ -937,7 +1267,17 @@ static uint32_t s_ShellAboutW(qwin *w, uint32_t *a)
 const qhle qw_misc[] = {
     MS("__wgetmainargs", m___wgetmainargs), MS("__getmainargs", m___getmainargs),
     MS("__set_app_type", m_nop), MS("__setusermatherr", m_nop), MS("__lconv_init", m_nop), MS("_fpreset", m_nop),
-    MS("_initterm", m_initterm), MS("_initterm_e", m_initterm_e), MS("_onexit", m_onexit), MS("__dllonexit", m_dllonexit), MS("atexit", m_onexit),
+    MS("_EH_prolog", m_EH_prolog), 
+    MS("_mbschr", m_mbschr), MS("_mbsrchr", m_mbsrchr), MS("_mbsstr", m_mbsstr), MS("_mbscmp", m_mbscmp), MS("_mbsicmp", m_mbsicmp),
+    MS("_mbsnbcmp", m_mbsnbcmp), MS("_mbsnbicmp", m_mbsnbicmp), MS("_mbscspn", m_mbscspn), MS("_mbsspn", m_mbsspn), MS("_mbspbrk", m_mbspbrk),
+    MS("_mbsrev", m_mbsrev), MS("_mbslwr", m_mbslwr), MS("_mbsupr", m_mbsupr), MS("_mbsinc", m_mbsinc), MS("_mbsdec", m_mbsdec), MS("_mbclen", m_mbclen),
+    MS("_ismbcdigit", m_ismbcdigit), MS("_ismbcspace", m_ismbcspace), MS("_itoa", m_itoa), MS("atol", m_atol), MS("abs", m_abs), MS("labs", m_abs),
+    MS("strtod", m_strtod), MS("_purecall", m_purecall), MS("_expand", m_expand), MS("??1type_info@@UAE@XZ", m_type_info_dtor),
+    MS("?terminate@@YAXXZ", m_terminate), MS("__doserrno", m_doserrno), MS("__p___argc", m_p_argc), MS("__p___argv", m_p_argv),
+    MS("__p__mbctype", m_p_mbctype), MS("_splitpath", m_splitpath), MS("_fullpath", m_fullpath),
+    MS("gmtime", m_gmtime), MS("localtime", m_gmtime), MS("mktime", m_mktime), MS("strftime", m_strftime),
+    MS("_beginthreadex", m_beginthreadex), MS("_endthreadex", m_endthreadex),
+    MS("_initterm", m_initterm), MS("_initterm_e", m_initterm_e), MS("_onexit", m_onexit), MS("__dllonexit", m_dllonexit), MS("atexit", m_atexit),
     MS("exit", m_exit), MS("_exit", m__exit), MS("_cexit", m_nop), MS("_c_exit", m_nop), MS("abort", m_abort), MS("_amsg_exit", m_amsg_exit),
     MS("_lock", m_nop), MS("_unlock", m_nop), MS("signal", m_signal), MS("_controlfp", m_controlfp), MS("_control87", m_controlfp),
     MS("malloc", m_malloc), MS("calloc", m_calloc), MS("free", m_free), MS("realloc", m_realloc), MS("_msize", m_msize),
@@ -955,18 +1295,18 @@ const qhle qw_misc[] = {
     MS("vfprintf", m_vfprintf), MS("fprintf", m_fprintf), MS("printf", m_printf), MS("fwrite", m_fwrite), MS("fputc", m_fputc),
     MS("fflush", m_fflush), MS("puts", m_puts), MS("swscanf", m_swscanf), MS("sscanf", m_sscanf),
     MS("_finite", m_finite), MS("_isnan", m_isnan),
-    MS("sin", m_sin), MS("cos", m_cos), MS("tan", m_tan), MS("asin", m_asin), MS("acos", m_acos), MS("atan", m_atan), MS("atan2", m_atan2),
+    MS("ldexp", m_ldexp), MS("sin", m_sin), MS("cos", m_cos), MS("tan", m_tan), MS("asin", m_asin), MS("acos", m_acos), MS("atan", m_atan), MS("atan2", m_atan2),
     MS("sinh", m_sinh), MS("cosh", m_cosh), MS("tanh", m_tanh), MS("exp", m_exp), MS("log", m_log), MS("log10", m_log10),
     MS("sqrt", m_sqrt), MS("floor", m_floor), MS("ceil", m_ceil), MS("fabs", m_fabs), MS("pow", m_pow), MS("fmod", m_fmod), MS("modf", m_modf),
     MS("_ftol", m_ftol), MS("_CIpow", m_CIpow),
     MS("bsearch", m_bsearch), MS("qsort", m_qsort), MS("_errno", m_errno),
-    MS("__p__fmode", m_p_fmode), MS("__p__acmdln", m_p_acmdln), MS("__p__wcmdln", m_p_wcmdln), MS("_ismbblead", m_ismbblead), MS("__p__commode", m_p_commode), MS("__iob_func", m_iob_func),
+    MS("__p__fmode", m_p_fmode), MS("__p__acmdln", m_p_acmdln), MS("__p__wcmdln", m_p_wcmdln), MS("_ismbblead", m_ismbblead), MS("__p__commode", m_p_commode), MS("__p__iob", m_iob_func), MS("__p___initenv", m_p_initenv), MS("__p___mb_cur_max", m_p_mb_cur_max), MS("islower", m_islower), MS("isupper", m_isupper), MS("_get_osfhandle", m_get_osfhandle), MS("_setmode", m_setmode), MS("__iob_func", m_iob_func),
     AD("RegOpenKeyExW", a_RegOpenKeyExW, 5), AD("RegCreateKeyExW", a_RegCreateKeyExW, 9), AD("RegCloseKey", a_RegCloseKey, 1),
     AD("RegQueryValueExW", a_RegQueryValueExW, 6), AD("RegSetValueExW", a_RegSetValueExW, 6),
     { "comctl32", "CreateStatusWindowW", 4, c_CreateStatusWindowW }, { "comctl32", "CreateStatusWindowA", 4, c_CreateStatusWindowA },
     { "comctl32", "InitCommonControls", 0, c_InitCommonControls }, { "comctl32", "InitCommonControlsEx", 1, c_InitCommonControlsEx },
     { "shell32", "ShellAboutW", 4, s_ShellAboutW },
-    { "winmm", "PlaySoundW", 3, mm_PlaySound }, { "winmm", "PlaySoundA", 3, mm_PlaySound },
+    { "winmm", "PlaySoundW", 3, mm_PlaySound }, { "winmm", "#2", 3, mm_PlaySound }, { "winmm", "PlaySoundA", 3, mm_PlaySound },
     { "ntdll", "vDbgPrintExWithPrefix", -1, nt_DbgPrint }, { "ntdll", "DbgPrint", -1, nt_DbgPrint },
     { NULL, NULL, 0, NULL }
 };

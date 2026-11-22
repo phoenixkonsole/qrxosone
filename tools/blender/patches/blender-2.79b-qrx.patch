@@ -1,0 +1,1072 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index bfea2dd..facf66b 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -683,7 +683,7 @@ if(WITH_INSTALL_PORTABLE)
+ 	set(CMAKE_SKIP_BUILD_RPATH TRUE)
+ endif()
+ 
+-if(WITH_GHOST_SDL OR WITH_HEADLESS)
++if(WITH_GHOST_SDL OR WITH_HEADLESS OR WITH_GHOST_AROS)
+ 	set(WITH_X11           OFF)
+ 	set(WITH_X11_XINPUT    OFF)
+ 	set(WITH_X11_XF86VMODE OFF)
+diff --git a/build_files/cmake/macros.cmake b/build_files/cmake/macros.cmake
+index 6303119..b9ccaaf 100644
+--- a/build_files/cmake/macros.cmake
++++ b/build_files/cmake/macros.cmake
+@@ -1344,7 +1344,7 @@ function(data_to_c
+ 	add_custom_command(
+ 		OUTPUT ${file_to}
+ 		COMMAND ${CMAKE_COMMAND} -E make_directory ${_file_to_path}
+-		COMMAND "$<TARGET_FILE:datatoc>" ${file_from} ${file_to}
++		COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:datatoc>" ${file_from} ${file_to}
+ 		DEPENDS ${file_from} datatoc)
+ 
+ 	set_source_files_properties(${file_to} PROPERTIES GENERATED TRUE)
+@@ -1369,7 +1369,7 @@ function(data_to_c_simple
+ 	add_custom_command(
+ 		OUTPUT  ${_file_to}
+ 		COMMAND ${CMAKE_COMMAND} -E make_directory ${_file_to_path}
+-		COMMAND "$<TARGET_FILE:datatoc>" ${_file_from} ${_file_to}
++		COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:datatoc>" ${_file_from} ${_file_to}
+ 		DEPENDS ${_file_from} datatoc)
+ 
+ 	set_source_files_properties(${_file_to} PROPERTIES GENERATED TRUE)
+@@ -1402,8 +1402,8 @@ function(data_to_c_simple_icons
+ 		OUTPUT  ${_file_from} ${_file_to}
+ 		COMMAND ${CMAKE_COMMAND} -E make_directory ${_file_to_path}
+ 		#COMMAND python3 ${CMAKE_SOURCE_DIR}/source/blender/datatoc/datatoc_icon.py ${_path_from_abs} ${_file_from}
+-		COMMAND "$<TARGET_FILE:datatoc_icon>" ${_path_from_abs} ${_file_from}
+-		COMMAND "$<TARGET_FILE:datatoc>" ${_file_from} ${_file_to}
++		COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:datatoc_icon>" ${_path_from_abs} ${_file_from}
++		COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:datatoc>" ${_file_from} ${_file_to}
+ 		DEPENDS
+ 			${_icon_files}
+ 			datatoc_icon
+@@ -1472,7 +1472,7 @@ function(msgfmt_simple
+ 	add_custom_command(
+ 		OUTPUT  ${_file_to}
+ 		COMMAND ${CMAKE_COMMAND} -E make_directory ${_file_to_path}
+-		COMMAND "$<TARGET_FILE:msgfmt>" ${_file_from} ${_file_to}
++		COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:msgfmt>" ${_file_from} ${_file_to}
+ 		DEPENDS msgfmt ${_file_from})
+ 
+ 	set_source_files_properties(${_file_to} PROPERTIES GENERATED TRUE)
+diff --git a/extern/glew/CMakeLists.txt b/extern/glew/CMakeLists.txt
+index f264b39..4319eb1 100644
+--- a/extern/glew/CMakeLists.txt
++++ b/extern/glew/CMakeLists.txt
+@@ -31,7 +31,7 @@ set(INC_SYS
+ 
+ )
+ 
+-if(UNIX)
++if(UNIX AND NOT WITH_GHOST_AROS)
+ 	list(APPEND INC_SYS
+ 		${X11_X11_INCLUDE_PATH}
+ 	)
+diff --git a/extern/glew/src/glew.c b/extern/glew/src/glew.c
+index 0ed5520..df44894 100644
+--- a/extern/glew/src/glew.c
++++ b/extern/glew/src/glew.c
+@@ -30,11 +30,15 @@
+ ** THE POSSIBILITY OF SUCH DAMAGE.
+ */
+ 
++/* QRX OS One: GL comes from the ARMithlon door on AROS (and from its native stand-in in the Mac reference). */
++#if defined(__AROS__) && !defined(QRX_GL_DOOR)
++#  define QRX_GL_DOOR
++#endif
+ #include <GL/glew.h>
+ 
+ #if defined(_WIN32)
+ #  include <GL/wglew.h>
+-#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
++#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(QRX_GL_DOOR) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
+ #  include <GL/glxew.h>
+ #endif
+ 
+@@ -179,6 +183,10 @@ void* NSGLGetProcAddress (const GLubyte *name)
+ #  define glewGetProcAddress(name) dlGetProcAddress(name)
+ #elif defined(__ANDROID__)
+ #  define glewGetProcAddress(name) NULL /* TODO */
++#elif defined(QRX_GL_DOOR)
++/* QRX OS One: the GL door's guest library, tools/qrxgl68k in the QRX OS One repository. */
++extern void *qgl_GetProcAddress(const char *name);
++#  define glewGetProcAddress(name) qgl_GetProcAddress((const char *)(name))
+ #elif defined(__native_client__)
+ #  define glewGetProcAddress(name) NULL /* TODO */
+ #else /* __linux */
+@@ -12305,7 +12313,7 @@ GLenum GLEWAPIENTRY wglewInit (WGLEW_CONTEXT_ARG_DEF_LIST)
+   return GLEW_OK;
+ }
+ 
+-#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
++#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(QRX_GL_DOOR) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
+ 
+ PFNGLXGETCURRENTDISPLAYPROC __glewXGetCurrentDisplay = NULL;
+ 
+@@ -13373,7 +13381,7 @@ GLenum glxewInit (GLXEW_CONTEXT_ARG_DEF_LIST)
+   return GLEW_OK;
+ }
+ 
+-#endif /* !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) */
++#endif /* !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(QRX_GL_DOOR) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) */
+ 
+ /* ------------------------------------------------------------------------ */
+ 
+@@ -13418,7 +13426,7 @@ GLenum GLEWAPIENTRY glewInit (void)
+   if ( r != 0 ) return r;
+ #if defined(_WIN32)
+   return wglewInit();
+-#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) /* _UNIX */
++#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(QRX_GL_DOOR) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX)) /* _UNIX */
+   return glxewInit();
+ #else
+   return r;
+@@ -18065,7 +18073,7 @@ GLboolean GLEWAPIENTRY wglewIsSupported (const char* name)
+   return ret;
+ }
+ 
+-#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(__APPLE__) || defined(GLEW_APPLE_GLX)
++#elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && !defined(QRX_GL_DOOR) && !defined(__APPLE__) || defined(GLEW_APPLE_GLX)
+ 
+ #if defined(GLEW_MX)
+ GLboolean glxewContextIsSupported (const GLXEWContext* ctx, const char* name)
+diff --git a/intern/CMakeLists.txt b/intern/CMakeLists.txt
+index bfe2302..b9c25e7 100644
+--- a/intern/CMakeLists.txt
++++ b/intern/CMakeLists.txt
+@@ -28,8 +28,8 @@ add_subdirectory(string)
+ add_subdirectory(ghost)
+ add_subdirectory(guardedalloc)
+ add_subdirectory(libmv)
+-add_subdirectory(memutil)
+ add_subdirectory(opencolorio)
++add_subdirectory(memutil)
+ add_subdirectory(mikktspace)
+ add_subdirectory(glew-mx)
+ add_subdirectory(eigen)
+diff --git a/intern/ghost/CMakeLists.txt b/intern/ghost/CMakeLists.txt
+index 2541e5e..2138678 100644
+--- a/intern/ghost/CMakeLists.txt
++++ b/intern/ghost/CMakeLists.txt
+@@ -112,7 +112,18 @@ if(WITH_INPUT_NDOF)
+ 	)
+ endif()
+ 
+-if(WITH_HEADLESS OR WITH_GHOST_SDL)
++if(WITH_GHOST_AROS)
++	# QRX OS One: Intuition windows, GL through the ARMithlon door. The sources live in the QRX OS One
++	# repository (tools/blender/ghost, tools/qrxgl68k/guest), see docs/BLENDER_AROS68K.md there.
++	list(APPEND SRC
++		${QRX_GHOST_DIR}/GHOST_SystemAROS.cpp
++		${QRX_GHOST_DIR}/GHOST_WindowAROS.cpp
++		${QRX_GHOST_DIR}/GHOST_ContextAROS.cpp
++		${QRX_GHOST_DIR}/ghost_aros_native.c
++	)
++	list(APPEND INC ${QRX_GHOST_DIR} ${QRX_GL_DIR} intern)
++	add_definitions(-DWITH_GHOST_AROS)
++elseif(WITH_HEADLESS OR WITH_GHOST_SDL)
+ 	if(WITH_HEADLESS)
+ 		list(APPEND SRC
+ 			intern/GHOST_DisplayManagerNULL.h
+@@ -305,7 +316,7 @@ elseif(WIN32)
+ 	endif()
+ endif()
+ 
+-if(WITH_GL_EGL AND NOT (WITH_HEADLESS OR WITH_GHOST_SDL))
++if(WITH_GL_EGL AND NOT (WITH_HEADLESS OR WITH_GHOST_SDL OR WITH_GHOST_AROS))
+ 	list(APPEND SRC
+ 		intern/GHOST_ContextEGL.cpp
+ 			
+@@ -313,7 +324,10 @@ if(WITH_GL_EGL AND NOT (WITH_HEADLESS OR WITH_GHOST_SDL))
+ 	)
+ endif()
+ 
+-if(APPLE)
++if(WITH_GHOST_AROS)
++	# GHOST_SystemPathsAROS.h only
++
++elseif(APPLE)
+ 	list(APPEND SRC
+ 		intern/GHOST_SystemPathsCocoa.mm
+ 		intern/GHOST_SystemPathsCocoa.h
+diff --git a/intern/ghost/intern/GHOST_ISystem.cpp b/intern/ghost/intern/GHOST_ISystem.cpp
+index 37d5926..f113c8a 100644
+--- a/intern/ghost/intern/GHOST_ISystem.cpp
++++ b/intern/ghost/intern/GHOST_ISystem.cpp
+@@ -41,7 +41,9 @@
+ #ifdef WITH_X11
+ #  include "GHOST_SystemX11.h"
+ #else
+-#  ifdef WITH_HEADLESS
++#  if defined(WITH_GHOST_AROS)
++#    include "GHOST_SystemAROS.h"
++#  elif defined(WITH_HEADLESS)
+ #    include "GHOST_SystemNULL.h"
+ #  elif defined(WITH_GHOST_SDL)
+ #    include "GHOST_SystemSDL.h"
+@@ -64,7 +66,9 @@ GHOST_TSuccess GHOST_ISystem::createSystem()
+ #ifdef WITH_X11
+ 		m_system = new GHOST_SystemX11();
+ #else
+-#  ifdef WITH_HEADLESS
++#  if defined(WITH_GHOST_AROS)
++		m_system = new GHOST_SystemAROS();
++#  elif defined(WITH_HEADLESS)
+ 		m_system = new GHOST_SystemNULL();
+ #  elif defined(WITH_GHOST_SDL)
+ 		m_system = new GHOST_SystemSDL();
+diff --git a/intern/ghost/intern/GHOST_ISystemPaths.cpp b/intern/ghost/intern/GHOST_ISystemPaths.cpp
+index 93ca0bc..631df8a 100644
+--- a/intern/ghost/intern/GHOST_ISystemPaths.cpp
++++ b/intern/ghost/intern/GHOST_ISystemPaths.cpp
+@@ -41,7 +41,9 @@
+ 
+ #include "GHOST_ISystemPaths.h"
+ 
+-#ifdef WIN32
++#if defined(WITH_GHOST_AROS)
++#  include "GHOST_SystemPathsAROS.h"
++#elif defined(WIN32)
+ #  include "GHOST_SystemPathsWin32.h"
+ #else
+ #  ifdef __APPLE__
+@@ -59,7 +61,9 @@ GHOST_TSuccess GHOST_ISystemPaths::create()
+ {
+ 	GHOST_TSuccess success;
+ 	if (!m_systemPaths) {
+-#ifdef WIN32
++#if defined(WITH_GHOST_AROS)
++		m_systemPaths = new GHOST_SystemPathsAROS();
++#elif defined(WIN32)
+ 		m_systemPaths = new GHOST_SystemPathsWin32();
+ #else
+ #  ifdef __APPLE__
+diff --git a/source/blender/blenkernel/intern/DerivedMesh.c b/source/blender/blenkernel/intern/DerivedMesh.c
+index 9b60066..57f6698 100644
+--- a/source/blender/blenkernel/intern/DerivedMesh.c
++++ b/source/blender/blenkernel/intern/DerivedMesh.c
+@@ -94,7 +94,7 @@ static DerivedMesh *navmesh_dm_createNavMeshForVisualization(DerivedMesh *dm);
+ #endif
+ 
+ 
+-static ThreadRWMutex loops_cache_lock = PTHREAD_RWLOCK_INITIALIZER;
++static ThreadRWMutex loops_cache_lock = BLI_RWLOCK_INITIALIZER;
+ 
+ 
+ static void add_shapekey_layers(DerivedMesh *dm, Mesh *me, Object *ob);
+diff --git a/source/blender/blenkernel/intern/appdir.c b/source/blender/blenkernel/intern/appdir.c
+index 8b05804..9511212 100644
+--- a/source/blender/blenkernel/intern/appdir.c
++++ b/source/blender/blenkernel/intern/appdir.c
+@@ -786,7 +786,11 @@ static void where_is_temp(char *fullname, char *basename, const size_t maxlen, c
+ #endif
+ 	
+ 	if (fullname[0] == '\0') {
++#ifdef __AROS__
++		BLI_strncpy(fullname, "RAM:T/", maxlen);
++#else
+ 		BLI_strncpy(fullname, "/tmp/", maxlen);
++#endif
+ 	}
+ 	else {
+ 		/* add a trailing slash if needed */
+diff --git a/source/blender/blenkernel/intern/font.c b/source/blender/blenkernel/intern/font.c
+index bad73bc..e654c98 100644
+--- a/source/blender/blenkernel/intern/font.c
++++ b/source/blender/blenkernel/intern/font.c
+@@ -35,7 +35,12 @@
+ #include <math.h>
+ #include <stdlib.h>
+ #include <wchar.h>
++#ifdef __AROS__
++#include <ctype.h>
++#define towupper(c) ((c) < 128 ? toupper(c) : (c))
++#else
+ #include <wctype.h>
++#endif
+ 
+ #include "MEM_guardedalloc.h"
+ 
+diff --git a/source/blender/blenkernel/intern/scene.c b/source/blender/blenkernel/intern/scene.c
+index 6fd53bb..627898e 100644
+--- a/source/blender/blenkernel/intern/scene.c
++++ b/source/blender/blenkernel/intern/scene.c
+@@ -2307,7 +2307,13 @@ int BKE_render_num_threads(const RenderData *rd)
+ 		threads = rd->threads;
+ 	else
+ 		threads = BLI_system_thread_count();
+-	
++
++#ifdef __AROS__
++	/* QRX OS One: tile rendering is what runs on the second 68100 core. */
++	if (!(rd->mode & R_FIXED_THREADS) && qrx_core1_available())
++		threads++;
++#endif
++
+ 	return max_ii(threads, 1);
+ }
+ 
+diff --git a/source/blender/blenlib/BLI_threads.h b/source/blender/blenlib/BLI_threads.h
+index 60da6b3..3a23963 100644
+--- a/source/blender/blenlib/BLI_threads.h
++++ b/source/blender/blenlib/BLI_threads.h
+@@ -37,6 +37,10 @@ extern "C" {
+ 
+ #include <pthread.h>
+ 
++#ifdef __AROS__
++#  include "qrx_core1.h"
++#endif
++
+ #ifdef __APPLE__
+ #include <libkern/OSAtomic.h>
+ #endif
+@@ -96,8 +100,14 @@ void    BLI_unlock_thread(int type);
+ 
+ /* Mutex Lock */
+ 
++#ifdef __AROS__
++/* QRX OS One: core 1 can take these as well, so they cannot be Exec semaphores. */
++typedef struct ThreadMutex { qrx_lock_t locked; } ThreadMutex;
++#  define BLI_MUTEX_INITIALIZER   {0}
++#else
+ typedef pthread_mutex_t ThreadMutex;
+-#define BLI_MUTEX_INITIALIZER   PTHREAD_MUTEX_INITIALIZER
++#  define BLI_MUTEX_INITIALIZER   PTHREAD_MUTEX_INITIALIZER
++#endif
+ 
+ void BLI_mutex_init(ThreadMutex *mutex);
+ void BLI_mutex_end(ThreadMutex *mutex);
+@@ -111,7 +121,9 @@ void BLI_mutex_unlock(ThreadMutex *mutex);
+ 
+ /* Spin Lock */
+ 
+-#if defined(__APPLE__)
++#if defined(__AROS__)
++typedef qrx_lock_t SpinLock;
++#elif defined(__APPLE__)
+ typedef OSSpinLock SpinLock;
+ #elif defined(_MSC_VER)
+ typedef volatile int SpinLock;
+@@ -129,9 +141,13 @@ void BLI_spin_end(SpinLock *spin);
+ #define THREAD_LOCK_READ    1
+ #define THREAD_LOCK_WRITE   2
+ 
+-#define BLI_RWLOCK_INITIALIZER PTHREAD_RWLOCK_INITIALIZER
+-
++#ifdef __AROS__
++typedef struct ThreadRWMutex { qrx_lock_t guard; int readers; char writer; } ThreadRWMutex;
++#  define BLI_RWLOCK_INITIALIZER {0, 0, 0}
++#else
++#  define BLI_RWLOCK_INITIALIZER PTHREAD_RWLOCK_INITIALIZER
+ typedef pthread_rwlock_t ThreadRWMutex;
++#endif
+ 
+ void BLI_rw_mutex_init(ThreadRWMutex *mutex);
+ void BLI_rw_mutex_end(ThreadRWMutex *mutex);
+diff --git a/source/blender/blenlib/intern/path_util.c b/source/blender/blenlib/intern/path_util.c
+index 4b3a74d..1fa4c77 100644
+--- a/source/blender/blenlib/intern/path_util.c
++++ b/source/blender/blenlib/intern/path_util.c
+@@ -1040,6 +1040,10 @@ bool BLI_path_cwd(char *path, const size_t maxlen)
+ #else
+ 	if (filelen >= 2 && path[0] == '/')
+ 		wasrelative = false;
++#  ifdef __AROS__
++	if (strchr(path, ':'))  /* a volume or assign name */
++		wasrelative = false;
++#  endif
+ #endif
+ 	
+ 	if (wasrelative) {
+@@ -1568,7 +1572,11 @@ void BLI_join_dirfile(char *__restrict dst, const size_t maxlen, const char *__r
+ 	}
+ 
+ 	/* inline BLI_add_slash */
++#ifdef __AROS__
++	if ((dirlen > 0) && !ELEM(dst[dirlen - 1], SEP, ALTSEP, ':')) {
++#else
+ 	if ((dirlen > 0) && !ELEM(dst[dirlen - 1], SEP, ALTSEP)) {
++#endif
+ 		dst[dirlen++] = SEP;
+ 		dst[dirlen] = '\0';
+ 	}
+@@ -1907,6 +1915,10 @@ const char *BLI_last_slash(const char *string)
+ int BLI_add_slash(char *string)
+ {
+ 	int len = strlen(string);
++#ifdef __AROS__
++	if (len && string[len - 1] == ':')  /* "RAM:/x" would mean a parent directory */
++		return len;
++#endif
+ 	if (len == 0 || string[len - 1] != SEP) {
+ 		string[len] = SEP;
+ 		string[len + 1] = '\0';
+diff --git a/source/blender/blenlib/intern/storage.c b/source/blender/blenlib/intern/storage.c
+index b819c51..86a1acb 100644
+--- a/source/blender/blenlib/intern/storage.c
++++ b/source/blender/blenlib/intern/storage.c
+@@ -131,12 +131,16 @@ double BLI_dir_free_space(const char *dir)
+ 	return (double) (freec * bytesps * sectorspc);
+ #else
+ 
+-#ifdef USE_STATFS_STATVFS
++#ifdef __AROS__
++	(void)dir;
++	return -1;  /* unknown; only the file browser shows it */
++#elif defined(USE_STATFS_STATVFS)
+ 	struct statvfs disk;
+ #else
+ 	struct statfs disk;
+ #endif
+ 
++#ifndef __AROS__
+ 	char name[FILE_MAXDIR], *slash;
+ 	int len = strlen(dir);
+ 
+@@ -160,9 +164,12 @@ double BLI_dir_free_space(const char *dir)
+ #else
+ 	if (statfs(name, &disk)) return -1;
+ #endif
++#endif /* !__AROS__ */
+ 
++#ifndef __AROS__
+ 	return ( ((double) disk.f_bsize) * ((double) disk.f_bfree));
+ #endif
++#endif
+ }
+ 
+ 
+diff --git a/source/blender/blenlib/intern/task.c b/source/blender/blenlib/intern/task.c
+index a064c69..9e71ff9 100644
+--- a/source/blender/blenlib/intern/task.c
++++ b/source/blender/blenlib/intern/task.c
+@@ -37,6 +37,9 @@
+ 
+ #include "atomic_ops.h"
+ 
++/* AROS's pthread.h brings in exec's struct Task. */
++#define Task BLI_Task
++
+ /* Define this to enable some detailed statistic print. */
+ #undef DEBUG_STATS
+ 
+diff --git a/source/blender/blenlib/intern/threads.c b/source/blender/blenlib/intern/threads.c
+index fbb64f3..694a6e2 100644
+--- a/source/blender/blenlib/intern/threads.c
++++ b/source/blender/blenlib/intern/threads.c
+@@ -114,17 +114,17 @@ static TaskScheduler *task_scheduler = NULL;
+  *
+  ************************************************ */
+ static SpinLock _malloc_lock;
+-static pthread_mutex_t _image_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _image_draw_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _viewer_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _custom1_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _rcache_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _opengl_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _nodes_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _movieclip_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _colormanage_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _fftw_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_mutex_t _view3d_lock = PTHREAD_MUTEX_INITIALIZER;
++static ThreadMutex _image_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _image_draw_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _viewer_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _custom1_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _rcache_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _opengl_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _nodes_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _movieclip_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _colormanage_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _fftw_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex _view3d_lock = BLI_MUTEX_INITIALIZER;
+ static pthread_t mainid;
+ static unsigned int thread_levels = 0;  /* threads can be invoked inside threads */
+ static int num_threads_override = 0;
+@@ -255,6 +255,9 @@ static void *tslot_thread_start(void *tslot_p)
+ 
+ int BLI_thread_is_main(void)
+ {
++#ifdef __AROS__
++	if (qrx_on_core1()) return 0;
++#endif
+ 	return pthread_equal(pthread_self(), mainid);
+ }
+ 
+@@ -365,7 +368,7 @@ int BLI_system_thread_count(void)
+ 		len = sizeof(t);
+ 		sysctl(mib, 2, &t, &len, NULL, 0);
+ #   else
+-		t = (int)sysconf(_SC_NPROCESSORS_ONLN);
++		t = 1;  /* QRX OS One: AROS has one scheduler CPU; core 1 is added below where present */
+ #   endif
+ #endif
+ 	}
+@@ -420,16 +423,23 @@ static ThreadMutex *global_mutex_from_type(const int type)
+ 
+ void BLI_lock_thread(int type)
+ {
+-	pthread_mutex_lock(global_mutex_from_type(type));
++	BLI_mutex_lock(global_mutex_from_type(type));
+ }
+ 
+ void BLI_unlock_thread(int type)
+ {
+-	pthread_mutex_unlock(global_mutex_from_type(type));
++	BLI_mutex_unlock(global_mutex_from_type(type));
+ }
+ 
+ /* Mutex Locks */
+ 
++#ifdef __AROS__
++void BLI_mutex_init(ThreadMutex *mutex) { mutex->locked = 0; }
++void BLI_mutex_lock(ThreadMutex *mutex) { qrx_lock(&mutex->locked); }
++void BLI_mutex_unlock(ThreadMutex *mutex) { qrx_unlock(&mutex->locked); }
++bool BLI_mutex_trylock(ThreadMutex *mutex) { return qrx_trylock(&mutex->locked); }
++void BLI_mutex_end(ThreadMutex *mutex) { (void)mutex; }
++#else
+ void BLI_mutex_init(ThreadMutex *mutex)
+ {
+ 	pthread_mutex_init(mutex, NULL);
+@@ -454,6 +464,7 @@ void BLI_mutex_end(ThreadMutex *mutex)
+ {
+ 	pthread_mutex_destroy(mutex);
+ }
++#endif /* __AROS__ */
+ 
+ ThreadMutex *BLI_mutex_alloc(void)
+ {
+@@ -472,17 +483,27 @@ void BLI_mutex_free(ThreadMutex *mutex)
+ 
+ void BLI_spin_init(SpinLock *spin)
+ {
++#ifdef __AROS__
++	*spin = 0;
++	return;
++#endif
+ #if defined(__APPLE__)
+ 	*spin = OS_SPINLOCK_INIT;
+ #elif defined(_MSC_VER)
+ 	*spin = 0;
+ #else
++#ifndef __AROS__
+ 	pthread_spin_init(spin, 0);
+ #endif
++#endif
+ }
+ 
+ void BLI_spin_lock(SpinLock *spin)
+ {
++#ifdef __AROS__
++	qrx_lock(spin);
++	return;
++#endif
+ #if defined(__APPLE__)
+ 	OSSpinLockLock(spin);
+ #elif defined(_MSC_VER)
+@@ -492,33 +513,75 @@ void BLI_spin_lock(SpinLock *spin)
+ 		}
+ 	}
+ #else
++#ifndef __AROS__
+ 	pthread_spin_lock(spin);
+ #endif
++#endif
+ }
+ 
+ void BLI_spin_unlock(SpinLock *spin)
+ {
++#ifdef __AROS__
++	qrx_unlock(spin);
++	return;
++#endif
+ #if defined(__APPLE__)
+ 	OSSpinLockUnlock(spin);
+ #elif defined(_MSC_VER)
+ 	_ReadWriteBarrier();
+ 	*spin = 0;
+ #else
++#ifndef __AROS__
+ 	pthread_spin_unlock(spin);
+ #endif
++#endif
+ }
+ 
+ void BLI_spin_end(SpinLock *spin)
+ {
++#ifdef __AROS__
++	(void)spin;
++	return;
++#endif
+ #if defined(__APPLE__)
+ #elif defined(_MSC_VER)
+ #else
++#ifndef __AROS__
+ 	pthread_spin_destroy(spin);
+ #endif
++#endif
+ }
+ 
+ /* Read/Write Mutex Lock */
+ 
++#ifdef __AROS__
++void BLI_rw_mutex_init(ThreadRWMutex *mutex)
++{
++	mutex->guard = 0; mutex->readers = 0; mutex->writer = 0;
++}
++void BLI_rw_mutex_lock(ThreadRWMutex *mutex, int mode)
++{
++	for (;;) {
++		qrx_lock(&mutex->guard);
++		if (!mutex->writer && (mode == THREAD_LOCK_READ || mutex->readers == 0)) {
++			if (mode == THREAD_LOCK_READ) mutex->readers++;
++			else mutex->writer = 1;
++			qrx_unlock(&mutex->guard);
++			return;
++		}
++		qrx_unlock(&mutex->guard);
++		qrx_yield();
++	}
++}
++void BLI_rw_mutex_unlock(ThreadRWMutex *mutex)
++{
++	qrx_lock(&mutex->guard);
++	if (mutex->writer) mutex->writer = 0;
++	else mutex->readers--;
++	qrx_unlock(&mutex->guard);
++}
++void BLI_rw_mutex_end(ThreadRWMutex *mutex) { (void)mutex; }
++#else
+ void BLI_rw_mutex_init(ThreadRWMutex *mutex)
+ {
+ 	pthread_rwlock_init(mutex, NULL);
+@@ -541,6 +604,7 @@ void BLI_rw_mutex_end(ThreadRWMutex *mutex)
+ {
+ 	pthread_rwlock_destroy(mutex);
+ }
++#endif /* __AROS__ */
+ 
+ ThreadRWMutex *BLI_rw_mutex_alloc(void)
+ {
+@@ -610,6 +674,39 @@ void BLI_condition_init(ThreadCondition *cond)
+ 	pthread_cond_init(cond, NULL);
+ }
+ 
++#ifdef __AROS__
++/* AROS's condition variables need a pthread mutex, these locks are not one, so a gate stands between
++ * them. Who waits holds the gate before dropping the lock, who notifies takes the gate first, so no
++ * notification is lost. Conditions are for core 0: core 1 has no scheduler to wait in. */
++static pthread_mutex_t condition_gate = PTHREAD_MUTEX_INITIALIZER;
++void BLI_condition_wait(ThreadCondition *cond, ThreadMutex *mutex)
++{
++	pthread_mutex_lock(&condition_gate);
++	BLI_mutex_unlock(mutex);
++	pthread_cond_wait(cond, &condition_gate);
++	pthread_mutex_unlock(&condition_gate);
++	BLI_mutex_lock(mutex);
++}
++
++void BLI_condition_wait_global_mutex(ThreadCondition *cond, const int type)
++{
++	BLI_condition_wait(cond, global_mutex_from_type(type));
++}
++
++void BLI_condition_notify_one(ThreadCondition *cond)
++{
++	pthread_mutex_lock(&condition_gate);
++	pthread_cond_signal(cond);
++	pthread_mutex_unlock(&condition_gate);
++}
++
++void BLI_condition_notify_all(ThreadCondition *cond)
++{
++	pthread_mutex_lock(&condition_gate);
++	pthread_cond_broadcast(cond);
++	pthread_mutex_unlock(&condition_gate);
++}
++#else
+ void BLI_condition_wait(ThreadCondition *cond, ThreadMutex *mutex)
+ {
+ 	pthread_cond_wait(cond, mutex);
+@@ -629,6 +726,7 @@ void BLI_condition_notify_all(ThreadCondition *cond)
+ {
+ 	pthread_cond_broadcast(cond);
+ }
++#endif
+ 
+ void BLI_condition_end(ThreadCondition *cond)
+ {
+diff --git a/source/blender/blenlib/intern/time.c b/source/blender/blenlib/intern/time.c
+index 3cf3221..e374763 100644
+--- a/source/blender/blenlib/intern/time.c
++++ b/source/blender/blenlib/intern/time.c
+@@ -93,6 +93,15 @@ double PIL_check_seconds_timer(void)
+ {
+ 	struct timeval tv;
+ 	struct timezone tz;
++#ifdef __AROS__
++	/* QRX OS One: core 1 has no timer and sees the time core 0 read last. */
++	extern int qrx_on_core1(void);
++	static volatile double last_seconds;
++	if (qrx_on_core1()) return last_seconds;
++	gettimeofday(&tv, &tz);
++	last_seconds = (double) tv.tv_sec + tv.tv_usec / 1000000.0;
++	return last_seconds;
++#endif
+ 
+ 	gettimeofday(&tv, &tz);
+ 
+diff --git a/source/blender/editors/util/numinput.c b/source/blender/editors/util/numinput.c
+index 0f32409..df067ee 100644
+--- a/source/blender/editors/util/numinput.c
++++ b/source/blender/editors/util/numinput.c
+@@ -514,7 +514,7 @@ bool handleNumInput(bContext *C, NumInput *n, const wmEvent *event)
+ 			n->val[idx] = -n->val[idx];
+ 		}
+ 		if (n->val_flag[idx] & NUM_INVERSE) {
+-			val = n->val[idx];
++			double val = n->val[idx];
+ 			/* If we invert on radians when user is in degrees, you get unexpected results... See T53463. */
+ 			if (!n->unit_use_radians && n->unit_type[idx] == B_UNIT_ROTATION) {
+ 				val = RAD2DEG(val);
+diff --git a/source/blender/imbuf/intern/colormanagement.c b/source/blender/imbuf/intern/colormanagement.c
+index f510ded..ac665d9 100644
+--- a/source/blender/imbuf/intern/colormanagement.c
++++ b/source/blender/imbuf/intern/colormanagement.c
+@@ -102,7 +102,7 @@ float imbuf_luma_coefficients[3] = { 0.2126f, 0.7152f, 0.0722f };
+  * LOCK_COLORMANAGE can not be used since this mutex could be needed to
+  * be locked before pre-cached processor are creating
+  */
+-static pthread_mutex_t processor_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex processor_lock = BLI_MUTEX_INITIALIZER;
+ 
+ typedef struct ColormanageProcessor {
+ 	OCIO_ConstProcessorRcPtr *processor;
+diff --git a/source/blender/imbuf/intern/moviecache.c b/source/blender/imbuf/intern/moviecache.c
+index 4b49076..3944f2b 100644
+--- a/source/blender/imbuf/intern/moviecache.c
++++ b/source/blender/imbuf/intern/moviecache.c
+@@ -59,7 +59,7 @@
+ #endif
+ 
+ static MEM_CacheLimiterC *limitor = NULL;
+-static pthread_mutex_t limitor_lock = BLI_MUTEX_INITIALIZER;
++static ThreadMutex limitor_lock = BLI_MUTEX_INITIALIZER;
+ 
+ typedef struct MovieCache {
+ 	char name[64];
+diff --git a/source/blender/makesdna/intern/CMakeLists.txt b/source/blender/makesdna/intern/CMakeLists.txt
+index 8c758c3..22560e3 100644
+--- a/source/blender/makesdna/intern/CMakeLists.txt
++++ b/source/blender/makesdna/intern/CMakeLists.txt
+@@ -62,7 +62,7 @@ add_custom_command(
+ 		${CMAKE_CURRENT_BINARY_DIR}/dna.c
+ 		${CMAKE_CURRENT_BINARY_DIR}/dna_type_offsets.h
+ 	COMMAND
+-		"$<TARGET_FILE:makesdna>"
++		${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:makesdna>"
+ 		${CMAKE_CURRENT_BINARY_DIR}/dna.c
+ 		${CMAKE_CURRENT_BINARY_DIR}/dna_type_offsets.h
+ 		${CMAKE_SOURCE_DIR}/source/blender/makesdna/
+diff --git a/source/blender/makesdna/intern/makesdna.c b/source/blender/makesdna/intern/makesdna.c
+index 17e30de..2391708 100644
+--- a/source/blender/makesdna/intern/makesdna.c
++++ b/source/blender/makesdna/intern/makesdna.c
+@@ -1231,7 +1231,7 @@ int main(int argc, char **argv)
+ 				baseDirectory = BASE_HEADER;
+ 			}
+ 
+-			fprintf(file_dna, "const unsigned char DNAstr[] = {\n");
++			fprintf(file_dna, "__attribute__((aligned(8))) const unsigned char DNAstr[] = {\n");
+ 			if (make_structDNA(baseDirectory, file_dna, file_dna_offsets)) {
+ 				/* error */
+ 				fclose(file_dna);
+diff --git a/source/blender/makesrna/intern/CMakeLists.txt b/source/blender/makesrna/intern/CMakeLists.txt
+index 9d0ba55..799aa81 100644
+--- a/source/blender/makesrna/intern/CMakeLists.txt
++++ b/source/blender/makesrna/intern/CMakeLists.txt
+@@ -373,7 +373,7 @@ target_link_libraries(makesrna bf_dna_blenlib)
+ # note (linux only): with crashes try add this after COMMAND: valgrind --leak-check=full --track-origins=yes
+ add_custom_command(
+ 	OUTPUT ${GENSRC}
+-	COMMAND "$<TARGET_FILE:makesrna>" ${CMAKE_CURRENT_BINARY_DIR}/
++	COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} "$<TARGET_FILE:makesrna>" ${CMAKE_CURRENT_BINARY_DIR}/
+ 	DEPENDS makesrna
+ )
+ 
+diff --git a/source/blender/makesrna/intern/makesrna.c b/source/blender/makesrna/intern/makesrna.c
+index df0df68..e2d308b 100644
+--- a/source/blender/makesrna/intern/makesrna.c
++++ b/source/blender/makesrna/intern/makesrna.c
+@@ -3994,7 +3994,6 @@ static int rna_preprocess(const char *outfile)
+ 
+ 	/* define rna */
+ 	brna = RNA_create();
+-
+ 	for (i = 0; PROCESS_ITEMS[i].filename; i++) {
+ 		if (PROCESS_ITEMS[i].define) {
+ 			PROCESS_ITEMS[i].define(brna);
+diff --git a/source/blender/makesrna/intern/rna_userdef.c b/source/blender/makesrna/intern/rna_userdef.c
+index 350cb02..7113836 100644
+--- a/source/blender/makesrna/intern/rna_userdef.c
++++ b/source/blender/makesrna/intern/rna_userdef.c
+@@ -3808,6 +3808,7 @@ static void rna_def_userdef_edit(BlenderRNA *brna)
+ 	/* currently only used for insert offset (aka auto-offset), maybe also be useful for later stuff though */
+ 	prop = RNA_def_property(srna, "node_margin", PROP_INT, PROP_NONE);
+ 	RNA_def_property_int_sdna(prop, NULL, "node_margin");
++	RNA_def_property_range(prop, 0, 127);  /* QRX OS One: char is unsigned in this build */
+ 	RNA_def_property_ui_text(prop, "Auto-offset Margin", "Minimum distance between nodes for Auto-offsetting nodes");
+ 	RNA_def_property_update(prop, 0, "rna_userdef_update");
+ }
+diff --git a/source/blender/render/intern/raytrace/vbvh.h b/source/blender/render/intern/raytrace/vbvh.h
+index abccab5..4b33731 100644
+--- a/source/blender/render/intern/raytrace/vbvh.h
++++ b/source/blender/render/intern/raytrace/vbvh.h
+@@ -113,7 +113,7 @@ struct BuildBinaryVBVH {
+ 	void test_break()
+ 	{
+ 		if (RE_rayobjectcontrol_test_break(control))
+-			throw "Stop";
++			/* QRX OS One: no C++ exceptions */ abort(); // "Stop";
+ 	}
+ 
+ 	BuildBinaryVBVH(MemArena *a, RayObjectControl *c)
+@@ -140,14 +140,7 @@ struct BuildBinaryVBVH {
+ 	
+ 	Node *transform(RTBuilder *builder)
+ 	{
+-		try
+-		{
+-			return _transform(builder);
+-			
+-		} catch (...)
+-		{
+-		}
+-		return NULL;
++		return _transform(builder);  /* QRX OS One: no C++ exceptions, out of memory ends the program */
+ 	}
+ 	
+ 	Node *_transform(RTBuilder *builder)
+diff --git a/source/blender/render/intern/source/pipeline.c b/source/blender/render/intern/source/pipeline.c
+index 9ed1520..80994fc 100644
+--- a/source/blender/render/intern/source/pipeline.c
++++ b/source/blender/render/intern/source/pipeline.c
+@@ -39,6 +39,8 @@
+ #include "DNA_anim_types.h"
+ #include "DNA_group_types.h"
+ #include "DNA_image_types.h"
++#include "DNA_material_types.h"
++#include "DNA_lamp_types.h"
+ #include "DNA_node_types.h"
+ #include "DNA_object_types.h"
+ #include "DNA_particle_types.h"
+@@ -713,6 +715,7 @@ void RE_InitState(Render *re, Render *source, RenderData *rd,
+ 
+ 	/* copy render data and render layers for thread safety */
+ 	render_copy_renderdata(&re->r, rd);
++	if (getenv("QRX_RENDER_RAY")) re->r.mode |= R_RAYTRACE | R_SHADOW;  /* QRX OS One test scene */
+ 
+ 	if (source) {
+ 		/* reuse border flags from source renderer */
+@@ -1344,6 +1347,46 @@ static void main_render_result_new(Render *re)
+ 	}
+ }
+ 
++#ifdef __AROS__
++/* QRX OS One: the second 68100 core renders tiles too. It has no scheduler, so it cannot wait on the
++ * queues the other render threads use. Tiles reach it through these two slots, from the loop in
++ * threaded_tile_processor(). */
++typedef struct Core1Tiles {
++	RenderThread *thread;
++	RenderPart *volatile todo;
++	RenderPart *volatile done;
++	volatile int quit;
++	int tiles;
++	int fail_after;  /* QRX_CORE1_FAULT_TEST: stop on a fault after this many tiles, to test the recovery */
++} Core1Tiles;
++
++static void core1_tile_job(void *arg)
++{
++	Core1Tiles *c = arg;
++
++	for (;;) {
++		RenderPart *pa = c->todo;
++		if (pa) {
++			pa->thread = c->thread->number;
++			do_part_thread(pa);
++			c->tiles++;
++			if (c->fail_after && c->tiles == c->fail_after) {
++				__asm__ volatile("illegal");  /* parks core 1 with a fault */
++			}
++			/* Core 0 hands out the next tile as soon as todo is empty, so it may not have taken
++			 * the last finished one yet: wait for that, and publish done before emptying todo,
++			 * or a finished tile is overwritten and the render waits for it forever. */
++			while (c->done) {}
++			c->done = pa;
++			c->todo = NULL;
++		}
++		else if (c->quit) {
++			return;
++		}
++	}
++}
++#endif
++
+ static void threaded_tile_processor(Render *re)
+ {
+ 	RenderThread thread[BLENDER_MAX_THREADS];
+@@ -1353,6 +1396,10 @@ static void threaded_tile_processor(Render *re)
+ 	rctf viewplane = re->viewplane;
+ 	double lastdraw, elapsed, redrawtime = 1.0f;
+ 	int totpart = 0, minx = 0, slice = 0, a, wait;
++#ifdef __AROS__
++	Core1Tiles core1 = {NULL};
++	int core1_on = 0;
++#endif
+ 	
+ 	if (re->result == NULL)
+ 		return;
+@@ -1362,6 +1409,10 @@ static void threaded_tile_processor(Render *re)
+ 	
+ 	/* assuming no new data gets added to dbase... */
+ 	R = *re;
++	/* A lock cannot be copied: macOS keeps a rwlock's state at offsets that depend on its address, and
++	 * the copy made the tile threads wait forever. */
++	memset(&R.resultmutex, 0, sizeof(R.resultmutex));
++	BLI_rw_mutex_init(&R.resultmutex);
+ 	
+ 	/* set threadsafe break */
+ 	R.test_break = thread_break;
+@@ -1378,6 +1429,9 @@ static void threaded_tile_processor(Render *re)
+ 		BLI_thread_queue_nowait(workqueue);
+ 		
+ 		/* start all threads */
++#ifdef __AROS__
++		printf("Render threads: %d, core 1 %s\n", re->r.threads, qrx_core1_available() ? "present" : "absent");
++#endif
+ 		BLI_init_threads(&threads, do_render_thread, re->r.threads);
+ 		
+ 		for (a = 0; a < re->r.threads; a++) {
+@@ -1394,6 +1448,22 @@ static void threaded_tile_processor(Render *re)
+ 				thread[a].duh = NULL;
+ 			}
+ 
++#ifdef __AROS__
++			/* The last thread goes to core 1 when there is more than one. Display updates
++			 * stay on core 0: the loop below does them when it takes a finished tile. */
++			if (a > 0 && a == re->r.threads - 1 && !core1_on) {
++				core1.thread = &thread[a];
++				core1.todo = NULL;
++				core1.done = NULL;
++				core1.quit = 0;
++				core1.tiles = 0;
++				core1.fail_after = getenv("QRX_CORE1_FAULT_TEST") ? 3 : 0;
++				if (qrx_core1_start(core1_tile_job, &core1)) {
++					core1_on = 1;
++					continue;
++				}
++			}
++#endif
+ 			BLI_insert_thread(&threads, &thread[a]);
+ 		}
+ 		
+@@ -1403,6 +1473,34 @@ static void threaded_tile_processor(Render *re)
+ 		while (1) {
+ 			elapsed = PIL_check_seconds_timer() - lastdraw;
+ 			wait = (redrawtime - elapsed)*1000;
++
++#ifdef __AROS__
++			if (core1_on) {
++				unsigned fault_pc, fault_addr;
++				if (core1.done) {
++					if (core1.thread->display_update)
++						core1.thread->display_update(core1.thread->duh, core1.done->result, NULL);
++					BLI_thread_queue_push(donequeue, core1.done);
++					core1.done = NULL;
++				}
++				if (qrx_core1_faulted(&fault_pc, &fault_addr)) {
++					printf("Core 1 stopped at %08x (address or vector %08x), core 0 takes over its tile\n",
++					       fault_pc, fault_addr);
++					core1_on = 0;
++					if (core1.todo) {
++						BLI_thread_queue_push(workqueue, core1.todo);
++						core1.todo = NULL;
++						BLI_insert_thread(&threads, core1.thread);
++					}
++				}
++				else if (!core1.todo && !core1.quit) {
++					RenderPart *next = BLI_thread_queue_pop_timeout(workqueue, 0);
++					if (next) core1.todo = next;
++					else core1.quit = 1;
++				}
++				wait = min_ii(wait, 5);
++			}
++#endif
+ 			
+ 			/* handle finished part */
+ 			if ((pa=BLI_thread_queue_pop_timeout(donequeue, wait))) {
+@@ -1438,6 +1536,14 @@ static void threaded_tile_processor(Render *re)
+ 			}
+ 		}
+ 		
++#ifdef __AROS__
++		if (core1_on) {
++			core1.quit = 1;
++			while (qrx_core1_busy()) qrx_yield();
++			core1_on = 0;
++			printf("Core 1: %d of the tiles, %u instructions in this job\n", core1.tiles, qrx_core1_instructions());
++		}
++#endif
+ 		BLI_end_threads(&threads);
+ 		
+ 		if ((g_break=re->test_break(re->tbh)))
+@@ -3146,6 +3252,31 @@ const char *RE_GetActiveRenderView(Render *re)
+ static int render_initialize_from_main(Render *re, RenderData *rd, Main *bmain, Scene *scene, SceneRenderLayer *srl,
+                                        Object *camera_override, unsigned int lay_override, int anim, int anim_init)
+ {
++	/* Test scenes for the QRX OS One port: a build without Python has no other way to change a scene.
++	 * QRX_RENDER=WIDTHxHEIGHTxTILE sets the size in pixels and the tile size. With QRX_RENDER_RAY set,
++	 * lamps cast ray shadows and materials become mirrors, so the C++ ray tracer takes part too. */
++	{
++		const char *test = getenv("QRX_RENDER");
++		int w, h, t;
++		if (test && sscanf(test, "%dx%dx%d", &w, &h, &t) == 3) {
++			rd->xsch = w; rd->ysch = h; rd->size = 100; rd->tilex = t; rd->tiley = t;
++		}
++		if (getenv("QRX_RENDER_RAY")) {
++			Material *ma;
++			Lamp *la;
++			rd->mode |= R_RAYTRACE | R_SHADOW;
++			for (ma = bmain->mat.first; ma; ma = ma->id.next) {
++				ma->mode |= MA_RAYMIRROR | MA_SHADBUF;
++				ma->ray_mirror = 0.4f;
++				ma->ray_depth = 2;
++			}
++			for (la = bmain->lamp.first; la; la = la->id.next) {
++				la->mode |= LA_SHAD_RAY;
++			}
++			{int nm=0,nl=0; for (ma = bmain->mat.first; ma; ma = ma->id.next) nm++; for (la = bmain->lamp.first; la; la = la->id.next) nl++; printf("QRXRAY mats %d lamps %d\n",nm,nl);}
++		}
++	}
++
+ 	int winx, winy;
+ 	rcti disprect;
+ 	
+diff --git a/source/blender/render/intern/source/pointdensity.c b/source/blender/render/intern/source/pointdensity.c
+index fb047aa..ef06405 100644
+--- a/source/blender/render/intern/source/pointdensity.c
++++ b/source/blender/render/intern/source/pointdensity.c
+@@ -70,7 +70,7 @@
+ extern struct Render R;
+ /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+ 
+-static ThreadMutex sample_mutex = PTHREAD_MUTEX_INITIALIZER;
++static ThreadMutex sample_mutex = BLI_MUTEX_INITIALIZER;
+ 
+ static int point_data_used(PointDensity *pd)
+ {

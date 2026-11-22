@@ -13,15 +13,19 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 static QRX68 *current;
 static uint64_t instruction_hooks;
 static uint32_t last_pc;
 static bool bus_fault;
+static bool cpu_trace;
 
 static bool region(uint32_t addr, unsigned width){
     if(!current || !current->memory || !width ||
        (uint64_t)addr+width>current->memory_size){
+        if(cpu_trace)fprintf(stderr,"BUS FAULT %08x width=%u\n",addr,width);
         bus_fault=true;
         if(current)current->failed=1;
         return false;
@@ -48,6 +52,7 @@ void m68k_write_memory_16(unsigned int addr,unsigned int v){write_bus(addr,2,v);
 void m68k_write_memory_32(unsigned int addr,unsigned int v){write_bus(addr,4,v);}
 void m68k_write_memory_32_pd(unsigned int addr,unsigned int v){write_bus(addr,4,v);}
 static void instruction_hook(unsigned int pc){
+    if(cpu_trace)fprintf(stderr,"PC=%08x SP=%08x SR=%04x\n",pc,m68k_get_reg(NULL,M68K_REG_A7),m68k_get_reg(NULL,M68K_REG_SR));
     instruction_hooks++;
     last_pc=pc;
     /* Stop before excessive interpreter executions in one Musashi timeslice.
@@ -68,9 +73,9 @@ static void cpu_to_guest(QRX68 *r){
 static void guest_to_cpu(QRX68 *r){
     QRXCPU *c=&r->vm.cpu;
     /* A7 is the currently active stack; change SR before assigning A7. */
+    m68k_set_reg(M68K_REG_SR,c->sr);
     m68k_set_reg(M68K_REG_USP,c->usp);
     m68k_set_reg(M68K_REG_ISP,c->ssp);
-    m68k_set_reg(M68K_REG_SR,c->sr);
     for(unsigned i=0;i<8;i++){
         m68k_set_reg((m68k_register_t)(M68K_REG_D0+i),c->d[i]);
         if(i!=7)m68k_set_reg((m68k_register_t)(M68K_REG_A0+i),c->a[i]);
@@ -80,10 +85,13 @@ static void guest_to_cpu(QRX68 *r){
 }
 bool qrx68_musashi_begin(QRX68 *r){
     if(!r||!r->memory||current)return false;
+    cpu_trace=getenv("QRX68_CPU_TRACE")!=NULL;
     current=r;bus_fault=false;instruction_hooks=0;last_pc=0;
     m68k_init();
     m68k_set_cpu_type(M68K_CPU_TYPE_68040);
     m68k_pulse_reset();
+    /* Consume reset latency before the single-instruction scheduler starts. */
+    (void)m68k_execute(0);
     m68k_set_instr_hook_callback(instruction_hook);
     guest_to_cpu(r);
     return true;

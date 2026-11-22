@@ -3,7 +3,11 @@
  * File operations are explicitly firmware device services (similar to a BIOS),
  * NOT evidence of native AmigaOS, AROS, Exec, DOS or a full 68040 implementation.
  */
+#ifndef __APPLE__
 #define _POSIX_C_SOURCE 200809L
+#else
+#define _DARWIN_C_SOURCE
+#endif
 #include "qrx_bootshell.h"
 #include "qrx_hunk.h"
 #include <ctype.h>
@@ -126,9 +130,13 @@ static bool hexstore(QRXShell *s,const char *name,const char *hex){
  * Guest memory is a bounded DMA staging region, shared with real 68k clients. */
 #define SHARE_NAME_ADDR 0x6000u
 #define SHARE_DATA_ADDR 0x7000u
-static bool share_req(QRXShell *s,unsigned op,const char *name,uint32_t ofs,
+static bool share_req_slot(QRXShell *s,int slot,unsigned op,const char *name,uint32_t ofs,
                       void *buffer,unsigned *len,uint32_t *filesize){
-    if(!s->vm->hostfs){result(s,"ERR: no host directory mounted (--share)");return false;}
+    if(slot==1){
+        if(!s->vm->hostfs2){result(s,"ERR: no second host directory mounted (--share2)");return false;}
+    }else{
+        if(!s->vm->hostfs){result(s,"ERR: no host directory mounted (--share)");return false;}
+    }
     if(name){
         size_t n=strlen(name);
         if(n==0||n>QRX_HOSTFS_MAX_NAME)return false;
@@ -138,15 +146,23 @@ static bool share_req(QRXShell *s,unsigned op,const char *name,uint32_t ofs,
     if(bytes>QRX_HOSTFS_MAX_TRANSFER)return false;
     if(op==QRX_HOSTFS_CMD_WRITE && bytes && buffer)
         memcpy(s->vm->ram.data+SHARE_DATA_ADDR,buffer,bytes);
-    bool ok=qrx_vm_write(s->vm,QRX_HOSTFS_NAME_DMA,4,SHARE_NAME_ADDR) &&
-            qrx_vm_write(s->vm,QRX_HOSTFS_DATA_DMA,4,SHARE_DATA_ADDR) &&
-            qrx_vm_write(s->vm,QRX_HOSTFS_OFFSET,4,ofs) &&
-            qrx_vm_write(s->vm,QRX_HOSTFS_LENGTH,4,bytes) &&
-            qrx_vm_write(s->vm,QRX_HOSTFS_COMMAND,4,op);
+    uint32_t r_name=slot==1?QRX_HOSTFS2_NAME_DMA:QRX_HOSTFS_NAME_DMA;
+    uint32_t r_data=slot==1?QRX_HOSTFS2_DATA_DMA:QRX_HOSTFS_DATA_DMA;
+    uint32_t r_ofs=slot==1?QRX_HOSTFS2_OFFSET:QRX_HOSTFS_OFFSET;
+    uint32_t r_len=slot==1?QRX_HOSTFS2_LENGTH:QRX_HOSTFS_LENGTH;
+    uint32_t r_cmd=slot==1?QRX_HOSTFS2_COMMAND:QRX_HOSTFS_COMMAND;
+    uint32_t r_status=slot==1?QRX_HOSTFS2_STATUS:QRX_HOSTFS_STATUS;
+    uint32_t r_result=slot==1?QRX_HOSTFS2_RESULT:QRX_HOSTFS_RESULT;
+    uint32_t r_size=slot==1?QRX_HOSTFS2_SIZE:QRX_HOSTFS_SIZE;
+    bool ok=qrx_vm_write(s->vm,r_name,4,SHARE_NAME_ADDR) &&
+            qrx_vm_write(s->vm,r_data,4,SHARE_DATA_ADDR) &&
+            qrx_vm_write(s->vm,r_ofs,4,ofs) &&
+            qrx_vm_write(s->vm,r_len,4,bytes) &&
+            qrx_vm_write(s->vm,r_cmd,4,op);
     uint32_t status=QRX_HOSTFS_INVALID,count=0,size=0;
-    ok=ok&&qrx_vm_read(s->vm,QRX_HOSTFS_STATUS,4,&status)&&
-           qrx_vm_read(s->vm,QRX_HOSTFS_RESULT,4,&count)&&
-           qrx_vm_read(s->vm,QRX_HOSTFS_SIZE,4,&size);
+    ok=ok&&qrx_vm_read(s->vm,r_status,4,&status)&&
+           qrx_vm_read(s->vm,r_result,4,&count)&&
+           qrx_vm_read(s->vm,r_size,4,&size);
     if(!ok||status!=QRX_HOSTFS_OK)return false;
     if(count>bytes)return false;
     if(len)*len=count;
@@ -155,14 +171,18 @@ static bool share_req(QRXShell *s,unsigned op,const char *name,uint32_t ofs,
         memcpy(buffer,s->vm->ram.data+SHARE_DATA_ADDR,count);
     return true;
 }
-static bool share_program(QRXShell *s,const char *name){
+static bool share_req(QRXShell *s,unsigned op,const char *name,uint32_t ofs,
+                      void *buffer,unsigned *len,uint32_t *filesize){
+    return share_req_slot(s,0,op,name,ofs,buffer,len,filesize);
+}
+static bool share_program_slot(QRXShell *s,int slot,const char *name){
     unsigned len=4096;uint32_t fsz=0;
     unsigned char data[4096];
-    if(!share_req(s,QRX_HOSTFS_CMD_STAT,name,0,NULL,NULL,&fsz)||fsz<8||fsz>4096){
+    if(!share_req_slot(s,slot,QRX_HOSTFS_CMD_STAT,name,0,NULL,NULL,&fsz)||fsz<8||fsz>4096){
         result(s,"ERR: host executable unavailable/too large");return false;
     }
     len=fsz;
-    if(!share_req(s,QRX_HOSTFS_CMD_READ,name,0,data,&len,NULL)||len!=fsz){
+    if(!share_req_slot(s,slot,QRX_HOSTFS_CMD_READ,name,0,data,&len,NULL)||len!=fsz){
         result(s,"ERR: host program read failed");return false;
     }
     if(len>=10 && !memcmp(data,"QEX1",4) && read_be32(data+4)==len-8 && !(len&1u)){
@@ -180,38 +200,44 @@ static bool share_program(QRXShell *s,const char *name){
     }
     result(s,"ERR: not a valid host QEX1 or bounded Amiga HUNK");return false;
 }
-static void share_command(QRXShell *s,const char *verb,char *arg){
-    if(!s->vm->hostfs){result(s,"ERR: no host directory mounted (--share)");return;}
-    if(!strcmp(verb,"hostinfo")){
+static bool share_program(QRXShell *s,const char *name){return share_program_slot(s,0,name);}
+static void share_command_slot(QRXShell *s,int slot,const char *verb,char *arg){
+    const char *tag=slot==1?"TEST:":"HOST:";
+    const char *opt=slot==1?"--share2":"--share";
+    if(slot==1){if(!s->vm->hostfs2){result(s,"ERR: no host directory mounted (--share2)");return;}}
+    else{if(!s->vm->hostfs){result(s,"ERR: no host directory mounted (--share)");return;}}
+    if(!strcmp(verb,slot==1?"host2info":"hostinfo")){
         uint32_t flags=0;
-        (void)qrx_vm_read(s->vm,QRX_HOSTFS_FEATURES,4,&flags);
-        result(s,flags&2?"HOST: mounted read/write (single directory)":"HOST: mounted read-only (single directory)");return;
+        (void)qrx_vm_read(s->vm,slot==1?QRX_HOSTFS2_FEATURES:QRX_HOSTFS_FEATURES,4,&flags);
+        char b[128];snprintf(b,sizeof(b),"%s mounted %s (directory %d)",tag,flags&2?"read/write":"read-only",slot+1);
+        result(s,b);return;
     }
-    if(!strcmp(verb,"hostls")){
+    if(!strcmp(verb,slot==1?"host2ls":"hostls")){
         unsigned n=4096;char out[4097]={0};
-        if(!share_req(s,QRX_HOSTFS_CMD_LIST,NULL,0,out,&n,NULL))result(s,"ERR: host directory listing failed");
+        if(!share_req_slot(s,slot,QRX_HOSTFS_CMD_LIST,NULL,0,out,&n,NULL))result(s,"ERR: host directory listing failed");
         else{out[n]=0;result(s,n?out:"(empty)");}return;
     }
     if(!arg||!*arg){result(s,"ERR: host command requires a filename");return;}
-    if(!strcmp(verb,"hostrm")){
-        result(s,share_req(s,QRX_HOSTFS_CMD_DELETE,arg,0,NULL,NULL,NULL)?"OK: host file deleted":"ERR: delete denied or failed");return;
+    if(!strcmp(verb,slot==1?"host2rm":"hostrm")){
+        result(s,share_req_slot(s,slot,QRX_HOSTFS_CMD_DELETE,arg,0,NULL,NULL,NULL)?"OK: host file deleted":"ERR: delete denied or failed");return;
     }
-    if(!strcmp(verb,"hostcat")||!strcmp(verb,"hostget")){
+    if(!strcmp(verb,slot==1?"host2cat":"hostcat")||!strcmp(verb,slot==1?"host2get":"hostget")){
+        int is_get=!strcmp(verb,slot==1?"host2get":"hostget");
         char *dest=arg?strpbrk(arg," \t"):NULL;
         if(dest){*dest++=0;while(*dest==' '||*dest=='\t')dest++;}
         uint32_t size=0;
-        if(!share_req(s,QRX_HOSTFS_CMD_STAT,arg,0,NULL,NULL,&size)){
+        if(!share_req_slot(s,slot,QRX_HOSTFS_CMD_STAT,arg,0,NULL,NULL,&size)){
             result(s,"ERR: host file unavailable");return;
         }
-        if(!strcmp(verb,"hostget")&&size>QRX_DISK_SLOT_BYTES){result(s,"ERR: QRXFS file limit 4096 bytes");return;}
-        if(!strcmp(verb,"hostcat")&&size>16384u){result(s,"ERR: hostcat limited to 16 KiB");return;}
+        if(is_get&&size>QRX_DISK_SLOT_BYTES){result(s,"ERR: QRXFS file limit 4096 bytes");return;}
+        if(!is_get&&size>16384u){result(s,"ERR: hostcat limited to 16 KiB");return;}
         unsigned char data[16384+1];uint32_t pos=0;
         while(pos<size){unsigned chunk=size-pos>4096?4096:size-pos;
-            if(!share_req(s,QRX_HOSTFS_CMD_READ,arg,pos,data+pos,&chunk,NULL)||chunk==0){
+            if(!share_req_slot(s,slot,QRX_HOSTFS_CMD_READ,arg,pos,data+pos,&chunk,NULL)||chunk==0){
                 result(s,"ERR: host file read failed");return;
             }pos+=chunk;
         }
-        if(!strcmp(verb,"hostget")){
+        if(is_get){
             const char *target=(dest&&*dest)?dest:arg;
             result(s,store_bytes(s,target,data,pos,false)?"OK: host file copied to QRXFS-1":"ERR: unable to save QRXFS file");
         }else{
@@ -219,19 +245,24 @@ static void share_command(QRXShell *s,const char *verb,char *arg){
             if(!pos||data[pos-1]!='\n')emit(s,"\n");
         }return;
     }
-    if(!strcmp(verb,"hostput")){
+    if(!strcmp(verb,slot==1?"host2put":"hostput")){
         char *dest=strpbrk(arg," \t");
         if(dest){*dest++=0;while(*dest==' '||*dest=='\t')dest++;}
         const char *target=dest&&*dest?dest:arg;
-        int slot=find(s,arg);if(slot<0){result(s,"ERR: QRXFS source not found");return;}
-        unsigned size=read_be32(meta(s,(unsigned)slot)+22);
+        int fslot=find(s,arg);if(fslot<0){result(s,"ERR: QRXFS source not found");return;}
+        unsigned size=read_be32(meta(s,(unsigned)fslot)+22);
         if(size==0){result(s,"ERR: empty source not supported by this device");return;}
         unsigned chunk=size;
-        bool ok=share_req(s,QRX_HOSTFS_CMD_WRITE,target,0,payload(s,(unsigned)slot),&chunk,NULL)&&chunk==size;
-        if(ok)ok=share_req(s,QRX_HOSTFS_CMD_TRUNCATE,target,size,NULL,NULL,NULL);
-        result(s,ok?"OK: QRXFS file copied to HOST:":"ERR: host share is read-only or write failed");
+        bool ok=share_req_slot(s,slot,QRX_HOSTFS_CMD_WRITE,target,0,payload(s,(unsigned)fslot),&chunk,NULL)&&chunk==size;
+        if(ok)ok=share_req_slot(s,slot,QRX_HOSTFS_CMD_TRUNCATE,target,size,NULL,NULL,NULL);
+        char b[128];snprintf(b,sizeof(b),"OK: QRXFS file copied to %s",tag);
+        result(s,ok?b:"ERR: host share is read-only or write failed");
         return;
     }
+    (void)opt;
+}
+static void share_command(QRXShell *s,const char *verb,char *arg){
+    share_command_slot(s,0,verb,arg);
 }
 
 static bool stage_program(QRXShell *s,const char *name){
@@ -264,7 +295,8 @@ static void command(QRXShell *s,char *line){
         result(s,"HELP: help ver cpu mem ls cat NAME write NAME TEXT append NAME TEXT rm NAME");
         result(s,"      stats uptime date disk echo TEXT hex NAME HEX run NAME bench reboot shutdown");
         result(s,"      hostinfo hostls hostcat FILE hostget FILE [DEST] hostput FILE [DEST] hostrm FILE");
-        result(s,"      run HOST:PROGRAM.QEX or HOST:PROGRAM.HUNK (bounded 68k; no Exec ABI)");
+        result(s,"      host2info host2ls host2cat FILE host2get FILE [DEST] host2put FILE [DEST] host2rm FILE (TEST:)");
+        result(s,"      run HOST:PROGRAM.QEX or TEST:PROGRAM.HUNK (bounded 68k; no Exec ABI)");
     }else if(!strcmp(p,"ver"))result(s,"QRX OS One / QRX68100 firmware shell v2.1 (68000 diagnostic ISA subset)");
     else if(!strcmp(p,"cpu")){
         result(s,"QRX68100 virtual CPU: 68040-compatible design target, core 0 active");
@@ -303,9 +335,13 @@ static void command(QRXShell *s,char *line){
     }else if(!strcmp(p,"hostinfo")||!strcmp(p,"hostls")||!strcmp(p,"hostcat")||
               !strcmp(p,"hostget")||!strcmp(p,"hostput")||!strcmp(p,"hostrm")){
         share_command(s,p,arg);
+    }else if(!strcmp(p,"host2info")||!strcmp(p,"host2ls")||!strcmp(p,"host2cat")||
+              !strcmp(p,"host2get")||!strcmp(p,"host2put")||!strcmp(p,"host2rm")){
+        share_command_slot(s,1,p,arg);
     }else if(!strcmp(p,"run")){
         if(!arg || !*arg)result(s,"ERR: usage run NAME");
-        else if(!strncmp(arg,"HOST:",5))(void)share_program(s,arg+5);
+        else if(!strncmp(arg,"HOST:",5))(void)share_program_slot(s,0,arg+5);
+        else if(!strncmp(arg,"TEST:",5))(void)share_program_slot(s,1,arg+5);
         else (void)stage_program(s,arg);
     }else if(!strcmp(p,"bench")){
         (void)stage_program(s,"BENCH.QEX");

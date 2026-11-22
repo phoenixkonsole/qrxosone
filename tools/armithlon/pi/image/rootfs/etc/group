@@ -1,0 +1,6 @@
+root:x:0:
+messagebus:x:101:
+bluetooth:x:102:
+audio:x:29:
+video:x:44:
+input:x:105:

@@ -66,6 +66,11 @@ static qblk *g_hash[QW_HBUCKETS];
 
 static unsigned hb(uint32_t a) { return (a >> 4) & (QW_HBUCKETS - 1); }
 
+#ifdef __AROS__
+#include <proto/exec.h>
+#include <exec/memory.h>
+#define QW_HOST_RESERVE (3u * 1024u * 1024u)
+#endif
 uint32_t qw_alloc(qwin *w, uint32_t n)
 {
     qblk **pp, *b;
@@ -83,19 +88,29 @@ uint32_t qw_alloc(qwin *w, uint32_t n)
     }
     if ((uint64_t)w->heap_top + n > QW_HEAP_LIMIT) return 0;
     a = w->heap_top;
-    w->heap_top += n;
-    if (w->heap_top > w->heap_mapped) {
-        uint32_t need = ((w->heap_top - w->heap_mapped) + 0xFFFFu) & ~0xFFFFu;
-        if (!x86_map(&w->cpu, w->heap_mapped, need, 1)) return 0;
+    if (a + n > w->heap_mapped) {
+        uint32_t need = ((a + n - w->heap_mapped) + 0xFFFFu) & ~0xFFFFu;
+#ifdef __AROS__
+        /* Programs probe with ever smaller requests until one succeeds: refuse
+         * early, so a too large probe neither pages the machine dry nor leaves
+         * the operating system without memory. */
+        if ((uint64_t)AvailMem(MEMF_ANY) < (uint64_t)need + QW_HOST_RESERVE) return 0;
+#endif
+        if (!x86_map(&w->cpu, w->heap_mapped, need, 1)) {
+            x86_unmap(&w->cpu, w->heap_mapped, need);
+            return 0;
+        }
         w->heap_mapped += need;
     }
+    w->heap_top = a + n;
 got:
     b = (qblk *)malloc(sizeof(*b));
     if (!b) return 0;
     b->a = a; b->n = n; b->next = g_hash[hb(a)]; g_hash[hb(a)] = b;
     {   /* fresh memory is zeroed (several programs rely on calloc-like behaviour) */
+        static const uint8_t zero[4096];
         uint32_t i;
-        for (i = 0; i < n; i += 4) x86_wr32(&w->cpu, a + i, 0);
+        for (i = 0; i < n; i += sizeof(zero)) x86_write_mem(&w->cpu, a + i, zero, n - i < sizeof(zero) ? n - i : (uint32_t)sizeof(zero));
     }
     return a;
 }
@@ -133,7 +148,7 @@ uint32_t qw_data(qwin *w, uint32_t n)
 }
 
 /* ---------------------------------------------------------------- thunks */
-static const qhle *tables[] = { qw_files, qw_extra, qw_kernel32, qw_user32, qw_gdi32, qw_misc, qw_ansi, qw_dx, NULL };
+static const qhle *tables[] = { qw_compat, qw_net, qw_dplay, qw_files, qw_extra, qw_kernel32, qw_user32, qw_gdi32, qw_misc, qw_ansi, qw_dx, NULL };
 
 static int dllcmp(const char *a, const char *b)
 {
@@ -154,6 +169,10 @@ const qhle *qw_find_hle(const char *dll, const char *name)
 
 uint32_t qw_data_import(qwin *w, const char *dll, const char *name);
 
+/* The function has set the registers and eip itself: no return to the caller. */
+static int g_api_jumped;
+void qw_api_jump(void) { g_api_jumped = 1; }
+
 uint32_t qw_thunk(qwin *w, const char *dll, const char *name)
 {
     const qhle *e = qw_find_hle(dll, name);
@@ -169,17 +188,66 @@ uint32_t qw_thunk(qwin *w, const char *dll, const char *name)
     return QW_THUNK_BASE + i;
 }
 
+static uint32_t door_alloc_cb(x86cpu *c, uint32_t size) { return qw_alloc((qwin *)c->user, size); }
+#define DOOR_SVC_API 2u
+/* block: service, serial, dir, op(0 query, 1 bind), thunk index, scratch, result, name[64] */
+static int host_api_call(qwin *w, uint32_t op, uint32_t idx, const char *name)
+{
+    static uint32_t block[7 + 16];
+    static uint32_t scratch;
+    if (!w->cpu.door) return 0;
+    if (!scratch) scratch = qw_alloc(w, 4096);
+    block[0] = DOOR_SVC_API; block[3] = op; block[4] = idx; block[5] = scratch; block[6] = 0;
+    memset(block + 7, 0, 64);
+    strncpy((char *)(block + 7), name, 63);
+    if (!x86_door_call(&w->cpu, block)) return 0;
+    return (int)block[6];
+}
+int qw_host_bind(qwin *w, uint32_t idx) { return host_api_call(w, 1, idx, w->thunk_name[idx]); }
+int qw_host_has(qwin *w, const char *name) { return host_api_call(w, 0, 0, name); }
+/* -v: which API functions take the time, printed with the frame rate. */
+static uint32_t g_api_calls[QW_THUNK_MAX], g_api_ms[QW_THUNK_MAX];
+void qw_api_report(qwin *w)
+{
+    int n;
+    for (n = 0; n < 6; n++) {
+        uint32_t best = 0;
+        int i, b = -1;
+        for (i = 0; i < w->nthunk; i++) if (g_api_ms[i] * 1000u + g_api_calls[i] > best) { best = g_api_ms[i] * 1000u + g_api_calls[i]; b = i; }
+        if (b < 0) break;
+        qw_log(w, "  API %s: %u calls, %u ms", w->thunk_name[b], g_api_calls[b], g_api_ms[b]);
+        g_api_calls[b] = g_api_ms[b] = 0;
+    }
+    memset(g_api_calls, 0, sizeof(g_api_calls));
+    memset(g_api_ms, 0, sizeof(g_api_ms));
+}
+
+/* Small functions the door also has on the host (qrx_api_k32 in the engine): asked for once at
+ * their first call; from then on the door answers them without coming here. They keep their
+ * state in the thread's TEB, as Windows does: TLS slots at +0x1000, the last error at +0x34. */
+static int host_fast_name(const char *n)
+{
+    return !strcmp(n, "TlsGetValue") || !strcmp(n, "TlsSetValue") || !strcmp(n, "GetLastError") || !strcmp(n, "SetLastError");
+}
+static uint8_t g_host_tried[QW_THUNK_MAX];
 static int hle_hook(x86cpu *c, uint32_t idx)
 {
     qwin *w = (qwin *)c->user;
     const qhle *e = idx < w->nthunk ? w->thunk[idx] : NULL;
-    uint32_t a[16], ret, r, sp = c->r[X86_ESP];
+    uint32_t a[16], ret, r, sp = c->r[X86_ESP], teb;
     int i;
 #ifdef QRX_EXEC_PROFILE
     uint64_t profile_start = w->be->now(w);
     if (idx < QW_THUNK_MAX) w->prof_api_hits[idx]++;
 #endif
     w->api_calls++;
+    /* The door stops here for a thunk it does not know yet. If the host has the
+     * function it takes this and all later calls without coming back. */
+    if (!e && idx < w->nthunk && qw_host_bind(w, idx)) return 1;
+    if (e && idx < w->nthunk && !g_host_tried[idx] && host_fast_name(w->thunk_name[idx])) {
+        g_host_tried[idx] = 1;
+        if (qw_host_bind(w, idx)) return 1;           /* the door runs it again, host-side */
+    }
     if (!e) {
         qw_log(w, "unimplemented API called: %s", idx < w->nthunk ? w->thunk_name[idx] : "?");
         c->fault = X86_FAULT_HOST;
@@ -189,7 +257,24 @@ static int hle_hook(x86cpu *c, uint32_t idx)
     }
     ret = x86_rd32(c, sp);
     for (i = 0; i < 16; i++) a[i] = x86_rd32(c, sp + 4 + (uint32_t)i * 4);
+    /* The last error lives in the calling thread's TEB (+0x34), where the door's SetLastError
+     * writes it too: in before the call, out after it, to that thread's TEB. */
+    teb = c->sbase[X86_FS];
+    if (teb) w->last_error = x86_rd32(c, teb + 0x34);
     if (w->trace) qw_log(w, "-> %s(%08x, %08x, %08x, %08x, %08x, %08x, %08x) ret=%08x", e->name, a[0], a[1], a[2], a[3], a[4], a[5], a[6], ret);
+    if (w->verbose) {
+        uint64_t t0 = w->be->now(w);
+        r = e->fn(w, a);
+        g_api_calls[idx]++;
+        g_api_ms[idx] += (uint32_t)(w->be->now(w) - t0);
+        /* Also while no frames come: a stalled program shows where it spends its time. */
+        {
+            static uint64_t last;
+            uint64_t now = w->be->now(w);
+            if (!last) last = now;
+            if (now - last >= 10000u) { last = now; qw_log(w, "API time over the last 10 s, %d frames so far:", w->frames); qw_api_report(w); }
+        }
+    } else
     r = e->fn(w, a);
 #ifdef QRX_EXEC_PROFILE
     {
@@ -198,12 +283,15 @@ static int hle_hook(x86cpu *c, uint32_t idx)
             w->prof_api_ms[idx] += end - profile_start;
     }
 #endif
+    if (teb) x86_wr32(c, teb + 0x34, w->last_error);
     if (w->trace) qw_log(w, "<- %s = %08x", e->name, r);
     if (c->fault) return 1;
-    if (w->exiting) { c->stop = 1; return 1; }
+    if (w->exiting) { c->stop = 1; g_api_jumped = 0; return 1; }
+    if (g_api_jumped) { g_api_jumped = 0; return 1; }
     c->r[X86_ESP] = sp + 4 + (e->nargs > 0 ? 4u * (uint32_t)e->nargs : 0u);
     c->r[X86_EAX] = r;
     c->eip = ret;
+    if (!(w->api_calls & 31u)) qw_thread_tick(w);
     return 1;
 }
 
@@ -239,11 +327,23 @@ int qw_load(qwin *w, const char *path, int argc, char **argv)
     b = (uint8_t *)malloc((size_t)n);
     if (!b || fread(b, 1, (size_t)n, f) != (size_t)n) { fclose(f); free(b); return 0; }
     fclose(f);
+    if (n > 64 && b[0] == 'M' && b[1] == 'Z') {     /* a 16-bit starter: run what it would start */
+        extern int qw_ne_redirect(qwin *w, const char *path, char *out, size_t max);
+        static char alt[1200];
+        uint32_t o = (uint32_t)b[60] | (uint32_t)b[61] << 8 | (uint32_t)b[62] << 16 | (uint32_t)b[63] << 24;
+        if (o + 2u < (uint32_t)n && b[o] == 'N' && b[o + 1] == 'E' && qw_ne_redirect(w, path, alt, sizeof(alt))) {
+            free(b);
+            return qw_load(w, alt, argc, argv);
+        }
+    }
     snprintf(w->exe_path, sizeof(w->exe_path), "%s", path);
     x86_init(c);
     c->user = w;
     c->hle_base = QW_THUNK_BASE;
     c->hle_count = QW_THUNK_MAX;
+    /* A program can import a variable where we have a function: it then reads the thunk's
+     * address as data. Zeroes there let it go on; execution never reaches this memory. */
+    x86_map(c, QW_THUNK_BASE, QW_THUNK_MAX, 0);
     c->hle_hook = hle_hook;
     w->data_next = QW_DATA_BASE;
     x86_map(c, QW_DATA_BASE, QW_DATA_SIZE, 1);
@@ -274,9 +374,22 @@ int qw_load(qwin *w, const char *path, int argc, char **argv)
     x86_wr32(c, QW_TEB + 0x20, 0x100);
     x86_wr32(c, QW_TEB + 0x24, 0x104);
     x86_wr32(c, QW_TEB + 0x2C, QW_TEB + 0x1000);
+    { extern void qw_tls_new_thread(qwin *w, uint32_t teb); qw_tls_new_thread(w, QW_TEB); }
     x86_wr32(c, QW_TEB + 0x30, QW_PEB);
     x86_wr32(c, QW_PEB + 0x08, w->image_base);
+    /* ProcessParameters (RTL_USER_PROCESS_PARAMETERS, read by the C runtime of Visual C++
+     * 2015 and later) in the second half of the PEB's page: length, flags "normalized", the
+     * rest zero. Then the processor count and the version GetVersion reports (5.1). */
+    x86_wr32(c, QW_PEB + 0x10, QW_PEB + 0x800);
+    x86_wr32(c, QW_PEB + 0x800, 0x2A0u);
+    x86_wr32(c, QW_PEB + 0x804, 0x2A0u);
+    x86_wr32(c, QW_PEB + 0x808, 1u);
     x86_wr32(c, QW_PEB + 0x18, 0x00150000u);
+    x86_wr32(c, QW_PEB + 0x64, 1u);
+    x86_wr32(c, QW_PEB + 0xA4, 5u);
+    x86_wr32(c, QW_PEB + 0xA8, 1u);
+    x86_wr16(c, QW_PEB + 0xAC, 2600u);
+    x86_wr32(c, QW_PEB + 0xB0, 2u);
     c->sreg[X86_FS] = 0x3B;
     c->sbase[X86_FS] = QW_TEB;
     c->r[X86_ESP] = QW_STACK_TOP - 64;
@@ -298,11 +411,24 @@ int qw_run(qwin *w)
     w->started = 1;
     pe_init_dlls(w);                              /* DllMain of DLLs loaded with the program */
     c->eip = w->image_base + w->entry;
+    /* SetEnv QRX86_HOST 1 in the board's startup: QRX86 runs on the host CPU. */
+    if (getenv("QRX86_HOST") && x86_door_enable(c)) {
+        static uint32_t begin[3];
+        c->door_alloc = door_alloc_cb;
+        begin[0] = 7;                             /* a new process: the door forgets this page directory */
+        x86_door_call(c, begin);
+        qw_log(w, "x86 runs on the host door");
+    }
     f = w->cpu.fault ? w->cpu.fault : x86_run(c, 0xFFFFFFFFu);
     if (f && !w->exiting) {
         char d[400];
         x86_describe_fault(c, d, sizeof(d));
         qw_log(w, "program stopped: %s", d);
+        {
+            uint32_t sp = w->cpu.r[X86_ESP];
+            qw_log(w, "stack: %08x %08x %08x %08x %08x %08x %08x %08x", x86_rd32(&w->cpu, sp), x86_rd32(&w->cpu, sp + 4), x86_rd32(&w->cpu, sp + 8), x86_rd32(&w->cpu, sp + 12),
+                   x86_rd32(&w->cpu, sp + 16), x86_rd32(&w->cpu, sp + 20), x86_rd32(&w->cpu, sp + 24), x86_rd32(&w->cpu, sp + 28));
+        }
         return 139;
     }
     return (int)w->exit_code;

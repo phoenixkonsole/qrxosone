@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""C compiler for the tor port: AROS m68k with sockets through the ARMithlon door.
+
+Like .build/qrx-sdk/bin/aros-gcc, plus what autoconf and a large C program need:
+-Wl and -pthread are understood, the POSIX shim is linked into every program, and
+functions that return a pointer are bridged. The SDK's libraries were built by AROS's
+compiler, which returns pointers in d0, while m68k-elf-gcc expects them in a0.
+"""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+HERE = Path(__file__).resolve().parent
+
+
+def main():
+    sdk_bin = Path(os.environ['QRX_SDK_BIN'])
+    out = Path(os.environ['QRX_TOR_OUT'])
+    cfg = json.loads((sdk_bin / 'toolchain.json').read_text())
+    base, cc = cfg['sdk'], cfg['gcc']
+    flags = ['-include', cfg['abi_header'], '-fomit-frame-pointer', '-D__AROS__', '-DAMIGA', '-D_AMIGA',
+             '-U__linux__', '-U__linux', '-Ulinux', '-U__gnu_linux__', '-U__unix__', '-U__unix', '-Uunix',
+             '-U_TIME_BITS', '-U_FILE_OFFSET_BITS', '-nostdinc', '-m68040', '-fno-pic', '-fno-PIC',
+             '-include', str(HERE / 'shim' / 'qrx_posix_force.h'), '-isystem', str(HERE / 'shim' / 'include')]
+    for inc in ('/include/aros/posixc', '/include/aros/stdc', '/include'):
+        flags += ['-isystem', base + inc]
+    flags += ['-isystem', cfg['gcc_include']]
+    args = [a for a in sys.argv[1:] if a != '-pthread']
+    if any(a in ('--version', '-v', '-V', '-qversion', '-dumpversion', '-dumpmachine') for a in args):
+        return subprocess.call([cc, *args])
+    asm = any(a.endswith('.S') for a in args)
+    cflags = flags[2:] if asm else flags
+    if any(a in args for a in ('-c', '-E', '-S', '-M', '-MM')):
+        return subprocess.call([cc, *cflags, *args])
+    output, compile_only, inputs, ldextra, i = 'a.out', [], [], [], 0
+    while i < len(args):
+        a = args[i]
+        if a == '-o':
+            output = args[i + 1]
+            i += 2
+            continue
+        if a.startswith('-Wl,'):
+            ldextra += [w for w in a.split(',')[1:] if w not in ('-z', 'relro', 'now', '--as-needed')]
+        elif a.endswith(('.c', '.S', '.o', '.a')) or a.startswith(('-l', '-L')):
+            inputs.append(a)
+        else:
+            compile_only.append(a)
+        i += 1
+    with tempfile.TemporaryDirectory(prefix='qrx-tor-') as tmp:
+        objects = []
+        for n, a in enumerate(inputs):
+            if a.endswith(('.c', '.S')):
+                o = str(Path(tmp) / f'{n}.o')
+                f = flags[2:] if a.endswith('.S') else flags
+                r = subprocess.run([cc, *f, *compile_only, '-c', a, '-o', o])
+                if r.returncode:
+                    return r.returncode
+                objects.append(o)
+            elif a != '-lpthread' and a != '-lm':
+                objects.append(a)
+        extra_wrap = (HERE / 'shim' / 'wrap-symbols.txt').read_text().split() + (out / 'shim/bridges/wrap-generated.txt').read_text().split()
+        libs = Path(base, 'lib/auto').read_text().splitlines()[1].split()
+        cmd = [cfg['collect'], '-o', output, '-L' + base + '/lib', '-L' + cfg['gcc_lib'] + '/m68040',
+               '-L' + cfg['gcc_lib'], base + '/lib/startup.o', cfg['bridges'],
+               *cfg['wrap_flags'], *['--wrap=' + s for s in extra_wrap], *ldextra, *objects,
+               '--start-group', str(out / 'shim/libqrxposix.a'), str(out / 'shim/bridges/libqrxbridges.a'), '-lcrtprog', '-lcrt', '-lstdlib', '-lpthread',
+               '-lm', *libs, '-lexec', '-lstdc.static', '-latomic', '-lgcc', '--end-group']
+        return subprocess.call(cmd)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

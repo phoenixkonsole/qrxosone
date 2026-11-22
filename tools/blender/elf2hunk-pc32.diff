@@ -1,0 +1,7 @@
+608a609,614
+>         /* QRX OS One: a PC-relative reference inside one section is final here. HUNK_RELRELOC32
+>          * has 16 bit offsets and cannot describe it in a large program, and needs no reloc anyway. */
+>         if (ELF_R_TYPE(rel->info) == R_68K_PC32 && hh[shid] == h) {
+>             continue;
+>         }
+> 

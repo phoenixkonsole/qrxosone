@@ -1,0 +1,6 @@
+guest wall seconds 10.74
+1000000000 guest instructions in 10657 ms (93835038 per second), 353 DirectDraw frames, 446 HLE imports, 611413 API transitions
+guest wall seconds 10.73
+1000000000 guest instructions in 10643 ms (93958470 per second), 355 DirectDraw frames, 446 HLE imports, 617078 API transitions
+guest wall seconds 10.93
+1000000000 guest instructions in 11022 ms (90727635 per second), 355 DirectDraw frames, 446 HLE imports, 513781 API transitions

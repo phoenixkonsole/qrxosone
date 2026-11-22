@@ -1,3 +1,4 @@
+#include <strings.h>
 /* QRX OS One 22.5.12 - qrx-win32: GDI on 32-bit software surfaces. */
 #include <stdlib.h>
 #include <string.h>
@@ -506,6 +507,24 @@ FN(g_GetTextExtentPoint32W) {
     WR32(a[3] + 4, (uint32_t)FD(fi)->height);
     return 1;
 }
+FN(g_GetTextExtentExPointW) {            /* (hdc, str, n, max extent, *fit, *widths, *size) */
+    uint32_t b[4];
+    wchar16 t[512];
+    qdc *d = DCP(w, a[0]);
+    int n = (int)a[2], bold = 0, fi, i, x = 0, fit = 0;
+    if (n > 511) n = 511;
+    for (i = 0; i < n; i++) t[i] = x86_rd16(C, a[1] + (uint32_t)i * 2);
+    fi = d ? font_of(w, d, &bold) : 0;
+    for (i = 0; i < n; i++) {
+        x = gdi_text_width(fi, t, i + 1);
+        if (a[4] && (int32_t)a[3] >= 0 && x > (int)a[3]) break;
+        fit = i + 1;
+        if (a[5]) x86_wr32(C, a[5] + (uint32_t)i * 4, (uint32_t)x);
+    }
+    if (a[4]) x86_wr32(C, a[4], (uint32_t)fit);
+    b[0] = a[0]; b[1] = a[1]; b[2] = a[2]; b[3] = a[6];
+    return g_GetTextExtentPoint32W(w, b);
+}
 FN(g_GetTextMetricsW) {
     qdc *d = DCP(w, a[0]);
     int bold = 0, fi = d ? font_of(w, d, &bold) : 0, i;
@@ -593,6 +612,8 @@ FN(g_CreatePen) {
     if (o) { o->style = (int)a[0]; o->width = a[1] ? (int)a[1] : 1; o->color = rgb_of(a[2]); }
     return h;
 }
+/* LOGPEN: style, then the width as a POINT, then the colour. */
+FN(g_CreatePenIndirect) { uint32_t b[3]; b[0] = RD32(a[0]); b[1] = RD32(a[0] + 4); b[2] = RD32(a[0] + 12); return g_CreatePen(w, b); }
 FN(g_CreateSolidBrush) {
     uint32_t h = gdi_new(w, GO_BRUSH);
     qobj *o = O(w, h, GO_BRUSH);
@@ -644,12 +665,31 @@ FN(g_SelectObject) {
     }
     return old;
 }
+static uint32_t g_realized;                 /* the palette in the system palette */
 FN(g_DeleteObject) {
     qobj *o = O(w, a[0], 0);
     if (!o || o->stock || o->type == GO_DC) return o ? 1 : 0;
     free(o->bmp.pix);
+    free(o->pal);
+    if (a[0] == g_realized) g_realized = 0;
     memset(o, 0, sizeof(*o));
     return 1;
+}
+static int dib_get_bits(qwin *w, uint32_t h, uint32_t bytes, uint32_t out, uint32_t *done);
+static int dib_describe(qwin *w, uint32_t h, uint32_t bitmap);
+/* (bitmap, bytes, buffer): rows of 32 bits per pixel, the depth GetObject reports */
+FN(g_GetBitmapBits) {
+    qobj *o = O(w, a[0], GO_BITMAP);
+    uint32_t n = 0, total;
+    int x, y;
+    if (!o || !o->bmp.pix) return 0;
+    if (dib_get_bits(w, a[0], a[1], a[2], &n)) return n;
+    total = (uint32_t)o->bmp.w * (uint32_t)o->bmp.h * 4u;
+    if (!a[2]) return total;
+    for (y = 0; y < o->bmp.h && n + 4u <= a[1]; y++)
+        for (x = 0; x < o->bmp.w && n + 4u <= a[1]; x++, n += 4u)
+            x86_wr32(C, a[2] + n, o->bmp.pix[(size_t)y * (size_t)o->bmp.w + (size_t)x] & 0xFFFFFFu);
+    return n;
 }
 FN(g_GetObjectW) {
     qobj *o = O(w, a[0], 0);
@@ -659,6 +699,7 @@ FN(g_GetObjectW) {
         for (i = 0; i < 24; i += 4) WR32(a[2] + i, 0);
         WR32(a[2] + 4, (uint32_t)o->bmp.w); WR32(a[2] + 8, (uint32_t)o->bmp.h); WR32(a[2] + 12, (uint32_t)o->bmp.w * 4);
         x86_wr16(C, a[2] + 16, 1); x86_wr16(C, a[2] + 18, o->mono ? 1 : 32); if (o->mono) WR32(a[2] + 12, (uint32_t)((o->bmp.w + 15) / 16 * 2));
+        dib_describe(w, a[0], a[2]);
         return 24;
     }
     return 0;
@@ -690,7 +731,9 @@ static qdib g_dib[32];
 void qw_dib_register(qwin *w, uint32_t hbm, uint32_t mem, uint32_t bmi, int bw, int bh, int bpp, uint32_t stride)
 {
     int i, k;
-    for (i = 0; i < 32; i++) if (!g_dib[i].h || !O(w, g_dib[i].h, GO_BITMAP)) break;
+    /* A handle comes back after DeleteObject: its old entry is stale and must not win. */
+    for (i = 0; i < 32; i++) if (g_dib[i].h == hbm) break;
+    if (i == 32) for (i = 0; i < 32; i++) if (!g_dib[i].h || !O(w, g_dib[i].h, GO_BITMAP)) break;
     if (i == 32) return;
     g_dib[i].h = hbm; g_dib[i].mem = mem; g_dib[i].stride = stride; g_dib[i].w = bw; g_dib[i].h_ = bh < 0 ? -bh : bh;
     g_dib[i].bpp = bpp; g_dib[i].topdown = bh < 0;
@@ -700,6 +743,30 @@ void qw_dib_register(qwin *w, uint32_t hbm, uint32_t mem, uint32_t bmi, int bw, 
     }
 }
 static qdib *dib_of(uint32_t h) { int i; for (i = 0; i < 32; i++) if (g_dib[i].h == h) return &g_dib[i]; return NULL; }
+/* A DIB section's pixels are the program's memory, at its own depth; rows come top line first. */
+static int dib_get_bits(qwin *w, uint32_t h, uint32_t bytes, uint32_t out, uint32_t *done)
+{
+    qdib *d = dib_of(h);
+    uint32_t y, i, n = 0, row;
+    if (!d) return 0;
+    row = (uint32_t)(((d->w * d->bpp + 15) / 16) * 2);
+    if (!out) { *done = row * (uint32_t)d->h_; return 1; }
+    for (y = 0; y < (uint32_t)d->h_; y++) {
+        uint32_t from = d->mem + (d->topdown ? y : (uint32_t)d->h_ - 1u - y) * d->stride;
+        for (i = 0; i < row && n < bytes; i++, n++) x86_wr8(C, out + n, x86_rd8(C, from + i));
+    }
+    *done = n;
+    return 1;
+}
+static int dib_describe(qwin *w, uint32_t h, uint32_t bitmap)
+{
+    qdib *d = dib_of(h);
+    if (!d) return 0;
+    WR32(bitmap + 12, d->stride);
+    x86_wr16(C, bitmap + 18, (uint16_t)d->bpp);
+    WR32(bitmap + 20, d->mem);
+    return 1;
+}
 uint32_t qw_dib_colortable(qwin *w, uint32_t hdc, uint32_t start, uint32_t n, uint32_t rgbq)
 {
     qdc *d = DCP(w, hdc);
@@ -765,6 +832,105 @@ static int blt(qwin *w, qdc *d, int x, int y, int cw, int ch, qdc *s, int sx, in
     }
     return 1;
 }
+/* Device-independent bits onto a DC; source y counts from the picture's top. */
+static uint32_t dib_draw(qwin *w, qdc *d, int x, int y, int cw, int ch, int sx, int sy, int sw, int sh, uint32_t bits, uint32_t bmi, uint32_t usage)
+{
+    uint32_t hsize, ncol, comp, stride, pal[256];
+    int bw, bh, top, bpp, i, j, have = -1;
+    uint8_t *row;
+    if (!d || !d->s || !d->s->pix || !bits || !bmi || cw <= 0 || ch <= 0 || sw <= 0 || sh <= 0) return 0;
+    hsize = RD32(bmi);
+    bw = (int)RD32(bmi + 4);
+    bh = (int)RD32(bmi + 8);
+    bpp = x86_rd16(C, bmi + 14);
+    comp = RD32(bmi + 16);
+    ncol = RD32(bmi + 32);
+    top = bh < 0;
+    if (top) bh = -bh;
+    if (bw <= 0 || !bh || (bpp != 1 && bpp != 4 && bpp != 8 && bpp != 16 && bpp != 24 && bpp != 32) || (comp != 0 && comp != 3)) return 0;
+    if (bpp <= 8) {
+        uint32_t n = ncol ? ncol : 1u << bpp, k;
+        const uint32_t *sys = qw_sys_palette();
+        if (n > 256) n = 256;
+        memset(pal, 0, sizeof(pal));
+        for (k = 0; k < n; k++) {
+            if (usage == 1) pal[k] = sys[x86_rd16(C, bmi + hsize + k * 2) & 255];
+            else { uint32_t q = RD32(bmi + hsize + k * 4); pal[k] = q & 0xFFFFFF; }
+        }
+    }
+    stride = (((uint32_t)bw * (uint32_t)bpp + 31u) / 32u) * 4u;
+    row = (uint8_t *)malloc(stride);
+    if (!row) return 0;
+    for (j = 0; j < ch; j++) {
+        int dy = TY(d, y + j), yy = sy + j * sh / ch;
+        if (dy < d->cy0 || dy >= d->cy1 || dy < 0 || dy >= d->s->h || yy < 0 || yy >= bh) continue;
+        if (yy != have) { x86_read_mem(C, bits + (uint32_t)(top ? yy : bh - 1 - yy) * stride, row, stride); have = yy; }
+        for (i = 0; i < cw; i++) {
+            int dx = TX(d, x + i), xx = sx + i * sw / cw;
+            uint32_t v;
+            if (dx < d->cx0 || dx >= d->cx1 || dx < 0 || dx >= d->s->w || xx < 0 || xx >= bw) continue;
+            switch (bpp) {
+            case 1: v = pal[(row[xx >> 3] >> (7 - (xx & 7))) & 1]; break;
+            case 4: v = pal[(row[xx >> 1] >> ((xx & 1) ? 0 : 4)) & 15]; break;
+            case 8: v = pal[row[xx]]; break;
+            case 16: { uint32_t p = row[xx * 2] | ((uint32_t)row[xx * 2 + 1] << 8);
+                v = comp == 3 ? ((p >> 11 & 31) << 19) | ((p >> 5 & 63) << 10) | ((p & 31) << 3)
+                              : ((p >> 10 & 31) << 19) | ((p >> 5 & 31) << 11) | ((p & 31) << 3); break; }
+            case 24: v = row[xx * 3] | ((uint32_t)row[xx * 3 + 1] << 8) | ((uint32_t)row[xx * 3 + 2] << 16); break;
+            default: v = row[xx * 4] | ((uint32_t)row[xx * 4 + 1] << 8) | ((uint32_t)row[xx * 4 + 2] << 16); break;
+            }
+            d->s->pix[(size_t)dy * (size_t)d->s->w + (size_t)dx] = v;
+        }
+    }
+    free(row);
+    return 1;
+}
+FN(g_StretchDIBits) {                    /* (hdc, x, y, w, h, xsrc, ysrc, wsrc, hsrc, bits, info, usage, rop) */
+    return dib_draw(w, DCP(w, a[0]), (int32_t)a[1], (int32_t)a[2], (int32_t)a[3], (int32_t)a[4], (int32_t)a[5], (int32_t)a[6], (int32_t)a[7], (int32_t)a[8], a[9], a[10], a[11]) ? a[8] : 0;
+}
+FN(g_SetDIBitsToDevice) {                /* (hdc, x, y, w, h, xsrc, ysrc, first line, lines, bits, info, usage) */
+    /* ysrc counts from the bottom of a bottom-up picture. */
+    int bh = (int)RD32(a[10] + 8), h = (int32_t)a[4], ys = (int32_t)a[6];
+    if (bh > 0) ys = bh - ys - h;
+    return dib_draw(w, DCP(w, a[0]), (int32_t)a[1], (int32_t)a[2], (int32_t)a[3], h, (int32_t)a[5], ys, (int32_t)a[3], h, a[9], a[10], a[11]) ? a[8] : 0;
+}
+FN(g_SetDIBits) {                        /* (hdc, bitmap, first line, lines, bits, info, usage) */
+    qobj *o = O(w, a[1], GO_BITMAP);
+    qdc d;
+    int bh;
+    if (!o || !o->bmp.pix) return 0;
+    memset(&d, 0, sizeof(d));
+    d.s = &o->bmp;
+    d.cx1 = o->bmp.w; d.cy1 = o->bmp.h;
+    bh = (int)RD32(a[5] + 8);
+    if (bh < 0) bh = -bh;
+    return dib_draw(w, &d, 0, 0, o->bmp.w, o->bmp.h, 0, 0, o->bmp.w, bh, a[4], a[5], a[6]) ? a[3] : 0;
+}
+/* (hdc, BITMAPINFOHEADER, init, bits, BITMAPINFO, usage): a device bitmap of the header's size,
+ * with the picture drawn in when init has CBM_INIT (4). InstallShield's dialog picture. */
+FN(g_CreateDIBitmap) {
+    uint32_t h = gdi_new(w, GO_BITMAP);
+    qobj *o = O(w, h, GO_BITMAP);
+    int bw, bh;
+    if (!o || !a[1]) return h;
+    bw = (int32_t)RD32(a[1] + 4); bh = (int32_t)RD32(a[1] + 8);
+    if (bh < 0) bh = -bh;
+    if (bw <= 0 || bh <= 0 || bw > 4096 || bh > 4096) { surf_resize(&o->bmp, 1, 1); return h; }
+    surf_resize(&o->bmp, bw, bh);
+    if ((a[2] & 4u) && a[3] && a[4]) {
+        qdc d;
+        int ih = (int32_t)RD32(a[4] + 8);
+        memset(&d, 0, sizeof(d));
+        d.s = &o->bmp;
+        d.cx1 = bw; d.cy1 = bh;
+        if (ih < 0) ih = -ih;
+        (void)dib_draw(w, &d, 0, 0, bw, bh, 0, 0, bw, ih, a[3], a[4], a[5]);
+    }
+    return h;
+}
+/* (driver, device, output, devmode): "DISPLAY" and the like; a memory DC answers what programs
+ * ask such a DC (GetDeviceCaps) and takes what they draw into it. */
+FN(g_CreateDCA) { uint32_t b[1] = { 0 }; (void)a; return g_CreateCompatibleDC(w, b); }
 FN(g_BitBlt) { return (uint32_t)blt(w, DCP(w, a[0]), (int32_t)a[1], (int32_t)a[2], (int32_t)a[3], (int32_t)a[4], DCP(w, a[5]), (int32_t)a[6], (int32_t)a[7], (int32_t)a[3], (int32_t)a[4], a[8]); }
 FN(g_StretchBlt) { return (uint32_t)blt(w, DCP(w, a[0]), (int32_t)a[1], (int32_t)a[2], (int32_t)a[3], (int32_t)a[4], DCP(w, a[5]), (int32_t)a[6], (int32_t)a[7], (int32_t)a[8], (int32_t)a[9], a[10]); }
 FN(g_PatBlt) { return (uint32_t)blt(w, DCP(w, a[0]), (int32_t)a[1], (int32_t)a[2], (int32_t)a[3], (int32_t)a[4], NULL, 0, 0, 0, 0, a[5]); }
@@ -862,13 +1028,32 @@ FN(g_Polygon) {
     if (pen_visible(p)) for (i = 0; i < n; i++) line_abs(d, TX(d, xs[i]), TY(d, ys[i]), TX(d, xs[(i + 1) % n]), TY(d, ys[(i + 1) % n]), p->color, p->width);
     return 1;
 }
+/* A few programs refuse anything but a 256 colour desktop. Windows would make the
+ * user change it; here the desktop is whatever the program wants to hear. */
+int qw_needs_256_colours(qwin *w)
+{
+    static const char *const names[] = { "SONICCD.EXE", "SONIC3K.EXE", NULL };
+    const char *base = strrchr(w->exe_path, '/');
+    int i;
+    extern int qw_dd_mode_bpp;
+    if (qw_dd_mode_bpp == 8) return 1;      /* Virtua Fighter 2 asks GDI before it makes a palette */
+    if (!base) base = strrchr(w->exe_path, ':');
+    base = base ? base + 1 : w->exe_path;
+    for (i = 0; names[i]; i++) if (!strcasecmp(base, names[i])) return 1;
+    return 0;
+}
+
 FN(g_GetDeviceCaps) {
     UNUSED;
     switch (a[1]) {
     case 8: return 1024; case 10: return 768;        /* HORZRES / VERTRES */
-    case 12: return 32; case 14: return 1;          /* BITSPIXEL / PLANES */
+    case 12: return qw_needs_256_colours(w) ? 8 : 16; case 14: return 1;          /* BITSPIXEL / PLANES: games of the time refuse true colour desktops */
     case 88: case 90: return 96;                     /* LOGPIXELSX/Y */
-    case 24: return 0xFFFFFFFFu;                     /* NUMCOLORS */
+    case 24: return qw_needs_256_colours(w) ? 256u : 0xFFFFFFFFu;   /* NUMCOLORS */
+    case 38: return qw_needs_256_colours(w) ? 0x7E99u | 0x100u : 0x7E99u;   /* RASTERCAPS, RC_PALETTE */
+    case 104: return qw_needs_256_colours(w) ? 256u : 0;  /* SIZEPALETTE */
+    case 106: return qw_needs_256_colours(w) ? 20u : 0;   /* NUMRESERVED */
+    case 108: return qw_needs_256_colours(w) ? 18u : 0;   /* COLORRES */
     default: return 0;
     }
 }
@@ -898,9 +1083,79 @@ FN(g_ExcludeClipRect) {
     return 3;                                   /* COMPLEXREGION */
 }
 /* palettes: surfaces are 32-bit true colour, palettes only need to exist */
-FN(g_CreatePalette) { UNUSED; return gdi_new(w, GO_PALETTE); }
+/* ---- GDI palettes. 8-bit programs without a DirectDraw palette show through the system
+ * palette, which the palette realized last fills, index by index. */
+static uint32_t g_sys_pal[256];
+static int g_sys_pal_init;
+const uint32_t *qw_sys_palette(void)
+{
+    if (!g_sys_pal_init) {
+        int i;
+        for (i = 0; i < 256; i++) g_sys_pal[i] = (uint32_t)i * 0x010101u;
+        g_sys_pal_init = 1;
+    }
+    return g_sys_pal;
+}
+static uint32_t pal_entry(qwin *w, uint32_t p)
+{
+    return ((uint32_t)x86_rd8(C, p) << 16) | ((uint32_t)x86_rd8(C, p + 1) << 8) | x86_rd8(C, p + 2);
+}
+uint32_t qw_gdi_CreatePalette(qwin *w, uint32_t *a) {
+    uint32_t h = gdi_new(w, GO_PALETTE), n = x86_rd16(C, a[0] + 2), i;
+    qobj *o = O(w, h, GO_PALETTE);
+    if (!o) return 0;
+    if (n > 256) n = 256;
+    o->pal = (uint32_t *)calloc(n ? n : 1, 4);
+    o->npal = (int)n;
+    if (o->pal) for (i = 0; i < n; i++) o->pal[i] = pal_entry(w, a[0] + 4 + i * 4);
+    return h;
+}
+uint32_t qw_gdi_RealizePalette(qwin *w, uint32_t *a) {
+    qdc *d = DCP(w, a[0]);
+    qobj *o = d && d->pal ? O(w, d->pal, GO_PALETTE) : NULL;
+    int i;
+    qw_sys_palette();
+    /* The count of entries it mapped. Sonic CD treats 0 as an error. */
+    if (!o || !o->pal) return 256;
+    for (i = 0; i < o->npal; i++) g_sys_pal[i] = o->pal[i];
+    g_realized = d->pal;
+    return (uint32_t)o->npal;
+}
+/* (palette, start, count, entries) */
+static uint32_t pal_change(qwin *w, uint32_t *a)
+{
+    qobj *o = O(w, a[0], GO_PALETTE);
+    uint32_t i, n = 0;
+    if (!o || !o->pal) return 0;
+    qw_sys_palette();
+    for (i = 0; i < a[2] && a[1] + i < (uint32_t)o->npal; i++, n++) {
+        o->pal[a[1] + i] = pal_entry(w, a[3] + i * 4);
+        if (g_realized == a[0]) g_sys_pal[a[1] + i] = o->pal[a[1] + i];
+    }
+    return n;
+}
+uint32_t qw_gdi_AnimatePalette(qwin *w, uint32_t *a) { return pal_change(w, a) ? 1 : 0; }
+uint32_t qw_gdi_SetPaletteEntries(qwin *w, uint32_t *a) { return pal_change(w, a); }
+static void pal_write(qwin *w, uint32_t p, uint32_t v)
+{
+    x86_wr8(C, p, (uint8_t)(v >> 16)); x86_wr8(C, p + 1, (uint8_t)(v >> 8)); x86_wr8(C, p + 2, (uint8_t)v); x86_wr8(C, p + 3, 0);
+}
+uint32_t qw_gdi_GetPaletteEntries(qwin *w, uint32_t *a) {
+    qobj *o = O(w, a[0], GO_PALETTE);
+    uint32_t i, n = 0;
+    if (!o) return 0;
+    if (!a[3]) return (uint32_t)o->npal;
+    for (i = 0; i < a[2] && a[1] + i < (uint32_t)o->npal; i++, n++) pal_write(w, a[3] + i * 4, o->pal ? o->pal[a[1] + i] : 0);
+    return n;
+}
+uint32_t qw_gdi_GetSystemPaletteEntries(qwin *w, uint32_t *a) {
+    const uint32_t *sys = qw_sys_palette();
+    uint32_t i;
+    if (!a[3]) return 256;
+    for (i = 0; i < a[2] && a[1] + i < 256; i++) pal_write(w, a[3] + i * 4, sys[a[1] + i]);
+    return i;
+}
 FN(g_SelectPalette) { qdc *d = DCP(w, a[0]); uint32_t o; if (!d) return 0; o = d->pal ? d->pal : STOCK(15); d->pal = a[1]; return o; }
-FN(g_RealizePalette) { UNUSED; return 0; }
 /* SaveDC/RestoreDC: drawing state incl. clip; the surface/membmp stay owned by the DC */
 FN(g_SaveDC) {
     qdc *d = DCP(w, a[0]), *c;
@@ -1069,13 +1324,15 @@ const qhle qw_gdi32[] = {
     G("GetStockObject", g_GetStockObject, 1), G("SetBkMode", g_SetBkMode, 2), G("SetTextColor", g_SetTextColor, 2),
     G("SetBkColor", g_SetBkColor, 2), G("GetTextColor", g_GetTextColor, 1), G("GetBkColor", g_GetBkColor, 1),
     G("SetTextAlign", g_SetTextAlign, 2), G("SetROP2", g_SetROP2, 2),
-    G("GetTextExtentPoint32W", g_GetTextExtentPoint32W, 4), G("GetTextExtentPointW", g_GetTextExtentPoint32W, 4),
+    G("GetTextExtentPoint32W", g_GetTextExtentPoint32W, 4), G("GetTextExtentPointW", g_GetTextExtentPoint32W, 4), G("GetTextExtentExPointW", g_GetTextExtentExPointW, 7), G("StretchDIBits", g_StretchDIBits, 13), G("SetDIBitsToDevice", g_SetDIBitsToDevice, 12), G("SetDIBits", g_SetDIBits, 7),
     G("GetTextMetricsW", g_GetTextMetricsW, 2), G("TextOutW", g_TextOutW, 5), G("ExtTextOutW", g_ExtTextOutW, 8),
     G("CreateCompatibleDC", g_CreateCompatibleDC, 1), G("DeleteDC", g_DeleteDC, 1),
     G("CreateCompatibleBitmap", g_CreateCompatibleBitmap, 3), G("CreateBitmap", g_CreateBitmap, 5),
-    G("CreatePen", g_CreatePen, 3), G("CreateSolidBrush", g_CreateSolidBrush, 1), G("CreateBrushIndirect", g_CreateBrushIndirect, 1),
+    G("CreatePen", g_CreatePen, 3), G("CreatePenIndirect", g_CreatePenIndirect, 1), G("CreateSolidBrush", g_CreateSolidBrush, 1), G("CreateBrushIndirect", g_CreateBrushIndirect, 1),
     G("CreateFontW", g_CreateFontW, 14), G("CreateFontIndirectW", g_CreateFontIndirectW, 1),
+    G("GetBitmapBits", g_GetBitmapBits, 3),
     G("SelectObject", g_SelectObject, 2), G("DeleteObject", g_DeleteObject, 1), G("GetObjectW", g_GetObjectW, 3),
+    G("CreateDIBitmap", g_CreateDIBitmap, 6), G("CreateDCA", g_CreateDCA, 4),
     G("BitBlt", g_BitBlt, 9), G("StretchBlt", g_StretchBlt, 11), G("PatBlt", g_PatBlt, 6),
     G("SetPixel", g_SetPixel, 4), G("SetPixelV", g_SetPixel, 4), G("GetPixel", g_GetPixel, 3),
     G("MoveToEx", g_MoveToEx, 4), G("LineTo", g_LineTo, 3), G("Rectangle", g_Rectangle, 5), G("Ellipse", g_Ellipse, 5),
@@ -1083,7 +1340,7 @@ const qhle qw_gdi32[] = {
     G("SaveDC", g_SaveDC, 1), G("RestoreDC", g_RestoreDC, 2), G("CreateRectRgn", g_CreateRectRgn, 4),
     G("SelectClipRgn", g_SelectClipRgn, 2), G("IntersectClipRect", g_IntersectClipRect, 5),
     G("CreatePatternBrush", g_CreatePatternBrush, 1), G("SetBrushOrgEx", g_SetBrushOrgEx, 4), G("ExcludeClipRect", g_ExcludeClipRect, 5),
-    G("CreatePalette", g_CreatePalette, 1), G("SelectPalette", g_SelectPalette, 3), G("RealizePalette", g_RealizePalette, 1),
+    G("CreatePalette", qw_gdi_CreatePalette, 1), G("SelectPalette", g_SelectPalette, 3), G("RealizePalette", qw_gdi_RealizePalette, 1),
     U("FillRect", u_FillRect, 3), U("FrameRect", u_FrameRect, 3), U("InvertRect", u_InvertRect, 2), U("DrawFocusRect", u_DrawFocusRect, 2),
     U("DrawEdge", u_DrawEdge, 4), U("DrawFrameControl", u_DrawFrameControl, 4), U("DrawStateW", u_DrawStateW, 10),
     U("DrawTextW", u_DrawTextW, 5), U("GetSysColor", u_GetSysColor, 1), U("GetSysColorBrush", u_GetSysColorBrush, 1),
