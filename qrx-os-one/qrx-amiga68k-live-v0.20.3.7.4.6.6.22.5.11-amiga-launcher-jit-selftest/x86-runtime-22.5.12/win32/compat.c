@@ -2073,12 +2073,117 @@ FN(c_BeginDeferWindowPos) { UNUSED; return 0x7E900001u; }
 /* ================================================================ COM */
 FN(c_CoCreateInstance) { if (a[4]) WR32(a[4], 0); UNUSED; return 0x80040154u; /* REGDB_E_CLASSNOTREG */ }
 
+/* ------------------------------------------------------------------ the C runtime of
+ * Visual C++ 2015 and later (CrystalMark Retro): pointer encoding, interlocked singly linked
+ * lists (one thread at a time runs x86 code here, so plain reads and writes are atomic),
+ * GetModuleHandleExW, the 64-bit file size and position calls, console output in UTF-16 and
+ * CommandLineToArgvW. */
+FN(c_EncodePointer) { (void)w; return a[0]; }
+FN(c_InitializeSListHead) { WR32(a[0], 0); WR32(a[0] + 4, 0); return 0; }
+FN(c_InterlockedPushEntrySList) {
+    uint32_t first = RD32(a[0]), depth = RD32(a[0] + 4);
+    WR32(a[1], first); WR32(a[0], a[1]);
+    WR32(a[0] + 4, ((depth & 0xFFFFu) + 1u) | ((depth + 0x10000u) & 0xFFFF0000u));
+    return first;
+}
+FN(c_InterlockedPopEntrySList) {
+    uint32_t first = RD32(a[0]), depth = RD32(a[0] + 4);
+    if (!first) return 0;
+    WR32(a[0], RD32(first));
+    WR32(a[0] + 4, ((depth - 1u) & 0xFFFFu) | ((depth + 0x10000u) & 0xFFFF0000u));
+    return first;
+}
+FN(c_InterlockedFlushSList) { uint32_t first = RD32(a[0]); WR32(a[0], 0); WR32(a[0] + 4, RD32(a[0] + 4) & 0xFFFF0000u); return first; }
+FN(c_QueryDepthSList) { return RD32(a[0] + 4) & 0xFFFFu; }
+FN(c_GetModuleHandleExW) {             /* (flags, name or address, HMODULE *) */
+    uint32_t h;
+    if (!a[2]) return 0;
+    if (a[0] & 4u) h = w->image_base;  /* FROM_ADDRESS: the program's own code asks */
+    else { uint32_t b[1]; b[0] = a[1]; h = call_api(w, "kernel32", "GetModuleHandleW", b); }
+    WR32(a[2], h);
+    return h != 0;
+}
+FN(c_FindFirstFileExW) { uint32_t b[2]; b[0] = a[0]; b[1] = a[2]; return call_api(w, "kernel32", "FindFirstFileW", b); }
+FN(c_GetFileSizeEx) {
+    uint32_t b[2], lo;
+    b[0] = a[0]; b[1] = 0;
+    lo = call_api(w, "kernel32", "GetFileSize", b);
+    if (lo == 0xFFFFFFFFu) return 0;
+    WR32(a[1], lo); WR32(a[1] + 4, 0);
+    return 1;
+}
+FN(c_SetFilePointerEx) {               /* (h, distance low, distance high, LARGE_INTEGER *new, method) */
+    uint32_t b[4], r;
+    b[0] = a[0]; b[1] = a[1]; b[2] = 0; b[3] = a[4];
+    r = call_api(w, "kernel32", "SetFilePointer", b);
+    if (r == 0xFFFFFFFFu) return 0;
+    if (a[3]) { WR32(a[3], r); WR32(a[3] + 4, 0); }
+    return 1;
+}
+FN(c_GetConsoleOutputCP) { UNUSED; return 437; }
+FN(c_WriteConsoleW) {                  /* (h, const WCHAR *, n, DWORD *written, reserved) */
+    uint32_t n = a[2], tmp, i, b[5];
+    if (!n) { if (a[3]) WR32(a[3], 0); return 1; }
+    tmp = qw_alloc(w, n);
+    if (!tmp) return 0;
+    for (i = 0; i < n; i++) { uint16_t ch = RD16(a[1] + 2u * i); WR8(tmp + i, ch < 256 ? ch : '?'); }
+    b[0] = a[0]; b[1] = tmp; b[2] = n; b[3] = a[3]; b[4] = 0;
+    i = call_api(w, "kernel32", "WriteFile", b);
+    qw_free(w, tmp);
+    return i;
+}
+FN(c_FreeLibraryAndExitThread) { uint32_t b[1]; b[0] = a[1]; return call_api(w, "kernel32", "ExitThread", b); }
+FN(c_CommandLineToArgvW) {             /* the Windows rules for quotes and backslashes */
+    static wchar16 cmd[2048], out[2048];
+    uint32_t starts[128], argc = 0, n = 0, blk, i, p = 0, len = (uint32_t)qw_rd_wstr(w, a[0], cmd, 2048);
+    for (;;) {
+        int quote = 0;
+        while (p < len && (cmd[p] == ' ' || cmd[p] == '\t')) p++;
+        if (p >= len || argc >= 127 || n >= 2040) break;
+        starts[argc++] = n;
+        while (p < len && n < 2040) {
+            wchar16 ch = cmd[p];
+            if (ch == '\\') {
+                uint32_t bs = 0;
+                while (p < len && cmd[p] == '\\') { bs++; p++; }
+                if (p < len && cmd[p] == '"') {
+                    for (i = 0; i < bs / 2 && n < 2040; i++) out[n++] = '\\';
+                    if (bs & 1) { out[n++] = '"'; p++; }
+                } else for (i = 0; i < bs && n < 2040; i++) out[n++] = '\\';
+                continue;
+            }
+            if (ch == '"') { quote = !quote; p++; continue; }
+            if (!quote && (ch == ' ' || ch == '\t')) break;
+            out[n++] = ch;
+            p++;
+        }
+        out[n++] = 0;
+    }
+    blk = qw_alloc(w, (argc + 1u) * 4u + n * 2u);
+    if (!blk) return 0;
+    for (i = 0; i < argc; i++) WR32(blk + i * 4u, blk + (argc + 1u) * 4u + starts[i] * 2u);
+    WR32(blk + argc * 4u, 0);
+    for (i = 0; i < n; i++) WR16(blk + (argc + 1u) * 4u + i * 2u, out[i]);
+    if (a[1]) WR32(a[1], argc);
+    return blk;
+}
+
 #define K(n, f, c) { "kernel32", n, c, f }
 #define U(n, f, c) { "user32", n, c, f }
 #define G(n, f, c) { "gdi32", n, c, f }
 #define ADV(n, f, c) { "advapi32", n, c, f }
 #define WM(n, f, c) { "winmm", n, c, f }
 const qhle qw_compat[] = {
+    /* the C runtime of Visual C++ 2015 and later */
+    K("EncodePointer", c_EncodePointer, 1), K("DecodePointer", c_EncodePointer, 1),
+    K("InitializeSListHead", c_InitializeSListHead, 1), K("InterlockedPushEntrySList", c_InterlockedPushEntrySList, 2),
+    K("InterlockedPopEntrySList", c_InterlockedPopEntrySList, 1), K("InterlockedFlushSList", c_InterlockedFlushSList, 1),
+    K("QueryDepthSList", c_QueryDepthSList, 1), K("GetModuleHandleExW", c_GetModuleHandleExW, 3),
+    K("FindFirstFileExW", c_FindFirstFileExW, 6), K("GetFileSizeEx", c_GetFileSizeEx, 2),
+    K("SetFilePointerEx", c_SetFilePointerEx, 5), K("GetConsoleOutputCP", c_GetConsoleOutputCP, 0),
+    K("WriteConsoleW", c_WriteConsoleW, 5), K("FreeLibraryAndExitThread", c_FreeLibraryAndExitThread, 2),
+    { "shell32", "CommandLineToArgvW", 2, c_CommandLineToArgvW },
+
     /* threads and synchronisation */
     K("CreateThread", qw_api_CreateThread, 6), K("ExitThread", qw_api_ExitThread, 1), K("ResumeThread", qw_api_ResumeThread, 1),
     K("SuspendThread", qw_api_SuspendThread, 1), K("TerminateThread", qw_api_TerminateThread, 2), K("GetExitCodeThread", qw_api_GetExitCodeThread, 2),

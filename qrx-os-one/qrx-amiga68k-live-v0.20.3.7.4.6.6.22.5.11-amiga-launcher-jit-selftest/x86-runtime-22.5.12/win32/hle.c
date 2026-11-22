@@ -222,11 +222,19 @@ void qw_api_report(qwin *w)
     memset(g_api_ms, 0, sizeof(g_api_ms));
 }
 
+/* Small functions the door also has on the host (qrx_api_k32 in the engine): asked for once at
+ * their first call; from then on the door answers them without coming here. They keep their
+ * state in the thread's TEB, as Windows does: TLS slots at +0x1000, the last error at +0x34. */
+static int host_fast_name(const char *n)
+{
+    return !strcmp(n, "TlsGetValue") || !strcmp(n, "TlsSetValue") || !strcmp(n, "GetLastError") || !strcmp(n, "SetLastError");
+}
+static uint8_t g_host_tried[QW_THUNK_MAX];
 static int hle_hook(x86cpu *c, uint32_t idx)
 {
     qwin *w = (qwin *)c->user;
     const qhle *e = idx < w->nthunk ? w->thunk[idx] : NULL;
-    uint32_t a[16], ret, r, sp = c->r[X86_ESP];
+    uint32_t a[16], ret, r, sp = c->r[X86_ESP], teb;
     int i;
 #ifdef QRX_EXEC_PROFILE
     uint64_t profile_start = w->be->now(w);
@@ -236,6 +244,10 @@ static int hle_hook(x86cpu *c, uint32_t idx)
     /* The door stops here for a thunk it does not know yet. If the host has the
      * function it takes this and all later calls without coming back. */
     if (!e && idx < w->nthunk && qw_host_bind(w, idx)) return 1;
+    if (e && idx < w->nthunk && !g_host_tried[idx] && host_fast_name(w->thunk_name[idx])) {
+        g_host_tried[idx] = 1;
+        if (qw_host_bind(w, idx)) return 1;           /* the door runs it again, host-side */
+    }
     if (!e) {
         qw_log(w, "unimplemented API called: %s", idx < w->nthunk ? w->thunk_name[idx] : "?");
         c->fault = X86_FAULT_HOST;
@@ -245,6 +257,10 @@ static int hle_hook(x86cpu *c, uint32_t idx)
     }
     ret = x86_rd32(c, sp);
     for (i = 0; i < 16; i++) a[i] = x86_rd32(c, sp + 4 + (uint32_t)i * 4);
+    /* The last error lives in the calling thread's TEB (+0x34), where the door's SetLastError
+     * writes it too: in before the call, out after it, to that thread's TEB. */
+    teb = c->sbase[X86_FS];
+    if (teb) w->last_error = x86_rd32(c, teb + 0x34);
     if (w->trace) qw_log(w, "-> %s(%08x, %08x, %08x, %08x, %08x, %08x, %08x) ret=%08x", e->name, a[0], a[1], a[2], a[3], a[4], a[5], a[6], ret);
     if (w->verbose) {
         uint64_t t0 = w->be->now(w);
@@ -267,6 +283,7 @@ static int hle_hook(x86cpu *c, uint32_t idx)
             w->prof_api_ms[idx] += end - profile_start;
     }
 #endif
+    if (teb) x86_wr32(c, teb + 0x34, w->last_error);
     if (w->trace) qw_log(w, "<- %s = %08x", e->name, r);
     if (c->fault) return 1;
     if (w->exiting) { c->stop = 1; g_api_jumped = 0; return 1; }
@@ -360,7 +377,19 @@ int qw_load(qwin *w, const char *path, int argc, char **argv)
     { extern void qw_tls_new_thread(qwin *w, uint32_t teb); qw_tls_new_thread(w, QW_TEB); }
     x86_wr32(c, QW_TEB + 0x30, QW_PEB);
     x86_wr32(c, QW_PEB + 0x08, w->image_base);
+    /* ProcessParameters (RTL_USER_PROCESS_PARAMETERS, read by the C runtime of Visual C++
+     * 2015 and later) in the second half of the PEB's page: length, flags "normalized", the
+     * rest zero. Then the processor count and the version GetVersion reports (5.1). */
+    x86_wr32(c, QW_PEB + 0x10, QW_PEB + 0x800);
+    x86_wr32(c, QW_PEB + 0x800, 0x2A0u);
+    x86_wr32(c, QW_PEB + 0x804, 0x2A0u);
+    x86_wr32(c, QW_PEB + 0x808, 1u);
     x86_wr32(c, QW_PEB + 0x18, 0x00150000u);
+    x86_wr32(c, QW_PEB + 0x64, 1u);
+    x86_wr32(c, QW_PEB + 0xA4, 5u);
+    x86_wr32(c, QW_PEB + 0xA8, 1u);
+    x86_wr16(c, QW_PEB + 0xAC, 2600u);
+    x86_wr32(c, QW_PEB + 0xB0, 2u);
     c->sreg[X86_FS] = 0x3B;
     c->sbase[X86_FS] = QW_TEB;
     c->r[X86_ESP] = QW_STACK_TOP - 64;

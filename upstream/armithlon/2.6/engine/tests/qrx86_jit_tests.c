@@ -92,7 +92,7 @@ static void gen_flagged(void) {
 }
 static void gen_one(void) {
     unsigned sz;
-    switch (pick(34)) {
+    switch (pick(36)) {
     case 0: case 1: sz = osz(); c8((pick(8) << 3) | (pick(2) << 1) | (sz != 8)); modrm(rsz(sz), sz, true); break;
     case 2: sz = osz(); c8(sz == 8 ? 0x80 : 0x81); modrm(pick(8), sz, true); imm_sz(sz); break;
     case 3: sz = osz(); c8(0x88 | (pick(2) << 1) | (sz != 8)); modrm(rsz(sz), sz, true); break;
@@ -213,7 +213,8 @@ static void gen_one(void) {
         }
         if (pick(2)) {                                                   /* fnstsw ax; test ah,imm; then a reader */
             c8(0xDF); c8(0xE0);
-            c8(0xF6); c8(0xC4); c8((uint8_t[]){ 0x01, 0x40, 0x41, 0x05, 0x45 }[pick(5)]);
+            if (pick(2)) c8(0x9E);                                       /* sahf */
+            else { c8(0xF6); c8(0xC4); c8((uint8_t[]){ 0x01, 0x40, 0x41, 0x05, 0x45 }[pick(5)]); }
         }
         switch (pick(3)) {
         case 0: c8(0x0F); c8(0x90 | pick(16)); c8(0xC0 | r8()); break;   /* setcc */
@@ -239,6 +240,15 @@ static void gen_one(void) {
         c8(0x8B); c8(0x43 | r32() << 3); c8(0x78);                       /* mov reg,[ebx+78h] */
         break;
     }
+    case 33: case 34:                                                    /* SAHF with any AH, then a reader */
+        if (pick(2)) { c8(0xB4); c8(rnd()); }                            /* mov ah,imm */
+        c8(0x9E);
+        switch (pick(3)) {
+        case 0: c8(0x0F); c8(0x90 | pick(16)); c8(0xC0 | r8()); break;
+        case 1: c8(0x0F); c8(0x40 | pick(16)); c8(0xC0 | r32() << 3 | r32()); break;
+        default: { unsigned at; c8(0x70 | pick(16)); at = cp; c8(0); c8(0xB8 | r32()); c32(rnd()); code[at] = (uint8_t)(cp - at - 1); break; }
+        }
+        break;
     default: gen_flagged(); break;
     }
 }

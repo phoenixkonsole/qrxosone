@@ -103,7 +103,8 @@ enum {
     K_FLD_M, K_FSTP_M, K_FARITH_M, K_FARITH_ST,
     K_MUL1,                          /* F7 /4-/7 on 32 bits: MUL, IMUL, DIV, IDIV of EDX:EAX (op = /n) */
     K_FPU,                           /* more x87, op = FP_*, rm = the ST index */
-    K_FCMP                           /* x87 compares: op = FC_*, rm = ST index, cc = pops, src_sz for memory */
+    K_FCMP,                          /* x87 compares: op = FC_*, rm = ST index, cc = pops, src_sz for memory */
+    K_SAHF                           /* SF ZF AF PF CF from AH into NZCV (NZ_SAHF); only while no lazy reader needs OF */
 };
 enum { FC_FCOM, FC_FCOMI, FC_FNSTSW };
 enum { FP_LDST, FP_XCH, FP_STST, FP_STSTP, FP_CHS, FP_ABS, FP_SQRT, FP_LD1, FP_LDZ, FP_ILD32, FP_IST32, FP_ISTP32, FP_LDCW, FP_STCW };
@@ -455,6 +456,7 @@ static bool xj_decode1(uint32_t eip, XIns *x) {
         break;
     case 0x90: x->kind = rep ? K_FALL : K_NOP; break;
     case 0x9B: x->kind = K_NOP; break;               /* FWAIT: nothing pending in this x87 */
+    case 0x9E: x->kind = K_SAHF; break;
     case 0x98: x->kind = K_CWDE; break;
     case 0x99: x->kind = K_CDQ; break;
     case 0xA0: case 0xA1: case 0xA2: case 0xA3:
@@ -605,7 +607,7 @@ static unsigned xj_peek_live(uint32_t addr) {
     }
     return mask;
 }
-enum { NZ_NONE, NZ_SUB, NZ_ADD, NZ_LOGIC, NZ_INCDEC, NZ_FCOMI };
+enum { NZ_NONE, NZ_SUB, NZ_ADD, NZ_LOGIC, NZ_INCDEC, NZ_FCOMI, NZ_SAHF };
 enum { C_EQ, C_NE, C_HS, C_LO, C_MI, C_PL, C_VS, C_VC, C_HI, C_LS, C_GE, C_LT, C_GT, C_LE, C_AL };
 static int xj_a64_cc(int nz, unsigned cc) {
     static const int8_t sub[16] = { C_VS, C_VC, C_LO, C_HS, C_EQ, C_NE, C_LS, C_HI, C_MI, C_PL, -1, -1, C_LT, C_GE, C_LE, C_GT };
@@ -613,6 +615,8 @@ static int xj_a64_cc(int nz, unsigned cc) {
     static const int8_t logic[16] = { -1, -1, -1, -1, C_EQ, C_NE, C_EQ, C_NE, C_MI, C_PL, -1, -1, C_LT, C_GE, C_LE, C_GT };
     static const int8_t incdec[16] = { C_VS, C_VC, -1, -1, C_EQ, C_NE, -1, -1, C_MI, C_PL, -1, -1, C_LT, C_GE, C_LE, C_GT };
     /* FCMP of two ordered values (NaN goes to the interpreter): CF = less, ZF = equal */
+    /* SAHF: N = SF, Z = ZF, C = !CF, V = PF; OF unknown */
+    static const int8_t sahf[16] = { -1, -1, C_LO, C_HS, C_EQ, C_NE, C_LS, C_HI, C_MI, C_PL, C_VS, C_VC, -1, -1, -1, -1 };
     static const int8_t fcomi[16] = { -1, -1, C_LO, C_HS, C_EQ, C_NE, C_LS, C_HI, -1, -1, -1, -1, -1, -1, -1, -1 };
     switch (nz) {
     case NZ_SUB: return sub[cc & 15];
@@ -620,6 +624,7 @@ static int xj_a64_cc(int nz, unsigned cc) {
     case NZ_LOGIC: return logic[cc & 15];
     case NZ_INCDEC: return incdec[cc & 15];
     case NZ_FCOMI: return fcomi[cc & 15];
+    case NZ_SAHF: return sahf[cc & 15];
     default: return -1;
     }
 }
@@ -638,6 +643,7 @@ static void xj_analyse(XIns *ins, int n, unsigned end_live) {
             case K_ALU: nz = (x->op == 3 || x->op == 5 || x->op == 7) ? NZ_SUB : (x->op == 0 || x->op == 2) ? NZ_ADD : NZ_LOGIC; break;
             case K_INCDEC: nz = NZ_INCDEC; break;
             case K_FCMP: if (x->op == FC_FCOMI) nz = NZ_FCOMI; break;
+            case K_SAHF: nz = NZ_SAHF; break;
             case K_JCC: case K_SETCC: case K_CMOV:
                 /* An interpreter re-run of a memory form reads the lazy flags. */
                 x->native_cc = !x->has_mem && xj_a64_cc(nz, x->cc) >= 0;
@@ -672,6 +678,10 @@ static void xj_analyse(XIns *ins, int n, unsigned end_live) {
                 break;
             case K_FCMP:
                 if (x->op == FC_FCOMI) { x->need_lf = live != 0; live = 0; }
+                break;
+            case K_SAHF:
+                /* a later reader through the lazy flags (OF among them, which SAHF keeps): the interpreter */
+                if (live) { x->kind = K_FALL; changed = true; live = L_ALL; }
                 break;
             case K_NEG: case K_IMUL: case K_MUL1:
                 if (live) { x->kind = K_FALL; changed = true; live = L_ALL; }
@@ -1443,6 +1453,15 @@ static void gen_ins(XT *t, XIns *x, int *nz, XOut *outs, int *nouts) {
         break;
     case K_FPU: gen_fpu(t, x); break;
     case K_FCMP: gen_fcmp(t, x, nz); break;
+    case K_SAHF:                                   /* NZCV = SF ZF !CF PF from AH (bits 15 14 8 10 of EAX) */
+        ubfm(e, 9, XR(X86_EAX), 15, 15); lsl_i(e, 9, 9, 31);
+        ubfm(e, 10, XR(X86_EAX), 14, 14); lsl_i(e, 10, 10, 30); E(e, R3(0x2A000000u, 9, 9, 10));
+        ubfm(e, 10, XR(X86_EAX), 8, 8); E(e, 0x52000000u | (10u << 5) | 10u);   /* eor w10,w10,#1 */
+        lsl_i(e, 10, 10, 29); E(e, R3(0x2A000000u, 9, 9, 10));
+        ubfm(e, 10, XR(X86_EAX), 10, 10); lsl_i(e, 10, 10, 28); E(e, R3(0x2A000000u, 9, 9, 10));
+        E(e, 0xD51B4209u);                         /* msr nzcv,x9 */
+        *nz = NZ_SAHF;
+        break;
     case K_FSTP_M:
         addr = ea(t, &x->m);
         if (addr == 0) { movr(e, 5, 0); addr = 5; }
@@ -1632,7 +1651,7 @@ static void xj_count_op(uint32_t eip) {
     static int on = -1;
     if (on < 0) on = getenv("QRX86_JIT_STATS") != NULL;
     if (!on) return;
-    if (!xj.op_counts && !(xj.op_counts = calloc(0x400, sizeof(uint32_t)))) return;
+    if (!xj.op_counts && !(xj.op_counts = calloc(0xE00, sizeof(uint32_t)))) return;
     const uint8_t *q;
     uint32_t room, pos = 0, rep = 0;
     if (!xj_fetch_ok(eip, &q, &room)) return;
@@ -1643,6 +1662,8 @@ static void xj_count_op(uint32_t eip) {
     }
     if (pos >= room) return;
     uint32_t k = q[pos];
+    if (k >= 0xD8 && k <= 0xDF && pos + 1 < room) { xj.op_counts[0x400u + ((k & 7u) << 8) + q[pos + 1]]++; return; }   /* x87 with its mod/rm byte */
+    if ((k == 0xF6 || k == 0xF7) && pos + 1 < room) { xj.op_counts[0xC00u + ((k & 1u) << 8) + q[pos + 1]]++; return; }
     if (k == 0x0F && pos + 1 < room) k = 0x100u + q[pos + 1];
     xj.op_counts[(k | rep) & 0x3FF]++;
 }
@@ -2287,9 +2308,11 @@ static void xj_report_one(void) {
         fprintf(stderr, "[QRX86-JIT] interpreted by opcode:");
         for (int n = 0; n < 16; n++) {
             unsigned best = 0;
-            for (unsigned i = 1; i < 0x400; i++) if (xj.op_counts[i] > xj.op_counts[best]) best = i;
+            for (unsigned i = 1; i < 0xE00; i++) if (xj.op_counts[i] > xj.op_counts[best]) best = i;
             if (!xj.op_counts[best]) break;
-            fprintf(stderr, " %s%s%02x:%u", best & 0x200 ? "rep " : "", best & 0x100 ? "0f " : "", best & 0xFF, xj.op_counts[best]);
+            if (best >= 0xC00) fprintf(stderr, " %02x %02x:%u", 0xF6u + ((best - 0xC00u) >> 8), best & 0xFF, xj.op_counts[best]);
+            else if (best >= 0x400) fprintf(stderr, " %02x %02x:%u", 0xD8u + ((best - 0x400u) >> 8), best & 0xFF, xj.op_counts[best]);
+            else fprintf(stderr, " %s%s%02x:%u", best & 0x200 ? "rep " : "", best & 0x100 ? "0f " : "", best & 0xFF, xj.op_counts[best]);
             xj.op_counts[best] = 0;
         }
         fprintf(stderr, "\n");
