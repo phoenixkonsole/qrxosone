@@ -590,6 +590,250 @@ diff -ruN a/library/std/src/sys/process/mod.rs b/library/std/src/sys/process/mod
              target_os = "l4re"
          ))
      ),
+diff -ruN a/library/std/src/sys/process/unix/aros.rs b/library/std/src/sys/process/unix/aros.rs
+--- a/library/std/src/sys/process/unix/aros.rs
++++ b/library/std/src/sys/process/unix/aros.rs
+@@ -0,0 +1,226 @@
++//! Processes on AROS (QRX OS One 64). AROS has no fork: `qrx_spawn` in libqrxaroscompat starts
++//! the program with AROS's vfork (whose child runs in the parent's place until execve), sets up
++//! the child's stdio and directory there and execs. AROS has no signals for processes and no
++//! process groups; a status is the program's return code (`WEXITSTATUS` is `status & 0xff`,
++//! `WIFEXITED` is always true in AROS's sys/wait.h).
++#![forbid(unsafe_op_in_unsafe_fn)]
++use libc::{self, c_char, c_int, pid_t};
++
++use super::common::*;
++use crate::io::{self, ErrorKind, Read};
++use crate::num::NonZero;
++use crate::process::StdioPipes;
++use crate::sys::cvt;
++use crate::{fmt, sys};
++
++unsafe extern "C" {
++    fn qrx_spawn(
++        path: *const c_char,
++        argv: *const *const c_char,
++        envp: *const *const c_char,
++        stdin: c_int,
++        stdout: c_int,
++        stderr: c_int,
++        cwd: *const c_char,
++        exec_errno: *mut c_int,
++    ) -> pid_t;
++}
++
++const WNOHANG: c_int = 1; // AROS's sys/wait.h
++
++impl Command {
++    pub fn spawn(
++        &mut self,
++        default: Stdio,
++        needs_stdin: bool,
++    ) -> io::Result<(Process, StdioPipes)> {
++        let envp = self.capture_env();
++        if self.saw_nul() {
++            return Err(io::const_error!(ErrorKind::InvalidInput, "nul byte found in provided data"));
++        }
++        if self.get_chroot().is_some() {
++            return Err(io::const_error!(ErrorKind::Unsupported, "chroot not supported by AROS"));
++        }
++        if !self.get_closures().is_empty() {
++            return Err(io::const_error!(ErrorKind::Unsupported, "pre_exec not supported by AROS"));
++        }
++        let (ours, theirs) = self.setup_io(default, needs_stdin)?;
++        let fd = |s: &ChildStdio| s.fd().unwrap_or(-1);
++        let cwd = self.get_cwd().map(|c| c.as_ptr()).unwrap_or(crate::ptr::null());
++        let envp_ptr = envp.as_ref().map(|c| c.as_ptr()).unwrap_or(crate::ptr::null());
++        let mut exec_errno: c_int = 0;
++        let pid = {
++            // the environment is read by execve in the child
++            let _lock = sys::env::env_read_lock();
++            unsafe {
++                qrx_spawn(
++                    self.get_program_cstr().as_ptr(),
++                    self.get_argv().as_ptr(),
++                    envp_ptr,
++                    fd(&theirs.stdin),
++                    fd(&theirs.stdout),
++                    fd(&theirs.stderr),
++                    cwd,
++                    &mut exec_errno,
++                )
++            }
++        };
++        if pid < 0 {
++            return Err(io::Error::last_os_error());
++        }
++        let mut p = Process { pid, status: None };
++        if exec_errno != 0 {
++            // the child could not exec: it has already ended with 127; report why, as unix does
++            let _ = p.wait();
++            return Err(io::Error::from_raw_os_error(exec_errno));
++        }
++        Ok((p, ours))
++    }
++
++    pub fn exec(&mut self, default: Stdio) -> io::Error {
++        match self.spawn(default, true) {
++            Ok((mut p, _)) => match p.wait() {
++                Ok(st) => crate::process::exit(st.code().unwrap_or(1)),
++                Err(e) => e,
++            },
++            Err(e) => e,
++        }
++    }
++}
++
++/// `output()` without poll: stderr is read on a thread of its own while this one reads stdout.
++pub fn output(cmd: &mut Command) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
++    let (mut process, mut pipes) = cmd.spawn(Stdio::MakePipe, false)?;
++    drop(pipes.stdin.take());
++    let err_reader = pipes.stderr.take().map(|mut err| {
++        crate::thread::spawn(move || {
++            let mut v = Vec::new();
++            err.read_to_end(&mut v).map(|_| v)
++        })
++    });
++    let mut stdout = Vec::new();
++    if let Some(mut out) = pipes.stdout.take() {
++        out.read_to_end(&mut stdout)?;
++    }
++    let stderr = match err_reader {
++        Some(h) => h.join().map_err(|_| io::const_error!(ErrorKind::Other, "stderr reader panicked"))??,
++        None => Vec::new(),
++    };
++    let status = process.wait()?;
++    Ok((status, stdout, stderr))
++}
++
++pub struct Process {
++    pid: pid_t,
++    status: Option<ExitStatus>,
++}
++
++impl Process {
++    pub fn id(&self) -> u32 {
++        self.pid as u32
++    }
++
++    pub fn kill(&self) -> io::Result<()> {
++        self.send_signal(libc::SIGKILL)
++    }
++
++    pub fn send_signal(&self, signal: i32) -> io::Result<()> {
++        if self.status.is_some() { Ok(()) } else { cvt(unsafe { libc::kill(self.pid, signal) }).map(drop) }
++    }
++
++    pub fn send_process_group_signal(&self, _signal: i32) -> io::Result<()> {
++        Err(io::const_error!(ErrorKind::Unsupported, "AROS has no process groups"))
++    }
++
++    pub fn wait(&mut self) -> io::Result<ExitStatus> {
++        if let Some(status) = self.status {
++            return Ok(status);
++        }
++        let mut status = 0 as c_int;
++        sys::cvt_r(|| unsafe { libc::waitpid(self.pid, &mut status, 0) })?;
++        self.status = Some(ExitStatus::new(status));
++        Ok(ExitStatus::new(status))
++    }
++
++    pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
++        if let Some(status) = self.status {
++            return Ok(Some(status));
++        }
++        let mut status = 0 as c_int;
++        let pid = cvt(unsafe { libc::waitpid(self.pid, &mut status, WNOHANG) })?;
++        if pid == 0 {
++            Ok(None)
++        } else {
++            self.status = Some(ExitStatus::new(status));
++            Ok(Some(ExitStatus::new(status)))
++        }
++    }
++}
++
++/// A process's return code as AROS's waitpid gives it.
++#[derive(PartialEq, Eq, Clone, Copy, Debug, Default)]
++pub struct ExitStatus(c_int);
++
++impl ExitStatus {
++    pub fn new(status: c_int) -> ExitStatus {
++        ExitStatus(status)
++    }
++
++    pub fn exit_ok(&self) -> Result<(), ExitStatusError> {
++        match NonZero::try_from(self.0 & 0xff) {
++            Ok(failure) => Err(ExitStatusError(failure)),
++            Err(_) => Ok(()),
++        }
++    }
++
++    pub fn code(&self) -> Option<i32> {
++        Some(self.0 & 0xff)
++    }
++
++    pub fn signal(&self) -> Option<i32> {
++        None
++    }
++
++    pub fn core_dumped(&self) -> bool {
++        false
++    }
++
++    pub fn stopped_signal(&self) -> Option<i32> {
++        None
++    }
++
++    pub fn continued(&self) -> bool {
++        false
++    }
++
++    pub fn into_raw(&self) -> c_int {
++        self.0
++    }
++}
++
++impl From<c_int> for ExitStatus {
++    fn from(a: c_int) -> ExitStatus {
++        ExitStatus(a)
++    }
++}
++
++impl fmt::Display for ExitStatus {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        write!(f, "exit code: {}", self.0 & 0xff)
++    }
++}
++
++#[derive(PartialEq, Eq, Clone, Copy, Debug)]
++pub struct ExitStatusError(NonZero<c_int>);
++
++impl Into<ExitStatus> for ExitStatusError {
++    fn into(self) -> ExitStatus {
++        ExitStatus(self.0.into())
++    }
++}
++
++impl ExitStatusError {
++    pub fn code(self) -> Option<NonZero<i32>> {
++        ExitStatus(self.0.into()).code().and_then(NonZero::new)
++    }
++}
+diff -ruN a/library/std/src/sys/process/unix/common.rs b/library/std/src/sys/process/unix/common.rs
+--- a/library/std/src/sys/process/unix/common.rs
++++ b/library/std/src/sys/process/unix/common.rs
+@@ -31,6 +31,10 @@
+     target_os = "vxworks" => {
+         const DEV_NULL: &CStr = c"/null";
+     }
++    target_os = "aros" => {
++        // QRX OS One 64: AROS's null device
++        const DEV_NULL: &CStr = c"NIL:";
++    }
+     _ => {
+         const DEV_NULL: &CStr = c"/dev/null";
+     }
 diff -ruN a/library/std/src/sys/process/unix/mod.rs b/library/std/src/sys/process/unix/mod.rs
 --- a/library/std/src/sys/process/unix/mod.rs
 +++ b/library/std/src/sys/process/unix/mod.rs
@@ -600,15 +844,19 @@ diff -ruN a/library/std/src/sys/process/unix/mod.rs b/library/std/src/sys/proces
      allow(unused)
  )]
  mod common;
-@@ -17,7 +17,7 @@
+@@ -13,6 +13,12 @@
+         mod vxworks;
+         use vxworks as imp;
+     }
++    target_os = "aros" => {
++        // QRX OS One 64: no fork; vfork + execve in libqrxaroscompat (qrx_spawn)
++        mod aros;
++        use aros as imp;
++        pub use aros::output;
++    }
+     any(
          target_os = "espidf",
          target_os = "horizon",
-         target_os = "vita",
--        target_os = "nuttx",
-+        target_os = "nuttx", target_os = "aros",
-         target_os = "l4re"
-     ) => {
-         mod unsupported;
 diff -ruN a/library/std/src/sys/random/mod.rs b/library/std/src/sys/random/mod.rs
 --- a/library/std/src/sys/random/mod.rs
 +++ b/library/std/src/sys/random/mod.rs

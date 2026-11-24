@@ -86,6 +86,10 @@ mk linklibs-z-static workbench-libs-z-quick
 # coolimages.library links the coolimagesstatic linklib (likewise not in README's order)
 mk linklibs-coolimagesstatic
 mk workbench-libs-asl-catalogs workbench-libs-coolimages-quick workbench-libs-asl-quick
+# PIPE: for QRX OS One 64 (aros-qrx/qrxpipe; AROS's own workbench/fs/pipe does not start here)
+mkdir -p "$SRC/workbench/fs/qrxpipe"
+cp "$HERE/qrxpipe/mmakefile.src" "$HERE/qrxpipe/qrxpipe-handler.c" "$SRC/workbench/fs/qrxpipe/"
+mk workbench-fs-qrxpipe
 if [[ "${QRX_BUILD_PTHREAD:-0}" == 1 ]]; then
   mk pthread-includes-copy linklibs-pthread
 fi

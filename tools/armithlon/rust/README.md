@@ -7,8 +7,9 @@ Voraussetzung für Gecko/SpiderMonkey, die Rust zwingend brauchen.
 | rustc 1.100.0 gegen das gepatchte LLVM 22 (m68k64-Backend) | `build-rustc.sh`, `rustc-1.100.0-m68k64.patch` |
 | Zielbeschreibung | `m68k64-unknown-aros.json` (LP64, Big Endian, keine FPU, Linken über clang/collect-aros) |
 | std für AROS | `rustc-1.100.0-aros-std.patch` (`std::os::aros`, Plattformschicht), `libc-0.2.189-aros.patch` |
-| POSIX-Funktionen, die AROS fehlen | `compat/qrxaroscompat.c`, `compat/build-compat.sh` → `libqrxaroscompat.a` |
-| Tests | `tests/rhello` (ohne std), `tests/rstd` (std), `tests/runwind` (Panic-Abwicklung), `tests/run-guest.sh` |
+| POSIX-Funktionen, die AROS fehlen | `compat/qrxaroscompat.c` (Prozesse, Zufall, pread/pwrite, …), `compat/qrxnet.c` (Sockets, poll, Deskriptoren), `compat/build-compat.sh` → `libqrxaroscompat.a` |
+| `PIPE:` für pipe() | `../aros-qrx/qrxpipe/qrxpipe-handler.c` (von `build-linux.sh` gebaut) |
+| Tests | `tests/rhello` (ohne std), `tests/rstd` (std), `tests/runwind` (Panic-Abwicklung), `tests/rsys` (Netz, Prozesse, Pipes, Zufall), `tests/run-guest.sh` |
 
 ```sh
 tools/armithlon/rust/build-rustc.sh /opt/qrx-os-one/ec64llvm/build /opt/qrx-os-one/rust
@@ -55,9 +56,8 @@ Was dafür nötig war:
   Bibliotheken linkt der AROS-Treiber von clang, nicht das Crate.
 - std: `std::os::aros` (nach NuttX), `errno` über `___geterrnoptr`, Condvar mit `CLOCK_REALTIME` (AROS hat
   kein `pthread_condattr_setclock`), `os_family = unix` mit den AROS-Lücken (kein `openat`, kein `linkat`).
-- `libqrxaroscompat.a`: `strerror_r`, `pread`/`pwrite` (über `lseek`, nicht atomar), `poll` (meldet alles bereit;
-  AROS' `libcrt` hat auch kein `select`), `arc4random_buf` (**nicht kryptografisch**: AROS hat keine
-  Entropiequelle), Sockets/`getaddrinfo`/`mkfifo`/`lchown`/`chroot` → `ENOSYS`.
+- `libqrxaroscompat.a` (siehe unten: Netz, Prozesse, Pipes, Zufall), dazu `strerror_r`, `pread`/`pwrite` (über `lseek`,
+  nicht atomar), `mkfifo`/`lchown`/`chroot` → `ENOSYS`.
 - Abwickeln: libunwind baut für m68k64 jetzt die `_Unwind_Backtrace`-Familie (`config.h`), und
   `__register_frame`, das der AROS-Start libgcc-artig mit der ganzen `.eh_frame`-Sektion aufruft, macht dort
   nichts (die Bare-Metal-Suche findet die Sektion selbst).
@@ -68,11 +68,24 @@ Was dafür nötig war:
   Sicherungsplätze feste Objekte unter dem gesicherten FP, und feste Objekte gehen in solchen Funktionen
   über den FP (wie im x86-Backend). Die Backend-, Builtins- und C++-Laufzeittests laufen danach weiter fehlerfrei.
 
+### Netz, Prozesse, Pipes, Zufall (`tests/rsys` → `SYS ALL PASS`)
+
+| Teil | Wie | Geprüft |
+| --- | --- | --- |
+| `std::net` | Die Sockets gehen über den Netzdienst 4 des Boards an den Host (`qrx_hostnet.c` der Engine, wie `QRXHostSocket`). Socket-Deskriptoren liegen ab `0x40000`; `read`/`write`/`close`/`fcntl`/`ioctl` der Bibliothek nehmen Sockets und geben alles andere an AROS weiter. Blockieren = Warten auf den Poll des Hosts. Timeouts (`SO_RCVTIMEO`/`SO_SNDTIMEO`) werden hier verwaltet. | TCP-Listener und -Client im Gast, Echo, Lese-Timeout, nicht blockierendes `accept`, `connect_timeout`, abgelehnte Verbindung, UDP, `localhost` |
+| Namensauflösung | `getaddrinfo` über den Host (nur IPv4, Ports nur als Zahl) | `localhost:80` |
+| `std::process` | `qrx_spawn`: `LoadSeg` + `CreateNewProc`, Argumente nach AROS-Regeln gequotet, Rückgabewert über `NP_ExitCode`; eigene `waitpid`/`kill` für diese Kinder. AROS' `vfork` gibt auf dem 68100EC64 die PID 1 zurück und startet das Kind nie, deshalb nicht `vfork`. `Stdio::null()` ist `NIL:`. | `C:Echo` mit `output()`, das eigene Programm als Kind mit stdin/stdout/stderr über Pipes und Exitcode 3, fehlendes Programm → `NotFound`, `try_wait` |
+| Pipes | `qrxpipe-handler` (neu, 64-Bit-sauber; AROS' alter `pipe-handler` startet hier nicht). Für das Kind wird ein Pipe-Ende über seinen Namen neu geöffnet, die Eltern dürfen ihres sofort schließen, der Leser sieht das Ende, wenn das Kind fertig ist. | über die Prozesstests |
+| `poll` | Sockets über den Host, Pipes über das private Paket `ACTION_QRX_PIPE_AVAIL` des Handlers, Konsolen über `WaitForChar`, Dateien sind immer bereit | Pipe: 0 vor dem Schreiben, 1 nach 20 ms |
+| Zufall | `arc4random_buf`/`getentropy` holen Bytes vom `getentropy()` des Hosts (Op 19), **kryptografisch**. Ohne Host-Tür bricht das Programm ab, statt mit erratbaren Zahlen weiterzulaufen. | zwei HashMap-Startwerte verschieden |
+
+Grenzen: höchstens 64 Sockets für das ganze System (Tabelle des Hosts), kein IPv6, kein `sendmsg`/`recvmsg`;
+Puffer über 4 GB gehen über einen Zwischenpuffer (der Dienst nimmt 32-Bit-Adressen). Ein Kindprozess bekommt keine
+eigene Umgebung (AROS-Prozesse teilen ihre Variablen); `pre_exec` und Prozessgruppen gibt es nicht; `kill` schickt
+Ctrl-C. Im Tor-Modus der Engine gehen TCP-Verbindungen über `qrxnetd`, UDP verlässt den Rechner dann nicht.
+
 Noch nicht:
 
-- `std::net`: AROS' Sockets leben in der `bsdsocket.library` mit eigenen Deskriptoren. Die Funktionen liefern
-  `Unsupported` (os error 78). Für Gecko/Tor kommt das Netz ohnehin über NSPR in C.
-- `std::process` (AROS hat kein `fork`/`exec`), `poll` auf Pipes/Konsole (meldet immer bereit).
 - Ein Lauf mit dem ARM64-JIT auf dem Pi (bisher nur die x86-64-Referenzmaschine).
 - Das übrige AROS-64-System ist noch mit dem LLVM vor der Backend-Korrektur gebaut. Betroffen wären nur
   Funktionen mit neu ausgerichtetem Stapel, die selten sind (C ohne `i128`/`alignas(16)`). Ein Neubau steht aus.
