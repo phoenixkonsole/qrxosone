@@ -84,8 +84,9 @@ Puffer über 4 GB gehen über einen Zwischenpuffer (der Dienst nimmt 32-Bit-Adre
 eigene Umgebung (AROS-Prozesse teilen ihre Variablen); `pre_exec` und Prozessgruppen gibt es nicht; `kill` schickt
 Ctrl-C. Im Tor-Modus der Engine gehen TCP-Verbindungen über `qrxnetd`, UDP verlässt den Rechner dann nicht.
 
+Das AROS-64-System ist mit dem korrigierten Backend neu gebaut (alle Objekte neu übersetzt, `build-linux.sh`), darauf
+laufen `rstd`, `runwind`, `rsys`, GeckoRuntime und die C++-Registertests wieder fehlerfrei.
+
 Noch nicht:
 
 - Ein Lauf mit dem ARM64-JIT auf dem Pi (bisher nur die x86-64-Referenzmaschine).
-- Das übrige AROS-64-System ist noch mit dem LLVM vor der Backend-Korrektur gebaut. Betroffen wären nur
-  Funktionen mit neu ausgerichtetem Stapel, die selten sind (C ohne `i128`/`alignas(16)`). Ein Neubau steht aus.
