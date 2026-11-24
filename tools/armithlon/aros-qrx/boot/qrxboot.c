@@ -188,6 +188,7 @@ static long long boot(int argc, char **argv, double seconds, unsigned cores, con
     qec64_machine *m = qec64_machine_new(ram, ram_size, cores);
     static qec64_board board;           /* the emulator's devices: the clock for battclock.resource */
     qec64_board_init(&board, ram, ram_size);
+    board.cores = cores;
     qec64_machine_set_mmio(m, qec64_board_mmio, &board);
     static char out[1 << 20];
     unsigned who = 0;

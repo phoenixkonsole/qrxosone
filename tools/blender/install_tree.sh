@@ -2,7 +2,8 @@
 # Puts Blender, Python and their scripts into the test tree: SYS:blender, SYS:python, SYS:lib/python3.5,
 # SYS:2.79/scripts with the add-ons Blender enables by default (Cycles is not built).
 set -eu
-W=${QRX_BLENDER_WORK:-/Users/pascalpapara/Documents/GitHub/qrxosone/.build/blender-2.79b}
+HERE=$(cd "$(dirname "$0")" && pwd)
+eval "$("$HERE/qrxenv.py" sh)"
 T=$W/tree
 S=$W/src/blender-2.79b/release/scripts
 "$W/elf2hunk" "$W/build/bin/blender" "$T/blender"

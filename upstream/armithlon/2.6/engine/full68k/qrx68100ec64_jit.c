@@ -31,6 +31,16 @@ bool qec64_jit_map_new(uint64_t ram_size, uint8_t **code_map, uint32_t **code_ge
     return true;
 }
 
+static enum qec64_status run_interpreter(qec64_cpu *c, uint64_t max)
+{
+    /* The machine's wake handshake can proceed once this core has no plain JIT code running. */
+    if (c->active_mask && !__atomic_load_n(&c->ordered, __ATOMIC_RELAXED)) {
+        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+        __atomic_store_n(&c->ordered, true, __ATOMIC_SEQ_CST);
+    }
+    return qec64_run(c, max);
+}
+
 #if defined(__aarch64__)
 #include <sys/mman.h>
 #include "qrx_perfmap.h"
@@ -1461,14 +1471,7 @@ static int verify_block(qec64_cpu *c, Block *b, uint64_t *n, enum qec64_status *
 enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
 {
     JitSet *set = c->code_map && c->m64 ? jit_set(c) : NULL;
-    if (!set) {
-        /* no JIT code now: nothing plain of ours for a waking core to wait for */
-        if (c->active_mask && !__atomic_load_n(&c->ordered, __ATOMIC_RELAXED)) {
-            __atomic_thread_fence(__ATOMIC_SEQ_CST);
-            __atomic_store_n(&c->ordered, true, __ATOMIC_SEQ_CST);
-        }
-        return qec64_run(c, max);
-    }
+    if (!set) return run_interpreter(c, max);
     Jit *j = NULL;
     uint64_t left = max;
     c->status = QEC64_RUNNING;
@@ -1576,6 +1579,6 @@ enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
     return QEC64_RUNNING;
 }
 #else
-enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max) { return qec64_run(c, max); }
+enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max) { return run_interpreter(c, max); }
 void qec64_jit_free(qec64_cpu *c) { (void)c; }
 #endif

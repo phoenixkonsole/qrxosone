@@ -12,13 +12,12 @@ import concurrent.futures as cf, os, re, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = Path(os.environ.get('QRX_ROOT', '/Users/pascalpapara/Documents/GitHub/qrxosone'))
-WORK = ROOT / '.build/blender-2.79b'
+sys.path.insert(0, str(HERE))
+from qrxenv import ROOT, WORK, SDK, SDK_DIR, GCC, tool  # noqa: E402
 OUT = WORK / 'port'
 CC = str(HERE / 'aros_cc.py')
-NM = '/opt/homebrew/bin/m68k-elf-nm'
-AR = '/opt/homebrew/bin/m68k-elf-ar'
-SDK = ROOT / '.build/qrx-sdk/sdk/Development'
+NM = tool('nm')
+AR = tool('ar')
 HEADERS = ['stdio.h', 'stdlib.h', 'string.h', 'strings.h', 'unistd.h', 'time.h', 'dirent.h', 'pthread.h', 'errno.h',
            'ctype.h', 'wchar.h', 'sys/stat.h', 'sys/time.h', 'signal.h', 'fcntl.h', 'locale.h', 'zlib.h', 'png.h',
            'stdio.h', 'jpeglib.h', 'ft2build.h', 'math.h', 'libgen.h', 'semaphore.h', 'sched.h']
@@ -44,7 +43,7 @@ def msun():
     syms = set()
     for o in objs.glob('[es]_*.o'):
         syms |= nm_defined(o)
-    gcc = '/opt/homebrew/bin/m68k-elf-gcc'
+    gcc = GCC
     for sym in sorted(syms):
         if sym.startswith('__ieee754_') and not sym.endswith(('_r', 'rem_pio2', 'rem_pio2f')):
             name = sym[len('__ieee754_'):]
@@ -68,29 +67,73 @@ def msun():
 
 
 def prototypes():
+    """name -> (kind, argument words) for every function the SDK headers declare that returns a pointer
+    ('p'), a double ('d') or a float ('f'). The compiler classifies the types itself: a return type is
+    often a typedef (png_infop, FT_String *...), which a look at its spelling would miss."""
     tu = OUT / 'protos.c'
-    tu.write_text(''.join(f'#include <{h}>\n' for h in HEADERS) + '#include FT_FREETYPE_H\n')
+    head = ''.join(f'#include <{h}>\n' for h in HEADERS) + '#include FT_FREETYPE_H\n'
+    tu.write_text(head)
     aux = OUT / 'protos.aux'
     subprocess.run([CC, '-c', str(tu), '-o', str(OUT / 'protos.tmp'), '-aux-info', str(aux)], check=True)
     (OUT / 'protos.tmp').unlink()
-    out = {}
+    decls, ptr_decls = [], []
     for line in aux.read_text(errors='replace').splitlines():
-        m = re.match(r'/\* [^*]*\*/ (?:extern )?(.*?)\b(\w+) \((.*)\);', line)
-        if not m:
+        # returns a pointer to an array, a function or an array typedef:
+        # T (*name (args))[n], T (*name (args))(...), jmp_buf (*name (args))
+        m = re.match(r'/\* [^*]*\*/ (?:extern )?[^(]*\(\*(\w+) \((.*)\)\)\s*(?:[\[(][^;]*)?;', line)
+        if m:
+            if '...' not in m.group(2):
+                ptr_decls.append((m.group(1), m.group(2)))
             continue
-        ret, name, args = m.group(1).strip(), m.group(2), m.group(3).split(' /*')[0]
-        depth, n, cur = 0, 0, ''
-        for ch in args:
-            depth += ch == '('; depth -= ch == ')'
-            if ch == ',' and depth == 0:
-                n += 1
-        n = 0 if args.strip() in ('void', '') else n + 1
-        kind = 'p' if ret.endswith('*') else 'd' if re.search(r'\bdouble$', ret) else 'f' if re.search(r'\bfloat$', ret) else None
-        if kind and '...' not in args:
-            words = 0
-            for a in split_args(args):
-                words += 2 if re.search(r'\b(double|long long)\b', a) and '*' not in a else 1
+        m = re.match(r'/\* [^*]*\*/ (?:extern )?(.*?)\b(\w+) \((.*)\);', line)
+        if not m or '...' in m.group(3):
+            continue
+        decls.append((m.group(1).strip(), m.group(2), m.group(3).split(' /*')[0]))
+    # one probe per distinct type: __builtin_classify_type (5 pointer, 8 real) and sizeof
+    types = sorted({re.sub(r'\brestrict\b', '', t).strip() for r, _, a in decls + [('void', n, a) for n, a in ptr_decls]
+                    for t in [r, *split_args(a)]} - {'void', ''})
+    # a type that is not one (a misread declaration) would stop the probe: function pointer types only as (*)
+    types = [t for t in types if '(' not in t or re.fullmatch(r'[^()]*\(\*\)\s*\(.*\)', t)]
+    probe = OUT / 'protos_types.c'
+    asm = OUT / 'protos_types.s'
+    nhead = head.count('\n')
+    # -aux-info writes some types it cannot spell (/* ??? */, a parameter name): leave those out, round by
+    # round, from the lines the compiler rejects; they keep the old default (no bridge, one word)
+    for _ in range(20):
+        probe.write_text(head + ''.join(f'const int qrx_type_{i}[2] = {{ __builtin_classify_type(*({t} *)0), sizeof({t}) }};\n'
+                                        for i, t in enumerate(types)))
+        r = subprocess.run([CC, '-S', str(probe), '-o', str(asm)], capture_output=True, text=True)
+        if r.returncode == 0:
+            break
+        bad = {int(n) - nhead - 1 for n in re.findall(r'protos_types\.c:(\d+):\d+: error', r.stderr)}
+        if not bad:
+            raise RuntimeError(r.stderr[-2000:])
+        types = [t for i, t in enumerate(types) if i not in bad]
+    else:
+        raise RuntimeError('type probe does not compile')
+    info, cur, vals = {}, None, []
+    for line in asm.read_text().splitlines():
+        m = re.match(r'qrx_type_(\d+):', line.strip())
+        if m:
+            cur, vals = int(m.group(1)), []
+            continue
+        m = re.match(r'\.long\s+(-?\d+)', line.strip())
+        if cur is not None and m:
+            vals.append(int(m.group(1)))
+            if len(vals) == 2:
+                info[types[cur]] = tuple(vals)
+                cur = None
+    def classify(t):
+        return info.get(re.sub(r'\brestrict\b', '', t).strip(), (0, 4))
+    out = {}
+    for ret, name, args in decls:
+        cls, size = classify(ret)
+        kind = 'p' if cls == 5 else ('f' if size == 4 else 'd') if cls == 8 else None
+        if kind:
+            words = sum((classify(a)[1] + 3) // 4 for a in split_args(args) if a.strip() not in ('void', ''))
             out[name] = (kind, words)
+    for name, args in ptr_decls:
+        out[name] = ('p', sum((classify(a)[1] + 3) // 4 for a in split_args(args) if a.strip() not in ('void', '')))
     return out
 
 
@@ -124,7 +167,7 @@ def bridges():
     protos = prototypes()
     protos.setdefault('realpath', ('p', 2))  # the SDK's stdlib.h hides it from strict modes
     builtin = {w.split('=', 1)[1] for w in __import__('json').loads(
-        (ROOT / '.build/qrx-sdk/bin/toolchain.json').read_text())['wrap_flags']}
+        (SDK_DIR / 'bin/toolchain.json').read_text())['wrap_flags']}
     sdk_syms = set()
     for lib in ('libm.a', 'libcrt.a', 'libstdlib.a', 'libcrtprog.a', 'libstdc.static.a', 'libpthread.a', 'libz.a', 'libpng.a',
                 'libjpeg.a', 'libfreetype2.a', 'libarossupport.a', 'libamiga.a'):
@@ -148,7 +191,7 @@ def bridges():
     bdir.mkdir(exist_ok=True)
     for o in bdir.glob('*'):
         o.unlink()
-    gcc = '/opt/homebrew/bin/m68k-elf-gcc'
+    gcc = GCC
     def one(name):
         kind, words = protos[name]
         asm = ['.text', f'.globl __wrap_{name}', f'__wrap_{name}:', 'movem.l %a2/%a6,-(%sp)', 'lea 12(%sp),%a2']

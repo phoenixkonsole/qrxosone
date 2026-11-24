@@ -576,10 +576,32 @@ Dafür behoben bzw. neu:
   schaltet das API-Trace ab dieser Stelle ein. Ein Skript-`click` zählt relativ zum aktiven
   Fenster; auf dem Bildschirm bringt jedes Mausereignis sein Fenster selbst mit.
 
-Noch offen: Der Haken „Final Reality jetzt starten“ erscheint nicht (nur „README ansehen“), einzelne
-Absätze werden unten abgeschnitten (unsere Schrift hat etwas höhere Zeilen als MS Sans Serif), und
-das installierte Programm bleibt beim leeren Lizenztext stehen (siehe unten). Das Setup selbst
-wurde nur über das Testskript bedient, noch nicht mit Maus auf dem echten Bildschirm.
+**Danach behoben (2026-11-24):**
+- Der Haken „Final Reality jetzt starten“ fehlt zu Recht: Die InstallShield-Engine blendet ihn selbst
+  aus (`ShowWindow(…, SW_HIDE)` gleich nach dem Anlegen); unter Windows sieht es genauso aus.
+- Abgeschnittene Zeilen: Die Dialogbreite kommt jetzt wie unter Windows aus der Dialogschrift
+  (mittlere Breite von A–Z/a–z; unsere ist 6,35 statt 6 Pixel), und Fenstertexte fassen 4096 statt
+  256 Zeichen (ein Satz brach genau bei 256 ab).
+- Mehrzeilige EDIT-Felder wurden einzeilig gezeichnet: jetzt mit Umbruch, Tabstopps, Rollbalken,
+  Mausrad, Tasten und den EM_-Scrollnachrichten. Die Zusammenfassung vor dem Kopieren und der
+  Lizenztext von Final Reality erscheinen.
+- Der Lizenztext fehlte, weil der Programmordner `C:\` war: FR.exe bildet Pfade als Ordner + `\` +
+  Name und suchte `C:\\ENGLISH.TXT`, was sein Archivleser (`FR.RAS`) nicht findet. Ein Programm,
+  das die Registry unter App Paths führt und dessen Ordner zu diesem Pfad passt, sieht jetzt den
+  installierten Pfad (`C:\Program Files\Final Reality\FR.exe`, aktuelles Verzeichnis dort,
+  Laufwerk C: = der Ordner, in dem das Setup lief). Geprüft durch Nachbau des Archivformats
+  (verschlüsselter Kopf und Inhaltsverzeichnis, CRC-32): `english.txt` steht im Archiv.
+- STATIC-Felder mit `SS_BITMAP`/`SS_ICON` zeichneten nichts: jetzt das Bild aus der Vorlage bzw.
+  aus `STM_SETIMAGE`. Die Logos im Hauptfenster erscheinen.
+- Auswahllisten zeigten nur das erste Zeichen: MFC reicht `CB_ADDSTRING` über `CallWindowProcA`
+  weiter, der Text wurde dabei ein zweites Mal von ANSI nach UTF-16 umgesetzt.
+
+Stand auf der Pi-Engine: Setup → Lizenz (Text lesbar) → „Accept“ → Hauptfenster „Final Reality
+Benchmark (1.01)“ mit Logos und Auswahllisten. **Noch offen:** Nach „Run benchmark“ schaltet das
+Programm auf DirectDraw 640×480 um, das Bild bleibt im Testskript-Modus (Bild im Speicher) schwarz
+(0 Bilder/s); ob Direct3D dort überhaupt gezeichnet wird, ist noch nicht untersucht. Mit Maus auf
+dem echten Bildschirm ist das Ganze noch nicht getestet. Die ReactOS-Dialogtests (calc, winmine)
+liefen hier nicht, weil die ReactOS-Dateien in dieser Umgebung fehlen.
 
 Vorher, ohne Setup: `tools/armithlon/is3-extract.py ARCHIV ZIEL` packt das Archiv mit eigenem
 PKWARE-DCL-Decoder aus (`Group3` gehört nach `e2driver/`). Mit `CoCreateInstance` für

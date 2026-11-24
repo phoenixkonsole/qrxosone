@@ -1,0 +1,3 @@
+#!/bin/sh
+# keeps the original of each file before its first change: qorig.sh FILE...
+for f in "$@"; do [ -e "$f.qrxorig" ] || cp -p "$f" "$f.qrxorig"; done

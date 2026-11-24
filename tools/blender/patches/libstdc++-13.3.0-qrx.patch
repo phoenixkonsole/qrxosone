@@ -1,0 +1,20 @@
+--- a/libstdc++-v3/src/c++20/tzdb.cc	2026-11-24 08:12:21.660269779 +0000
++++ b/libstdc++-v3/src/c++20/tzdb.cc	2026-11-24 08:12:21.661799845 +0000
+@@ -636,11 +636,17 @@
+ 	// The caller must have called lock() for exclusive access to infos.
+ 	void decrement() { }
+ 
++#ifdef _GLIBCXX_HAS_GTHREADS
+ 	// Use a mutex to synchronize all access to the infos vector.
+ 	mutex infos_mutex;
+ 
+ 	void lock() { infos_mutex.lock(); }
+ 	void unlock() { infos_mutex.unlock(); }
++#else
++	// No threads: nothing to synchronize (as in GCC 14).
++	void lock() { }
++	void unlock() { }
++#endif
+       };
+ 
+ #if defined __GTHREADS && __cpp_lib_atomic_wait

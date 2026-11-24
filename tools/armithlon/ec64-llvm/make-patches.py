@@ -16,7 +16,16 @@ CORE = ['llvm/CMakeLists.txt', 'llvm/include/llvm/TargetParser/Triple.h', 'llvm/
         'clang/include/clang/Options/Options.td', 'clang/lib/Basic/Targets/OSTargets.h',
         'clang/lib/Driver/CMakeLists.txt', 'clang/lib/Driver/Driver.cpp',
         'clang/lib/Driver/ToolChains/AROS.cpp', 'clang/lib/Driver/ToolChains/AROS.h',
-        'clang/lib/Lex/InitHeaderSearch.cpp']
+        'clang/lib/Lex/InitHeaderSearch.cpp',
+        # C++ runtime for AROS (build-runtimes.sh): cxa_atexit default, libunwind for m68k64, emutls,
+        # libc++ and libc++abi on AROS
+        'clang/lib/Driver/ToolChains/Clang.cpp',
+        'libunwind/include/__libunwind_config.h', 'libunwind/include/libunwind.h', 'libunwind/src/Registers.hpp',
+        'libunwind/src/UnwindCursor.hpp', 'libunwind/src/libunwind.cpp', 'libunwind/src/config.h',
+        'libunwind/src/UnwindRegistersSave.S', 'libunwind/src/UnwindLevel1-gcc-ext.c', 'libunwind/src/UnwindRegistersRestore.S',
+        'libcxx/src/system_error.cpp', 'libcxx/src/chrono.cpp',
+        'libcxxabi/src/CMakeLists.txt', 'libcxxabi/src/cxa_thread_atexit.cpp',
+        'compiler-rt/lib/builtins/emutls.c']
 NEW = {'lld/ELF/Arch/M68k64.cpp', 'clang/lib/Driver/ToolChains/AROS.cpp', 'clang/lib/Driver/ToolChains/AROS.h'}
 def lines(p):
     return open(p, encoding='utf8').read().splitlines(True) if os.path.exists(p) else []

@@ -95,6 +95,9 @@ typedef struct qclass {
     int builtin;                      /* 1 BUTTON 2 STATIC 3 EDIT 4 DIALOG 5 LISTBOX 6 SCROLLBAR */
 } qclass;
 
+/* Window text: long enough for a licence in an EDIT control or a dialog's paragraphs (was 256,
+ * which cut InstallShield's texts in the middle of a word). */
+#define QW_WTEXT 4096
 typedef struct qwnd {
     int used;
     uint32_t h;                       /* handle */
@@ -102,7 +105,7 @@ typedef struct qwnd {
     uint32_t parent, owner, style, exstyle, id, menu, wndproc, userdata, hinst;
     int x, y, cw, ch;                 /* client rect: x/y relative to parent client (screen for top-level) */
     int nl, nt, nr, nb;               /* non-client margins (frame/caption/menu), top-level only */
-    wchar16 text[256];
+    wchar16 text[QW_WTEXT];           /* window text; an EDIT's whole contents */
     uint8_t *extra;                   /* cbWndExtra bytes */
     int nextra;
     int visible, enabled, destroyed;
@@ -123,6 +126,7 @@ typedef struct qwnd {
     void *sheet;                      /* property sheet frame: its pages and buttons */
     uint32_t focus_child;
     int caret;
+    int escroll;                      /* multiline EDIT: first visible line */
     uint32_t tme;                     /* TrackMouseEvent flags */
     uint32_t icon;
     int fs_w, fs_h, fs_bpp;           /* DirectDraw exclusive mode: show on an own screen (backend permitting) */
@@ -414,6 +418,7 @@ void user_input_event(qwin *w, qevent *ev);       /* feed one backend event into
 void qw_dib_register(qwin *w, uint32_t hbm, uint32_t mem, uint32_t bmi, int bw, int bh, int bpp, uint32_t stride);
 uint32_t qw_dib_colortable(qwin *w, uint32_t hdc, uint32_t start, uint32_t n, uint32_t rgbq);
 int qw_user_has_window(qwin *w, const char *title);   /* test scripts: waitfor */
+int qw_reg_get_str(const char *key, const char *name, char *out, size_t max);   /* test scripts: waitfor */
 uint32_t qw_dx_cocreate(qwin *w, uint32_t *a);   /* CoCreateInstance of DirectDraw, DirectSound */
 const qhle *qw_find_dx(const char *name);   /* COM method thunks "IDirectDraw::CreateSurface" */
 FILE *qw_stream_host(qwin *w, uint32_t gfile);    /* host FILE of a guest fopen() stream, NULL otherwise */

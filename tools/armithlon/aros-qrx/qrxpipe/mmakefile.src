@@ -1,0 +1,13 @@
+include $(SRCDIR)/config/aros.cfg
+
+# QRX OS One 64: PIPE: (see qrxpipe-handler.c); build-linux.sh copies this directory to
+# workbench/fs/qrxpipe of the AROS tree.
+
+USER_LDFLAGS := -noclibs -lstdc.static
+
+%build_prog mmake=workbench-fs-qrxpipe \
+	progname=qrxpipe-handler targetdir=$(AROS_FS) \
+	files="qrxpipe-handler" \
+	usestartup=no
+
+%common

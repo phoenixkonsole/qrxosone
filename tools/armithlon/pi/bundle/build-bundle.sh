@@ -40,6 +40,7 @@ app QRXSystem "$REPO/tools/armithlon/qrxsystem/QRXSystem.c"
 app QRXNetwork "$REPO/tools/armithlon/qrxnetwork/QRXNetwork.c"
 app QRXInfo "$REPO/tools/armithlon/qrxinfo/QRXInfo.c"
 app QRXLoadDevice "$REPO/tools/armithlon/diskimage/qrx-load-device.c"
+app QRXAppStore "$REPO/tools/armithlon/appstore/QRXAppStore.c"
 AROS_TC="$TC" sh "$REPO/upstream/armithlon/2.6/engine/guest/aros/ahi/build-aros.sh" "$REPO" "$OUT/ahi" >/dev/null 2>&1
 python3 "$REPO/tools/armithlon/build-desktop.py" >/dev/null
 python3 "$REPO/tools/armithlon/build-system-apps.py" >/dev/null
@@ -50,7 +51,7 @@ xorriso -osirrox on -indev "$OUT/aros.iso" -extract / "$S" >/dev/null 2>&1
 chmod -R u+w "$S"
 cp "$REPO/tools/armithlon/Startup-Sequence-FullISO" "$S/S/Startup-Sequence"
 mkdir -p "$S/QRX/C"
-for f in QRXHostInput QRXMoreMemory QRXWireless QRXSystem QRXNetwork QRXInfo QRXLoadDevice; do cp "$G/$f" "$S/C/$f"; done
+for f in QRXHostInput QRXMoreMemory QRXWireless QRXSystem QRXNetwork QRXInfo QRXLoadDevice QRXAppStore; do cp "$G/$f" "$S/C/$f"; done
 cp "$REPO/.build/qrx-desktop/QRXDesktop.hunk" "$S/QRX/C/QRXDesktop"
 cp "$REPO/.build/qrx-desktop/QRXDesktopPrefs.hunk" "$S/QRX/C/QRXDesktopPrefs"
 for f in QRXWelcome QRXWriter QRXSpreadsheet QRXPresenter QRXHardware QRXSettings QRXIPFSPrefs; do

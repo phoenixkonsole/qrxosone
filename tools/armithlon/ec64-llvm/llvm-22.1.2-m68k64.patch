@@ -338,7 +338,28 @@
        TII(*STI.getInstrInfo()), TRI(STI.getRegisterInfo()) {
    SlotSize = STI.getSlotSize();
    StackPtr = TRI->getStackRegister();
-@@ -201,13 +201,52 @@
+@@ -78,14 +78,18 @@
+ M68k64FrameLowering::getFrameIndexReference(const MachineFunction &MF, int FI,
+                                           Register &FrameReg) const {
+   const MachineFrameInfo &MFI = MF.getFrameInfo();
++  // QRX: fixed objects (incoming arguments, the callee-saved register slots) lie above the
++  // realignment, at a fixed distance from the frame pointer; the offsets below are computed that
++  // way (FI < 0: "skip the saved FP"), so address them through it, as X86FrameLowering does.
++  bool IsFixed = MFI.isFixedObjectIndex(FI);
+ 
+   // We can't calculate offset from frame pointer if the stack is realigned,
+   // so enforce usage of stack/base pointer.  The base pointer is used when we
+   // have dynamic allocas in addition to dynamic realignment.
+   if (TRI->hasBasePointer(MF))
+-    FrameReg = TRI->getBaseRegister();
++    FrameReg = IsFixed ? TRI->getFrameRegister(MF) : Register(TRI->getBaseRegister());
+   else if (TRI->hasStackRealignment(MF))
+-    FrameReg = TRI->getStackRegister();
++    FrameReg = IsFixed ? TRI->getFrameRegister(MF) : Register(TRI->getStackRegister());
+   else
+     FrameReg = TRI->getFrameRegister(MF);
+ 
+@@ -201,13 +205,52 @@
                                             const DebugLoc &DL, unsigned Reg,
                                             uint64_t MaxAlign) const {
    uint64_t Val = -MaxAlign;
@@ -395,7 +416,7 @@
  
    BuildMI(MBB, MBBI, DL, TII.get(MovOp), Tmp)
        .addReg(Reg)
-@@ -224,6 +263,11 @@
+@@ -224,6 +267,11 @@
    BuildMI(MBB, MBBI, DL, TII.get(MovOp), Reg)
        .addReg(Tmp)
        .setMIFlag(MachineInstr::FrameSetup);
@@ -407,7 +428,7 @@
  }
  
  MachineBasicBlock::iterator M68k64FrameLowering::eliminateCallFramePseudoInstr(
-@@ -349,15 +393,15 @@
+@@ -349,15 +397,15 @@
        // load the offset into a register and do one sub/add
        Register Reg;
  
@@ -427,7 +448,7 @@
          MachineInstr *MI = BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr)
                                 .addReg(StackPtr)
                                 .addReg(Reg);
-@@ -400,13 +444,13 @@
+@@ -400,13 +448,13 @@
      return Offset;
    }
  
@@ -443,7 +464,7 @@
      assert(PI->getOperand(1).getReg() == StackPtr);
      Offset -= PI->getOperand(2).getImm();
      MBB.erase(PI);
-@@ -426,7 +470,7 @@
+@@ -426,7 +474,7 @@
  
    bool IsSub = Offset < 0;
    uint64_t AbsOffset = IsSub ? -Offset : Offset;
@@ -452,7 +473,32 @@
  
    MachineInstrBuilder MI = BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr)
                                 .addReg(StackPtr)
-@@ -544,7 +588,7 @@
+@@ -459,11 +507,21 @@
+   if (CSI.empty())
+     return;
+ 
+-  // Calculate offsets.
++  // QRX: spillCalleeSavedRegisters stores all of them with one MOVEM at the frame object with the
++  // highest index, in MOVEM order (the register with the lowest mask bit at the lowest address), not
++  // each at its own frame object: describe that layout.
++  int BaseFI = INT_MIN;
++  for (const auto &I : CSI)
++    BaseFI = std::max(BaseFI, I.getFrameIdx());
++  int64_t Base = MFI.getObjectOffset(BaseFI);
+   for (const auto &I : CSI) {
+-    int64_t Offset = MFI.getObjectOffset(I.getFrameIdx());
+     MCRegister Reg = I.getReg();
+-
++    unsigned Order = TRI->getSpillRegisterOrder(Reg);
++    unsigned Rank = 0;
++    for (const auto &J : CSI)
++      if (TRI->getSpillRegisterOrder(J.getReg()) < Order)
++        ++Rank;
++    int64_t Offset = Base + int64_t(Rank) * SlotSize;
+     unsigned DwarfReg = MRI->getDwarfRegNum(Reg, true);
+     BuildCFI(MBB, MBBI, DL,
+              MCCFIInstruction::createOffset(nullptr, DwarfReg, Offset));
+@@ -544,7 +602,7 @@
      MFI.setOffsetAdjustment(-NumBytes);
  
      BuildMI(MBB, MBBI, DL, TII.get(M68k64::LINK16))
@@ -461,7 +507,16 @@
          .addImm(-NumBytes)
          .setMIFlag(MachineInstr::FrameSetup);
  
-@@ -584,7 +628,7 @@
+@@ -553,7 +611,7 @@
+       // Define the current CFA rule to use the provided offset.
+       assert(StackSize);
+       BuildCFI(MBB, MBBI, DL,
+-               MCCFIInstruction::cfiDefCfaOffset(nullptr, 2 * stackGrowth));
++               MCCFIInstruction::cfiDefCfaOffset(nullptr, -2 * stackGrowth));
+ 
+       // Change the rule for the FramePtr to be an "offset" rule.
+       int DwarfFramePtr = TRI->getDwarfRegNum(MachineFramePtr, true);
+@@ -584,7 +642,7 @@
    int StackOffset = 2 * stackGrowth;
  
    while (MBBI != MBB.end() && MBBI->getFlag(MachineInstr::FrameSetup) &&
@@ -470,7 +525,16 @@
      PushedRegs = true;
      ++MBBI;
  
-@@ -622,13 +666,13 @@
+@@ -593,7 +651,7 @@
+       // Define the current CFA rule to use the provided offset.
+       assert(StackSize);
+       BuildCFI(MBB, MBBI, DL,
+-               MCCFIInstruction::cfiDefCfaOffset(nullptr, StackOffset));
++               MCCFIInstruction::cfiDefCfaOffset(nullptr, -StackOffset));
+       StackOffset += stackGrowth;
+     }
+   }
+@@ -622,13 +680,13 @@
    // to reference locals.
    if (TRI->hasBasePointer(MF)) {
      // Update the base pointer with the current stack pointer.
@@ -486,7 +550,31 @@
        M68k64::addRegIndirectWithDisp(BuildMI(MBB, MBBI, DL, TII.get(Opm)),
                                     FramePtr, true,
                                     MMFI->getRestoreBasePointerOffset())
-@@ -704,7 +748,7 @@
+@@ -644,12 +702,22 @@
+       assert(StackSize);
+       BuildCFI(
+           MBB, MBBI, DL,
+-          MCCFIInstruction::cfiDefCfaOffset(nullptr, -StackSize + stackGrowth));
++          MCCFIInstruction::cfiDefCfaOffset(nullptr, StackSize - stackGrowth));
+     }
+ 
+     // Emit DWARF info specifying the offsets of the callee-saved registers.
+     if (PushedRegs)
+       emitPrologueCalleeSavedFrameMoves(MBB, MBBI, DL);
++  }
++
++  // QRX: the callee-saved registers are stored with MOVEM (spillCalleeSavedRegisters), not pushed:
++  // describe them after that store, or an unwinder cannot restore them.
++  if (!PushedRegs && NeedsDwarfCFI && !MFI.getCalleeSavedInfo().empty()) {
++    MachineBasicBlock::iterator AfterSpill = MBBI;
++    while (AfterSpill != MBB.end() && AfterSpill->getFlag(MachineInstr::FrameSetup) &&
++           AfterSpill->getOpcode() != TargetOpcode::CFI_INSTRUCTION)
++      ++AfterSpill;
++    emitPrologueCalleeSavedFrameMoves(MBB, AfterSpill, DL);
+   }
+ 
+   // TODO Interrupt handlers
+@@ -704,7 +772,7 @@
      MachineBasicBlock::iterator PI = std::prev(MBBI);
      unsigned Opc = PI->getOpcode();
  
@@ -495,7 +583,7 @@
          Opc != M68k64::DBG_VALUE && !PI->isTerminator())
        break;
  
-@@ -733,7 +777,7 @@
+@@ -733,7 +801,7 @@
      // However, we may use this sequence if we have a frame pointer because the
      // effects of the prologue can safely be undone.
      if (LEAAmount != 0) {
@@ -504,7 +592,44 @@
        M68k64::addRegIndirectWithDisp(
            BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr), FramePtr, false,
            LEAAmount);
-@@ -843,7 +887,7 @@
+@@ -823,8 +891,25 @@
+     }
+   }
+ 
+-  // The rest is fine
+-  return false;
++  // QRX: give the callee-saved registers fixed slots right below the saved frame pointer (or the
++  // return address), in MOVEM order: the register with the lowest order at the lowest address, which
++  // is also the slot created first, i.e. the one with the highest index (spillCalleeSavedRegisters
++  // stores them all with one MOVEM there). As fixed objects they keep a fixed distance from the CFA
++  // even when the stack is realigned, so the CFI emitPrologueCalleeSavedFrameMoves gives for them is
++  // right; ordinary spill slots would lie in the realigned area, at a distance known only at run time.
++  if (CSI.empty())
++    return true;
++  const auto *MRI = static_cast<const M68k64RegisterInfo *>(TRI);
++  SmallVector<std::pair<int, unsigned>, 16> Order;
++  for (unsigned i = 0, e = CSI.size(); i < e; ++i)
++    Order.push_back({MRI->getSpillRegisterOrder(CSI[i].getReg()), i});
++  llvm::sort(Order);
++  int Base = SpillSlotOffset - int(CSI.size()) * int(SlotSize);
++  for (unsigned k = 0, e = Order.size(); k < e; ++k) {
++    int FI = MFI.CreateFixedSpillStackObject(SlotSize, Base + int(k) * int(SlotSize));
++    CSI[Order[k].second].setFrameIdx(FI);
++  }
++  return true;
+ }
+ 
+ bool M68k64FrameLowering::spillCalleeSavedRegisters(
+@@ -833,7 +918,7 @@
+   auto &MRI = *static_cast<const M68k64RegisterInfo *>(TRI);
+   auto DL = MBB.findDebugLoc(MI);
+ 
+-  int FI = 0;
++  int FI = INT_MIN;     // QRX: the slots are fixed objects, whose indices are negative
+   unsigned Mask = 0;
+   for (const auto &Info : CSI) {
+     FI = std::max(FI, Info.getFrameIdx());
+@@ -843,7 +928,7 @@
    }
  
    auto I =
@@ -513,7 +638,16 @@
            .addImm(Mask)
            .setMIFlag(MachineInstr::FrameSetup);
  
-@@ -878,7 +922,7 @@
+@@ -868,7 +953,7 @@
+   auto &MRI = *static_cast<const M68k64RegisterInfo *>(TRI);
+   auto DL = MBB.findDebugLoc(MI);
+ 
+-  int FI = 0;
++  int FI = INT_MIN;     // QRX: the slots are fixed objects, whose indices are negative
+   unsigned Mask = 0;
+   for (const auto &Info : CSI) {
+     FI = std::max(FI, Info.getFrameIdx());
+@@ -878,7 +963,7 @@
    }
  
    auto I = M68k64::addFrameReference(
@@ -951,7 +1085,17 @@
  }
  
  SDValue M68k64TargetLowering::LowerGlobalTLSAddress(SDValue Op,
-@@ -1658,6 +1700,18 @@
+@@ -1508,6 +1550,9 @@
+   assert(Subtarget.isTargetELF());
+ 
+   auto *GA = cast<GlobalAddressSDNode>(Op);
++  // QRX: emulated TLS (the default for AROS, see Triple::hasDefaultEmulatedTLS)
++  if (DAG.getTarget().useEmulatedTLS())
++    return LowerToTLSEmulatedModel(GA, DAG);
+   TLSModel::Model AccessModel = DAG.getTarget().getTLSModel(GA->getGlobal());
+ 
+   switch (AccessModel) {
+@@ -1658,6 +1703,18 @@
    // that doing a bittest on the i32 value is ok.
    if (Src.getValueType() == MVT::i8 || Src.getValueType() == MVT::i16)
      Src = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i32, Src);
@@ -970,7 +1114,7 @@
  
    // If the operand types disagree, extend the shift amount to match.  Since
    // BTST ignores high bits (like shifts) we can use anyextend.
-@@ -3019,6 +3073,8 @@
+@@ -3019,6 +3076,8 @@
          return std::make_pair(0U, &M68k64::DR16RegClass);
        case MVT::i32:
          return std::make_pair(0U, &M68k64::DR32RegClass);
@@ -979,7 +1123,7 @@
        default:
          break;
        }
-@@ -3029,6 +3085,8 @@
+@@ -3029,6 +3088,8 @@
          return std::make_pair(0U, &M68k64::AR16RegClass);
        case MVT::i32:
          return std::make_pair(0U, &M68k64::AR32RegClass);
@@ -988,7 +1132,7 @@
        default:
          break;
        }
-@@ -3038,13 +3096,27 @@
+@@ -3038,13 +3099,27 @@
      }
    }
  
@@ -1018,7 +1162,7 @@
  }
  
  // Return true if it is OK for this CMOV pseudo-opcode to be cascaded
-@@ -3376,6 +3448,33 @@
+@@ -3376,6 +3451,33 @@
  // bytes in one go. Touching the stack at 4K increments is necessary to ensure
  // that the guard pages used by the OS virtual memory manager are allocated in
  // correct sequence.
@@ -1052,7 +1196,7 @@
  SDValue M68k64TargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
                                                      SelectionDAG &DAG) const {
    MachineFunction &MF = DAG.getMachineFunction();
-@@ -3443,8 +3542,8 @@
+@@ -3443,8 +3545,8 @@
  
    SDValue Zero = DAG.getConstant(0, DL, VT);
    SDValue One = DAG.getConstant(1, DL, VT);
@@ -1063,7 +1207,7 @@
    SDValue ShamtMinusRegisterSize =
        DAG.getNode(ISD::ADD, DL, VT, Shamt, MinusRegisterSize);
    SDValue RegisterSizeMinus1Shamt =
-@@ -3495,8 +3594,8 @@
+@@ -3495,8 +3597,8 @@
  
    SDValue Zero = DAG.getConstant(0, DL, VT);
    SDValue One = DAG.getConstant(1, DL, VT);
@@ -2488,7 +2632,7 @@
 -  FramePtr = M68k64::A6;
 -  GlobalBasePtr = M68k64::A5;
 -  BasePtr = M68k64::A4;
-+    : M68k64GenRegisterInfo(M68k64::QA0, 0, 0, M68k64::PC), Subtarget(ST) {
++    : M68k64GenRegisterInfo(M68k64::PC, 0, 0, M68k64::PC), Subtarget(ST) {  // QRX: RA = PC
 +  StackPtr = M68k64::QSP;
 +  FramePtr = M68k64::QA6;
 +  GlobalBasePtr = M68k64::QA5;
@@ -2524,17 +2668,17 @@
  }
  
  multiclass MxDataRegister<int INDEX, string REG_NAME, list<string> ALTNAMES = []> {
-@@ -39,6 +40,10 @@
+@@ -38,6 +39,10 @@
+   def NAME
      : MxReg<REG_NAME, INDEX,
              [!cast<Register>("W"#NAME)], [MxSubRegIndex16Lo],
-             [INDEX], ALTNAMES>;
++            [INDEX], ALTNAMES>;
 +  def "Q"#NAME
 +    : MxReg<REG_NAME, INDEX,
 +            [!cast<Register>(NAME)], [MxSubRegIndex32Lo],
-+            [INDEX], ALTNAMES>;
+             [INDEX], ALTNAMES>;
  }
  
- multiclass MxAddressRegister<int INDEX, string REG_NAME, list<string> ALTNAMES = []> {
 @@ -47,6 +52,10 @@
    def NAME
      : MxReg<REG_NAME, INDEX,
@@ -2546,7 +2690,16 @@
              [!add(8,INDEX)], ALTNAMES>;
  }
  
-@@ -108,19 +117,22 @@
+@@ -89,6 +98,8 @@
+ def CCR : MxPseudoReg<"ccr">;
+ def SR  : MxPseudoReg<"sr", [CCR], [MxSubRegIndex8Lo]>;
+ 
++// QRX: the return address column of the call frame information (after fp0-fp7 = 18-25)
++let DwarfNumbers = [26] in
+ def PC  : MxPseudoReg<"pc">;
+ 
+ //===----------------------------------------------------------------------===//
+@@ -108,19 +119,22 @@
  
  // Address Registers
  let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<16,16,16>]> in
@@ -2564,14 +2717,15 @@
  // FIXME try alternative ordering like `D0, D1, A0, A1, ...`
  let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<16,16,16>]> in
 -def XR16 : MxRegClass<[i16], 16, (add DR16, AR16)>;
-+def XR16 : MxRegClass<[i16], 16, (add DR16)>;
- let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
+-let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
 -def XR32 : MxRegClass<[i32], 32, (add DR32, AR32)>;
++def XR16 : MxRegClass<[i16], 16, (add DR16)>;
++let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
 +def XR32 : MxRegClass<[i32], 32, (add DR32)>;
  
  let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
  def SPC  : MxRegClass<[i32], 32, (add SP)>;
-@@ -133,7 +145,7 @@
+@@ -133,7 +147,7 @@
  let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<80,128,32>]> in
  def FPDR80 : MxRegClass<[f80], 32, (add FPDR32)>;
  
@@ -2580,7 +2734,7 @@
    let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<8,16,16>]> in
    def CCRC : MxRegClass<[i8],  16, (add CCR)>;
    let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<16,16,16>]> in
-@@ -148,8 +160,8 @@
+@@ -148,8 +162,8 @@
  }
  
  let isAllocatable = 0 in {
@@ -2591,7 +2745,7 @@
  }
  
  // Register used with tail call
-@@ -159,17 +171,28 @@
+@@ -159,17 +173,28 @@
  def DR32_TC : MxRegClass<[i32], 32, (add D0, D1)>;
  
  let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<16,16,16>]> in
@@ -2603,15 +2757,18 @@
  
  let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<16,16,16>]> in
 -def XR16_TC : MxRegClass<[i16], 16, (add DR16_TC, AR16_TC)>;
-+def XR16_TC : MxRegClass<[i16], 16, (add DR16_TC)>;
- let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
+-let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
 -def XR32_TC : MxRegClass<[i32], 32, (add DR32_TC, AR32_TC)>;
-+def XR32_TC : MxRegClass<[i32], 32, (add DR32_TC)>;
- 
+-
 -// These classes provide spill/restore order if used with MOVEM instruction
 -let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in {
 -  def SPILL   : MxRegClass<[i32], 32, (add XR32)>;
 -  def SPILL_R : MxRegClass<[i32], 32, (add SP, (sequence "A%u", 6, 0), (sequence "D%u", 7, 0))>;
+-}
++def XR16_TC : MxRegClass<[i16], 16, (add DR16_TC)>;
++let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<32,32,32>]> in
++def XR32_TC : MxRegClass<[i32], 32, (add DR32_TC)>;
++
 +
 +// 64-bit: every address is here, and i64 data.
 +let RegInfos = RegInfoByHwMode<[DefaultMode], [RegInfo<64,64,64>]> in {
@@ -2625,7 +2782,7 @@
 +def XR64_TC : MxRegClass<[i64], 64, (add DR64_TC, AR64_TC)>;
 +def SPILL   : MxRegClass<[i64], 64, (add XR64)>;
 +def SPILL_R : MxRegClass<[i64], 64, (add QSP, (sequence "QA%u", 6, 0), (sequence "QD%u", 7, 0))>;
- }
++}
 --- a/llvm/lib/Target/M68k64/M68k64Subtarget.cpp
 +++ b/llvm/lib/Target/M68k64/M68k64Subtarget.cpp
 @@ -12,9 +12,6 @@
@@ -3007,3 +3164,24 @@
    unsigned InstSize = EncodedInst.getBitWidth();
    for (unsigned i = 0; i != InstSize; i += 16)
      support::endian::write<uint16_t>(
+--- a/llvm/lib/Target/M68k64/MCTargetDesc/M68k64MCTargetDesc.cpp
++++ b/llvm/lib/Target/M68k64/MCTargetDesc/M68k64MCTargetDesc.cpp
+@@ -53,7 +53,8 @@
+ 
+ static MCRegisterInfo *createM68k64MCRegisterInfo(const Triple &TT) {
+   MCRegisterInfo *X = new MCRegisterInfo();
+-  InitM68k64MCRegisterInfo(X, llvm::M68k64::A0, 0, 0, llvm::M68k64::PC);
++  // QRX: the return address register is the PC (DWARF 26), the column the unwinder reads
++  InitM68k64MCRegisterInfo(X, llvm::M68k64::PC, 0, 0, llvm::M68k64::PC);
+   return X;
+ }
+ 
+@@ -77,7 +78,7 @@
+ 
+   // Initialize initial frame state.
+   // Calculate amount of bytes used for return address storing
+-  int StackGrowth = -4;
++  int StackGrowth = -8;   // QRX: the return address is 8 bytes in long mode
+ 
+   // Initial state of the frame pointer is SP+StackGrowth.
+   // TODO: Add tests for `cfi_*` directives

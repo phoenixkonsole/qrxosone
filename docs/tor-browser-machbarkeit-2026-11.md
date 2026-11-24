@@ -255,6 +255,44 @@ Grenzen bleiben:
 - Weder AROS noch eine C-Bibliothek laufen auf dem neuen Modus.
 - Der Test-Kernel ist mein eigener kleiner Test, kein Betriebssystem.
 
+### Vierter Stand: C++-Laufzeit (24. November)
+
+Die C++-Laufzeit für QRX OS One 64 steht. Beide Prüfprogramme für den Gecko-Port bestehen auf zwei EC64-Kernen:
+`GeckoPThread` (pthread-Schlüssel und ihre Destruktoren) und `GeckoRuntime` (C++-Ausnahmen über Rahmen hinweg, Threads,
+`thread_local` mit Destruktoren).
+
+| Teil | Stand |
+| --- | --- |
+| Compiler | Die Aufrufrahmen-Information (CFI) des m68k64-Backends war nicht abwickelbar: falsche CFA, kein Rücksprungregister, falsche Vorzeichen, gesicherte Register fehlten. Jetzt richtig, geprüft am Assembler mit und ohne Frame-Pointer. EH-Register d0/d1 für clang, emulierter TLS für AROS |
+| libunwind | Neues Ziel m68k64, Bare-Metal-Suche über die Symbole, die der AROS-Linker anlegt |
+| libc++abi, libc++ | Statisch, mit AROS-pthreads. Noch ohne Dateisystem, Lokalisierung und Wide Characters |
+| TLS | Emuliert über pthread-Schlüssel (`emutls`), Destruktoren beim Thread-Ende laufen |
+
+Damit ist Schritt 6 des Fahrplans für C++ erledigt. Offen bleiben dort Rust-`std` für AROS und die
+Lokalisierung von libc++. Ein großes C++-Programm ist noch nicht gelaufen; das wäre der nächste Prüfstein
+(SpiderMonkey ohne JIT, Schritt 7).
+
+### Fünfter Stand: Rust mit `std` (24. November)
+
+rustc 1.100.0 ist gegen das m68k64-LLVM gebaut. Rust-`std` läuft auf QRX OS One 64, Panics wickeln ab.
+Einzelheiten stehen in `tools/armithlon/rust/README.md`. Geprüft im 64-Bit-AROS-Gast auf zwei EC64-Kernen
+(x86-64-Referenzmaschine, nicht auf dem Pi):
+
+| Test | Ergebnis |
+| --- | --- |
+| `tests/rhello` (core, alloc) | PASS |
+| `tests/rstd`: Threads, Mutex, Kanäle, Condvar mit Timeout, Dateien, Verzeichnisse, HashMap, f64, Umgebung, Zeit | ALL PASS |
+| `tests/runwind`: `catch_unwind` mit Destruktoren, Panic im Thread, 20 Panics, bei 16 und 1 Codegen-Unit | UNWIND ALL PASS |
+
+Dabei kam ein Fehler im m68k64-Backend ans Licht, der auch C/C++ betrifft. In Funktionen mit neu ausgerichtetem Stapel
+(16-Byte-Objekte wie `i128`) lagen die gesicherten Register an Stellen, die die CFI nicht beschreiben kann.
+Stapelargumente wurden dort über einen falschen Bezug gelesen. Das ist behoben, die Backend- und Laufzeittests laufen
+weiter fehlerfrei. Das AROS-64-System selbst ist noch mit dem alten Stand gebaut.
+
+Offen für Gecko: `std::net` (AROS-Sockets liegen in der `bsdsocket.library`, Gecko nutzt dafür ohnehin NSPR), `std::process`,
+ein echtes `poll`, eine Entropiequelle (`arc4random_buf` ist im Moment nicht kryptografisch, für Tor so nicht tragbar).
+Damit ist Schritt 6 erledigt. Als Nächstes kommt Schritt 7: SpiderMonkey ohne JIT, mit seinem Rust-Anteil.
+
 ### Bedarf für die nächsten Schritte
 
 - Quellen: LLVM ist geladen. Für den AROS-Port fehlt `deadwood2/AROS` (rund 221 MB, GitHub).

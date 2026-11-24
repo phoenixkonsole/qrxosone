@@ -9,6 +9,7 @@
 #     WORK        tc/ (the toolchain wrappers) and build-qrx/ (the AROS build) go here
 # Result: WORK/build-qrx/bin/native-m68k64 (gen/rom/boot/core.elf, AROS/...), for
 # ../build-qrxos64.sh. The AROS build fetches some third-party archives (zlib and others) itself.
+# QRX_BUILD_PTHREAD=1 also stages the pthread headers and library in the SDK.
 set -Eeuo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LB="$(cd "$1" && pwd)"; LS="$(cd "$2" && pwd)"; SRC="$(cd "$3" && pwd)"; mkdir -p "$4"; W="$(cd "$4" && pwd)"
@@ -49,7 +50,7 @@ mk() {
       [ "${PIPESTATUS[0]}" = 0 ] && { rm -f "$out"; return; }
     fi
     # .../gen/<module>/include/proto/<name>.h: No such file or directory
-    grep -o '/[^ ]*/include/proto/[^ :]*\.h: No such file' "$out" | sed 's|/proto/[^/]*$||' | sort -u |
+    { grep -o '/[^ ]*/include/proto/[^ :]*\.h: No such file' "$out" || true; } | sed 's|/proto/[^/]*$||' | sort -u |
       while read -r d; do mkdir -p "$d/proto" "$d/clib" "$d/defines" "$d/inline"; done
     rm -f "$out"
   done
@@ -85,4 +86,11 @@ mk linklibs-z-static workbench-libs-z-quick
 # coolimages.library links the coolimagesstatic linklib (likewise not in README's order)
 mk linklibs-coolimagesstatic
 mk workbench-libs-asl-catalogs workbench-libs-coolimages-quick workbench-libs-asl-quick
+# PIPE: for QRX OS One 64 (aros-qrx/qrxpipe; AROS's own workbench/fs/pipe does not start here)
+mkdir -p "$SRC/workbench/fs/qrxpipe"
+cp "$HERE/qrxpipe/mmakefile.src" "$HERE/qrxpipe/qrxpipe-handler.c" "$SRC/workbench/fs/qrxpipe/"
+mk workbench-fs-qrxpipe
+if [[ "${QRX_BUILD_PTHREAD:-0}" == 1 ]]; then
+  mk pthread-includes-copy linklibs-pthread
+fi
 echo "QRX OS One 64 built: $B/bin/native-m68k64"

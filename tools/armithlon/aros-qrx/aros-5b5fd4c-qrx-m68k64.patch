@@ -8243,3 +8243,24 @@ index cf5700f0..3780afd1 100644
  
  #MM includes-copy
  
+diff --git a/compiler/crt/stdc/include/aros/stdc/stddef.h b/compiler/crt/stdc/include/aros/stdc/stddef.h
+index 17e60324..07f7ef47 100644
+--- a/compiler/crt/stdc/include/aros/stdc/stddef.h
++++ b/compiler/crt/stdc/include/aros/stdc/stddef.h
+@@ -13,6 +13,16 @@
+ #include <aros/types/wchar_t.h>
+ #include <aros/types/null.h>
+ 
++/* QRX: C11 and C++11 max_align_t (libc++ needs it), as clang's __stddef_max_align_t.h defines it */
++#if ((defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L) || \
++     (defined(__cplusplus) && __cplusplus >= 201103L)) && !defined(__CLANG_MAX_ALIGN_T_DEFINED)
++#define __CLANG_MAX_ALIGN_T_DEFINED
++typedef struct {
++  long long __aros_max_align_ll __attribute__((__aligned__(__alignof__(long long))));
++  long double __aros_max_align_ld __attribute__((__aligned__(__alignof__(long double))));
++} max_align_t;
++#endif
++
+ #ifdef __GNUC__
+ #define offsetof(type, member)      __builtin_offsetof(type, member)
+ #else

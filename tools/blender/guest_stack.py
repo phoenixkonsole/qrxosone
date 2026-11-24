@@ -7,7 +7,7 @@ ram = open(sys.argv[1], 'rb').read()
 elf, main_arg = sys.argv[2], sys.argv[3]
 want = sys.argv[4] if len(sys.argv) > 4 else 'blender'
 syms = []
-for l in subprocess.run(['/opt/homebrew/bin/m68k-elf-nm', '-n', elf], capture_output=True, text=True).stdout.splitlines():
+for l in subprocess.run([__import__('qrxenv').tool('nm'), '-n', elf], capture_output=True, text=True).stdout.splitlines():
     p = l.split()
     if len(p) == 3 and p[1] in 'tTwW':
         syms.append((int(p[0], 16), p[2]))

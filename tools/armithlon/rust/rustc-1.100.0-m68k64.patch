@@ -1,0 +1,52 @@
+--- a/compiler/rustc_llvm/build.rs
++++ b/compiler/rustc_llvm/build.rs
+@@ -16,6 +16,8 @@
+     "avr",
+     "loongarch",
+     "m68k",
++    // QRX: the 68100EC64 long mode backend of the patched LLVM (tools/armithlon/ec64-llvm)
++    "m68k64",
+     "csky",
+     "mips",
+     "powerpc",
+--- a/compiler/rustc_llvm/src/lib.rs
++++ b/compiler/rustc_llvm/src/lib.rs
+@@ -135,6 +135,15 @@
+         LLVMInitializeM68kAsmPrinter,
+         LLVMInitializeM68kAsmParser
+     );
++    // QRX: m68k64-unknown-aros (QRX OS One 64)
++    init_target!(
++        llvm_component = "m68k64",
++        LLVMInitializeM68k64TargetInfo,
++        LLVMInitializeM68k64Target,
++        LLVMInitializeM68k64TargetMC,
++        LLVMInitializeM68k64AsmPrinter,
++        LLVMInitializeM68k64AsmParser
++    );
+     init_target!(
+         llvm_component = "csky",
+         LLVMInitializeCSKYTargetInfo,
+--- a/compiler/rustc_target/src/spec/mod.rs
++++ b/compiler/rustc_target/src/spec/mod.rs
+@@ -3035,6 +3035,9 @@
+             ),
+             Arch::X86 => (Architecture::I386, None),
+             Arch::S390x => (Architecture::S390x, None),
++            // QRX: the object crate writes M68k as ELF32 only; m68k64 (QRX OS One 64) is ELF64 with
++            // EM_68K. No metadata object then: rustc keeps the metadata raw and leaves out symbols.o.
++            Arch::M68k if self.pointer_width == 64 => return None,
+             Arch::M68k => (Architecture::M68k, None),
+             Arch::Mips | Arch::Mips32r6 => (Architecture::Mips, None),
+             Arch::Mips64 | Arch::Mips64r6 => (
+--- a/library/Cargo.toml
++++ b/library/Cargo.toml
+@@ -85,6 +85,8 @@
+ rustc-std-workspace-core = { path = 'rustc-std-workspace-core' }
+ rustc-std-workspace-alloc = { path = 'rustc-std-workspace-alloc' }
+ rustc-std-workspace-std = { path = 'rustc-std-workspace-std' }
++# QRX: libc with target_os = "aros" (QRX OS One 64)
++libc = { path = '../libc-aros' }
+ 
+ # See comments in `library/windows-sys/Cargo.toml` for why this is patched
+ windows-sys = { path = 'windows-sys' }

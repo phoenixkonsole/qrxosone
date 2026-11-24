@@ -5,9 +5,10 @@
 # Output of the guest programs belongs in files on the tree, see the job script.
 set -u
 TREE=$1; LIMIT=$2; shift 2
-ROOT=${QRX_ROOT:-/Users/pascalpapara/Documents/GitHub/qrxosone}
-APP=$ROOT/.build/bundle/ARMithlon.app/Contents
-ENGINE=${QRX_ENGINE:-$ROOT/.build/blender-2.79b/engine-snapshot}
+HERE=$(cd "$(dirname "$0")" && pwd)
+eval "$("$HERE/qrxenv.py" sh)"
+ROOT=$QRX_ROOT
+ENGINE=${QRX_ENGINE:-$W/engine-snapshot}
 rm -f "$TREE/job.done"
 cat > "$TREE/S/Startup-Sequence" <<'S'
 FailAt 30
@@ -19,8 +20,11 @@ Assign LOCALE: SYS:Locale
 Execute S:job
 Echo done >SYS:job.done
 S
-QRX_FULL_ADF="$APP/Resources/boot.adf" "$ENGINE" --rom "$APP/Resources/aros-rom.bin" \
-  --ext-rom "$APP/Resources/aros-ext.bin" --share "$TREE" --share-rw --apps "${QRX_APPS:-$ROOT/.build/bundle/Apps}" --realtime \
+# Linux: without a window the guest stops before HostFS is mounted; the engine's Linux layer gives one
+# without a screen when QRX_LIO_TEST names an input script (none here). There APPS: comes from QRX_APPS_DIR, not --apps.
+WIN=(); if [ "$(uname)" = Linux ]; then WIN=(--window); export QRX_LIO_TEST=${QRX_LIO_TEST:-/dev/null} QRX_ALSA_DEVICE=${QRX_ALSA_DEVICE:-null} QRX_APPS_DIR=${QRX_APPS:-$ROOT/.build/bundle/Apps}; fi
+QRX_FULL_ADF="$BOOT_DIR/boot.adf" "$ENGINE" "${WIN[@]}" --rom "$BOOT_DIR/aros-rom.bin" \
+  --ext-rom "$BOOT_DIR/aros-ext.bin" --share "$TREE" --share-rw --apps "${QRX_APPS:-$ROOT/.build/bundle/Apps}" --realtime \
   --seconds "$LIMIT" "$@" >"$TREE/engine.log" 2>&1 &
 PID=$!
 T0=$(date +%s)
