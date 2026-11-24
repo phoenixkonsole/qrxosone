@@ -22,7 +22,7 @@ CORE = ['llvm/CMakeLists.txt', 'llvm/include/llvm/TargetParser/Triple.h', 'llvm/
         'clang/lib/Driver/ToolChains/Clang.cpp',
         'libunwind/include/__libunwind_config.h', 'libunwind/include/libunwind.h', 'libunwind/src/Registers.hpp',
         'libunwind/src/UnwindCursor.hpp', 'libunwind/src/libunwind.cpp', 'libunwind/src/config.h',
-        'libunwind/src/UnwindRegistersSave.S', 'libunwind/src/UnwindRegistersRestore.S',
+        'libunwind/src/UnwindRegistersSave.S', 'libunwind/src/UnwindLevel1-gcc-ext.c', 'libunwind/src/UnwindRegistersRestore.S',
         'libcxx/src/system_error.cpp', 'libcxx/src/chrono.cpp',
         'libcxxabi/src/CMakeLists.txt', 'libcxxabi/src/cxa_thread_atexit.cpp',
         'compiler-rt/lib/builtins/emutls.c']

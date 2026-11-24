@@ -1,14 +1,26 @@
-diff -ruN '--exclude=target' libc-0.2.189/src/new/aros/mod.rs /opt/qrx-os-one/rust/libc-aros/src/new/aros/mod.rs
---- a/src/new/aros/mod.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/new/aros/mod.rs	2026-11-24 17:36:31.878022643 +0000
+diff -ruN -x .cargo-checksum.json -x .cargo-ok -x .gitignore -x .cargo_vcs_info.json -x target a/libc/build.rs b/libc/build.rs
+--- a/libc/build.rs
++++ b/libc/build.rs
+@@ -46,7 +46,7 @@
+     (
+         "target_os",
+         &[
+-            "switch", "aix", "ohos", "hurd", "rtems", "visionos", "nuttx", "cygwin", "qurt", "qnx",
++            "switch", "aix", "ohos", "hurd", "rtems", "visionos", "nuttx", "aros", "cygwin", "qurt", "qnx",
+         ],
+     ),
+     (
+diff -ruN -x .cargo-checksum.json -x .cargo-ok -x .gitignore -x .cargo_vcs_info.json -x target a/libc/src/new/aros/mod.rs b/libc/src/new/aros/mod.rs
+--- a/libc/src/new/aros/mod.rs
++++ b/libc/src/new/aros/mod.rs
 @@ -0,0 +1,4 @@
 +//! RTEMS libc.
 +// FIXME(nuttx): link to headers needed.
 +
 +pub(crate) mod unistd;
-diff -ruN '--exclude=target' libc-0.2.189/src/new/aros/unistd.rs /opt/qrx-os-one/rust/libc-aros/src/new/aros/unistd.rs
---- a/src/new/aros/unistd.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/new/aros/unistd.rs	2026-11-24 17:36:31.878054130 +0000
+diff -ruN -x .cargo-checksum.json -x .cargo-ok -x .gitignore -x .cargo_vcs_info.json -x target a/libc/src/new/aros/unistd.rs b/libc/src/new/aros/unistd.rs
+--- a/libc/src/new/aros/unistd.rs
++++ b/libc/src/new/aros/unistd.rs
 @@ -0,0 +1,7 @@
 +//! Header: `unistd.h`
 +
@@ -17,9 +29,9 @@ diff -ruN '--exclude=target' libc-0.2.189/src/new/aros/unistd.rs /opt/qrx-os-one
 +    STDIN_FILENO,
 +    STDOUT_FILENO,
 +};
-diff -ruN '--exclude=target' libc-0.2.189/src/new/mod.rs /opt/qrx-os-one/rust/libc-aros/src/new/mod.rs
---- a/src/new/mod.rs	2006-07-24 01:21:28.000000000 +0000
-+++ b/src/new/mod.rs	2026-11-24 17:36:31.890301942 +0000
+diff -ruN -x .cargo-checksum.json -x .cargo-ok -x .gitignore -x .cargo_vcs_info.json -x target a/libc/src/new/mod.rs b/libc/src/new/mod.rs
+--- a/libc/src/new/mod.rs
++++ b/libc/src/new/mod.rs
 @@ -96,6 +96,10 @@
      } else if #[cfg(any(target_os = "nto", target_os = "qnx"))] {
          mod nto;
@@ -31,10 +43,10 @@ diff -ruN '--exclude=target' libc-0.2.189/src/new/mod.rs /opt/qrx-os-one/rust/li
      } else if #[cfg(target_os = "nuttx")] {
          mod nuttx;
          pub(crate) use nuttx::*;
-diff -ruN '--exclude=target' libc-0.2.189/src/unix/aros/mod.rs /opt/qrx-os-one/rust/libc-aros/src/unix/aros/mod.rs
---- a/src/unix/aros/mod.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/unix/aros/mod.rs	2026-11-24 17:37:08.992692992 +0000
-@@ -0,0 +1,607 @@
+diff -ruN -x .cargo-checksum.json -x .cargo-ok -x .gitignore -x .cargo_vcs_info.json -x target a/libc/src/unix/aros/mod.rs b/libc/src/unix/aros/mod.rs
+--- a/libc/src/unix/aros/mod.rs
++++ b/libc/src/unix/aros/mod.rs
+@@ -0,0 +1,630 @@
 +///! Definitions for Apache NuttX RTOS.
 +///!
 +///! Following definitions are based on NuttX 13.0.0.
@@ -479,23 +491,23 @@ diff -ruN '--exclude=target' libc-0.2.189/src/unix/aros/mod.rs /opt/qrx-os-one/r
 +pub const SEEK_END: i32 = 2;
 +
 +// sys/stat.h
-+pub const S_IFDIR: u32 = 16384;
-+pub const S_IFLNK: u32 = 40960;
-+pub const S_IFREG: u32 = 32768;
-+pub const S_IFMT: u32 = 61440;
-+pub const S_IFIFO: u32 = 4096;
-+pub const S_IFSOCK: u32 = 49152;
-+pub const S_IFBLK: u32 = 24576;
-+pub const S_IFCHR: u32 = 8192;
-+pub const S_IRUSR: u32 = 256;
-+pub const S_IWUSR: u32 = 128;
-+pub const S_IXUSR: u32 = 64;
-+pub const S_IRGRP: u32 = 32;
-+pub const S_IWGRP: u32 = 16;
-+pub const S_IXGRP: u32 = 8;
-+pub const S_IROTH: u32 = 4;
-+pub const S_IWOTH: u32 = 2;
-+pub const S_IXOTH: u32 = 1;
++pub const S_IFDIR: mode_t = 16384;
++pub const S_IFLNK: mode_t = 40960;
++pub const S_IFREG: mode_t = 32768;
++pub const S_IFMT: mode_t = 61440;
++pub const S_IFIFO: mode_t = 4096;
++pub const S_IFSOCK: mode_t = 49152;
++pub const S_IFBLK: mode_t = 24576;
++pub const S_IFCHR: mode_t = 8192;
++pub const S_IRUSR: mode_t = 256;
++pub const S_IWUSR: mode_t = 128;
++pub const S_IXUSR: mode_t = 64;
++pub const S_IRGRP: mode_t = 32;
++pub const S_IWGRP: mode_t = 16;
++pub const S_IXGRP: mode_t = 8;
++pub const S_IROTH: mode_t = 4;
++pub const S_IWOTH: mode_t = 2;
++pub const S_IXOTH: mode_t = 1;
 +
 +// sys/poll.h
 +
@@ -642,10 +654,49 @@ diff -ruN '--exclude=target' libc-0.2.189/src/unix/aros/mod.rs /opt/qrx-os-one/r
 +pub const PTHREAD_MUTEX_INITIALIZER: pthread_mutex_t = pthread_mutex_t { __opaque: [0; 15] };
 +pub const PTHREAD_COND_INITIALIZER: pthread_cond_t = pthread_cond_t { __opaque: [0; 17] };
 +pub const PTHREAD_RWLOCK_INITIALIZER: pthread_rwlock_t = pthread_rwlock_t { __opaque: [0; 13] };
-diff -ruN '--exclude=target' libc-0.2.189/src/unix/mod.rs /opt/qrx-os-one/rust/libc-aros/src/unix/mod.rs
---- a/src/unix/mod.rs	2006-07-24 01:21:28.000000000 +0000
-+++ b/src/unix/mod.rs	2026-11-24 17:33:43.796989229 +0000
-@@ -2511,6 +2511,10 @@
++
++// QRX: flags AROS's C library does not have. AROS has no exec(), so close-on-exec means nothing there.
++pub const O_CLOEXEC: c_int = 0;
++// poll() is not in AROS's C library; libqrxaroscompat provides it on top of select() with these values.
++pub const POLLIN: c_short = 0x1;
++pub const POLLPRI: c_short = 0x2;
++pub const POLLOUT: c_short = 0x4;
++pub const POLLERR: c_short = 0x8;
++pub const POLLHUP: c_short = 0x10;
++pub const POLLNVAL: c_short = 0x20;
++pub const POLLRDNORM: c_short = 0x40;
++pub const POLLWRNORM: c_short = POLLOUT;
++// Multicast options of the BSD socket API (AROS's network stack is BSD-derived; values as in 4.4BSD).
++pub const IP_MULTICAST_IF: c_int = 9;
++pub const IP_MULTICAST_TTL: c_int = 10;
++pub const IP_MULTICAST_LOOP: c_int = 11;
++pub const IP_ADD_MEMBERSHIP: c_int = 12;
++pub const IP_DROP_MEMBERSHIP: c_int = 13;
++pub const IPV6_MULTICAST_IF: c_int = 9;
++pub const IPV6_MULTICAST_HOPS: c_int = 10;
++pub const IPV6_MULTICAST_LOOP: c_int = 11;
++pub const IPV6_JOIN_GROUP: c_int = 12;
++pub const IPV6_LEAVE_GROUP: c_int = 13;
+diff -ruN -x .cargo-checksum.json -x .cargo-ok -x .gitignore -x .cargo_vcs_info.json -x target a/libc/src/unix/mod.rs b/libc/src/unix/mod.rs
+--- a/libc/src/unix/mod.rs
++++ b/libc/src/unix/mod.rs
+@@ -430,12 +430,14 @@
+     if #[cfg(any(
+         target_os = "l4re",
+         target_os = "espidf",
+-        target_os = "nuttx"
++        target_os = "nuttx",
++        target_os = "aros"
+     ))] {
+         // required libraries are linked externally for these platforms:
+         // * L4Re
+         // * ESP-IDF
+         // * NuttX
++        // * AROS (clang's AROS driver links the C library, posixc and the pthread library)
+     } else if #[cfg(feature = "std")] {
+         // cargo build, don't pull in anything extra as the std dep
+         // already pulls in all libs.
+@@ -2511,6 +2513,10 @@
      } else if #[cfg(target_os = "hurd")] {
          mod hurd;
          pub use self::hurd::*;

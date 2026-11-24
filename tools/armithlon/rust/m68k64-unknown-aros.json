@@ -35,12 +35,16 @@
     "description": "QRX OS One 64: 64-bit AROS on the 68100EC64 (long mode, LP64, no FPU)",
     "tier": 3,
     "host_tools": false,
-    "std": false
+    "std": true
   },
   "no-default-libraries": false,
   "post-link-args": {
     "gnu-cc": [
-      "-Wl,--no-gc-sections"
+      "-Wl,--no-gc-sections",
+      "-L/opt/qrx-os-one/ec64llvm/build/lib",
+      "-lqrxaroscompat",
+      "-lunwind",
+      "-lpthread"
     ]
   }
 }

@@ -23,6 +23,13 @@ if [ ! -d "$V" ]; then
     xz -dc "dl/$V.tar.xz" | tar -x --exclude="$V/src/llvm-project" --exclude="$V/src/gcc" \
         --exclude="$V/vendor"      # tests/ stays: the compiler includes files from it (57 MB)
     patch -p1 -d "$V" < "$HERE/rustc-1.100.0-m68k64.patch"
+    # std for AROS (os::aros, the cfgs, errno, condvar clock, the libc link setup)
+    patch -p1 -d "$V" < "$HERE/rustc-1.100.0-aros-std.patch"
+    # the libc crate with an AROS module, measured against the AROS 64 headers (gen-libc-aros.py);
+    # library/Cargo.toml (rustc patch) points std at it
+    xz -dc "dl/$V.tar.xz" | tar -x "$V/vendor/libc-0.2.189"
+    mv "$V/vendor/libc-0.2.189" "$V/libc-aros"; rmdir "$V/vendor" 2>/dev/null || true
+    patch -p2 -d "$V/libc-aros" < "$HERE/libc-0.2.189-aros.patch"
     # the archive points cargo at its vendor/ directory, which is left out: crates come from crates.io
     mv "$V/.cargo/config.toml" "$V/.cargo/config.toml.vendored"
 fi
@@ -36,6 +43,8 @@ docs = false
 extended = false
 vendor = false
 [rust]
+# libc-aros is a path dependency, so the warnings of its upstream code are not capped by cargo
+deny-warnings = false
 channel = "dev"
 debug = false
 debuginfo-level = 0

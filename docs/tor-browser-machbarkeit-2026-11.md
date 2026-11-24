@@ -272,6 +272,27 @@ Damit ist Schritt 6 des Fahrplans für C++ erledigt. Offen bleiben dort Rust-`st
 Lokalisierung von libc++. Ein großes C++-Programm ist noch nicht gelaufen; das wäre der nächste Prüfstein
 (SpiderMonkey ohne JIT, Schritt 7).
 
+### Fünfter Stand: Rust mit `std` (24. November)
+
+rustc 1.100.0 ist gegen das m68k64-LLVM gebaut. Rust-`std` läuft auf QRX OS One 64, Panics wickeln ab.
+Einzelheiten stehen in `tools/armithlon/rust/README.md`. Geprüft im 64-Bit-AROS-Gast auf zwei EC64-Kernen
+(x86-64-Referenzmaschine, nicht auf dem Pi):
+
+| Test | Ergebnis |
+| --- | --- |
+| `tests/rhello` (core, alloc) | PASS |
+| `tests/rstd`: Threads, Mutex, Kanäle, Condvar mit Timeout, Dateien, Verzeichnisse, HashMap, f64, Umgebung, Zeit | ALL PASS |
+| `tests/runwind`: `catch_unwind` mit Destruktoren, Panic im Thread, 20 Panics, bei 16 und 1 Codegen-Unit | UNWIND ALL PASS |
+
+Dabei kam ein Fehler im m68k64-Backend ans Licht, der auch C/C++ betrifft. In Funktionen mit neu ausgerichtetem Stapel
+(16-Byte-Objekte wie `i128`) lagen die gesicherten Register an Stellen, die die CFI nicht beschreiben kann.
+Stapelargumente wurden dort über einen falschen Bezug gelesen. Das ist behoben, die Backend- und Laufzeittests laufen
+weiter fehlerfrei. Das AROS-64-System selbst ist noch mit dem alten Stand gebaut.
+
+Offen für Gecko: `std::net` (AROS-Sockets liegen in der `bsdsocket.library`, Gecko nutzt dafür ohnehin NSPR), `std::process`,
+ein echtes `poll`, eine Entropiequelle (`arc4random_buf` ist im Moment nicht kryptografisch, für Tor so nicht tragbar).
+Damit ist Schritt 6 erledigt. Als Nächstes kommt Schritt 7: SpiderMonkey ohne JIT, mit seinem Rust-Anteil.
+
 ### Bedarf für die nächsten Schritte
 
 - Quellen: LLVM ist geladen. Für den AROS-Port fehlt `deadwood2/AROS` (rund 221 MB, GitHub).

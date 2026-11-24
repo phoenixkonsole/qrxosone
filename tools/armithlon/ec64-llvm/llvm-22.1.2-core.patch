@@ -1507,6 +1507,16 @@
    #endif
  #elif defined(__BIONIC__) && defined(_LIBUNWIND_ARM_EHABI)
    // For ARM EHABI, Bionic didn't implement dl_iterate_phdr until API 21. After
+@@ -126,7 +130,8 @@
+ #if defined(__i386__) || defined(__x86_64__) || defined(__powerpc__) ||        \
+     (!defined(__APPLE__) && defined(__arm__)) || defined(__aarch64__) ||       \
+     defined(__mips__) || defined(__riscv) || defined(__hexagon__) ||           \
+-    defined(__sparc__) || defined(__s390x__) || defined(__loongarch__)
++    defined(__sparc__) || defined(__s390x__) || defined(__loongarch__) ||     \
++    defined(__m68k64__) /* QRX */
+ #if !defined(_LIBUNWIND_BUILD_SJLJ_APIS)
+ #define _LIBUNWIND_BUILD_ZERO_COST_APIS
+ #endif
 --- a/libunwind/src/UnwindRegistersSave.S
 +++ b/libunwind/src/UnwindRegistersSave.S
 @@ -1043,6 +1043,32 @@
@@ -1542,6 +1552,35 @@
  #elif defined(__or1k__)
  
  #
+--- a/libunwind/src/UnwindLevel1-gcc-ext.c
++++ b/libunwind/src/UnwindLevel1-gcc-ext.c
+@@ -265,7 +265,14 @@
+ /// was broken until 10.6.
+ _LIBUNWIND_EXPORT void __register_frame(const void *fde) {
+   _LIBUNWIND_TRACE_API("__register_frame(%p)", fde);
++#if defined(__AROS__)
++  // QRX: AROS's startup (compiler/autoinit/initexitsets.c) calls this the libgcc way, with the
++  // start of the program's whole .eh_frame section. The bare-metal lookup already searches that
++  // section (__eh_frame_start/__eh_frame_end), so there is nothing to register.
++  (void)fde;
++#else
+   __unw_add_dynamic_fde((unw_word_t)(uintptr_t)fde);
++#endif
+ }
+ 
+ 
+@@ -275,7 +282,11 @@
+ /// was broken until 10.6.
+ _LIBUNWIND_EXPORT void __deregister_frame(const void *fde) {
+   _LIBUNWIND_TRACE_API("__deregister_frame(%p)", fde);
++#if defined(__AROS__)
++  (void)fde;      // QRX: see __register_frame
++#else
+   __unw_remove_dynamic_fde((unw_word_t)(uintptr_t)fde);
++#endif
+ }
+ 
+ 
 --- a/libunwind/src/UnwindRegistersRestore.S
 +++ b/libunwind/src/UnwindRegistersRestore.S
 @@ -884,6 +884,25 @@
