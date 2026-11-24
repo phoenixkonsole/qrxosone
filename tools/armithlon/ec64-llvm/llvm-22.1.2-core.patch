@@ -723,7 +723,7 @@
        break;
 --- a/clang/lib/Driver/ToolChains/AROS.cpp
 +++ b/clang/lib/Driver/ToolChains/AROS.cpp
-@@ -0,0 +1,404 @@
+@@ -0,0 +1,408 @@
 +//===--- AROS.cpp - AROS Tool Chain -------------===//
 +//
 +//                     The LLVM Compiler Infrastructure
@@ -1073,6 +1073,10 @@
 +        CC1Args.push_back("-lc++");
 +        CC1Args.push_back("-lc++abi");
 +        CC1Args.push_back("-lunwind");
++        // QRX OS One 64: the wide-character and other POSIX functions libc++ needs and AROS's C
++        // library lacks (tools/armithlon/rust/compat, installed next to libc++)
++        if (getTriple().getArch() == llvm::Triple::m68k64)
++          CC1Args.push_back("-lqrxaroscompat");
 +        break;
 +    }
 +    case ToolChain::CST_Libstdcxx:
@@ -1648,6 +1652,193 @@
  #  define _LIBCPP_HAS_CLOCK_GETTIME
  #endif
  
+--- a/libcxx/include/__locale_dir/support/aros.h
++++ b/libcxx/include/__locale_dir/support/aros.h
+@@ -0,0 +1,152 @@
++//===-----------------------------------------------------------------------===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++
++#ifndef _LIBCPP___LOCALE_DIR_SUPPORT_AROS_H
++#define _LIBCPP___LOCALE_DIR_SUPPORT_AROS_H
++
++#include <__config>
++#include <__utility/forward.h>
++#include <clocale> // uselocale & friends
++#include <cstdio>
++#include <cstdlib>
++#include <cwchar>
++#include <cstring>
++
++#if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
++#  pragma GCC system_header
++#endif
++
++_LIBCPP_BEGIN_NAMESPACE_STD
++namespace __locale {
++
++// QRX OS One 64 (AROS): the "C" locale is the only one; a locale_t is a token for it, and switching
++// to it changes nothing. The *_l functions come from no_locale/ (they ignore the locale).
++struct __aros_locale {};
++using locale_t = __aros_locale*;
++inline __aros_locale __aros_c_locale;
++
++struct __locale_guard {
++  _LIBCPP_HIDE_FROM_ABI __locale_guard(locale_t&) {}
++  __locale_guard(__locale_guard const&)            = delete;
++  __locale_guard& operator=(__locale_guard const&) = delete;
++};
++
++#define _LIBCPP_COLLATE_MASK (1 << 0)
++#define _LIBCPP_CTYPE_MASK (1 << 1)
++#define _LIBCPP_MONETARY_MASK (1 << 2)
++#define _LIBCPP_NUMERIC_MASK (1 << 3)
++#define _LIBCPP_TIME_MASK (1 << 4)
++#define _LIBCPP_MESSAGES_MASK (1 << 5)
++#define _LIBCPP_ALL_MASK 0x3f
++#define _LIBCPP_LC_ALL LC_ALL
++
++using __locale_t _LIBCPP_NODEBUG = locale_t;
++
++#if defined(_LIBCPP_BUILDING_LIBRARY)
++using __lconv_t _LIBCPP_NODEBUG = std::lconv;
++
++inline _LIBCPP_HIDE_FROM_ABI __locale_t __newlocale(int, const char* __name, __locale_t) {
++  // only "C" and "POSIX" (and "", the environment's, which is "C" here)
++  if (__name && (!__name[0] || !std::strcmp(__name, "C") || !std::strcmp(__name, "POSIX")))
++    return &__aros_c_locale;
++  return nullptr;
++}
++
++inline _LIBCPP_HIDE_FROM_ABI void __freelocale(__locale_t) {}
++
++inline _LIBCPP_HIDE_FROM_ABI char* __setlocale(int __category, char const* __locale) {
++  return ::setlocale(__category, __locale);
++}
++
++inline _LIBCPP_HIDE_FROM_ABI __lconv_t* __localeconv(__locale_t& __loc) {
++  __locale_guard __current(__loc);
++  return std::localeconv();
++}
++
++//
++// Other functions
++//
++inline _LIBCPP_HIDE_FROM_ABI decltype(MB_CUR_MAX) __mb_len_max(__locale_t __loc) {
++  __locale_guard __current(__loc);
++  return MB_CUR_MAX;
++}
++#  if _LIBCPP_HAS_WIDE_CHARACTERS
++inline _LIBCPP_HIDE_FROM_ABI wint_t __btowc(int __ch, __locale_t __loc) {
++  __locale_guard __current(__loc);
++  return std::btowc(__ch);
++}
++inline _LIBCPP_HIDE_FROM_ABI int __wctob(wint_t __ch, __locale_t __loc) {
++  __locale_guard __current(__loc);
++  return std::wctob(__ch);
++}
++inline _LIBCPP_HIDE_FROM_ABI size_t
++__wcsnrtombs(char* __dest, const wchar_t** __src, size_t __nwc, size_t __len, mbstate_t* __ps, __locale_t __loc) {
++  __locale_guard __current(__loc);
++  return ::wcsnrtombs(__dest, __src, __nwc, __len, __ps); // non-standard; AROS has it
++}
++inline _LIBCPP_HIDE_FROM_ABI size_t __wcrtomb(char* __s, wchar_t __ch, mbstate_t* __ps, __locale_t __loc) {
++  __locale_guard __current(__loc);
++  return std::wcrtomb(__s, __ch, __ps);
++}
++inline _LIBCPP_HIDE_FROM_ABI size_t
++__mbsnrtowcs(wchar_t* __dest, const char** __src, size_t __nms, size_t __len, mbstate_t* __ps, __locale_t __loc) {
++  __locale_guard __current(__loc);
++  return ::mbsnrtowcs(__dest, __src, __nms, __len, __ps); // non-standard
++}
++inline _LIBCPP_HIDE_FROM_ABI size_t
++__mbrtowc(wchar_t* __pwc, const char* __s, size_t __n, mbstate_t* __ps, __locale_t __loc) {
++  __locale_guard __current(__loc);
++  return std::mbrtowc(__pwc, __s, __n, __ps);
++}
++inline _LIBCPP_HIDE_FROM_ABI int __mbtowc(wchar_t* __pwc, const char* __pmb, size_t __max, __locale_t __loc) {
++  __locale_guard __current(__loc);
++  return std::mbtowc(__pwc, __pmb, __max);
++}
++inline _LIBCPP_HIDE_FROM_ABI size_t __mbrlen(const char* __s, size_t __n, mbstate_t* __ps, __locale_t __loc) {
++  __locale_guard __current(__loc);
++  return std::mbrlen(__s, __n, __ps);
++}
++inline _LIBCPP_HIDE_FROM_ABI size_t
++__mbsrtowcs(wchar_t* __dest, const char** __src, size_t __len, mbstate_t* __ps, __locale_t __loc) {
++  __locale_guard __current(__loc);
++  return ::mbsrtowcs(__dest, __src, __len, __ps);
++}
++#  endif // _LIBCPP_HAS_WIDE_CHARACTERS
++#endif   // _LIBCPP_BUILDING_LIBRARY
++
++_LIBCPP_DIAGNOSTIC_PUSH
++_LIBCPP_CLANG_DIAGNOSTIC_IGNORED("-Wgcc-compat")
++_LIBCPP_GCC_DIAGNOSTIC_IGNORED("-Wformat-nonliteral") // GCC doesn't support [[gnu::format]] on variadic templates
++#ifdef _LIBCPP_COMPILER_CLANG_BASED
++#  define _LIBCPP_VARIADIC_ATTRIBUTE_FORMAT(...) _LIBCPP_ATTRIBUTE_FORMAT(__VA_ARGS__)
++#else
++#  define _LIBCPP_VARIADIC_ATTRIBUTE_FORMAT(...) /* nothing */
++#endif
++
++template <class... _Args>
++_LIBCPP_HIDE_FROM_ABI _LIBCPP_VARIADIC_ATTRIBUTE_FORMAT(__printf__, 4, 5) int __snprintf(
++    char* __s, size_t __n, __locale_t __loc, const char* __format, _Args&&... __args) {
++  __locale_guard __current(__loc);
++  return std::snprintf(__s, __n, __format, std::forward<_Args>(__args)...);
++}
++template <class... _Args>
++_LIBCPP_HIDE_FROM_ABI _LIBCPP_VARIADIC_ATTRIBUTE_FORMAT(__printf__, 3, 4) int __asprintf(
++    char** __s, __locale_t __loc, const char* __format, _Args&&... __args) {
++  __locale_guard __current(__loc);
++  return ::asprintf(__s, __format, std::forward<_Args>(__args)...); // non-standard
++}
++_LIBCPP_DIAGNOSTIC_POP
++#undef _LIBCPP_VARIADIC_ATTRIBUTE_FORMAT
++
++} // namespace __locale
++_LIBCPP_END_NAMESPACE_STD
++
++#include <__locale_dir/support/no_locale/characters.h>
++#include <__locale_dir/support/no_locale/strtonum.h>
++
++#endif // _LIBCPP___LOCALE_DIR_SUPPORT_AROS_H
+--- a/libcxx/include/__locale_dir/locale_base_api.h
++++ b/libcxx/include/__locale_dir/locale_base_api.h
+@@ -116,6 +116,8 @@
+ #    include <__locale_dir/support/windows.h>
+ #  elif defined(__Fuchsia__)
+ #    include <__locale_dir/support/fuchsia.h>
++#  elif defined(__AROS__)
++#    include <__locale_dir/support/aros.h>
+ #  elif defined(__linux__)
+ #    include <__locale_dir/support/linux.h>
+ #  elif _LIBCPP_LIBC_NEWLIB
+--- a/libcxx/include/CMakeLists.txt
++++ b/libcxx/include/CMakeLists.txt
+@@ -534,6 +534,7 @@
+   __locale_dir/support/apple.h
+   __locale_dir/support/bsd_like.h
+   __locale_dir/support/freebsd.h
++  __locale_dir/support/aros.h
+   __locale_dir/support/fuchsia.h
+   __locale_dir/support/linux.h
+   __locale_dir/support/netbsd.h
+--- a/libcxx/include/__config
++++ b/libcxx/include/__config
+@@ -705,7 +705,7 @@
+ #    define _LIBCPP_HAS_TRIVIAL_CONDVAR_DESTRUCTION 0
+ #  endif
+ 
+-#  if defined(__BIONIC__) || defined(__NuttX__) || defined(__Fuchsia__) || defined(__wasi__) ||                        \
++#  if defined(__BIONIC__) || defined(__NuttX__) || defined(__Fuchsia__) || defined(__wasi__) || defined(__AROS__) || \
+       _LIBCPP_HAS_MUSL_LIBC || defined(__OpenBSD__) || defined(__LLVM_LIBC__)
+ #    define _LIBCPP_PROVIDES_DEFAULT_RUNE_TABLE
+ #  endif
 --- a/libcxxabi/src/CMakeLists.txt
 +++ b/libcxxabi/src/CMakeLists.txt
 @@ -36,7 +36,8 @@

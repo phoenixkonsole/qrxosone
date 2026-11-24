@@ -252,3 +252,9 @@ wint_t ungetwc(wint_t c, FILE *f)
     return c;
 }
 int fwide(FILE *f, int mode) { (void)f; return mode; }
+
+/* case mapping by name, for the C locale: "tolower" and "toupper" */
+typedef unsigned int qrx_wctrans_t;
+#define wctrans_t qrx_wctrans_t
+wctrans_t wctrans(const char *n) { return !strcmp(n, "tolower") ? 1 : !strcmp(n, "toupper") ? 2 : 0; }
+wint_t towctrans(wint_t c, wctrans_t t) { return t == 1 ? towlower(c) : t == 2 ? towupper(c) : c; }

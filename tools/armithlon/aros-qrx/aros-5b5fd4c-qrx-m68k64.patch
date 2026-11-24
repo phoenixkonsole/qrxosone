@@ -7469,6 +7469,121 @@ index 4fd49edf..ec73592f 100644
  #elif __riscv64
  #   define _JMPLEN 12
  #elif __riscv
+diff --git a/compiler/crt/stdc/include/aros/stdc/stdcnotimpl.h b/compiler/crt/stdc/include/aros/stdc/stdcnotimpl.h
+index df0e073f..e1ed83ae 100644
+--- a/compiler/crt/stdc/include/aros/stdc/stdcnotimpl.h
++++ b/compiler/crt/stdc/include/aros/stdc/stdcnotimpl.h
+@@ -9,6 +9,16 @@
+ */
+ 
+ 
++/* QRX OS One 64: libqrxaroscompat implements the wide-character and wctype functions for the C
++   locale (tools/armithlon/rust/compat/qrxwchar.c), so their declarations are visible there */
++#if defined(__m68k64__)
++# ifndef STDC_INCLUDE_WCHAR_NOTIMPL
++#  define STDC_INCLUDE_WCHAR_NOTIMPL
++# endif
++# ifndef STDC_INCLUDE_WCTYPE_NOTIMPL
++#  define STDC_INCLUDE_WCTYPE_NOTIMPL
++# endif
++#endif
+ #if !defined(STDC_INCLUDE_NOTIMPL)
+ # define STDC_NOTIMPL(x)
+ # if !defined(STDC_INCLUDE_STDLIB_NOTIMPL)
+diff --git a/compiler/crt/stdc/include/aros/stdc/stddef.h b/compiler/crt/stdc/include/aros/stdc/stddef.h
+index 17e60324..07f7ef47 100644
+--- a/compiler/crt/stdc/include/aros/stdc/stddef.h
++++ b/compiler/crt/stdc/include/aros/stdc/stddef.h
+@@ -13,6 +13,16 @@
+ #include <aros/types/wchar_t.h>
+ #include <aros/types/null.h>
+ 
++/* QRX: C11 and C++11 max_align_t (libc++ needs it), as clang's __stddef_max_align_t.h defines it */
++#if ((defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L) || \
++     (defined(__cplusplus) && __cplusplus >= 201103L)) && !defined(__CLANG_MAX_ALIGN_T_DEFINED)
++#define __CLANG_MAX_ALIGN_T_DEFINED
++typedef struct {
++  long long __aros_max_align_ll __attribute__((__aligned__(__alignof__(long long))));
++  long double __aros_max_align_ld __attribute__((__aligned__(__alignof__(long double))));
++} max_align_t;
++#endif
++
+ #ifdef __GNUC__
+ #define offsetof(type, member)      __builtin_offsetof(type, member)
+ #else
+diff --git a/compiler/crt/stdc/include/aros/stdc/wchar.h b/compiler/crt/stdc/include/aros/stdc/wchar.h
+index 9a11f07e..fb962b8c 100644
+--- a/compiler/crt/stdc/include/aros/stdc/wchar.h
++++ b/compiler/crt/stdc/include/aros/stdc/wchar.h
+@@ -30,6 +30,11 @@ struct tm;
+ 
+ /*  wchar.h should not include stdio.h */
+ struct __sFILE;
++#if defined(__cplusplus) || (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L)
++/* QRX: FILE here too, as glibc's wchar.h has it: libc++'s <cwchar> brings std::FILE in from it
++   (a repeated identical typedef is fine in C11 and C++) */
++typedef struct __sFILE FILE;
++#endif
+ 
+ 
+ __BEGIN_DECLS
+@@ -114,7 +119,7 @@ size_t wcsftime(wchar_t * restrict s, size_t maxsize,
+ /* Extended multibyte and wide character utilities */
+ wint_t btowc(int c);
+ int wctob(wint_t c);
+-int wcwidth(wchar_t);
++/* wcwidth: the inline function below (QRX: declaring it here too clashes with it) */
+ )
+ #if !defined(STDC_NOINLINE) && !defined(STDC_NOINLINE_WCHAR)
+ __header_inline int wcwidth(wchar_t wc) {
+diff --git a/compiler/crt/stdc/include/aros/stdc/wctype.h b/compiler/crt/stdc/include/aros/stdc/wctype.h
+index 3053d5b9..d557b078 100644
+--- a/compiler/crt/stdc/include/aros/stdc/wctype.h
++++ b/compiler/crt/stdc/include/aros/stdc/wctype.h
+@@ -27,6 +27,7 @@ int iswcntrl(wint_t);
+ int iswdigit(wint_t);
+ int iswgraph(wint_t);
+ int iswlower(wint_t);
++int iswprint(wint_t); /* QRX: was missing from the list */
+ int iswpunct(wint_t);
+ int iswspace(wint_t);
+ int iswupper(wint_t);
+diff --git a/compiler/crt/stdc/include/aros/types/wctrans_t.h b/compiler/crt/stdc/include/aros/types/wctrans_t.h
+index b8820505..4b5b679d 100644
+--- a/compiler/crt/stdc/include/aros/types/wctrans_t.h
++++ b/compiler/crt/stdc/include/aros/types/wctrans_t.h
+@@ -6,10 +6,9 @@
+     $Id$
+ */
+ 
+-#ifndef __cplusplus
+-
+-/* typedef int wctrans_t; */
+-
++#if defined(__m68k64__)
++/* QRX OS One 64: a scalar type, the functions are in libqrxaroscompat (qrxwchar.c) */
++typedef unsigned int wctrans_t;
+ #endif
+ 
+ #if (0)
+diff --git a/compiler/crt/stdc/include/aros/types/wctype_t.h b/compiler/crt/stdc/include/aros/types/wctype_t.h
+index ad0a116d..3197b1f5 100644
+--- a/compiler/crt/stdc/include/aros/types/wctype_t.h
++++ b/compiler/crt/stdc/include/aros/types/wctype_t.h
+@@ -8,10 +8,9 @@
+     wctype_t definition for AROS
+ */
+ 
+-#ifndef __cplusplus
+-
+-/* typedef int wctype_t; */
+-
++#if defined(__m68k64__)
++/* QRX OS One 64: a scalar type, the functions are in libqrxaroscompat (qrxwchar.c) */
++typedef unsigned int wctype_t;
+ #endif
+ 
+ #if 0
 diff --git a/compiler/crt/stdc/math/fpmath.h b/compiler/crt/stdc/math/fpmath.h
 index b090280a..4ca12dd5 100644
 --- a/compiler/crt/stdc/math/fpmath.h
@@ -8243,24 +8358,3 @@ index cf5700f0..3780afd1 100644
  
  #MM includes-copy
  
-diff --git a/compiler/crt/stdc/include/aros/stdc/stddef.h b/compiler/crt/stdc/include/aros/stdc/stddef.h
-index 17e60324..07f7ef47 100644
---- a/compiler/crt/stdc/include/aros/stdc/stddef.h
-+++ b/compiler/crt/stdc/include/aros/stdc/stddef.h
-@@ -13,6 +13,16 @@
- #include <aros/types/wchar_t.h>
- #include <aros/types/null.h>
- 
-+/* QRX: C11 and C++11 max_align_t (libc++ needs it), as clang's __stddef_max_align_t.h defines it */
-+#if ((defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L) || \
-+     (defined(__cplusplus) && __cplusplus >= 201103L)) && !defined(__CLANG_MAX_ALIGN_T_DEFINED)
-+#define __CLANG_MAX_ALIGN_T_DEFINED
-+typedef struct {
-+  long long __aros_max_align_ll __attribute__((__aligned__(__alignof__(long long))));
-+  long double __aros_max_align_ld __attribute__((__aligned__(__alignof__(long double))));
-+} max_align_t;
-+#endif
-+
- #ifdef __GNUC__
- #define offsetof(type, member)      __builtin_offsetof(type, member)
- #else

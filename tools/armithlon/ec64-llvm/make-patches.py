@@ -24,9 +24,13 @@ CORE = ['llvm/CMakeLists.txt', 'llvm/include/llvm/TargetParser/Triple.h', 'llvm/
         'libunwind/src/UnwindCursor.hpp', 'libunwind/src/libunwind.cpp', 'libunwind/src/config.h',
         'libunwind/src/UnwindRegistersSave.S', 'libunwind/src/UnwindLevel1-gcc-ext.c', 'libunwind/src/UnwindRegistersRestore.S',
         'libcxx/src/system_error.cpp', 'libcxx/src/chrono.cpp',
+        # libc++ localization on AROS (C locale only)
+        'libcxx/include/__locale_dir/support/aros.h', 'libcxx/include/__locale_dir/locale_base_api.h',
+        'libcxx/include/CMakeLists.txt', 'libcxx/include/__config',
         'libcxxabi/src/CMakeLists.txt', 'libcxxabi/src/cxa_thread_atexit.cpp',
         'compiler-rt/lib/builtins/emutls.c']
-NEW = {'lld/ELF/Arch/M68k64.cpp', 'clang/lib/Driver/ToolChains/AROS.cpp', 'clang/lib/Driver/ToolChains/AROS.h'}
+NEW = {'lld/ELF/Arch/M68k64.cpp', 'clang/lib/Driver/ToolChains/AROS.cpp', 'clang/lib/Driver/ToolChains/AROS.h',
+       'libcxx/include/__locale_dir/support/aros.h'}
 def lines(p):
     return open(p, encoding='utf8').read().splitlines(True) if os.path.exists(p) else []
 with tempfile.TemporaryDirectory() as tmp:
