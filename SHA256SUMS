@@ -1,0 +1,6 @@
+3f012b53aedd08ec120fb82abef3f46aeabdb635629a45ec0ae6421e7135881c  aros64-5b5fd4c-qrx-m68k64.tar.xz
+39dd5cc5d33904a4c1bc50426ffedb7abc4c83fd871fb30947d80011b778d642  m68k-aros-gcc-10.5.0-linux-x86_64.tar.xz
+4f2fbd8f25e0043df46a3bec8eda9e076f6f490d20a2e44b648df48892c85c8e  m68k64-llvm-22.1.2-cxxrt-linux-x86_64.tar.xz
+da0cc26d356d2e2514002d5f154e927b54d185d671934cdf84b0ef0a28ef3c86  aros-portssources.tar
+62f2f13ff25b1bb28ea507888e858212d19aafb65e8e72b4a65ee0629ec4ae0c  llvm-project-22.1.2.src.tar.xz
+90dab90b8084eb57c35ae2b1d0b70c8e5138ace6023b22c60a5a400f586f63b2  rustc-1.100.0-src.tar.xz
