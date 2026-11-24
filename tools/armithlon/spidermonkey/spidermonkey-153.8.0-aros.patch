@@ -1,0 +1,239 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -5,73 +5,7 @@
+ # and do not need to be listed here. Their external dependencies are vendored
+ # into `third_party/rust` by `mach vendor rust`.
+ members = [
+-  "browser/app/nmhproxy/",
+   "js/src/rust",
+-  "netwerk/base/idna_glue",
+-  "netwerk/test/http3server",
+-  "security/lockstore/lockstore_ffi",
+-  "security/lockstore/lockstore_rs",
+-  "security/manager/ssl/tests/unit/pkcs11testmodule",
+-  "security/manager/ssl/tests/unit/test_trust_anchors",
+-  "services/app-services-tools/embedded-uniffi-bindgen",
+-  "services/app-services-tools/nimbus-fml",
+-  "testing/geckodriver",
+-  "third_party/application-services/tools/embedded-uniffi-bindgen",
+-  "third_party/application-services/tools/uniffi-bindgen-library-mode",
+-  "third_party/application-services/components/ads-client",
+-  "third_party/application-services/components/autofill",
+-  "third_party/application-services/components/context_id",
+-  "third_party/application-services/components/crashtest",
+-  "third_party/application-services/components/example",
+-  "third_party/application-services/components/filter_adult",
+-  "third_party/application-services/components/fxa-client",
+-  "third_party/application-services/components/init_rust_components",
+-  "third_party/application-services/components/logins",
+-  "third_party/application-services/components/merino",
+-  "third_party/application-services/components/places",
+-  "third_party/application-services/components/push",
+-  "third_party/application-services/components/relay",
+-  "third_party/application-services/components/relevancy",
+-  "third_party/application-services/components/remote_settings",
+-  "third_party/application-services/components/search",
+-  "third_party/application-services/components/suggest",
+-  "third_party/application-services/components/support/error",
+-  "third_party/application-services/components/support/find-places-db",
+-  "third_party/application-services/components/support/firefox-versioning",
+-  "third_party/application-services/components/support/guid",
+-  "third_party/application-services/components/support/interrupt",
+-  "third_party/application-services/components/support/jwcrypto",
+-  "third_party/application-services/components/support/payload",
+-  "third_party/application-services/components/support/nimbus-fml",
+-  "third_party/application-services/components/support/rand_rccrypto",
+-  "third_party/application-services/components/support/rate-limiter",
+-  "third_party/application-services/components/support/restmail-client",
+-  "third_party/application-services/components/support/rc_crypto",
+-  "third_party/application-services/components/support/rc_crypto/nss",
+-  "third_party/application-services/components/support/rc_crypto/nss/nss_build_common",
+-  "third_party/application-services/components/support/rc_crypto/nss/nss_sys",
+-  "third_party/application-services/components/support/rust-log-forwarder",
+-  "third_party/application-services/components/support/sql",
+-  "third_party/application-services/components/support/text-table",
+-  "third_party/application-services/components/support/tracing",
+-  "third_party/application-services/components/support/types",
+-  "third_party/application-services/components/sync_manager",
+-  "third_party/application-services/components/sync15",
+-  "third_party/application-services/components/tabs",
+-  "third_party/application-services/components/viaduct",
+-  "third_party/application-services/components/webext-storage",
+-  "third_party/application-services/components/webext-storage/ffi",
+-  "third_party/application-services/megazords/full",
+-  "toolkit/components/uniffi-bindgen-gecko-js",
+-  "toolkit/crashreporter/android/export",
+-  "toolkit/crashreporter/client/app",
+-  "toolkit/crashreporter/crash_helper_server",
+-  "toolkit/crashreporter/crash_helper_client",
+-  "toolkit/crashreporter/crashping",
+-  "toolkit/crashreporter/mozwer-rust",
+-  "toolkit/library/gtest/rust",
+-  "toolkit/library/rust/",
+-  "services/application-services/components/viaduct-necko",
+   "js/src/builtin/normalizer_glue",
+ ]
+ 
+@@ -345,7 +279,6 @@
+ rusqlite = { path = "build/rust/rusqlite" }
+ 
+ # Overrides to allow easier use of common internal crates.
+-moz_asserts = { path = "mozglue/static/rust/moz_asserts" }
+ 
+ # Patch `rure` to disable building the cdylib and staticlib targets
+ # Cargo has no way to disable building targets your dependencies provide which
+@@ -364,16 +297,12 @@
+ # Other overrides
+ any_all_workaround = { git = "https://github.com/hsivonen/any_all_workaround", rev = "7fb1b7034c9f172aade21ee1c8554e8d8a48af80" }
+ cose = { git = "https://github.com/franziskuskiefer/cose-rust", rev = "43c22248d136c8b38fe42ea709d08da6355cf04b" }
+-firefox-on-glean = { path = "toolkit/components/glean/api" }
+ icu_capi = { path = "intl/icu_capi" }
+ icu_segmenter_data = { path = "intl/icu_segmenter_data" }
+-libudev-sys = { path = "dom/webauthn/libudev-sys" }
+ midir = { git = "https://github.com/mozilla/midir.git", rev = "54759f681f3b523e120d047adec2bb1a97152017" }
+ # Allow webrender to have a versioned dependency on the older crate on crates.io
+ # in order to build standalone.
+-malloc_size_of_derive = { path = "xpcom/rust/malloc_size_of_derive" }
+ # Use the in-tree code instead of pulling it in. It matches the crates.io version
+-wr_malloc_size_of = { path = "gfx/wr/wr_malloc_size_of" }
+ # Remove HarfBuzz itself from harfbuzz-sys, since we already maintain HarfBuzz itself in the tree.
+ harfbuzz-sys = { git = "https://github.com/hsivonen/rust-harfbuzz", rev = "9d58a23a98772a197291d04af93f7041b7093d95" }
+ # Make `harfbuzz` compile for targets with unsigned C char, such as aarch64 Android.
+@@ -388,22 +317,6 @@
+ allocator-api2 = { git = "https://github.com/glandium/allocator-api2", rev = "ad5f3d56a5a4519eff52af4ff85293431466ef5c" }
+ 
+ # application-services overrides to make updating them all simpler.
+-context_id = { path = "third_party/application-services/components/context_id" }
+-error-support = { path = "third_party/application-services/components/support/error" }
+-filter_adult = { path = "third_party/application-services/components/filter_adult" }
+-interrupt-support = { path = "third_party/application-services/components/support/interrupt" }
+-relevancy = { path = "third_party/application-services/components/relevancy" }
+-search = { path = "third_party/application-services/components/search" }
+-sql-support = { path = "third_party/application-services/components/support/sql" }
+-suggest = { path = "third_party/application-services/components/suggest" }
+-sync15 = { path = "third_party/application-services/components/sync15" }
+-tabs = { path = "third_party/application-services/components/tabs" }
+-tracing-support = { path = "third_party/application-services/components/support/tracing" }
+-viaduct = { path = "third_party/application-services/components/viaduct" }
+-webext-storage = { path = "third_party/application-services/components/webext-storage" }
+-logins = { path = "third_party/application-services/components/logins" }
+-init_rust_components = { path = "third_party/application-services/components/init_rust_components" }
+-breach-alerts = { path = "third_party/application-services/components/breach-alerts" }
+ # temporary ohttp override enabling app-services build-related hacks while we wait for a new version.
+ ohttp = { git = "https://github.com/martinthomson/ohttp", revision = "324f876e79394c9b815dcacda3fd4f48f105fdf2" }
+ 
+--- a/build/autoconf/config.sub
++++ b/build/autoconf/config.sub
+@@ -1344,7 +1344,7 @@
+ 			| m68hc11 \
+ 			| m68hc12 \
+ 			| m68hcs12x \
+-			| m68k \
++			| m68k | m68k64 \
+ 			| m88110 \
+ 			| m88k \
+ 			| maxq \
+--- a/build/moz.configure/init.configure
++++ b/build/moz.configure/init.configure
+@@ -517,6 +517,9 @@
+         # former as --target, but we need to make clang happy.
+         if os == "ios-sim":
+             os = "ios-simulator"
++    elif os == "aros":
++        # QRX OS One 64 (AROS)
++        canonical_os = canonical_kernel = "AROS"
+     elif os.startswith("dragonfly"):
+         canonical_os = canonical_kernel = "DragonFly"
+     elif os.startswith("freebsd"):
+@@ -564,6 +567,10 @@
+     elif cpu.startswith("arm"):
+         canonical_cpu = "arm"
+         endianness = "big" if cpu.startswith(("armeb", "armbe")) else "little"
++    elif cpu == "m68k64":
++        # QRX OS One 64: the 68100EC64 in long mode (LP64, big endian)
++        canonical_cpu = "m68k64"
++        endianness = "big"
+     elif cpu in ("m68k"):
+         canonical_cpu = "m68k"
+         endianness = "big"
+--- a/build/moz.configure/rust.configure
++++ b/build/moz.configure/rust.configure
+@@ -544,6 +544,10 @@
+ def rust_target_triple(
+     rustc, target, compiler_info, rust_supported_targets, arm_target
+ ):
++    if target.kernel == "AROS":
++        # QRX OS One 64: a custom target (tools/armithlon/rust/m68k64-unknown-aros.json, found
++        # through RUST_TARGET_PATH; RUSTFLAGS needs -Zunstable-options), its std in rustc's sysroot
++        return "m68k64-unknown-aros"
+     rustc_target = detect_rustc_target(
+         target, compiler_info, arm_target, rust_supported_targets
+     )
+--- a/build/moz.configure/toolchain.configure
++++ b/build/moz.configure/toolchain.configure
+@@ -1825,6 +1825,10 @@
+             result = try_linker(linker)
+             if result is None:
+                 die("Could not use {} as linker".format(linker))
++        elif target.kernel == "AROS":
++            # QRX OS One 64: clang's AROS driver links through collect-aros (it adds the
++            # symbol sets and __eh_frame_start/__eh_frame_end); -fuse-ld would bypass it
++            result = try_linker(None)
+ 
+         if (
+             result is None
+--- a/python/mozbuild/mozbuild/configure/constants.py
++++ b/python/mozbuild/mozbuild/configure/constants.py
+@@ -43,6 +43,7 @@
+         "SunOS",
+         "WINNT",
+         "WASI",
++        "AROS",
+     )
+ 
+ 
+@@ -58,6 +59,7 @@
+         "SunOS",
+         "WINNT",
+         "WASI",
++        "AROS",
+     )
+ 
+ 
+@@ -69,6 +71,7 @@
+     "ia64": 64,
+     "loongarch64": 64,
+     "m68k": 32,
++    "m68k64": 64,
+     "mips32": 32,
+     "mips64": 64,
+     "ppc": 32,
+@@ -125,6 +128,7 @@
+     ("hppa", "__hppa__"),
+     ("sparc64", "__sparc__ && __arch64__"),
+     ("sparc", "__sparc__"),
++    ("m68k64", "__m68k64__"),
+     ("m68k", "__m68k__"),
+     ("mips64", "__mips64"),
+     ("mips32", "__mips__"),
+@@ -147,6 +151,7 @@
+     "SunOS": "__sun__",
+     "WINNT": "_WIN32 || __CYGWIN__",
+     "WASI": "__wasi__",
++    "AROS": "__AROS__",
+ }
+ 
+ assert sorted(kernel_preprocessor_checks.keys()) == sorted(Kernel.POSSIBLE_VALUES)
+--- a/python/mozbuild/mozbuild/frontend/emitter.py
++++ b/python/mozbuild/mozbuild/frontend/emitter.py
+@@ -1837,6 +1837,10 @@
+                 )
+ 
+     def _process_test_manifests(self, context):
++        # QRX: a SpiderMonkey-only source extract without the test directories (QRX_NO_TESTS=1):
++        # their manifests are empty placeholders
++        if os.environ.get("QRX_NO_TESTS"):
++            return
+         for prefix, info in TEST_MANIFESTS.items():
+             for path, manifest in context.get("%s_MANIFESTS" % prefix, []):
+                 for obj in self._process_test_manifest(context, info, path, manifest):

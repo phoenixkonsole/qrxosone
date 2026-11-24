@@ -310,7 +310,7 @@
                                                                          Opts);
 --- a/clang/lib/Basic/Targets/M68k.h
 +++ b/clang/lib/Basic/Targets/M68k.h
-@@ -60,6 +60,44 @@
+@@ -60,6 +60,46 @@
    std::pair<unsigned, unsigned> hardwareInterferenceSizes() const override {
      return std::make_pair(32, 32);
    }
@@ -340,6 +340,8 @@
 +    IntMaxType = SignedLong;
 +    MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
 +  }
++  // _BitInt(N): LLVM legalizes wide integers generically (libc++'s <bitset>, fmt use it)
++  bool hasBitIntType() const override { return true; }
 +  void getTargetDefines(const LangOptions &Opts, MacroBuilder &Builder) const override {
 +    // Not __m68k__ or __mc68000: code that tests those expects the 32-bit m68k ABI
 +    // (AROS picks its register call convention by them).
