@@ -631,6 +631,19 @@ static void reg_load(void)
         if (reg_write(REG_FILE)) remove(REG_FILE_OLD);
     }
 }
+/* A string value for the file system's start (key in lower case, "hklm\\..."); 0 if none. */
+int qw_reg_get_str(const char *key, const char *name, char *out, size_t max)
+{
+    qval *v;
+    size_t n;
+    reg_load();
+    v = val_find(key, name);
+    if (!v || (v->type != 1 && v->type != 2) || !max) return 0;
+    n = v->size < max - 1 ? v->size : max - 1;
+    memcpy(out, v->data, n);
+    out[n] = 0;
+    return 1;
+}
 static void reg_path(qwin *w, uint32_t hk, uint32_t sub, char *out, size_t n)
 {
     const char *root = hk == 0x80000000u ? "hkcr" : hk == 0x80000001u ? "hkcu" : hk == 0x80000002u ? "hklm" : hk == 0x80000003u ? "hku" : NULL;

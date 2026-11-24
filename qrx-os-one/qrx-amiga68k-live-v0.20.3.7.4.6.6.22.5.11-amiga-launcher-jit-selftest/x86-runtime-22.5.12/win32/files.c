@@ -46,6 +46,41 @@ static char g_root[1024];                     /* host directory of drive C: */
 static char g_cwd[512];                       /* current directory relative to the root ("" = root) */
 static int g_init;
 
+/* A program a setup installed (the registry's App Paths name it, e.g. C:\Program Files\Final
+ * Reality\FR.exe) and whose folder here ends the same way: drive C: is the folder that setup ran
+ * in, so the program sees its Windows path, current directory and data where it was installed.
+ * Programs build paths as folder + "\" + name; with the folder as the root that gave
+ * "C:\\NAME", which Final Reality's archive reader cannot find. */
+static void adopt_install(qwin *w)
+{
+    char key[400], val[600], dirpart[600], base[256];
+    const char *sl = strrchr(w->exe_path, '/'), *b;
+    char *last;
+    size_t i, rl, dl;
+    if (!sl) sl = strrchr(w->exe_path, ':');
+    snprintf(base, sizeof(base), "%s", sl ? sl + 1 : w->exe_path);
+    for (i = 0; base[i]; i++) base[i] = (char)tolower((unsigned char)base[i]);
+    snprintf(key, sizeof(key), "hklm\\software\\microsoft\\windows\\currentversion\\app paths\\%s", base);
+    if (!qw_reg_get_str(key, "", val, sizeof(val))) return;
+    if (!(isalpha((unsigned char)val[0]) && val[1] == ':' && val[2] == '\\')) return;
+    last = strrchr(val, '\\');
+    b = last + 1;
+    if (strlen(b) != strlen(base)) return;
+    for (i = 0; b[i]; i++) if (tolower((unsigned char)b[i]) != base[i]) return;
+    dl = (size_t)(last - (val + 3));
+    if (!dl || dl >= sizeof(dirpart)) return;                  /* installed in the root: nothing to do */
+    memcpy(dirpart, val + 3, dl); dirpart[dl] = 0;
+    for (i = 0; i < dl; i++) if (dirpart[i] == '\\') dirpart[i] = '/';
+    rl = strlen(g_root);
+    if (rl <= dl + 1) return;
+    for (i = 0; i < dl; i++) if (tolower((unsigned char)g_root[rl - dl + i]) != tolower((unsigned char)dirpart[i])) return;
+    if (g_root[rl - dl - 1] != '/' && g_root[rl - dl - 1] != ':') return;
+    g_root[rl - dl - (g_root[rl - dl - 1] == '/' ? 1 : 0)] = 0;
+    snprintf(g_cwd, sizeof(g_cwd), "%s", dirpart);
+    snprintf(w->exe_win, sizeof(w->exe_win), "%s", val);
+    if (w->verbose) qw_log(w, "installed program: %s, drive C: is %s", val, g_root);
+}
+
 static void init_root(qwin *w)
 {
     const char *sl;
@@ -58,6 +93,7 @@ static void init_root(qwin *w)
         if (L >= sizeof(g_root)) L = sizeof(g_root) - 1;
         memcpy(g_root, w->exe_path, L); g_root[L] = 0;
     } else if (!getcwd(g_root, sizeof(g_root))) g_root[0] = 0;
+    if (!w->exe_win[0]) adopt_install(w);
 }
 
 static int ieq(const char *a, const char *b)
@@ -250,7 +286,7 @@ static uint32_t create_file(qwin *w, uint32_t *a, int wide)
     switch (disp) {
     case 1: if (exists) { w->last_error = 80; return INVALID_HANDLE; } mode = "w+b"; break;     /* CREATE_NEW */
     case 2: mode = "w+b"; break;                                                               /* CREATE_ALWAYS */
-    case 3: if (!exists) { w->last_error = 2; return INVALID_HANDLE; }                         /* OPEN_EXISTING */
+    case 3: if (!exists) { w->last_error = 2; if (w->verbose) qw_log(w, "CreateFile(%s -> %s): not found", win, host); return INVALID_HANDLE; }   /* OPEN_EXISTING */
             mode = (access & 0x40000000u) ? "r+b" : "rb"; break;
     case 4: mode = exists ? ((access & 0x40000000u) ? "r+b" : "rb") : "w+b"; break;            /* OPEN_ALWAYS */
     case 5: if (!exists) { w->last_error = 2; return INVALID_HANDLE; } mode = "w+b"; break;     /* TRUNCATE_EXISTING */

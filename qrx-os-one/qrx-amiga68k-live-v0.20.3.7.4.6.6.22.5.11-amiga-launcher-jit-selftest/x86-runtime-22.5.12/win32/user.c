@@ -15,6 +15,22 @@
 #define CW_USEDEFAULT 0x80000000u
 #define BASEX 6
 #define BASEY 13
+/* Horizontal dialog units from the dialog font itself, as Windows derives them: the width of
+ * "A..Za..z" / 52 is a quarter of DLU_X(4). The font here is a little wider than MS Sans Serif
+ * (6.35 against about 6 pixels a letter); with a fixed 6 a text the template's author fitted
+ * on two lines needs three here, and the third is cut off. GetDialogBaseUnits stays 6. */
+static int dlu_x(int v)
+{
+    static int sum;
+    if (!sum) {
+        wchar16 t[52];
+        int i;
+        for (i = 0; i < 26; i++) { t[i] = (wchar16)('A' + i); t[26 + i] = (wchar16)('a' + i); }
+        sum = gdi_text_width(0, t, 52);
+        if (sum < 52 * 4 || sum > 52 * 12) sum = 52 * BASEX;
+    }
+    return (v * sum + (v >= 0 ? 104 : -104)) / 208;
+}
 
 enum { B_NONE = 0, B_BUTTON, B_STATIC, B_EDIT, B_DIALOG, B_LISTBOX, B_SCROLLBAR, B_COMBOBOX, B_MENU };
 
@@ -189,7 +205,7 @@ static uint32_t create_window(qwin *w, uint32_t exstyle, qclass *cls, const wcha
     n->enabled = !(style & WS_DISABLED);
     n->nextra = (int)cls->cbwnd + 16;
     n->extra = (uint8_t *)calloc(1, (size_t)n->nextra);
-    if (title) wcpy16(n->text, title, 256);
+    if (title) wcpy16(n->text, title, QW_WTEXT);
     if (style & WS_CHILD) { n->parent = parent; n->id = menu; }
     else {
         n->owner = parent;
@@ -221,8 +237,8 @@ static uint32_t create_window(qwin *w, uint32_t exstyle, qclass *cls, const wcha
     /* CREATESTRUCTW in guest memory */
     cs = qw_alloc(w, 48);
     {
-        uint32_t tp = qw_alloc(w, 520), cp = qw_alloc(w, 132);
-        qw_wr_wstr(w, tp, n->text, 256);
+        uint32_t tp = qw_alloc(w, 2u * (uint32_t)wlen16(n->text) + 8u), cp = qw_alloc(w, 132);
+        qw_wr_wstr(w, tp, n->text, wlen16(n->text) + 1);
         qw_wr_wstr(w, cp, cls->name, 64);
         WR32(cs, param); WR32(cs + 4, hinst); WR32(cs + 8, menu); WR32(cs + 12, parent);
         WR32(cs + 16, (uint32_t)cy); WR32(cs + 20, (uint32_t)cx); WR32(cs + 24, (uint32_t)y); WR32(cs + 28, (uint32_t)x);
@@ -500,6 +516,7 @@ static uint32_t button_proc(qwin *w, uint32_t *a)
     return def_window_proc(w, a[0], msg, a[2], a[3]);
 }
 
+static uint32_t u_LoadBitmapW(qwin *w, uint32_t *a);
 static uint32_t static_proc(qwin *w, uint32_t *a)
 {
     qwnd *x = W(w, a[0]);
@@ -532,6 +549,27 @@ static uint32_t static_proc(qwin *w, uint32_t *a)
                 d->bkmode = 1;
                 gdi_drawtext(d, x->text, wlen16(x->text), rc, fmt);
             }
+            if (st == 0xE && x->icon) {                                 /* SS_BITMAP */
+                uint32_t bm = qw_alloc(w, 24), mdc, old;
+                int bw = x->cw, bh = x->ch, ox = 0, oy = 0;
+                gdi_fill(d, 0, 0, x->cw, x->ch, brush_rgb(w, br, sys_color(15)));
+                if (qw_call(w, qw_thunk(w, "gdi32", "GetObjectW"), 3, x->icon, 24, bm, 0)) { bw = (int32_t)RD32(bm + 4); bh = (int32_t)RD32(bm + 8); }
+                if (bh < 0) bh = -bh;
+                if (x->style & 0x200) { ox = (x->cw - bw) / 2; oy = (x->ch - bh) / 2; }   /* SS_CENTERIMAGE */
+                mdc = qw_call(w, qw_thunk(w, "gdi32", "CreateCompatibleDC"), 1, hdc, 0, 0, 0);
+                old = qw_call(w, qw_thunk(w, "gdi32", "SelectObject"), 2, mdc, x->icon, 0, 0);
+                {   /* BitBlt has 9 arguments: through the guest stack as qw_call takes 4 */
+                    uint32_t b[9] = { hdc, (uint32_t)ox, (uint32_t)oy, (uint32_t)bw, (uint32_t)bh, mdc, 0, 0, 0x00CC0020u };
+                    const qhle *e = qw_find_hle("gdi32", "BitBlt");
+                    if (e) e->fn(w, b);
+                }
+                qw_call(w, qw_thunk(w, "gdi32", "SelectObject"), 2, mdc, old, 0, 0);
+                qw_call(w, qw_thunk(w, "gdi32", "DeleteDC"), 1, mdc, 0, 0, 0);
+                qw_free(w, bm);
+            } else if (st == 3 && x->icon) {                            /* SS_ICON */
+                gdi_fill(d, 0, 0, x->cw, x->ch, brush_rgb(w, br, sys_color(15)));
+                qw_call(w, qw_thunk(w, "user32", "DrawIcon"), 4, hdc, 0, 0, x->icon);
+            }
             if (x->style & 0x1000) gdi_frame3d(d, 0, 0, x->cw, x->ch, 1, 0);       /* SS_SUNKEN */
         }
         qw_call(w, qw_thunk(w, "user32", "EndPaint"), 2, x->h, ps, 0, 0);
@@ -544,6 +582,113 @@ static uint32_t static_proc(qwin *w, uint32_t *a)
     case 0x0170: case 0x0172: x->icon = a[2]; return 0;                 /* STM_SETICON / STM_SETIMAGE */
     }
     return def_window_proc(w, a[0], msg, a[2], a[3]);
+}
+
+/* ---- multiline EDIT (ES_MULTILINE): word-wrapped lines, a first visible line, and a scroll
+ * bar when the control has WS_VSCROLL. Programs show licences and summaries in these. */
+#define EDIT_SB 16
+#ifndef WS_VSCROLL
+#define WS_VSCROLL 0x00200000u
+#endif
+static int ml_starts[8192], ml_lens[8192];
+static int edit_is_ml(const qwnd *x) { return (x->style & 4u) != 0; }
+/* width of n characters of a line, tabs to the stops every 32 dialog units (as drawn) */
+static int edit_meas(const wchar16 *t, int n)
+{
+    int px = 0, st = 0, k, stop = dlu_x(32);
+    for (k = 0; ; k++) {
+        if (k == n || t[k] == '\t') {
+            if (k > st) px += gdi_text_width(0, t + st, k - st);
+            if (k == n) break;
+            px = (px / stop + 1) * stop;
+            st = k + 1;
+        }
+    }
+    return px;
+}
+static int edit_lines(qwnd *x)               /* fills ml_starts/ml_lens, returns the count */
+{
+    const wchar16 *s = x->text;
+    int n = wlen16(s), rw = x->cw - 4 - ((x->style & WS_VSCROLL) ? EDIT_SB : 0), pos = 0, lines = 0;
+    while (lines < 8192) {
+        int st = pos, lastsp = -1;
+        if (pos >= n) { if (!lines || (n && s[n - 1] == '\n')) { ml_starts[lines] = pos; ml_lens[lines] = 0; lines++; } break; }
+        while (pos < n && s[pos] != '\n') {
+            if (s[pos] == ' ') lastsp = pos;
+            if (s[pos] != '\r' && edit_meas(s + st, pos - st + 1) > rw && pos > st) {
+                if (lastsp > st) pos = lastsp;
+                break;
+            }
+            pos++;
+        }
+        ml_starts[lines] = st; ml_lens[lines] = pos - st; lines++;
+        if (pos < n && (s[pos] == '\n' || s[pos] == ' ')) pos++;
+    }
+    return lines;
+}
+static int edit_visible(qwnd *x) { int v = (x->ch - 2) / gdi_font_height(0); return v < 1 ? 1 : v; }
+static void edit_scroll_to(qwin *w, qwnd *x, int first)
+{
+    int lines = edit_lines(x), max = lines - edit_visible(x);
+    if (max < 0) max = 0;
+    if (first > max) first = max;
+    if (first < 0) first = 0;
+    if (first != x->escroll) { x->escroll = first; win_invalidate(w, x, 1); }
+}
+static void edit_scroll_cmd(qwin *w, qwnd *x, int code, int pos)
+{
+    int v = edit_visible(x);
+    switch (code) {
+    case 0: edit_scroll_to(w, x, x->escroll - 1); break;              /* SB_LINEUP */
+    case 1: edit_scroll_to(w, x, x->escroll + 1); break;              /* SB_LINEDOWN */
+    case 2: edit_scroll_to(w, x, x->escroll - v); break;              /* SB_PAGEUP */
+    case 3: edit_scroll_to(w, x, x->escroll + v); break;              /* SB_PAGEDOWN */
+    case 4: case 5: edit_scroll_to(w, x, pos); break;                 /* SB_THUMBPOSITION, SB_THUMBTRACK */
+    case 6: edit_scroll_to(w, x, 0); break;                           /* SB_TOP */
+    case 7: edit_scroll_to(w, x, 1 << 20); break;                     /* SB_BOTTOM */
+    }
+}
+static void edit_paint_ml(qwin *w, qwnd *x, qdc *d)
+{
+    int lines = edit_lines(x), fh = gdi_font_height(0), i, y = 1;
+    int right = x->cw - 2 - ((x->style & WS_VSCROLL) ? EDIT_SB : 0);
+    if (x->escroll > lines - 1) x->escroll = lines > 0 ? lines - 1 : 0;
+    for (i = x->escroll; i < lines && y < x->ch; i++, y += fh) {
+        /* tabs to the default stops, every 32 dialog units, as an EDIT control does */
+        const wchar16 *t = x->text + ml_starts[i];
+        int k = 0, st = 0, px = 2, stop = dlu_x(32);
+        for (;; k++) {
+            if (k == ml_lens[i] || t[k] == '\t') {
+                int rc[4] = { px, y, right, y + fh };
+                if (k > st) { gdi_drawtext(d, t + st, k - st, rc, 0x820u); px += gdi_text_width(0, t + st, k - st); }
+                if (k == ml_lens[i]) break;
+                px = 2 + ((px - 2) / stop + 1) * stop;
+                st = k + 1;
+            }
+        }
+    }
+    if (x->style & WS_VSCROLL) {
+        int bx = x->cw - EDIT_SB, track = x->ch - 2 * EDIT_SB, v = edit_visible(x), th, ty, k;
+        gdi_fill(d, bx, 0, x->cw, x->ch, sys_color(15));
+        gdi_fill(d, bx, EDIT_SB, x->cw, x->ch - EDIT_SB, 0xE0E0E0);
+        for (k = 0; k < 2; k++) {                                     /* the arrow buttons */
+            int top = k ? x->ch - EDIT_SB : 0, r;
+            gdi_fill(d, bx, top, x->cw, top + EDIT_SB, sys_color(15));
+            gdi_fill(d, bx, top + EDIT_SB - 1, x->cw, top + EDIT_SB, 0x808080);
+            gdi_fill(d, x->cw - 1, top, x->cw, top + EDIT_SB, 0x808080);
+            for (r = 0; r < 4; r++) {
+                int ay = k ? top + 6 + r : top + 9 - r, cx = bx + EDIT_SB / 2;
+                gdi_fill(d, cx - 3 + r, ay, cx + 4 - r, ay + 1, 0);
+            }
+        }
+        if (lines > v && track > 8) {                                 /* the thumb */
+            th = track * v / lines; if (th < 8) th = 8;
+            ty = EDIT_SB + (track - th) * x->escroll / (lines - v);
+            gdi_fill(d, bx + 1, ty, x->cw - 1, ty + th, sys_color(15));
+            gdi_fill(d, bx + 1, ty + th - 1, x->cw - 1, ty + th, 0x808080);
+            gdi_fill(d, x->cw - 2, ty, x->cw - 1, ty + th, 0x808080);
+        }
+    }
 }
 
 static uint32_t edit_proc(qwin *w, uint32_t *a)
@@ -565,8 +710,9 @@ static uint32_t edit_proc(qwin *w, uint32_t *a)
             if (!x->enabled) d->textcol = 0x808080;
             d->bkmode = 1;
             rc[0] = 2; rc[1] = 1; rc[2] = x->cw - 2; rc[3] = x->ch;
-            gdi_drawtext(d, x->text, wlen16(x->text), rc, ((x->style & 3) == 2 ? 0x2u : (x->style & 3) == 1 ? 0x1u : 0u) | 0x820u);
-            if (w->focus == x->h && !ro) {
+            if (edit_is_ml(x)) edit_paint_ml(w, x, d);
+            else gdi_drawtext(d, x->text, wlen16(x->text), rc, ((x->style & 3) == 2 ? 0x2u : (x->style & 3) == 1 ? 0x1u : 0u) | 0x820u);
+            if (w->focus == x->h && !ro && !edit_is_ml(x)) {
                 int tw = gdi_text_width(0, x->text, wlen16(x->text)), cx;
                 cx = (x->style & 3) == 2 ? x->cw - 2 : 2 + tw;
                 gdi_fill(d, cx, 2, cx + 1, 2 + gdi_font_height(0), 0);
@@ -576,13 +722,41 @@ static uint32_t edit_proc(qwin *w, uint32_t *a)
         qw_free(w, ps);
         return 0; }
     case WM_ERASEBKGND: return 1;
-    case WM_LBUTTONDOWN: set_focus(w, x->h); return 0;
+    case WM_LBUTTONDOWN:
+        set_focus(w, x->h);
+        if (edit_is_ml(x) && (x->style & WS_VSCROLL) && (int16_t)(a[3] & 0xFFFF) >= x->cw - EDIT_SB) {
+            int my = (int16_t)(a[3] >> 16), lines = edit_lines(x), v = edit_visible(x), track = x->ch - 2 * EDIT_SB;
+            if (my < EDIT_SB) edit_scroll_cmd(w, x, 0, 0);
+            else if (my >= x->ch - EDIT_SB) edit_scroll_cmd(w, x, 1, 0);
+            else if (lines > v && track > 0) {                        /* in the track: page towards the click */
+                int th = track * v / lines, ty = EDIT_SB + (track - (th < 8 ? 8 : th)) * x->escroll / (lines - v);
+                edit_scroll_cmd(w, x, my < ty ? 2 : 3, 0);
+            }
+        }
+        return 0;
+    case 0x0115: if (edit_is_ml(x)) edit_scroll_cmd(w, x, (int)(a[2] & 0xFFFF), (int)(a[2] >> 16)); return 0;   /* WM_VSCROLL */
+    case 0x020A: if (edit_is_ml(x)) edit_scroll_to(w, x, x->escroll - 3 * (int16_t)(a[2] >> 16) / 120); return 0;   /* WM_MOUSEWHEEL */
+    case WM_KEYDOWN:
+        if (edit_is_ml(x)) switch (a[2]) {
+            case 0x26: edit_scroll_cmd(w, x, 0, 0); return 0;          /* up */
+            case 0x28: edit_scroll_cmd(w, x, 1, 0); return 0;          /* down */
+            case 0x21: edit_scroll_cmd(w, x, 2, 0); return 0;          /* page up */
+            case 0x22: edit_scroll_cmd(w, x, 3, 0); return 0;          /* page down */
+            case 0x24: edit_scroll_cmd(w, x, 6, 0); return 0;          /* home */
+            case 0x23: edit_scroll_cmd(w, x, 7, 0); return 0;          /* end */
+        }
+        break;
+    case 0x00B5: if (edit_is_ml(x)) { int o = x->escroll; edit_scroll_cmd(w, x, (int)a[2], 0); return 0x10000u | ((uint32_t)(x->escroll - o) & 0xFFFFu); } return 0;   /* EM_SCROLL */
+    case 0x00B6: if (edit_is_ml(x)) edit_scroll_to(w, x, x->escroll + (int32_t)a[3]); return 1;   /* EM_LINESCROLL */
+    case 0x00BA: return edit_is_ml(x) ? (uint32_t)edit_lines(x) : 1u;                        /* EM_GETLINECOUNT */
+    case 0x00CE: return edit_is_ml(x) ? (uint32_t)x->escroll : 0u;                           /* EM_GETFIRSTVISIBLELINE */
     case WM_SETFOCUS: case WM_KILLFOCUS: win_invalidate(w, x, 1); return 0;
     case WM_CHAR: {
         int n = wlen16(x->text);
         if (x->style & 0x800) return 0;
         if (a[2] == 8) { if (n) x->text[n - 1] = 0; }
-        else if (a[2] >= 32 && n < 255) {
+        else if (a[2] == 13 && edit_is_ml(x) && n < QW_WTEXT - 2) { x->text[n] = '\r'; x->text[n + 1] = '\n'; x->text[n + 2] = 0; }
+        else if (a[2] >= 32 && n < QW_WTEXT - 1) {
             if ((x->style & 0x2000) && (a[2] < '0' || a[2] > '9')) return 0;   /* ES_NUMBER */
             if (x->caret && n >= x->caret) return 0;                            /* EM_LIMITTEXT */
             x->text[n] = (wchar16)a[2]; x->text[n + 1] = 0;
@@ -592,13 +766,13 @@ static uint32_t edit_proc(qwin *w, uint32_t *a)
         return 0; }
     case WM_GETDLGCODE:                                    /* ES_MULTILINE with ES_WANTRETURN keeps Return */
         return (x->style & 0x1004u) == 0x1004u && a[2] == 0x0D ? 0x85 : 0x81;
-    case WM_SETTEXT: def_window_proc(w, a[0], msg, a[2], a[3]); win_invalidate(w, x, 1); return 1;
+    case WM_SETTEXT: def_window_proc(w, a[0], msg, a[2], a[3]); x->escroll = 0; win_invalidate(w, x, 1); return 1;
     case 0x00C5: x->caret = (int)a[2]; return 0;           /* EM_LIMITTEXT */
     case 0x00B1: return 0;                                 /* EM_SETSEL */
     case 0x00B0: { int n = wlen16(x->text); if (a[2]) WR32(a[2], 0); if (a[3]) WR32(a[3], (uint32_t)n); return ((uint32_t)n << 16); }
     case 0x00C2: {                                         /* EM_REPLACESEL */
-        wchar16 t[256]; int n = wlen16(x->text), k = qw_rd_wstr(w, a[3], t, 256), i;
-        for (i = 0; i < k && n < 255; i++) x->text[n++] = t[i];
+        static wchar16 t[QW_WTEXT]; int n = wlen16(x->text), k = qw_rd_wstr(w, a[3], t, QW_WTEXT), i;
+        for (i = 0; i < k && n < QW_WTEXT - 1; i++) x->text[n++] = t[i];
         x->text[n] = 0; win_invalidate(w, x, 1); return 0; }
     case 0x00CF: if (a[2]) x->style |= 0x800; else x->style &= ~0x800u; win_invalidate(w, x, 1); return 1;  /* EM_SETREADONLY */
     }
@@ -852,7 +1026,7 @@ static uint32_t create_dialog(qwin *w, uint32_t tpl, uint32_t parent, uint32_t d
     cls = clsord ? NULL : (clsname[0] ? find_class(w, 0, clsname) : NULL);
     if (!cls) { static wchar16 dn[8]; a2w(dn, "#32770", 8); cls = find_class(w, 0, dn); }
     {
-        int px = x * BASEX / 4, py = y * BASEY / 8, pw = cx * BASEX / 4, ph = cy * BASEY / 8;
+        int px = dlu_x(x), py = y * BASEY / 8, pw = dlu_x(cx), ph = cy * BASEY / 8;
         qwnd tmp;
         memset(&tmp, 0, sizeof(tmp));
         tmp.style = style; tmp.exstyle = exstyle; tmp.menu = menu;
@@ -880,7 +1054,8 @@ static uint32_t create_dialog(qwin *w, uint32_t tpl, uint32_t parent, uint32_t d
     for (i = 0; i < n; i++) {
         uint32_t cstyle, cex, id, cord, tord, extra;
         int16_t ix, iy, icx, icy;
-        wchar16 cname[64], ctext[256];
+        static wchar16 ctext[QW_WTEXT];
+        wchar16 cname[64];
         qclass *cc = NULL;
         uint32_t ch;
         talign(&t, tpl);
@@ -889,7 +1064,7 @@ static uint32_t create_dialog(qwin *w, uint32_t tpl, uint32_t parent, uint32_t d
         ix = (int16_t)t16(w, &t); iy = (int16_t)t16(w, &t); icx = (int16_t)t16(w, &t); icy = (int16_t)t16(w, &t);
         id = t.ex ? t32(w, &t) : t16(w, &t);
         cord = tsz(w, &t, cname, 64);
-        tord = tsz(w, &t, ctext, 256);
+        tord = tsz(w, &t, ctext, QW_WTEXT);
         extra = t16(w, &t);
         t.p += extra;
         if (cord) {
@@ -899,10 +1074,16 @@ static uint32_t create_dialog(qwin *w, uint32_t tpl, uint32_t parent, uint32_t d
         cc = find_class(w, 0, cname);
         if (!cc) { char an[64]; w2a(an, cname, 64); qw_log(w, "dialog control class '%s' unknown - using Static", an); { static wchar16 sn[8]; a2w(sn, "Static", 8); cc = find_class(w, 0, sn); } }
         if (tord) ctext[0] = 0;
-        ch = create_window(w, cex, cc, ctext, (cstyle | WS_CHILD) & ~WS_VISIBLE, ix * BASEX / 4, iy * BASEY / 8, icx * BASEX / 4, icy * BASEY / 8, h, id, hinst, 0);
+        ch = create_window(w, cex, cc, ctext, (cstyle | WS_CHILD) & ~WS_VISIBLE, dlu_x(ix), iy * BASEY / 8, dlu_x(icx), icy * BASEY / 8, h, id, hinst, 0);
         if (ch) {
             qwnd *cw = W(w, ch);
             if (cw) { cw->font = font; cw->visible = (cstyle & WS_VISIBLE) != 0; if (cw->visible) cw->style |= WS_VISIBLE; }
+            /* a STATIC with SS_BITMAP or SS_ICON names its picture by resource id in the template */
+            if (cw && tord && cw->cls && cw->cls->builtin == 2) {
+                uint32_t r[2] = { hinst, tord };
+                if ((cstyle & 0x1F) == 0xE) cw->icon = u_LoadBitmapW(w, r);
+                else if ((cstyle & 0x1F) == 3) cw->icon = qw_call(w, qw_thunk(w, "user32", "LoadIconW"), 2, hinst, tord, 0, 0);
+            }
             if (!focusctl && (cstyle & WS_TABSTOP) && !(cstyle & WS_DISABLED)) focusctl = ch;
         }
     }
@@ -1830,7 +2011,7 @@ static uint32_t def_window_proc(qwin *w, uint32_t h, uint32_t msg, uint32_t wp, 
     switch (msg) {
     case WM_NCCREATE: {
         uint32_t name = RD32(lp + 36);
-        if (name && name >= 0x10000u) qw_rd_wstr(w, name, x->text, 256);
+        if (name && name >= 0x10000u) qw_rd_wstr(w, name, x->text, QW_WTEXT);
         return 1; }
     case WM_CLOSE: win_destroy(w, x); return 0;
     case WM_ERASEBKGND: {
@@ -1845,7 +2026,7 @@ static uint32_t def_window_proc(qwin *w, uint32_t h, uint32_t msg, uint32_t wp, 
         qw_free(w, ps);
         return 0; }
     case WM_SETTEXT:
-        qw_rd_wstr(w, lp, x->text, 256);
+        qw_rd_wstr(w, lp, x->text, QW_WTEXT);
         if (w->verbose && (x->style & WS_CHILD)) { char t[260]; w2a(t, x->text, 260); qw_log(w, "text %u: %s", x->id, t); }
         if (!(x->style & WS_CHILD) && x->be && w->be->title) w->be->title(w, x);
         return 1;
@@ -1913,9 +2094,9 @@ FN(u_GetClassInfoExW) {
 }
 FN(u_CreateWindowExW) {
     qclass *c = find_class(w, a[1], NULL);
-    wchar16 t[256];
+    static wchar16 t[QW_WTEXT];
     if (!c) { wchar16 n[64]; char an[64]; if (a[1] >= 0x10000) { qw_rd_wstr(w, a[1], n, 64); w2a(an, n, 64); } else snprintf(an, sizeof(an), "#%u", a[1]); qw_log(w, "CreateWindowEx: unknown class %s", an); return 0; }
-    if (a[2] >= 0x10000u) qw_rd_wstr(w, a[2], t, 256); else t[0] = 0;
+    if (a[2] >= 0x10000u) qw_rd_wstr(w, a[2], t, QW_WTEXT); else t[0] = 0;
     return create_window(w, a[0], c, t, a[3], (int32_t)a[4], (int32_t)a[5], (int32_t)a[6], (int32_t)a[7], a[8], a[9], a[10], a[11]);
 }
 /* (hwnd, POINT by value in client coordinates): a direct child there, else the window itself. */
@@ -2483,7 +2664,7 @@ FN(u_EndDialog) { qwnd *x = W(w, a[0]); if (!x) return 0; x->modal_done = 1; x->
 FN(u_GetNextDlgTabItem) { return dlg_next_tab(w, a[0], a[1], a[2] != 0); }
 FN(u_GetNextDlgGroupItem) { return dlg_next_group(w, a[0], a[1], a[2] != 0); }
 FN(u_MapDialogRect) {
-    WR32(a[1], RD32(a[1]) * BASEX / 4); WR32(a[1] + 8, RD32(a[1] + 8) * BASEX / 4);
+    WR32(a[1], (uint32_t)dlu_x((int32_t)RD32(a[1]))); WR32(a[1] + 8, (uint32_t)dlu_x((int32_t)RD32(a[1] + 8)));
     WR32(a[1] + 4, RD32(a[1] + 4) * BASEY / 8); WR32(a[1] + 12, RD32(a[1] + 12) * BASEY / 8);
     UNUSED; return 1;
 }
@@ -2760,7 +2941,7 @@ static int sheet_select(qwin *w, qsheet *s, int i, int dir)
         qwnd *f = W(w, s->h);
         const wchar16 *cap = t[0] ? t : s->caption;
         int k;
-        for (k = 0; cap[k] && k < 255; k++) f->text[k] = cap[k];
+        for (k = 0; cap[k] && k < QW_WTEXT - 1; k++) f->text[k] = cap[k];
         f->text[k] = 0;
         win_invalidate(w, f, 1);
     }
@@ -2868,7 +3049,7 @@ static int sheet_proc(qwin *w, struct qsheet *s, uint32_t *a, uint32_t *ret)
         s->wide = a[1] == 0x0478;
         sheet_text(w, s, s->hinst, lp, s->caption, 128);
         s->wide = was;
-        if (f) { for (k = 0; s->caption[k] && k < 255; k++) f->text[k] = s->caption[k]; f->text[k] = 0; win_invalidate(w, f, 1); }
+        if (f) { for (k = 0; s->caption[k] && k < QW_WTEXT - 1; k++) f->text[k] = s->caption[k]; f->text[k] = 0; win_invalidate(w, f, 1); }
         return 1; }
     case 0x0470: s->wizbtn = lp; sheet_wiz_buttons(w, s); return 1;                  /* PSM_SETWIZBUTTONS */
     case 0x0471: {                                         /* PSM_PRESSBUTTON */
@@ -2977,7 +3158,7 @@ static uint32_t property_sheet(qwin *w, uint32_t *a, int wide)
         if (!t) continue;
         ex = x86_rd16(C, t) == 1 && x86_rd16(C, t + 2) == 0xFFFF;
         cx = (int16_t)x86_rd16(C, t + (ex ? 22 : 14)); cy = (int16_t)x86_rd16(C, t + (ex ? 24 : 16));
-        if (cx * BASEX / 4 > s->pw) s->pw = cx * BASEX / 4;
+        if (dlu_x(cx) > s->pw) s->pw = dlu_x(cx);
         if (cy * BASEY / 8 > s->ph) s->ph = cy * BASEY / 8;
     }
     if (s->pw < 200) s->pw = 200;

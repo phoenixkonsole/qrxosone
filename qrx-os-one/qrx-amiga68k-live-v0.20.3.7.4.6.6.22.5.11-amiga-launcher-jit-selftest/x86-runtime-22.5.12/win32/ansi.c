@@ -95,7 +95,9 @@ static uint32_t text_msg(qwin *w, const char *fn, uint32_t *a, int nargs_before)
 {
     uint32_t r, msg = a[nargs_before + 1], outer = g_wide_buf;
     COPYARGS;
-    if ((msg == WM_SETTEXT || msg == WM_GETTEXT) && g_wide_buf && a[nargs_before + 3] == g_wide_buf) {
+    int list_in = msg == 0x0180 || msg == 0x0181 || msg == 0x018C || msg == 0x018F || msg == 0x01A2 ||
+                  msg == 0x0143 || msg == 0x014A || msg == 0x014C || msg == 0x014D || msg == 0x0158;
+    if ((msg == WM_SETTEXT || msg == WM_GETTEXT || list_in) && g_wide_buf && a[nargs_before + 3] == g_wide_buf) {
         r = callw(w, "user32", fn, b);
     } else if (msg == WM_SETTEXT) {
         b[nargs_before + 3] = g_wide_buf = tw(w, &t, a[nargs_before + 3], -1);
@@ -103,9 +105,11 @@ static uint32_t text_msg(qwin *w, const char *fn, uint32_t *a, int nargs_before)
         g_wide_buf = outer;
     } else if (msg == 0x0180 || msg == 0x0181 || msg == 0x018C || msg == 0x018F || msg == 0x01A2 ||
                msg == 0x0143 || msg == 0x014A || msg == 0x014C || msg == 0x014D || msg == 0x0158) {
-        /* list and combo box entries */
-        b[nargs_before + 3] = tw(w, &t, a[nargs_before + 3], -1);
+        /* list and combo box entries; a subclassing ANSI procedure (MFC) hands the wide copy
+         * back through CallWindowProcA, where it must not be widened again */
+        b[nargs_before + 3] = g_wide_buf = tw(w, &t, a[nargs_before + 3], -1);
         r = callw(w, "user32", fn, b);
+        g_wide_buf = outer;
     } else if (msg == 0x0189 || msg == 0x0148) {           /* LB_GETTEXT, CB_GETLBTEXT */
         uint32_t g = qw_alloc(w, 512);
         b[nargs_before + 3] = g;
