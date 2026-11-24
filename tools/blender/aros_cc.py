@@ -47,7 +47,13 @@ def main():
     cxx = Path(sys.argv[0]).name.endswith('c++')
     args = [a for a in sys.argv[1:] if a not in DROP_ARGS]
     if '--version' in args or '-dumpversion' in args or '-v' in args:
-        return subprocess.call([CFG['gcc'], *args])
+        # libstdc++'s configure takes the thread model from here. These AROS programs have no gthreads
+        # (Homebrew's m68k-elf-gcc says single; m68k-linux-gnu-gcc says posix and would bring weak
+        # pthread references that collect-aros rejects).
+        r = subprocess.run([CFG['gcc'], *args], capture_output=True, text=True)
+        sys.stdout.write(r.stdout)
+        sys.stderr.write(r.stderr.replace('Thread model: posix', 'Thread model: single'))
+        return r.returncode
     is_link = not any(a in args for a in ('-c', '-E', '-S', '-M', '-MM'))
     if not is_link:
         drv = GXX if cxx else CFG['gcc']

@@ -1,6 +1,8 @@
 #!/bin/bash
-# Builds libstdc++ of the compiler's own GCC version (16.2 on the Mac, 13.3 with m68k-linux-gnu) for the AROS SDK, without exceptions, RTTI or
-# threads. configure may not link in a cross build, so what it wants to link is answered here.
+# Builds libstdc++ of the compiler's own GCC version (16.2 on the Mac, 13.3 with m68k-linux-gnu) for the AROS SDK,
+# without exceptions, RTTI or threads (aros_cc.py reports the thread model "single").
+# _GLIBCXX_USE_WEAK_REF=0: no weak references to transactional-memory clones (cow-stdexcept.cc); collect-aros
+# counts weak undefined symbols as undefined. configure may not link in a cross build, so what it wants to link is answered here.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 eval "$("$HERE/qrxenv.py" sh)"
@@ -12,7 +14,7 @@ for round in $(seq 1 40); do
   rm -f config.cache
   env $ANSWERS CC="$HERE/aros_cc.py" CXX="$HERE/aros-c++" CPP="$HERE/aros_cc.py -E" CXXCPP="$HERE/aros-c++ -E" \
     AR=$XAR RANLIB=$XRANLIB NM=$XNM AS=$XAS LD=$XLD \
-    CFLAGS="-O2" CXXFLAGS="-O2 -fno-exceptions -fno-rtti" \
+    CFLAGS="-O2" CXXFLAGS="-O2 -fno-exceptions -fno-rtti -D_GLIBCXX_USE_WEAK_REF=0" \
     "$W/gcc/gcc-$GCC_VERSION/libstdc++-v3/configure" --host=m68k-elf --build=$BUILD_TRIPLE --target=m68k-elf --with-newlib \
     --disable-shared --disable-multilib --disable-libstdcxx-pch --disable-libstdcxx-verbose --disable-nls \
     --disable-libstdcxx-threads --disable-tls --disable-libstdcxx-filesystem-ts --disable-libstdcxx-backtrace --disable-werror \
