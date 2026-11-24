@@ -1,7 +1,27 @@
-608a609,614
->         /* QRX OS One: a PC-relative reference inside one section is final here. HUNK_RELRELOC32
->          * has 16 bit offsets and cannot describe it in a large program, and needs no reloc anyway. */
->         if (ELF_R_TYPE(rel->info) == R_68K_PC32 && hh[shid] == h) {
->             continue;
->         }
-> 
+--- elf2hunk.c.orig
++++ elf2hunk.c
+@@ -515,6 +515,11 @@
+ 
+         rel_fixup(rel);
+ 
++        /* QRX OS One: m68k-linux-gnu's libgcc calls its helpers through the PLT (R_68K_PLT32). An AROS
++         * program is linked statically and has no PLT: the target is in the program, as for R_68K_PC32. */
++        if (ELF_R_TYPE(rel->info) == 13 /* R_68K_PLT32 */)
++            rel->info = ELF_R_INFO(ELF_R_SYM(rel->info), R_68K_PC32);
++
+ #ifdef __arm__
+         /*
+          * R_ARM_V4BX are actually special marks for the linker.
+@@ -606,6 +611,12 @@
+             continue;
+         }
+ 
++        /* QRX OS One: a PC-relative reference inside one section is final here. HUNK_RELRELOC32
++         * has 16 bit offsets and cannot describe it in a large program, and needs no reloc anyway. */
++        if (ELF_R_TYPE(rel->info) == R_68K_PC32 && hh[shid] == h) {
++            continue;
++        }
++
+         switch (ELF_R_TYPE(rel->info))
+         {
+             case R_68K_32:
