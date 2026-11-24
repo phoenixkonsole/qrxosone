@@ -84,3 +84,25 @@ Das lädt `Python-3.5.10.tar.xz` von python.org (15,4 MB), wendet den Patch an, 
 - Ein Abzug braucht `C:QRXMoreMemory` im Job, sonst ist das RAM kleiner als der angeforderte Bereich und nichts wird geschrieben.
 - Neue SDK-Funktionen, die Zeiger oder `double` liefern, brauchen eine Brücke. `build_port.py` erzeugt sie aus
   den Prototypen, sucht aber nur in den Headern und Bibliotheken, die dort aufgelistet sind.
+
+## Auf Linux bauen
+
+Dieselben Skripte bauen auch auf Linux (getestet auf x86-64 mit Ubuntu 24.04). `qrxenv.py` nimmt Werkzeuge, SDK und
+GCC-Version aus `toolchain.json`:
+
+```bash
+apt-get install g++-m68k-linux-gnu rsync          # GCC 13.3 für m68k
+python3 tools/qrx86/bootstrap-aros-sdk.py .build/qrx-sdk-elf
+export QRX_BOOT_DIR=…/pibundle/out QRX_SYSTEM_TREE=…/pibundle/out/SystemFull   # Boot-Dateien und Systembaum des Pi-Bundles
+tools/blender/build_python.sh && tools/blender/build.sh
+tools/blender/package-appstore.sh OUT 1           # Archiv für den App Store
+```
+
+Unterschiede zum Mac, alle in den Skripten berücksichtigt:
+
+- libstdc++ kommt aus GCC 13.3. Dafür gibt es einen kleinen Patch: `tzdb.cc` braucht in 13.3 auch ohne Threads einen Mutex.
+- Der Compiler-Treiber meldet das Thread-Modell `single`. Die `libgcc` des Linux-Compilers ruft ihre Hilfen über PLT auf, `elf2hunk` behandelt `R_68K_PLT32` deshalb wie `R_68K_PC32`.
+- `_Unwind_DeleteException` steht in `port/qrx_unwind.c`, weil `libgcc_eh.a` glibc voraussetzt.
+- Die Brücken richten sich nach den Typen, die der Compiler meldet, nicht nach deren Schreibweise. So bekommen auch Typedef-Zeiger wie `png_infop` eine Brücke.
+- Im Gast läuft die Engine auf Linux mit Fenster (`QRX_LIO_TEST`, ohne Bildschirm). `APPS:` kommt dort aus `QRX_APPS_DIR`.
+- Kern 1 gibt es nur mit dem ARM64-JIT. Auf einem x86-Rechner deshalb mit `SetEnv QRX_NO_CORE1 1` testen, oder mit der Pi-Engine unter qemu-aarch64 (`QRX_ENGINE=…/qemu-wrappers-cortex-a72/qrx68100_full_run`).

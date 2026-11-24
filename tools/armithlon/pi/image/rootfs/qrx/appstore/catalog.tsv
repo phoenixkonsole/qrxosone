@@ -5,5 +5,6 @@
 # it is installed to APPS:<id> only if its SHA-256 equals the one here. launch: the file in APPS:<id> to start
 # (a script with the s bit runs through Execute). Add a line with tools/armithlon/appstore/add-to-catalog.sh.
 #
-# Blender 2.79b is added here once its archive (blender-2.79b-qrx-1.tar.xz) is built and attached to the GitHub
-# release appstore-blender-2.79b-1; the line carries that file's real SHA-256, see docs/armithlon/qrx-appstore.md.
+# Blender 2.79b: tools/blender/package-appstore.sh (reproducible), attached to the GitHub release
+# appstore-blender-2.79b-1; until that release exists the download fails and nothing is installed.
+blender	Blender	3D modelling, animation and rendering	Create	2.79b	10972976	40797068	2b3748cb948e82c727d2b36aeff2fd9ca3e7733dd24a63597dd635ba82f6e1c5	https://github.com/phoenixkonsole/qrxosone/releases/download/appstore-blender-2.79b-1/blender-2.79b-qrx-1.tar.xz	Start	Blender Foundation, port by QRX	GPL-2.0	Blender 2.79b with Python 3.5 for QRX OS One: modelling, sculpting, animation, rendering and Python scripting, built for the 68100.

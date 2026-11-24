@@ -29,23 +29,39 @@ Mit OPEN startet die App die im Katalog genannte Startdatei. Ein Skript mit gese
 - Nur `https://`-Adressen sind erlaubt. App-IDs müssen `[a-z0-9][a-z0-9._-]*` entsprechen, damit kein Pfad aus `APPS:` hinausführt.
 - `QRX_STORE_MIRROR=URL` holt die Archive unter demselben Dateinamen von einem Spiegel, für Tests oder eine Offline-Kopie. Die Prüfung des Hashs bleibt dabei dieselbe.
 
-## Blender in den Store bringen
+## Blender im Store
 
 Das Archiv liegt als Asset an einem GitHub-Release dieses (öffentlichen) Repositories. Der Pi braucht deshalb keinen Token.
+Der Katalog im Image enthält die Zeile schon:
 
-1. Blender 2.79b bauen (`tools/blender/`) und den Ordner `blender/` samt Startskript `Blender` (s-Bit gesetzt) packen:
-   `tar -cJf blender-2.79b-qrx-1.tar.xz blender`
-2. Auf GitHub ein Release mit dem Tag `appstore-blender-2.79b-1` anlegen und die Datei als Asset anhängen.
-3. Die Katalogzeile erzeugen und an `catalog.tsv` anhängen:
-   ```
-   tools/armithlon/appstore/add-to-catalog.sh blender-2.79b-qrx-1.tar.xz blender Blender \
-     "3D modelling, animation and rendering" Create 2.79b <installierte Bytes> \
-     https://github.com/phoenixkonsole/qrxosone/releases/download/appstore-blender-2.79b-1/blender-2.79b-qrx-1.tar.xz \
-     Blender "Blender Foundation, port by QRX" GPL-2.0 "Blender 2.79b with Python 3.5 for QRX OS One: …"
-   ```
-4. Das Image neu bauen.
+| | |
+|---|---|
+| Datei | `blender-2.79b-qrx-1.tar.xz`, 10.972.976 Bytes, installiert 40,8 MB |
+| SHA-256 | `2b3748cb948e82c727d2b36aeff2fd9ca3e7733dd24a63597dd635ba82f6e1c5` |
+| Adresse | `https://github.com/phoenixkonsole/qrxosone/releases/download/appstore-blender-2.79b-1/blender-2.79b-qrx-1.tar.xz` |
+| Inhalt | `blender/`: Programm `blender` (Hunk), Startskript `Start`, `lib/python3.5`, `2.79/scripts` mit den Standard-Add-ons, Lizenzen |
 
-Wird das Asset später ersetzt, ändert sich sein Hash und der Store verweigert die Installation, bis der Katalog angepasst ist. Das ist so gewollt.
+**Noch zu tun (von Hand, ich habe kein Werkzeug für Releases):** Auf GitHub ein Release mit dem Tag
+`appstore-blender-2.79b-1` anlegen und genau diese Datei als Asset anhängen. Bis dahin meldet der Store
+„download failed“ und installiert nichts.
+
+Neu bauen und packen, auf Linux oder dem Mac (`tools/blender/qrxenv.py` findet die Werkzeuge):
+
+```
+tools/blender/build.sh                       # Blender, Python 3.5, libstdc++ der eigenen GCC-Version
+tools/blender/build_python.sh
+tools/blender/package-appstore.sh OUT 1      # reproduzierbar: gleicher Inhalt, gleicher SHA-256
+tools/armithlon/appstore/add-to-catalog.sh OUT/blender-2.79b-qrx-1.tar.xz blender Blender ...
+```
+
+Eine neue Version bekommt eine neue Revision (`-2`), ein neues Release und eine neue Katalogzeile. Wird ein Asset
+ersetzt, ändert sich sein Hash, und der Store verweigert die Installation, bis der Katalog angepasst ist. Das ist so gewollt.
+
+Das Startskript heißt `Start` und nicht `Blender`, weil AROS bei Namen nicht zwischen Groß- und Kleinschreibung
+unterscheidet: Es wäre dieselbe Datei wie das Programm `blender`. Es holt den Speicher über 2 GB (`QRXMoreMemory`),
+setzt 8 MB Stack und wechselt nach `APPS:blender`, wo Blender seine Skripte sucht. Die App erkennt ein Skript am
+fehlenden Hunk-Kopf (`0x3F3`) und startet es mit `Execute`. Das s-Bit übersteht das Entpacken auf dem Dateisystem des
+Pi nicht.
 
 ## Tests (Stand 2026-11-24)
 
@@ -57,9 +73,17 @@ Getestet auf der nativen x86-Engine (`qrx68100_full_run`) mit dem QRX-Systembaum
 - Ungültige ID: wird abgewiesen. `store-remove`: entfernt die App.
 - Leerer Katalog: „Nothing here yet.“
 
+Blender aus dem Archiv (Linux-Bau, 24. November):
+
+- Store-Skript mit dem echten Archiv über einen lokalen Spiegel: Hash geprüft, nach `apps/blender` installiert, `.qrx-store` = `2.79b`.
+- Im Gast mit der **Pi-Engine** (aarch64-Build, JIT, Kern 1) unter qemu-aarch64: `APPS:blender/blender -b` aus dem
+  installierten Ordner lädt seine Skripte aus `APPS:blender/2.79/scripts`. `bpy` arbeitet, die Startszene wird gerendert
+  (4 von 6 Kacheln auf Kern 1) und als PNG gespeichert.
+
 Noch nicht getestet:
 
-- Der Lauf auf echter Pi-Hardware mit echtem Netz und dem GitHub-Release, denn das Blender-Archiv gibt es noch nicht.
+- Blender mit Oberfläche auf dem Pi: Die GL-Tür der Pi-Engine nutzt EGL (Mesa V3D). Hier gibt es keine GPU, auf dem Gerät ist das offen.
+- Der Lauf auf echter Pi-Hardware mit echtem Netz und dem GitHub-Release (das Release ist noch nicht angelegt).
 - Eine Ausgabe für QRX OS One 64 (EC64): Die App spricht die Host-Tür über die 32-Bit-Boardadresse an.
 
 Bekannt:
