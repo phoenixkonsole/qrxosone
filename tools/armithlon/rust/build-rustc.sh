@@ -10,7 +10,7 @@
 # and llvm-config: configure it with -DLLVM_TARGETS_TO_BUILD=X86 and build llvm-config and the
 # libraries (ninja llvm-config llvm-libraries) besides what build.sh builds.
 #
-# Disk: without its bundled LLVM, GCC backend, tests and vendored crates the source is ~500 MB;
+# Disk: without its bundled LLVM, GCC backend and vendored crates the source is ~560 MB;
 # the crates come from crates.io. The stage 1 compiler needs several GB more.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -21,7 +21,7 @@ cd "$W"
 echo "90dab90b8084eb57c35ae2b1d0b70c8e5138ace6023b22c60a5a400f586f63b2  dl/$V.tar.xz" | sha256sum -c
 if [ ! -d "$V" ]; then
     xz -dc "dl/$V.tar.xz" | tar -x --exclude="$V/src/llvm-project" --exclude="$V/src/gcc" \
-        --exclude="$V/tests" --exclude="$V/vendor"
+        --exclude="$V/vendor"      # tests/ stays: the compiler includes files from it (57 MB)
     patch -p1 -d "$V" < "$HERE/rustc-1.100.0-m68k64.patch"
     # the archive points cargo at its vendor/ directory, which is left out: crates come from crates.io
     mv "$V/.cargo/config.toml" "$V/.cargo/config.toml.vendored"
