@@ -23,7 +23,7 @@
   "eh-frame-header": false,
   "emit-debug-gdb-scripts": false,
   "singlethread": false,
-  "families": ["unix"],
+  "target-family": ["unix"],
   "metadata": {
     "description": "QRX OS One 64: 64-bit AROS on the 68100EC64 (long mode, LP64, no FPU)",
     "tier": 3,
