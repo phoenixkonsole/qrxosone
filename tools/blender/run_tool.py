@@ -10,8 +10,8 @@ import os, shutil, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = Path(os.environ.get('QRX_ROOT', '/Users/pascalpapara/Documents/GitHub/qrxosone'))
-WORK = ROOT / '.build/blender-2.79b'
+sys.path.insert(0, str(HERE))
+from qrxenv import ROOT, WORK  # noqa: E402
 SRC = WORK / 'src/blender-2.79b'
 
 
@@ -58,8 +58,10 @@ def main():
     if name == 'datatoc':
         return subprocess.call([str(host_tool(name, [SRC / 'source/blender/datatoc/datatoc.c'])), *args])
     if name == 'datatoc_icon':
-        png = subprocess.check_output(['/opt/homebrew/bin/pkg-config', '--cflags', '--libs', 'libpng'], text=True).split()
-        return subprocess.call([str(host_tool(name, [SRC / 'source/blender/datatoc/datatoc_icon.c'], png)), *args])
+        png = subprocess.check_output(['pkg-config', '--cflags', '--libs', 'libpng'], text=True).split()
+        # datatoc_icon swaps bytes unless __LITTLE_ENDIAN__ is set, which clang defines and GCC does not
+        endian = ['-D__LITTLE_ENDIAN__'] if sys.byteorder == 'little' else []
+        return subprocess.call([str(host_tool(name, [SRC / 'source/blender/datatoc/datatoc_icon.c'], png + endian)), *args])
     if name in ('makesdna', 'makesrna'):
         return run_guest(exe, args)
     print('run_tool: unknown tool', exe, file=sys.stderr)

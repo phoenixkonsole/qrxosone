@@ -605,13 +605,13 @@ static void open_app(App *a)
     snprintf(cmd, sizeof cmd, "%s", a->launch[0] ? a->launch : a->id);
     /* a launcher script (Blender sets up Python's paths) or the program itself, in its folder */
     BPTR old = CurrentDir(dir);
-    BPTR test = Lock((STRPTR)cmd, ACCESS_READ);
+    /* a program starts with the hunk header 0x3F3; anything else is a script for Execute (the s bit
+     * does not survive the archive on the host's file system) */
+    BPTR test = Open((STRPTR)cmd, MODE_OLDFILE);
     if (test) {
-        struct FileInfoBlock *fib = AllocDosObject(DOS_FIB, NULL);
-        int script = 0;
-        if (fib && Examine(test, fib)) script = (fib->fib_Protection & FIBF_SCRIPT) != 0;
-        if (fib) FreeDosObject(DOS_FIB, fib);
-        UnLock(test);
+        ULONG magic = 0;
+        int script = Read(test, &magic, 4) != 4 || magic != 0x000003F3UL;
+        Close(test);
         char line[240];
         snprintf(line, sizeof line, script ? "Execute APPS:%s/%s" : "APPS:%s/%s", a->id, cmd);
         SystemTags((STRPTR)line, SYS_Asynch, TRUE, SYS_Input, Open((STRPTR)"NIL:", MODE_OLDFILE),

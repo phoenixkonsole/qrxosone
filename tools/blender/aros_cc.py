@@ -10,8 +10,8 @@ import json, os, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = Path(os.environ.get('QRX_ROOT', '/Users/pascalpapara/Documents/GitHub/qrxosone'))
-CFG = json.loads((ROOT / '.build/qrx-sdk/bin/toolchain.json').read_text())
+sys.path.insert(0, str(HERE))
+from qrxenv import ROOT, WORK, CFG, GXX, GCC_SRC  # noqa: E402
 BASE = CFG['sdk']
 # -fno-caller-saves: GCC 16 saves a call-clobbered FPU register around a call as 96-bit extended and can
 # read it back as a 32-bit float 8 bytes further on, the low mantissa bytes (both with reload and LRA). In
@@ -19,7 +19,7 @@ BASE = CFG['sdk']
 CPU = ['-m68040', '-fno-pic', '-fomit-frame-pointer', '-mlong-jump-table-offsets', '-fno-caller-saves']
 DEFS = ['-D__AROS__', '-DAMIGA', '-D_AMIGA', '-D__BIG_ENDIAN__=1', '-U__linux__', '-U__linux', '-Ulinux',
         '-U__gnu_linux__', '-U_TIME_BITS', '-U_FILE_OFFSET_BITS', '-D__unix__', '-Dunix']
-STDCXX = ROOT / '.build/blender-2.79b/gcc/build'
+STDCXX = WORK / 'gcc/build'
 DROP_LIBS = {'-lm', '-lpthreads', '-ldl', '-lutil', '-lrt', '-lc', '-lstdc++', '-lgcc_s'}
 
 
@@ -30,7 +30,7 @@ def includes(cxx):
         out += ['-nostdinc++']
         if not os.environ.get('QRX_CXX_BARE'):
             out += ['-isystem', str(STDCXX / 'include/m68k-elf'), '-isystem', str(STDCXX / 'include'),
-                    '-isystem', str(STDCXX.parent / 'gcc-16.2.0/libstdc++-v3/libsupc++')]
+                    '-isystem', str(GCC_SRC / 'libstdc++-v3/libsupc++')]
     out += ['-isystem', str(HERE / 'shim/include')]
     for inc in ('/include/aros/posixc', '/include/aros/stdc', '/include'):
         out += ['-isystem', BASE + inc]
@@ -50,7 +50,7 @@ def main():
         return subprocess.call([CFG['gcc'], *args])
     is_link = not any(a in args for a in ('-c', '-E', '-S', '-M', '-MM'))
     if not is_link:
-        drv = CFG['gcc'][:-3] + 'g++' if cxx else CFG['gcc']
+        drv = GXX if cxx else CFG['gcc']
         flags = CPU + DEFS + ['-Wno-error=float-conversion', '-w', '-fno-math-errno',
                               # sin plus cos would become a call of cexp in the SDK's libm
                               '-fno-builtin-sin', '-fno-builtin-cos', '-fno-builtin-sinf', '-fno-builtin-cosf',
@@ -82,7 +82,7 @@ def main():
             output = args[i + 1]; i += 2; continue
         if a.endswith(('/libGL.a', '/libGLU.a')):
             # GL and GLU come from the ARMithlon GL door's guest library, tools/qrxgl68k.
-            gl = str(ROOT / '.build/blender-2.79b/port/libqrxgl.a')
+            gl = str(WORK / 'port/libqrxgl.a')
             if gl not in inputs:
                 inputs.append(gl)
         elif a.endswith(('.o', '.a', '.obj')) or a.startswith('-L') or (a.startswith('-l') and a not in DROP_LIBS):
@@ -92,11 +92,11 @@ def main():
         i += 1
     libs = Path(BASE, 'lib/auto').read_text().splitlines()[1].split()
     wraps = []
-    port = ROOT / '.build/blender-2.79b/port'
+    port = WORK / 'port'
     extra = sorted(str(p) for p in port.glob('qrx_*.o')) if port.exists() else []
     if (port / 'wraps.flags').exists():
         wraps += (port / 'wraps.flags').read_text().split()
-    cmd = [CFG['collect'], '-o', output, '-L' + BASE + '/lib', '-L' + CFG['gcc_lib'] + '/m68040',
+    cmd = [CFG['collect'], '-o', output, '-L' + BASE + '/lib', '-L' + CFG['gcc_lib'] + '/m68040', '-L' + CFG['gcc_lib'],
            BASE + '/lib/startup.o', *extra, *wraps,
            '--start-group', *[i for i in inputs if i not in ('--start-group', '--end-group')],
            *([str(STDCXX / 'src/.libs/libstdc++.a')] if cxx else []),

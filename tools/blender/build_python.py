@@ -9,11 +9,12 @@ import concurrent.futures as cf, os, re, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-W = Path(os.environ.get('QRX_BLENDER_WORK', '/Users/pascalpapara/Documents/GitHub/qrxosone/.build/blender-2.79b'))
+sys.path.insert(0, str(HERE))
+from qrxenv import WORK as W, tool  # noqa: E402
 SRC = W / 'py/Python-3.5.10'
 B = W / 'py/build'
 CC = str(HERE / 'aros_cc.py')
-AR = '/opt/homebrew/bin/m68k-elf-ar'
+AR = tool('ar')
 
 # name in config.c, sources under Modules
 MODULES = {
@@ -42,7 +43,7 @@ def fix_pyconfig():
     s = s.split('/* QRX OS One')[0]
     for name in ('_FILE_OFFSET_BITS', '_LARGEFILE_SOURCE', 'HAVE_LARGEFILE_SUPPORT', 'HAVE_DYNAMIC_LOADING',
                  'HAVE_SEM_OPEN', 'HAVE_BROKEN_SEM_GETVALUE', 'HAVE_CLOCK_GETTIME', 'HAVE_CLOCK_SETTIME', 'HAVE_SYS_RESOURCE_H', 'HAVE_GETRUSAGE',
-                 'HAVE_PTHREAD_KILL', 'HAVE_GETADDRINFO', 'HAVE_GETNAMEINFO', 'HAVE_ADDRINFO', 'HAVE_SOCKADDR_STORAGE', 'HAVE_SYS_EPOLL_H', 'HAVE_EPOLL', 'HAVE_EPOLL_CREATE1', 'HAVE_KQUEUE', 'HAVE_SYS_DEVPOLL_H',
+                 'HAVE_PTHREAD_KILL', 'HAVE_GETADDRINFO', 'HAVE_GETNAMEINFO', 'HAVE_ADDRINFO', 'HAVE_SYS_EPOLL_H', 'HAVE_EPOLL', 'HAVE_EPOLL_CREATE1', 'HAVE_KQUEUE', 'HAVE_SYS_DEVPOLL_H',
                  'HAVE_GETHOSTBYNAME_R', 'HAVE_GETHOSTBYNAME_R_6_ARG', 'HAVE_GETHOSTBYNAME_R_5_ARG', 'HAVE_GETHOSTBYNAME_R_3_ARG', 'HAVE_NETPACKET_PACKET_H',
                  'HAVE_LINUX_NETLINK_H', 'HAVE_LINUX_CAN_H', 'HAVE_LINUX_TIPC_H', 'HAVE_SOCKADDR_ALG', 'HAVE_SYS_UN_H', 'HAVE_SENDMSG', 'HAVE_RECVMSG', 'HAVE_HSTRERROR',
                  'HAVE_INET_PTON', 'HAVE_INET_NTOP', 'HAVE_GETLOADAVG', 'HAVE_SETHOSTNAME', 'HAVE_GETHOSTBYADDR', 'HAVE_PTHREAD_SIGMASK', 'HAVE_FORK', 'HAVE_FORKPTY', 'HAVE_OPENPTY', '_POSIX_C_SOURCE', '_XOPEN_SOURCE', '_XOPEN_SOURCE_EXTENDED'):
@@ -50,6 +51,8 @@ def fix_pyconfig():
     s = re.sub(r'^#define SIZEOF_OFF_T .*$', '#define SIZEOF_OFF_T 4', s, flags=re.M)
     s = s.replace('/* #undef DOUBLE_IS_BIG_ENDIAN_IEEE754 */', '#define DOUBLE_IS_BIG_ENDIAN_IEEE754 1')
     # select and poll come from port/qrx_socket.c and the headers in shim/include
+    # the SDK's sys/socket.h always defines struct sockaddr_storage (sys/_sockaddr_storage.h)
+    s = s.replace('/* #undef HAVE_SOCKADDR_STORAGE */', '#define HAVE_SOCKADDR_STORAGE 1')
     for name in ('HAVE_SYS_SELECT_H', 'HAVE_POLL', 'HAVE_POLL_H'):
         s = s.replace(f'/* #undef {name} */', f'#define {name} 1')
     p.write_text(s + '\n/* QRX OS One: corrected by tools/blender/build_python.py */\n')

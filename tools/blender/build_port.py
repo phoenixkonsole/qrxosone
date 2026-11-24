@@ -12,13 +12,12 @@ import concurrent.futures as cf, os, re, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = Path(os.environ.get('QRX_ROOT', '/Users/pascalpapara/Documents/GitHub/qrxosone'))
-WORK = ROOT / '.build/blender-2.79b'
+sys.path.insert(0, str(HERE))
+from qrxenv import ROOT, WORK, SDK, SDK_DIR, GCC, tool  # noqa: E402
 OUT = WORK / 'port'
 CC = str(HERE / 'aros_cc.py')
-NM = '/opt/homebrew/bin/m68k-elf-nm'
-AR = '/opt/homebrew/bin/m68k-elf-ar'
-SDK = ROOT / '.build/qrx-sdk/sdk/Development'
+NM = tool('nm')
+AR = tool('ar')
 HEADERS = ['stdio.h', 'stdlib.h', 'string.h', 'strings.h', 'unistd.h', 'time.h', 'dirent.h', 'pthread.h', 'errno.h',
            'ctype.h', 'wchar.h', 'sys/stat.h', 'sys/time.h', 'signal.h', 'fcntl.h', 'locale.h', 'zlib.h', 'png.h',
            'stdio.h', 'jpeglib.h', 'ft2build.h', 'math.h', 'libgen.h', 'semaphore.h', 'sched.h']
@@ -44,7 +43,7 @@ def msun():
     syms = set()
     for o in objs.glob('[es]_*.o'):
         syms |= nm_defined(o)
-    gcc = '/opt/homebrew/bin/m68k-elf-gcc'
+    gcc = GCC
     for sym in sorted(syms):
         if sym.startswith('__ieee754_') and not sym.endswith(('_r', 'rem_pio2', 'rem_pio2f')):
             name = sym[len('__ieee754_'):]
@@ -124,7 +123,7 @@ def bridges():
     protos = prototypes()
     protos.setdefault('realpath', ('p', 2))  # the SDK's stdlib.h hides it from strict modes
     builtin = {w.split('=', 1)[1] for w in __import__('json').loads(
-        (ROOT / '.build/qrx-sdk/bin/toolchain.json').read_text())['wrap_flags']}
+        (SDK_DIR / 'bin/toolchain.json').read_text())['wrap_flags']}
     sdk_syms = set()
     for lib in ('libm.a', 'libcrt.a', 'libstdlib.a', 'libcrtprog.a', 'libstdc.static.a', 'libpthread.a', 'libz.a', 'libpng.a',
                 'libjpeg.a', 'libfreetype2.a', 'libarossupport.a', 'libamiga.a'):
@@ -148,7 +147,7 @@ def bridges():
     bdir.mkdir(exist_ok=True)
     for o in bdir.glob('*'):
         o.unlink()
-    gcc = '/opt/homebrew/bin/m68k-elf-gcc'
+    gcc = GCC
     def one(name):
         kind, words = protos[name]
         asm = ['.text', f'.globl __wrap_{name}', f'__wrap_{name}:', 'movem.l %a2/%a6,-(%sp)', 'lea 12(%sp),%a2']
