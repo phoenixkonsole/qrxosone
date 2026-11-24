@@ -22,6 +22,28 @@ Der Ablauf von GET:
 
 Mit OPEN startet die App die im Katalog genannte Startdatei. Ein Skript mit gesetztem s-Bit (zum Beispiel Blenders Startskript, das die Python-Pfade setzt) läuft über `Execute`.
 
+## QRX OS One 64 (EC64)
+
+Dieselbe Quelle läuft als m68k64-Programm, gebaut mit dem m68k64-Clang. `build-qrxos64.sh` baut die App mit, wenn
+`QRX_CC64` gesetzt ist. Die Tür zum Host ist im 64-Bit-System die Boardadresse `0xFFFFFFFF00000400` statt
+`0xFF00088C`, der Dienst 11 und damit `/qrx/netctl store-…` sind dieselben.
+
+Der Katalog hat eine 14. Spalte `arch`: `m68k` für QRX OS One (die Vorgabe, wenn sie fehlt) und `m68k64` für
+QRX OS One 64. Jede Fassung der App zeigt nur Apps, die ihr System auch starten kann. Blender ist ein 32-Bit-Programm,
+im 64-Bit-Store erscheint es deshalb nicht. Im Moment gibt es noch keine 64-Bit-App im Katalog, der 64-Bit-Store zeigt
+also „Nothing here yet.“.
+
+Geprüft (x86-64-Engine `qrx_ec64_run`, 2 Kerne, mit dem 64-Bit-Desktop): Das Fenster öffnet sich auf dem Desktop, der
+Katalog kommt über den Host-Dienst. Mit einem Testkatalog aus einem 32- und einem 64-Bit-Eintrag zeigt die 64-Bit-App
+nur den 64-Bit-Eintrag und die 32-Bit-App nur Blender.
+
+Grenzen:
+
+- Das 64-Bit-System hat keine Antialias-Schriften (keine `Fonts`, keine `freetype2.library`). Die App schreibt in `topaz`.
+- Die EC64-Engine bietet keinen Host-Ordner als Laufwerk an. Installiert wird auf dem Pi nach `/data/Apps`, aber im
+  64-Bit-System gibt es kein `APPS:`, OPEN findet die App also nicht. Dafür braucht die EC64-Engine erst eine
+  HostFS-Freigabe wie die 32-Bit-Engine.
+
 ## Sicherheit
 
 - BusyBox-`wget` prüft keine TLS-Zertifikate. Dass niemand ein manipuliertes Archiv unterschiebt, sichert allein der SHA-256-Vergleich mit dem Katalog.
@@ -84,7 +106,6 @@ Noch nicht getestet:
 
 - Blender mit Oberfläche auf dem Pi: Die GL-Tür der Pi-Engine nutzt EGL (Mesa V3D). Hier gibt es keine GPU, auf dem Gerät ist das offen.
 - Der Lauf auf echter Pi-Hardware mit echtem Netz und dem GitHub-Release (das Release ist noch nicht angelegt).
-- Eine Ausgabe für QRX OS One 64 (EC64): Die App spricht die Host-Tür über die 32-Bit-Boardadresse an.
 
 Bekannt:
 

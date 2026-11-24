@@ -1,6 +1,7 @@
 # QRX App Store catalog (ships with the image; never fetched from the network).
 # One app per line, fields separated by TABs:
-#   id  name  subtitle  category  version  archive-bytes  installed-bytes  sha256  https-url  launch  developer  license  description
+#   id  name  subtitle  category  version  archive-bytes  installed-bytes  sha256  https-url  launch  developer  license  description  [arch]
+# arch: m68k (QRX OS One, the default when left out) or m68k64 (QRX OS One 64); each App Store shows only its own.
 # category: Create | Work | Play | Develop. The archive is a .tar.xz holding the folder <id>/ (or its files);
 # it is installed to APPS:<id> only if its SHA-256 equals the one here. launch: the file in APPS:<id> to start
 # (a script with the s bit runs through Execute). Add a line with tools/armithlon/appstore/add-to-catalog.sh.

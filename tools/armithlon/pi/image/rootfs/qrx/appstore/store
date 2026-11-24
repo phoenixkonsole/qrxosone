@@ -4,8 +4,9 @@
 # per line, fields separated by tabs. Runs with BusyBox only (wget, sha256sum, xz, tar).
 #
 #   store-catalog               one line per app: id, name, subtitle, category, version, archive
-#                               bytes, installed bytes, developer, license, state, launch, description
-#                               (state: get | installed | update | loading | failed)
+#                               bytes, installed bytes, developer, license, state, launch, description,
+#                               architecture (state: get | installed | update | loading | failed;
+#                               architecture: m68k for QRX OS One, m68k64 for QRX OS One 64)
 #   store-get ID                download, check and install in the background; answers "started"
 #   store-status ID             state, bytes so far, bytes in all, message
 #   store-remove ID             delete the installed app
@@ -44,10 +45,10 @@ status() { printf '%s\t%s\t%s\t%s\n' "$2" "$3" "$4" "$5" > "$WORK/$1.status"; }
 case "$cmd" in
 store-catalog)
     mkdir -p "$WORK"
-    grep -v '^#' "$CAT" | while IFS="$TAB" read -r id name sub cat ver size isize sha url launch dev lic desc; do
+    grep -v '^#' "$CAT" | while IFS="$TAB" read -r id name sub cat ver size isize sha url launch dev lic desc arch; do
         [ -n "$id" ] || continue
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$name" "$sub" "$cat" "$ver" "$size" "$isize" \
-            "$dev" "$lic" "$(state_of "$id" "$ver")" "$launch" "$desc"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$name" "$sub" "$cat" "$ver" "$size" "$isize" \
+            "$dev" "$lic" "$(state_of "$id" "$ver")" "$launch" "$desc" "${arch:-m68k}"
     done ;;
 store-get)
     id_ok "$1" || { echo "bad id"; exit 2; }

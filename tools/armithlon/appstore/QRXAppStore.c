@@ -77,6 +77,13 @@ static App apps[MAX_APPS];
 static int napps, host_ok;
 static char host_msg[160];
 
+#if defined(__m68k64__)
+#define MY_ARCH "m68k64"
+#define MY_SYSTEM "QRX OS One 64"
+#else
+#define MY_ARCH "m68k"
+#define MY_SYSTEM "QRX OS One"
+#endif
 static int split(char *line, char **f, int n)
 {
     int k = 0;
@@ -100,8 +107,11 @@ static void load_catalog(void)
     while (*p && napps < MAX_APPS) {
         char *e = strchr(p, '\n');
         if (e) *e = 0;
-        char *f[12];
-        if (split(p, f, 12) == 12) {
+        char *f[13];
+        int nf = split(p, f, 13);
+        /* only apps for this system: 32-bit hunk programs here, m68k64 ELF programs on QRX OS One 64 */
+        const char *arch = nf == 13 && f[12][0] ? f[12] : "m68k";
+        if (nf >= 12 && !strcmp(arch, MY_ARCH)) {
             App *a = &apps[napps++];
             memset(a, 0, sizeof *a);
             snprintf(a->id, sizeof a->id, "%s", f[0]); snprintf(a->name, sizeof a->name, "%s", f[1]);
@@ -459,7 +469,7 @@ static void draw_sidebar(void)
         text(F_NAME, 48, y + 15 - font_h(F_NAME) / 2, C_TEXT, sections[i], 0);
         hit(10, y, SIDE_W - 20, 30, A_SECTION, i);
     }
-    text(F_SMALL, 18, WIN_H - 30, C_GRAY, "QRX OS One", 0);
+    text(F_SMALL, 18, WIN_H - 30, C_GRAY, MY_SYSTEM, 0);
 }
 
 static void draw_list(void)
@@ -636,7 +646,7 @@ int main(int argc, char **argv)
     ULONG size = 256 * 1024;
     UBYTE *stack = AllocVec(size, MEMF_ANY);
     if (!stack) return app_main(argc, argv);
-    sss.stk_Lower = stack; sss.stk_Upper = (IPTR)(stack + size); sss.stk_Pointer = (APTR)(stack + size);
+    sss.stk_Lower = stack; sss.stk_Upper = (APTR)(stack + size); sss.stk_Pointer = (APTR)(stack + size);
     ssa.Args[0] = (IPTR)argc; ssa.Args[1] = (IPTR)argv;
     int r = (int)NewStackSwap(&sss, (LONG_FUNC)app_main, &ssa);
     FreeVec(stack);

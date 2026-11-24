@@ -3,6 +3,7 @@
 # system. Nothing of the 32-bit system changes.
 #   build-qrxos64.sh <AROS build bin dir> <qrx_ec64_run> <qrx-win32 for m68k64> [bundle] [image MB]
 # The AROS build bin dir holds native-m68k64 (see tools/armithlon/aros-qrx/README.md).
+# QRX_CC64, if set, is the m68k64 clang (cc64): the App Store is built with it.
 # QRX64_EXTRA_C, if set, is a directory of more m68k64 programs for C: (QRXDesktop, QRXHostSocket,
 # EC64Input, EC64GLDemo, and the Mac tools from tools/qrxppc/build64.sh).
 # Result in the bundle:
@@ -57,6 +58,10 @@ for l in crt stdlib m locale iffparse uuid gadtools workbench diskfont asl z1; d
 done
 cp "$QW" "$T/C/qrx-win32"
 [ -n "${QRX64_EXTRA_C:-}" ] && cp "$QRX64_EXTRA_C"/* "$T/C/"
+# The App Store (m68k64 build: shows only apps for QRX OS One 64), with QRX_CC64 = the m68k64 clang (cc64)
+if [ -n "${QRX_CC64:-}" ]; then
+    "$QRX_CC64" -O2 -w "$REPO/tools/armithlon/appstore/QRXAppStore.c" -o "$T/C/QRXAppStore"
+fi
 GUI=0; grep -q '^ec64gfx.hidd$' "$K/modules.txt" && GUI=1
 # The desktop's wallpapers in all sizes (the screen follows the Mac window), from the 32-bit system
 if [ -d "$BU/SystemFull/QRX/Wallpapers" ]; then
