@@ -21,8 +21,8 @@ Execute S:job
 Echo done >SYS:job.done
 S
 # Linux: without a window the guest stops before HostFS is mounted; the engine's Linux layer gives one
-# without a screen when QRX_LIO_TEST names an input script (none here).
-WIN=(); if [ "$(uname)" = Linux ]; then WIN=(--window); export QRX_LIO_TEST=${QRX_LIO_TEST:-/dev/null} QRX_ALSA_DEVICE=${QRX_ALSA_DEVICE:-null}; fi
+# without a screen when QRX_LIO_TEST names an input script (none here). There APPS: comes from QRX_APPS_DIR, not --apps.
+WIN=(); if [ "$(uname)" = Linux ]; then WIN=(--window); export QRX_LIO_TEST=${QRX_LIO_TEST:-/dev/null} QRX_ALSA_DEVICE=${QRX_ALSA_DEVICE:-null} QRX_APPS_DIR=${QRX_APPS:-$ROOT/.build/bundle/Apps}; fi
 QRX_FULL_ADF="$BOOT_DIR/boot.adf" "$ENGINE" "${WIN[@]}" --rom "$BOOT_DIR/aros-rom.bin" \
   --ext-rom "$BOOT_DIR/aros-ext.bin" --share "$TREE" --share-rw --apps "${QRX_APPS:-$ROOT/.build/bundle/Apps}" --realtime \
   --seconds "$LIMIT" "$@" >"$TREE/engine.log" 2>&1 &
