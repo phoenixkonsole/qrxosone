@@ -126,7 +126,7 @@ def main():
     shutil.copytree(BUNDLE / 'SystemFull', q / 'System', symlinks=True)
     # the appliance's own files: init scripts, settings service, configuration
     shutil.copytree(HERE / 'rootfs', OUT, symlinks=True, dirs_exist_ok=True)
-    for f in ('etc/init.d/rcS', 'etc/init.d/rcK', 'qrx/session', 'usr/share/udhcpc/default.script', 'qrx/netctl', 'usr/sbin/qrx-grow'):
+    for f in ('etc/init.d/rcS', 'etc/init.d/rcK', 'qrx/session', 'usr/share/udhcpc/default.script', 'qrx/netctl', 'qrx/appstore/store', 'usr/sbin/qrx-grow'):
         p = OUT / f
         if p.exists(): p.chmod(p.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     for d in ('dev', 'proc', 'sys', 'run', 'tmp', 'var/lib/bluetooth', 'data', 'root', 'mnt', 'boot'):

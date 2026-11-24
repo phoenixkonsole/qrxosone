@@ -1,0 +1,9 @@
+# QRX App Store catalog (ships with the image; never fetched from the network).
+# One app per line, fields separated by TABs:
+#   id  name  subtitle  category  version  archive-bytes  installed-bytes  sha256  https-url  launch  developer  license  description
+# category: Create | Work | Play | Develop. The archive is a .tar.xz holding the folder <id>/ (or its files);
+# it is installed to APPS:<id> only if its SHA-256 equals the one here. launch: the file in APPS:<id> to start
+# (a script with the s bit runs through Execute). Add a line with tools/armithlon/appstore/add-to-catalog.sh.
+#
+# Blender 2.79b is added here once its archive (blender-2.79b-qrx-1.tar.xz) is built and attached to the GitHub
+# release appstore-blender-2.79b-1; the line carries that file's real SHA-256, see docs/armithlon/qrx-appstore.md.

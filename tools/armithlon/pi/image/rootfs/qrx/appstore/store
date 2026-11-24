@@ -1,0 +1,96 @@
+#!/bin/sh
+# QRX App Store, host side (Raspberry Pi image): C:QRXAppStore calls this through the engine's
+# host control service (door service 11, /qrx/netctl store-...). Answers are plain text, one item
+# per line, fields separated by tabs. Runs with BusyBox only (wget, sha256sum, xz, tar).
+#
+#   store-catalog               one line per app: id, name, subtitle, category, version, archive
+#                               bytes, installed bytes, developer, license, state, launch, description
+#                               (state: get | installed | update | loading | failed)
+#   store-get ID                download, check and install in the background; answers "started"
+#   store-status ID             state, bytes so far, bytes in all, message
+#   store-remove ID             delete the installed app
+#
+# QRX_STORE_MIRROR=URL takes the archives from URL/<file name> instead (tests, an offline mirror).
+#
+# Trust: the catalog comes with the image and pins every archive by SHA-256. BusyBox wget cannot
+# check TLS certificates, so the check of the archive's hash is what keeps a changed or swapped
+# download from being installed. The catalog is never fetched from the network.
+#
+# Files: $QRX_APPS_DIR/<id>/ holds an app (APPS:<id> in QRX OS One), .qrx-store in it its version;
+# $QRX_APPS_DIR/.store/ the downloads in progress and their status.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+CAT=${QRX_STORE_CATALOG:-/qrx/appstore/catalog.tsv}
+APPS=${QRX_APPS_DIR:-/data/Apps}
+WORK=$APPS/.store
+TAB=$(printf '\t')
+cmd=$1; shift 2>/dev/null
+
+id_ok() { echo "$1" | grep -qE '^[a-z0-9][a-z0-9._-]{0,40}$'; }
+# the catalog line of an app (comment lines start with #)
+entry() { awk -F'\t' -v id="$1" '$1 == id && $1 !~ /^#/ { print; exit }' "$CAT"; }
+field() { echo "$1" | cut -d"$TAB" -f"$2"; }
+state_of() {   # id version
+    if [ -f "$WORK/$1.status" ]; then
+        s=$(cut -d"$TAB" -f1 "$WORK/$1.status")
+        case "$s" in loading|failed) echo "$s"; return ;; esac
+    fi
+    if [ -f "$APPS/$1/.qrx-store" ]; then
+        [ "$(cat "$APPS/$1/.qrx-store")" = "$2" ] && echo installed || echo update
+    else echo get; fi
+}
+status() { printf '%s\t%s\t%s\t%s\n' "$2" "$3" "$4" "$5" > "$WORK/$1.status"; }
+
+[ -r "$CAT" ] || { echo "no catalog"; exit 1; }
+case "$cmd" in
+store-catalog)
+    mkdir -p "$WORK"
+    grep -v '^#' "$CAT" | while IFS="$TAB" read -r id name sub cat ver size isize sha url launch dev lic desc; do
+        [ -n "$id" ] || continue
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$name" "$sub" "$cat" "$ver" "$size" "$isize" \
+            "$dev" "$lic" "$(state_of "$id" "$ver")" "$launch" "$desc"
+    done ;;
+store-get)
+    id_ok "$1" || { echo "bad id"; exit 2; }
+    e=$(entry "$1"); [ -n "$e" ] || { echo "unknown app"; exit 1; }
+    mkdir -p "$WORK" || { echo "no apps folder"; exit 1; }
+    [ "$(state_of "$1" x)" = loading ] && { echo "already loading"; exit 0; }
+    size=$(field "$e" 6); sha=$(field "$e" 8); url=$(field "$e" 9); ver=$(field "$e" 5)
+    case "$url" in https://*) ;; *) echo "bad url"; exit 1 ;; esac
+    # a mirror (tests, or a local copy): the same file name there; the hash check stays the same
+    [ -n "$QRX_STORE_MIRROR" ] && url=$QRX_STORE_MIRROR/${url##*/}
+    echo "$sha" | grep -qE '^[0-9a-f]{64}$' || { echo "bad hash"; exit 1; }
+    status "$1" loading 0 "$size" "downloading"
+    # in the background, with nothing left on the engine's pipe (it waits for the pipe to close)
+    (
+        part=$WORK/$1.part; new=$WORK/$1.new
+        rm -rf "$part" "$new"
+        if ! wget -q -T 30 -O "$part" "$url"; then status "$1" failed 0 "$size" "download failed"; rm -f "$part"; exit 1; fi
+        got=$(sha256sum "$part" | cut -d' ' -f1)
+        if [ "$got" != "$sha" ]; then status "$1" failed 0 "$size" "checksum wrong, not installed"; rm -f "$part"; exit 1; fi
+        status "$1" loading "$size" "$size" "installing"
+        mkdir -p "$new" && xz -dc "$part" | tar -x -C "$new" 2>/dev/null
+        if [ $? -ne 0 ] || [ -z "$(ls -A "$new")" ]; then status "$1" failed 0 "$size" "archive broken"; rm -rf "$part" "$new"; exit 1; fi
+        rm -f "$part"
+        # the archive holds the app's folder <id>/, or its files directly
+        if [ -d "$new/$1" ] && [ "$(ls -A "$new" | wc -l)" -eq 1 ]; then src=$new/$1; else src=$new; fi
+        rm -rf "$APPS/$1.old"; [ -d "$APPS/$1" ] && mv "$APPS/$1" "$APPS/$1.old"
+        mv "$src" "$APPS/$1" && echo "$ver" > "$APPS/$1/.qrx-store"
+        rm -rf "$new" "$APPS/$1.old" "$WORK/$1.status"
+        sync
+    ) </dev/null >/dev/null 2>&1 &
+    echo started ;;
+store-status)
+    id_ok "$1" || { echo "bad id"; exit 2; }
+    e=$(entry "$1"); [ -n "$e" ] || { echo "unknown app"; exit 1; }
+    ver=$(field "$e" 5); size=$(field "$e" 6)
+    if [ -f "$WORK/$1.status" ]; then
+        IFS="$TAB" read -r st done all msg < "$WORK/$1.status"
+        if [ "$st" = loading ] && [ "$msg" = downloading ] && [ -f "$WORK/$1.part" ]; then done=$(wc -c < "$WORK/$1.part"); fi
+        printf '%s\t%s\t%s\t%s\n' "$st" "${done:-0}" "${all:-$size}" "$msg"
+    else printf '%s\t0\t%s\t\n' "$(state_of "$1" "$ver")" "$size"; fi ;;
+store-remove)
+    id_ok "$1" || { echo "bad id"; exit 2; }
+    [ -f "$APPS/$1/.qrx-store" ] || { echo "not installed by the store"; exit 1; }
+    rm -rf "$APPS/$1" "$WORK/$1.status" "$WORK/$1.part" && sync && echo ok ;;
+*) echo "unknown command"; exit 2 ;;
+esac

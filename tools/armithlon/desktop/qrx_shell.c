@@ -728,6 +728,7 @@ static const struct sh_app sh_apps[] = {
     { "Welcome",    "QRX:C/QRXWelcome",     0xFF0D9488u, "HI" },
     { "Antivirus",  "QRX:C/ARESAntivirus",  0xFFBE123Cu, "AV" },
     { "Apps",       "*apps",                0xFFCA8A04u, "AP" },
+    { "App Store",  "C:QRXAppStore",        0xFF007AFFu, "AS" },
     { "Desktop",    "QRX:C/QRXDesktopPrefs", 0xFF9333EAu, "DP" },
 };
 #define SH_NAPPS (int)(sizeof sh_apps / sizeof sh_apps[0])

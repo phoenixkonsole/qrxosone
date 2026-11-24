@@ -14,6 +14,7 @@
 #   bt-remove ADDRESS
 #   system 32|64                    which QRX OS One starts next (/boot/qrx.txt), then restart
 #   reboot | poweroff
+#   store-catalog | store-get ID | store-status ID | store-remove ID   the App Store: /qrx/appstore/store
 PATH=/usr/sbin:/usr/bin
 W="wpa_cli -p /run/wpa_supplicant -i wlan0"
 cmd=$1; shift 2>/dev/null
@@ -25,6 +26,7 @@ wpa_text_ok() { case "$1" in *\"*|*\\*|"") return 1;; esac; [ "$(printf %s "$1" 
 net_id() { $W list_networks | awk -F'\t' -v s="$1" 'NR>1 && $2==s {print $1; exit}'; }
 
 case "$cmd" in
+store-*) exec "${0%/*}/appstore/store" "$cmd" "$@" ;;      # the App Store (C:QRXAppStore), see that script
 status)
     printf 'eth0\t%s\t%s\n' "$(cat /sys/class/net/eth0/operstate 2>/dev/null || echo none)" "$(addr_of eth0)"
     if [ -e /sys/class/net/wlan0 ]; then
