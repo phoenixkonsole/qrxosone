@@ -37,6 +37,18 @@
    /// Comparison function for checking OS X version compatibility, which handles
    /// supporting skewed version numbering schemes used by the "darwin" triples.
    LLVM_ABI bool isMacOSXVersionLT(unsigned Major, unsigned Minor = 0,
+@@ -1208,8 +1214,10 @@
+   ///
+   /// Note: Android API level 29 (10) introduced ELF TLS.
+   bool hasDefaultEmulatedTLS() const {
++    // QRX: AROS loads relocatable ELF and has no TLS segment; thread_local goes through
++    // __emutls_get_address (compiler-rt's emutls on AROS pthread keys).
+     return (isAndroid() && isAndroidVersionLT(29)) || isOSOpenBSD() ||
+-           isWindowsCygwinEnvironment() || isOHOSFamily();
++           isWindowsCygwinEnvironment() || isOHOSFamily() || isAROS();
+   }
+ 
+   /// True if the target uses TLSDESC by default.
 --- a/llvm/lib/TargetParser/Triple.cpp
 +++ b/llvm/lib/TargetParser/Triple.cpp
 @@ -47,6 +47,7 @@
@@ -298,10 +310,18 @@
                                                                          Opts);
 --- a/clang/lib/Basic/Targets/M68k.h
 +++ b/clang/lib/Basic/Targets/M68k.h
-@@ -62,6 +62,38 @@
+@@ -60,6 +60,44 @@
+   std::pair<unsigned, unsigned> hardwareInterferenceSizes() const override {
+     return std::make_pair(32, 32);
    }
- };
- 
++
++  // QRX: the exception object and selector a landing pad receives (getExceptionPointerRegister and
++  // getExceptionSelectorRegister of the backend): d0 and d1, DWARF registers 0 and 1.
++  int getEHDataRegisterNumber(unsigned RegNo) const override {
++    return RegNo < 2 ? int(RegNo) : -1;
++  }
++};
++
 +// QRX 68100EC64 long mode: LP64, natural alignment.
 +class LLVM_LIBRARY_VISIBILITY M68k64TargetInfo : public M68kTargetInfo {
 +public:
@@ -332,11 +352,9 @@
 +    Builder.defineMacro("_LP64");
 +    Builder.defineMacro("__LP64__");
 +  }
-+};
-+
- } // namespace targets
- } // namespace clang
+ };
  
+ } // namespace targets
 --- a/clang/lib/CodeGen/CodeGenModule.cpp
 +++ b/clang/lib/CodeGen/CodeGenModule.cpp
 @@ -118,6 +118,7 @@
@@ -1239,3 +1257,434 @@
    case llvm::Triple::AIX:
    case llvm::Triple::DragonFly:
    case llvm::Triple::ELFIAMCU:
+--- a/clang/lib/Driver/ToolChains/Clang.cpp
++++ b/clang/lib/Driver/ToolChains/Clang.cpp
+@@ -7118,7 +7118,8 @@
+   // -fuse-cxa-atexit is default.
+   if (!Args.hasFlag(
+           options::OPT_fuse_cxa_atexit, options::OPT_fno_use_cxa_atexit,
+-          !RawTriple.isOSAIX() &&
++          // QRX: AROS's C library has atexit but no __cxa_atexit
++          !RawTriple.isOSAIX() && !RawTriple.isAROS() &&
+               (!RawTriple.isOSWindows() ||
+                RawTriple.isWindowsCygwinEnvironment()) &&
+               ((RawTriple.getVendor() != llvm::Triple::MipsTechnologies) ||
+--- a/libunwind/include/__libunwind_config.h
++++ b/libunwind/include/__libunwind_config.h
+@@ -23,6 +23,7 @@
+ #define _LIBUNWIND_HIGHEST_DWARF_REGISTER_ARM64     95
+ #define _LIBUNWIND_HIGHEST_DWARF_REGISTER_ARM       287
+ #define _LIBUNWIND_HIGHEST_DWARF_REGISTER_OR1K      32
++#define _LIBUNWIND_HIGHEST_DWARF_REGISTER_M68K64    26
+ #define _LIBUNWIND_HIGHEST_DWARF_REGISTER_MIPS      65
+ #define _LIBUNWIND_HIGHEST_DWARF_REGISTER_SPARC     31
+ #define _LIBUNWIND_HIGHEST_DWARF_REGISTER_SPARC64   31
+@@ -93,6 +94,12 @@
+ #    define _LIBUNWIND_CURSOR_SIZE 49
+ #  endif
+ #  define _LIBUNWIND_HIGHEST_DWARF_REGISTER _LIBUNWIND_HIGHEST_DWARF_REGISTER_ARM
++# elif defined(__m68k64__)
++// QRX 68100EC64 long mode: d0-d7, a0-a7 (a7 = sp) and pc, 8 bytes each (no FPU)
++#  define _LIBUNWIND_TARGET_M68K64 1
++#  define _LIBUNWIND_CONTEXT_SIZE 17
++#  define _LIBUNWIND_CURSOR_SIZE 29
++#  define _LIBUNWIND_HIGHEST_DWARF_REGISTER _LIBUNWIND_HIGHEST_DWARF_REGISTER_M68K64
+ # elif defined(__or1k__)
+ #  define _LIBUNWIND_TARGET_OR1K 1
+ #  define _LIBUNWIND_CONTEXT_SIZE 16
+@@ -198,6 +205,7 @@
+ # define _LIBUNWIND_TARGET_AARCH64 1
+ # define _LIBUNWIND_TARGET_ARM 1
+ # define _LIBUNWIND_TARGET_OR1K 1
++# define _LIBUNWIND_TARGET_M68K64 1
+ # define _LIBUNWIND_TARGET_MIPS_O32 1
+ # define _LIBUNWIND_TARGET_MIPS_NEWABI 1
+ # define _LIBUNWIND_TARGET_SPARC 1
+--- a/libunwind/include/libunwind.h
++++ b/libunwind/include/libunwind.h
+@@ -880,6 +880,27 @@
+ };
+ 
+ // OpenRISC1000 register numbers
++// QRX 68100EC64 long mode (DWARF numbers of the m68k64 backend)
++enum {
++  UNW_M68K64_D0 = 0,
++  UNW_M68K64_D1 = 1,
++  UNW_M68K64_D2 = 2,
++  UNW_M68K64_D3 = 3,
++  UNW_M68K64_D4 = 4,
++  UNW_M68K64_D5 = 5,
++  UNW_M68K64_D6 = 6,
++  UNW_M68K64_D7 = 7,
++  UNW_M68K64_A0 = 8,
++  UNW_M68K64_A1 = 9,
++  UNW_M68K64_A2 = 10,
++  UNW_M68K64_A3 = 11,
++  UNW_M68K64_A4 = 12,
++  UNW_M68K64_A5 = 13,
++  UNW_M68K64_A6 = 14,
++  UNW_M68K64_A7 = 15,
++  UNW_M68K64_PC = 26,
++};
++
+ enum {
+   UNW_OR1K_R0  = 0,
+   UNW_OR1K_R1  = 1,
+--- a/libunwind/src/Registers.hpp
++++ b/libunwind/src/Registers.hpp
+@@ -38,6 +38,7 @@
+   REGISTERS_ARM64,
+   REGISTERS_ARM,
+   REGISTERS_OR1K,
++  REGISTERS_M68K64,
+   REGISTERS_MIPS_O32,
+   REGISTERS_MIPS_NEWABI,
+   REGISTERS_SPARC,
+@@ -2767,6 +2768,126 @@
+ }
+ #endif // _LIBUNWIND_TARGET_ARM
+ 
++
++#if defined(_LIBUNWIND_TARGET_M68K64)
++/// Registers_m68k64 holds the integer registers of the QRX 68100EC64 in long mode.
++class _LIBUNWIND_HIDDEN Registers_m68k64 {
++public:
++  Registers_m68k64();
++  Registers_m68k64(const void *registers);
++
++  typedef uint64_t reg_t;
++  typedef uint64_t link_reg_t;
++  typedef const link_reg_t &link_hardened_reg_arg_t;
++
++  bool        validRegister(int num) const;
++  uint64_t    getRegister(int num) const;
++  void        setRegister(int num, uint64_t value);
++  bool        validFloatRegister(int) const { return false; }
++  double      getFloatRegister(int) const {
++    _LIBUNWIND_ABORT("m68k64 has no floating point registers");
++  }
++  void        setFloatRegister(int, double) {
++    _LIBUNWIND_ABORT("m68k64 has no floating point registers");
++  }
++  bool        validVectorRegister(int) const { return false; }
++  v128        getVectorRegister(int) const {
++    _LIBUNWIND_ABORT("m68k64 has no vector registers");
++  }
++  void        setVectorRegister(int, v128) {
++    _LIBUNWIND_ABORT("m68k64 has no vector registers");
++  }
++  static const char *getRegisterName(int num);
++  void        jumpto();
++  static constexpr int lastDwarfRegNum() {
++    return _LIBUNWIND_HIGHEST_DWARF_REGISTER_M68K64;
++  }
++  static int  getArch() { return REGISTERS_M68K64; }
++
++  uint64_t  getSP() const         { return _registers.__a[7]; }
++  void      setSP(uint64_t value) { _registers.__a[7] = value; }
++  uint64_t  getIP() const         { return _registers.__pc; }
++  void      setIP(uint64_t value) { _registers.__pc = value; }
++
++private:
++  // Layout shared with __unw_getcontext and jumpto (UnwindRegistersSave/Restore.S):
++  // d0-d7 at 0, a0-a7 at 64, pc at 128.
++  struct m68k64_thread_state_t {
++    uint64_t __d[8];
++    uint64_t __a[8];
++    uint64_t __pc;
++  };
++
++  m68k64_thread_state_t _registers;
++};
++
++inline Registers_m68k64::Registers_m68k64(const void *registers) {
++  static_assert((check_fit<Registers_m68k64, unw_context_t>::does_fit),
++                "m68k64 registers do not fit into unw_context_t");
++  memcpy(&_registers, static_cast<const uint8_t *>(registers),
++         sizeof(_registers));
++}
++
++inline Registers_m68k64::Registers_m68k64() {
++  memset(&_registers, 0, sizeof(_registers));
++}
++
++inline bool Registers_m68k64::validRegister(int regNum) const {
++  if (regNum == UNW_REG_IP || regNum == UNW_REG_SP)
++    return true;
++  if (regNum >= UNW_M68K64_D0 && regNum <= UNW_M68K64_A7)
++    return true;
++  return regNum == UNW_M68K64_PC;
++}
++
++inline uint64_t Registers_m68k64::getRegister(int regNum) const {
++  if (regNum >= UNW_M68K64_D0 && regNum <= UNW_M68K64_D7)
++    return _registers.__d[regNum - UNW_M68K64_D0];
++  if (regNum >= UNW_M68K64_A0 && regNum <= UNW_M68K64_A7)
++    return _registers.__a[regNum - UNW_M68K64_A0];
++  switch (regNum) {
++  case UNW_REG_IP:
++  case UNW_M68K64_PC:
++    return _registers.__pc;
++  case UNW_REG_SP:
++    return _registers.__a[7];
++  }
++  _LIBUNWIND_ABORT("unsupported m68k64 register");
++}
++
++inline void Registers_m68k64::setRegister(int regNum, uint64_t value) {
++  if (regNum >= UNW_M68K64_D0 && regNum <= UNW_M68K64_D7) {
++    _registers.__d[regNum - UNW_M68K64_D0] = value;
++    return;
++  }
++  if (regNum >= UNW_M68K64_A0 && regNum <= UNW_M68K64_A7) {
++    _registers.__a[regNum - UNW_M68K64_A0] = value;
++    return;
++  }
++  switch (regNum) {
++  case UNW_REG_IP:
++  case UNW_M68K64_PC:
++    _registers.__pc = value;
++    return;
++  case UNW_REG_SP:
++    _registers.__a[7] = value;
++    return;
++  }
++  _LIBUNWIND_ABORT("unsupported m68k64 register");
++}
++
++inline const char *Registers_m68k64::getRegisterName(int regNum) {
++  static const char *const names[16] = {"d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7",
++                                        "a0", "a1", "a2", "a3", "a4", "a5", "a6", "sp"};
++  if (regNum >= UNW_M68K64_D0 && regNum <= UNW_M68K64_A7)
++    return names[regNum];
++  if (regNum == UNW_REG_IP || regNum == UNW_M68K64_PC)
++    return "pc";
++  if (regNum == UNW_REG_SP)
++    return "sp";
++  return "unknown register";
++}
++#endif // _LIBUNWIND_TARGET_M68K64
+ 
+ #if defined(_LIBUNWIND_TARGET_OR1K)
+ /// Registers_or1k holds the register state of a thread in an OpenRISC1000
+--- a/libunwind/src/UnwindCursor.hpp
++++ b/libunwind/src/UnwindCursor.hpp
+@@ -1286,6 +1286,12 @@
+   }
+ #endif
+ 
++#if defined (_LIBUNWIND_TARGET_M68K64)
++  compact_unwind_encoding_t dwarfEncoding(Registers_m68k64 &) const {
++    return 0;
++  }
++#endif
++
+ #if defined (_LIBUNWIND_TARGET_OR1K)
+   compact_unwind_encoding_t dwarfEncoding(Registers_or1k &) const {
+     return 0;
+--- a/libunwind/src/libunwind.cpp
++++ b/libunwind/src/libunwind.cpp
+@@ -57,6 +57,8 @@
+ # define REGISTER_KIND Registers_arm64
+ #elif defined(__arm__)
+ # define REGISTER_KIND Registers_arm
++#elif defined(__m68k64__)
++# define REGISTER_KIND Registers_m68k64
+ #elif defined(__or1k__)
+ # define REGISTER_KIND Registers_or1k
+ #elif defined(__hexagon__)
+--- a/libunwind/src/config.h
++++ b/libunwind/src/config.h
+@@ -40,7 +40,11 @@
+ #elif defined(_LIBUNWIND_IS_BAREMETAL)
+   #if !defined(_LIBUNWIND_ARM_EHABI)
+     #define _LIBUNWIND_SUPPORT_DWARF_UNWIND 1
++    // QRX: AROS's collect-aros provides __eh_frame_start/__eh_frame_end but no .eh_frame_hdr
++    // index; the unwinder searches .eh_frame itself.
++    #if !defined(__AROS__)
+     #define _LIBUNWIND_SUPPORT_DWARF_INDEX 1
++    #endif
+   #endif
+ #elif defined(__BIONIC__) && defined(_LIBUNWIND_ARM_EHABI)
+   // For ARM EHABI, Bionic didn't implement dl_iterate_phdr until API 21. After
+--- a/libunwind/src/UnwindRegistersSave.S
++++ b/libunwind/src/UnwindRegistersSave.S
+@@ -1043,6 +1043,32 @@
+ 
+ #endif
+ 
++#elif defined(__m68k64__)
++
++; QRX 68100EC64 long mode. ';' starts a comment here, so the directives stand on lines of their own
++; instead of in DEFINE_LIBUNWIND_FUNCTION.
++;
++; extern int __unw_getcontext(unw_context_t* thread_state)
++; The argument is on the stack: (8,%sp) on entry. Layout: d0-d7 at 0, a0-a7 at 64, pc at 128.
++  .text
++  .p2align 1
++  .globl __unw_getcontext
++  .type __unw_getcontext,@function
++__unw_getcontext:
++  move.q  %a0, -(%sp)
++  move.q  (16,%sp), %a0
++  movem.q %d0-%d7, (%a0)
++  move.q  (%sp)+, (64,%a0)
++  movem.q %a1-%a6, (72,%a0)
++  lea     (8,%sp), %a1
++  move.q  %a1, (120,%a0)
++  move.q  (%sp), (128,%a0)
++  moveq   #0, %d0
++  rts
++  .size __unw_getcontext, .-__unw_getcontext
++  .weak unw_getcontext
++  .set unw_getcontext, __unw_getcontext
++
+ #elif defined(__or1k__)
+ 
+ #
+--- a/libunwind/src/UnwindRegistersRestore.S
++++ b/libunwind/src/UnwindRegistersRestore.S
+@@ -884,6 +884,25 @@
+   JMP(lr)
+ 
+ #endif
++
++#elif defined(__m68k64__)
++
++; void libunwind::Registers_m68k64::jumpto(), this at (8,%sp). The new pc goes onto the new stack,
++; then everything is loaded and rts takes it.
++  .text
++  .p2align 1
++  .globl _ZN9libunwind16Registers_m68k646jumptoEv
++  .type _ZN9libunwind16Registers_m68k646jumptoEv,@function
++_ZN9libunwind16Registers_m68k646jumptoEv:
++  move.q  (8,%sp), %a0
++  movem.q (%a0), %d0-%d7
++  move.q  (120,%a0), %a1
++  move.q  (128,%a0), -(%a1)
++  move.q  %a1, %sp
++  movem.q (72,%a0), %a1-%a6
++  move.q  (64,%a0), %a0
++  rts
++  .size _ZN9libunwind16Registers_m68k646jumptoEv, .-_ZN9libunwind16Registers_m68k646jumptoEv
+ 
+ #elif defined(__or1k__)
+ 
+--- a/libcxx/src/system_error.cpp
++++ b/libcxx/src/system_error.cpp
+@@ -155,6 +155,22 @@
+     return string(buffer);
+   std::snprintf(buffer, strerror_buff_size, "unknown error %d", ev);
+   return string(buffer);
++}
++#  elif defined(__AROS__)
++// QRX: AROS has no strerror_r; its strerror returns fixed strings, which another call does not change.
++string do_strerror_r(int ev) {
++  const int old_errno = errno;
++  const char* message = ::strerror(ev);
++  string result;
++  if (message && message[0])
++    result = message;
++  else {
++    char buffer[64];
++    std::snprintf(buffer, sizeof buffer, "Unknown error %d", ev);
++    result = buffer;
++  }
++  errno = old_errno;
++  return result;
+ }
+ #  else
+ 
+--- a/libcxx/src/chrono.cpp
++++ b/libcxx/src/chrono.cpp
+@@ -38,7 +38,8 @@
+ // OpenBSD and GPU do not have a fully conformant suite of POSIX timers, but
+ // it does have clock_gettime and CLOCK_MONOTONIC which is all we need.
+ #if defined(__APPLE__) || defined(__gnu_hurd__) || defined(__OpenBSD__) || defined(__AMDGPU__) ||                      \
+-    defined(__NVPTX__) || (defined(_POSIX_TIMERS) && _POSIX_TIMERS > 0)
++    defined(__NVPTX__) || (defined(_POSIX_TIMERS) && _POSIX_TIMERS > 0) ||                                             \
++    defined(__AROS__) // QRX: AROS has clock_gettime with CLOCK_MONOTONIC but says _POSIX_TIMERS -1
+ #  define _LIBCPP_HAS_CLOCK_GETTIME
+ #endif
+ 
+--- a/libcxxabi/src/CMakeLists.txt
++++ b/libcxxabi/src/CMakeLists.txt
+@@ -36,7 +36,8 @@
+   )
+ endif()
+ 
+-if (LIBCXXABI_ENABLE_THREADS AND (UNIX OR FUCHSIA) AND NOT (APPLE OR CYGWIN)
++# QRX: AROS (m68k64-unknown-aros, built as CMAKE_SYSTEM_NAME Generic) has pthreads as well
++if (LIBCXXABI_ENABLE_THREADS AND (UNIX OR FUCHSIA OR "${CMAKE_CXX_COMPILER_TARGET}" MATCHES "aros") AND NOT (APPLE OR CYGWIN)
+     AND NOT ("${CMAKE_SYSTEM_NAME}" MATCHES "AIX"))
+   list(APPEND LIBCXXABI_SOURCES
+     cxa_thread_atexit.cpp
+--- a/libcxxabi/src/cxa_thread_atexit.cpp
++++ b/libcxxabi/src/cxa_thread_atexit.cpp
+@@ -21,6 +21,7 @@
+ 
+   using Dtor = void(*)(void*);
+ 
++#if !defined(__AROS__)
+   extern "C"
+ #ifndef HAVE___CXA_THREAD_ATEXIT_IMPL
+   // A weak symbol is used to detect this function's presence in the C library
+@@ -28,6 +29,9 @@
+   _LIBCXXABI_WEAK
+ #endif
+   int __cxa_thread_atexit_impl(Dtor, void*, void*);
++#else
++  static int __cxa_thread_atexit_impl(Dtor, void*, void*) { return -1; }
++#endif
+ 
+ #ifndef HAVE___CXA_THREAD_ATEXIT_IMPL
+ 
+@@ -106,14 +110,20 @@
+ 
+ #endif // HAVE___CXA_THREAD_ATEXIT_IMPL
+ 
+-#if defined(__linux__) || defined(__Fuchsia__)
++#if defined(__linux__) || defined(__Fuchsia__) || defined(__AROS__)  // QRX: AROS too, with the fallback below
+ extern "C" {
+ 
+   _LIBCXXABI_FUNC_VIS int __cxa_thread_atexit(Dtor dtor, void* obj, void* dso_symbol) throw() {
+ #ifdef HAVE___CXA_THREAD_ATEXIT_IMPL
+     return __cxa_thread_atexit_impl(dtor, obj, dso_symbol);
+ #else
++#if defined(__AROS__)
++    // QRX: AROS's C library has no __cxa_thread_atexit_impl, and its linker counts a weak
++    // undefined symbol as undefined: always the fallback.
++    if (false) {
++#else
+     if (__cxa_thread_atexit_impl) {
++#endif
+       return __cxa_thread_atexit_impl(dtor, obj, dso_symbol);
+     } else {
+       // Initialize the dtors std::__libcpp_tls_key (uses __cxa_guard_*() for
+@@ -142,5 +152,5 @@
+ #endif // HAVE___CXA_THREAD_ATEXIT_IMPL
+   }
+ } // extern "C"
+-#endif // defined(__linux__) || defined(__Fuchsia__)
++#endif // defined(__linux__) || defined(__Fuchsia__) || defined(__AROS__)
+ } // namespace __cxxabiv1
+--- a/compiler-rt/lib/builtins/emutls.c
++++ b/compiler-rt/lib/builtins/emutls.c
+@@ -12,7 +12,7 @@
+ 
+ #include "int_lib.h"
+ 
+-#ifdef __BIONIC__
++#if defined(__BIONIC__) || defined(__AROS__)  // QRX: AROS also has 4 rounds and no __cxa_thread_atexit_impl
+ // There are 4 pthread key cleanup rounds on Bionic. Delay emutls deallocation
+ // to round 2. We need to delay deallocation because:
+ //  - Android versions older than M lack __cxa_thread_atexit_impl, so apps
+@@ -397,7 +397,7 @@
+   return array->data[index];
+ }
+ 
+-#ifdef __BIONIC__
++#if defined(__BIONIC__) || defined(__AROS__)  // QRX: AROS also has 4 rounds and no __cxa_thread_atexit_impl
+ // Called by Bionic on dlclose to delete the emutls pthread key.
+ __attribute__((visibility("hidden"))) void __emutls_unregister_key(void) {
+   if (emutls_key_created) {

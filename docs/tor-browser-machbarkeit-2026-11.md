@@ -255,6 +255,23 @@ Grenzen bleiben:
 - Weder AROS noch eine C-Bibliothek laufen auf dem neuen Modus.
 - Der Test-Kernel ist mein eigener kleiner Test, kein Betriebssystem.
 
+### Vierter Stand: C++-Laufzeit (24. November)
+
+Die C++-Laufzeit für QRX OS One 64 steht. Beide Prüfprogramme für den Gecko-Port bestehen auf zwei EC64-Kernen:
+`GeckoPThread` (pthread-Schlüssel und ihre Destruktoren) und `GeckoRuntime` (C++-Ausnahmen über Rahmen hinweg, Threads,
+`thread_local` mit Destruktoren).
+
+| Teil | Stand |
+| --- | --- |
+| Compiler | Die Aufrufrahmen-Information (CFI) des m68k64-Backends war nicht abwickelbar: falsche CFA, kein Rücksprungregister, falsche Vorzeichen, gesicherte Register fehlten. Jetzt richtig, geprüft am Assembler mit und ohne Frame-Pointer. EH-Register d0/d1 für clang, emulierter TLS für AROS |
+| libunwind | Neues Ziel m68k64, Bare-Metal-Suche über die Symbole, die der AROS-Linker anlegt |
+| libc++abi, libc++ | Statisch, mit AROS-pthreads. Noch ohne Dateisystem, Lokalisierung und Wide Characters |
+| TLS | Emuliert über pthread-Schlüssel (`emutls`), Destruktoren beim Thread-Ende laufen |
+
+Damit ist Schritt 6 des Fahrplans für C++ erledigt. Offen bleiben dort Rust-`std` für AROS und die
+Lokalisierung von libc++. Ein großes C++-Programm ist noch nicht gelaufen; das wäre der nächste Prüfstein
+(SpiderMonkey ohne JIT, Schritt 7).
+
 ### Bedarf für die nächsten Schritte
 
 - Quellen: LLVM ist geladen. Für den AROS-Port fehlt `deadwood2/AROS` (rund 221 MB, GitHub).
