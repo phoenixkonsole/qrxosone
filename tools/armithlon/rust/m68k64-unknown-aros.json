@@ -12,7 +12,12 @@
   "env": "",
   "linker-flavor": "gnu-cc",
   "linker": "/opt/qrx-os-one/aros64/tc/bin/clang",
-  "pre-link-args": { "gnu-cc": ["--sysroot", "/opt/qrx-os-one/aros64/build-qrx/bin/native-m68k64/AROS/Development"] },
+  "pre-link-args": {
+    "gnu-cc": [
+      "--sysroot",
+      "/opt/qrx-os-one/aros64/build-qrx/bin/native-m68k64/AROS/Development"
+    ]
+  },
   "executables": true,
   "dynamic-linking": false,
   "position-independent-executables": false,
@@ -23,11 +28,19 @@
   "eh-frame-header": false,
   "emit-debug-gdb-scripts": false,
   "singlethread": false,
-  "target-family": ["unix"],
+  "target-family": [
+    "unix"
+  ],
   "metadata": {
     "description": "QRX OS One 64: 64-bit AROS on the 68100EC64 (long mode, LP64, no FPU)",
     "tier": 3,
     "host_tools": false,
     "std": false
+  },
+  "no-default-libraries": false,
+  "post-link-args": {
+    "gnu-cc": [
+      "-Wl,--no-gc-sections"
+    ]
   }
 }
