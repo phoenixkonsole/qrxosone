@@ -46,3 +46,9 @@ RUSTC=$DIR/rust-1.100.0-m68k64/bin/rustc RUSTC_BOOTSTRAP=1 PATH=$DIR/linux-x86_6
 
 The spec names the linker `/opt/qrx-os-one/aros64/tc/bin/clang`, the sysroot and `-L /opt/qrx-os-one/ec64llvm/build/lib`
 (libunwind, libqrxaroscompat) by absolute path; elsewhere, adjust those three entries in a copy of the spec.
+
+Update (2026-11-24, evening): `aros64-5b5fd4c-qrx-m68k64` rebuilt with the fixed m68k64 LLVM (every object
+compiled again) and with `L/qrxpipe-handler` (PIPE: for pipe() and std::process). `libqrxaroscompat.a` in the LLVM
+archive predates the sockets, processes, pipes and host entropy of the working branch: run
+`tools/armithlon/rust/compat/build-compat.sh <ec64-llvm-22.1.2> <native-m68k64/AROS/Development>` after unpacking
+(a few seconds).
