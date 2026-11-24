@@ -1,0 +1,29 @@
+--- a/compiler/rustc_llvm/build.rs
++++ b/compiler/rustc_llvm/build.rs
+@@ -16,6 +16,8 @@
+     "avr",
+     "loongarch",
+     "m68k",
++    // QRX: the 68100EC64 long mode backend of the patched LLVM (tools/armithlon/ec64-llvm)
++    "m68k64",
+     "csky",
+     "mips",
+     "powerpc",
+--- a/compiler/rustc_llvm/src/lib.rs
++++ b/compiler/rustc_llvm/src/lib.rs
+@@ -135,6 +135,15 @@
+         LLVMInitializeM68kAsmPrinter,
+         LLVMInitializeM68kAsmParser
+     );
++    // QRX: m68k64-unknown-aros (QRX OS One 64)
++    init_target!(
++        llvm_component = "m68k64",
++        LLVMInitializeM68k64TargetInfo,
++        LLVMInitializeM68k64Target,
++        LLVMInitializeM68k64TargetMC,
++        LLVMInitializeM68k64AsmPrinter,
++        LLVMInitializeM68k64AsmParser
++    );
+     init_target!(
+         llvm_component = "csky",
+         LLVMInitializeCSKYTargetInfo,
