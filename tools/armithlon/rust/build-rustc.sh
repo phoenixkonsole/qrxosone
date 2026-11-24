@@ -23,6 +23,8 @@ if [ ! -d "$V" ]; then
     xz -dc "dl/$V.tar.xz" | tar -x --exclude="$V/src/llvm-project" --exclude="$V/src/gcc" \
         --exclude="$V/tests" --exclude="$V/vendor"
     patch -p1 -d "$V" < "$HERE/rustc-1.100.0-m68k64.patch"
+    # the archive points cargo at its vendor/ directory, which is left out: crates come from crates.io
+    mv "$V/.cargo/config.toml" "$V/.cargo/config.toml.vendored"
 fi
 cat > "$V/bootstrap.toml" <<EOF
 change-id = "ignore"
