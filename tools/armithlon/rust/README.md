@@ -29,5 +29,11 @@ kennt (die Metadaten bleiben roh im rlib, lld meldet das nur als Warnung).
 - `tests/rhello` läuft im 64-Bit-AROS-Gast auf zwei EC64-Kernen (x86-64-Referenzmaschine): Vec, BTreeMap,
   `format!`, Gleitkomma, 128-Bit-Ganzzahlen; Allokator über `malloc` der AROS-C-Bibliothek. Ausgabe
   `PASS: Rust core+alloc on m68k64`.
-- Noch nicht: `std` für AROS (Plattformschicht und Bindungen im `libc`-Crate), Abwickeln von Panics
+- `libc`-Crate mit `target_os = "aros"` (`libc-0.2.189-aros.patch`, nach `<work>/libc-aros`, im
+  Bibliotheks-Workspace per `[patch]` eingebunden): Typen, Konstanten und Strukturen sind mit
+  `gen-libc-aros.py` gegen die AROS-64-SDK-Header gemessen (Größen, Vorzeichen, Makrowerte, Feld-Offsets
+  aus clangs Record-Layouts); die pthread-Typen sind opak in AROS-Größe, ihre Initialisierer Nullbytes wie
+  in AROS. Das Crate übersetzt für das Ziel.
+- Noch nicht: `std` für AROS (Stand: 129 Fehler in std selbst – fehlendes `std::os::aros`, Thread-Namen,
+  `current_exe`, Zufall, Konstanten wie `O_CLOEXEC`/`AT_FDCWD`/`poll`, die AROS nicht hat) (Plattformschicht und Bindungen im `libc`-Crate), Abwickeln von Panics
   (das Testprogramm nutzt `panic=abort`), ein Lauf mit dem ARM64-JIT auf dem Pi.
