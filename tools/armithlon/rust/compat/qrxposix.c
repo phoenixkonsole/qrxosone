@@ -339,3 +339,33 @@ time_t timegm(struct tm *tm)
     long long days = era * 146097 + doe - 719468;
     return (time_t)(days * 86400 + tm->tm_hour * 3600LL + tm->tm_min * 60LL + tm->tm_sec);
 }
+
+/* sigaction on top of AROS's signal() (AROS's own sigaction is "not implemented"): the action is
+ * kept here and returned as the old action; SA_SIGINFO handlers get a siginfo_t with si_signo set
+ * (AROS delivers no more information); the mask and the other flags have no effect. */
+#define QRX_NSIG 65
+static struct sigaction qrx_actions[QRX_NSIG];
+static void qrx_siginfo_trampoline(int sig)
+{
+    if (sig <= 0 || sig >= QRX_NSIG) return;
+    siginfo_t info;
+    memset(&info, 0, sizeof info);
+    info.si_signo = sig;
+    qrx_actions[sig].sa_sigaction(sig, &info, NULL);
+}
+int sigaction(int sig, const struct sigaction *act, struct sigaction *old)
+{
+    if (sig <= 0 || sig >= QRX_NSIG || sig == SIGKILL || sig == SIGSTOP) {
+        if (old || act) { errno = EINVAL; return -1; }
+    }
+    if (old) *old = qrx_actions[sig];
+    if (!act) return 0;
+    void (*h)(int);
+    if (act->sa_flags & SA_SIGINFO)
+        h = (act->sa_sigaction == NULL) ? SIG_DFL : qrx_siginfo_trampoline;
+    else
+        h = act->sa_handler;
+    if (signal(sig, h) == SIG_ERR) return -1;
+    qrx_actions[sig] = *act;
+    return 0;
+}

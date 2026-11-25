@@ -5079,6 +5079,19 @@
      UNIFIED_SOURCES += [
          "nsNativeTheme.cpp",
      ]
+--- a/xpcom/base/nsDebugImpl.cpp
++++ b/xpcom/base/nsDebugImpl.cpp
+@@ -685,6 +685,10 @@
+ }
+ 
+ void NS_ABORT_OOM(size_t aSize) {
++#ifdef __AROS__
++  // QRX: say how much was asked for (AROS has no crash reporter to annotate)
++  printf_stderr("NS_ABORT_OOM: %zu bytes\n", aSize);
++#endif
+   CrashReporter::AnnotateOOMAllocationSize(aSize);
+   MOZ_CRASH("OOM");
+ }
 --- a/xpcom/base/nsMemoryReporterManager.cpp
 +++ b/xpcom/base/nsMemoryReporterManager.cpp
 @@ -2562,7 +2562,7 @@
