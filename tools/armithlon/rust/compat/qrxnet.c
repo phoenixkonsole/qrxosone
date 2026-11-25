@@ -59,6 +59,7 @@ enum { NET_SOCKET6 = 23, NET_BIND6, NET_CONNECT6, NET_SENDTO6, NET_RECVFROM6, NE
 #define IPPROTO_TCP_ 6
 #define MSG_PEEK_ 2
 #define MSG_OOB_ 1
+#define MSG_DONTWAIT_ 0x80
 #define F_GETFD_ F_GETFD       /* AROS's own numbers (2, 3, 4, 5; O_NONBLOCK 2048), not BSD's */
 #define F_SETFD_ F_SETFD
 #define F_GETFL_ F_GETFL
@@ -95,6 +96,9 @@ ssize_t __write_CrtBase_wrapper(int, const void *, size_t);
 int __fcntl_CrtBase_wrapper(int, int, ...);
 int __ioctl_CrtBase_wrapper(int, int, ...);
 int __get_default_file(int fd, long *fh);
+int qrx_is_shm_fd(int fd);             /* qrxshm.c */
+int qrx_shm_close(int fd);
+int qrx_shm_fcntl(int fd, int cmd, long arg);
 
 /* pend_err: an error the host reported with a poll. Its poll reads SO_ERROR, which clears it on
  * the host, so it is kept here until getsockopt(SO_ERROR) or connect takes it. */
@@ -265,7 +269,6 @@ int socket(int domain, int type, int protocol)
     if (fd >= 0) sk[fd - QRX_SOCK_FD].v6 = domain == AF_INET6_;
     return fd;
 }
-int socketpair(int d, int t, int p, int *sv) { (void)d; (void)t; (void)p; (void)sv; errno = EOPNOTSUPP; return -1; }
 
 int bind(int fd, const void *sa, qsocklen_t l)
 {
@@ -446,7 +449,7 @@ static ssize_t xfer(int s, void *buf, size_t n, int flags, uint32_t op, const vo
             else if (op == NET_RECVFROM) put_in(from, fl, q[14], q[15]);
             return r;
         }
-        if (errno != EAGAIN || sk[s].nonblock) return -1;
+        if (errno != EAGAIN || sk[s].nonblock || (flags & MSG_DONTWAIT_)) return -1;
         if (wait_sock(s, is_send ? 2 : 1, tmo)) return -1;
     }
 }
@@ -478,6 +481,7 @@ ssize_t recvfrom(int fd, void *b, size_t n, int f, void *from, qsocklen_t *fl)
 /* ---- the descriptor functions: sockets here, the rest to AROS */
 int close(int fd)
 {
+    if (qrx_is_shm_fd(fd)) return qrx_shm_close(fd);
     if (!is_sockfd(fd)) return __close_CrtBase_wrapper(fd);
     int s = sock_of(fd);
     if (s < 0) { errno = EBADF; return -1; }
@@ -531,6 +535,7 @@ int fcntl(int fd, int cmd, ...)
     va_start(ap, cmd);
     long arg = va_arg(ap, long);
     va_end(ap);
+    if (qrx_is_shm_fd(fd)) return qrx_shm_fcntl(fd, cmd, arg);
     if (!is_sockfd(fd)) {
         /* close-on-exec: AROS has no such flag; qrx_spawn closes the parent's other descriptors */
         if (cmd == F_GETFD_) return __fcntl_CrtBase_wrapper(fd, F_GETFL_) < 0 ? -1 : 0;
@@ -1007,3 +1012,59 @@ struct qhostent *gethostbyname2(const char *name, int af)
 }
 const uint8_t in6addr_any[16] = { 0 };
 const uint8_t in6addr_loopback[16] = { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 };
+
+/* sendmsg/recvmsg: the data of the iovecs; no ancillary data (descriptors cannot be passed between
+ * AROS processes: sendmsg with control data fails with EOPNOTSUPP, recvmsg returns none) */
+struct qmsghdr { void *name; qsocklen_t namelen; struct qiovec *iov; int iovlen; void *control; qsocklen_t controllen; int flags; };
+ssize_t sendmsg(int fd, const struct qmsghdr *m, int flags)
+{
+    if (m->controllen) { errno = EOPNOTSUPP; return -1; }
+    ssize_t total = 0;
+    for (int i = 0; i < m->iovlen; i++) {
+        if (!m->iov[i].len) continue;
+        ssize_t r = m->name ? sendto(fd, m->iov[i].base, m->iov[i].len, flags, m->name, m->namelen)
+                            : send(fd, m->iov[i].base, m->iov[i].len, flags);
+        if (r < 0) return total ? total : -1;
+        total += r;
+        if ((size_t)r < m->iov[i].len) break;
+    }
+    return total;
+}
+ssize_t recvmsg(int fd, struct qmsghdr *m, int flags)
+{
+    ssize_t total = 0;
+    m->controllen = 0;
+    m->flags = 0;
+    for (int i = 0; i < m->iovlen; i++) {
+        if (!m->iov[i].len) continue;
+        ssize_t r = (i == 0 && m->name) ? recvfrom(fd, m->iov[i].base, m->iov[i].len, flags, m->name, &m->namelen)
+                                        : recv(fd, m->iov[i].base, m->iov[i].len, total ? (flags | MSG_DONTWAIT_) : flags);
+        if (r < 0) { if (total) break; return -1; }
+        total += r;
+        if ((size_t)r < m->iov[i].len) break;
+    }
+    return total;
+}
+
+/* socketpair: a connected TCP pair on 127.0.0.1 through the door (AROS has no AF_UNIX sockets);
+ * stream only */
+int socketpair(int d, int t, int p, int *sv)
+{
+    (void)d; (void)p;
+    if ((t & 0xFF) != SOCK_STREAM_) { errno = EOPNOTSUPP; return -1; }
+    struct qsockaddr_in a;
+    qsocklen_t al = sizeof a;
+    int l = socket(AF_INET_, SOCK_STREAM_, 0);
+    if (l < 0) return -1;
+    memset(&a, 0, sizeof a);
+    a.len = sizeof a; a.family = AF_INET_; a.addr = 0x7F000001u; a.port = 0;
+    if (bind(l, &a, sizeof a) || listen(l, 1) || getsockname(l, &a, &al)) { int e = errno; close(l); errno = e; return -1; }
+    int c = socket(AF_INET_, SOCK_STREAM_, 0);
+    if (c < 0 || connect(c, &a, sizeof a)) { int e = errno; if (c >= 0) close(c); close(l); errno = e; return -1; }
+    int s2 = accept(l, NULL, NULL);
+    int e = errno;
+    close(l);
+    if (s2 < 0) { close(c); errno = e; return -1; }
+    sv[0] = c; sv[1] = s2;
+    return 0;
+}

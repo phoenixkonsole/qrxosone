@@ -300,3 +300,50 @@ int qrx_program_path(char *buf, size_t n, int unix)
     int k = snprintf(buf, n, "/%s%s%s", full, colon[1] ? "/" : "", colon + 1);
     return k > 0 && (size_t)k < n ? 0 : -1;
 }
+
+/* statvfs/fstatvfs (aros/posixc/sys/statvfs.h, which AROS's C library does not implement): the
+ * volume's InfoData from dos.library Info(). A Unix-style path (/Volume/dir, AROS's *nix mode) is
+ * turned into Volume:dir first. File nodes: AROS file systems have no fixed count; reported as 0. */
+#include <sys/statvfs.h>
+static void fill_statvfs(const struct InfoData *id, struct statvfs *b)
+{
+    memset(b, 0, sizeof *b);
+    b->f_bsize = b->f_frsize = (unsigned long)id->id_BytesPerBlock;
+    b->f_blocks = (fsblkcnt_t)id->id_NumBlocks;
+    b->f_bfree = b->f_bavail = (fsblkcnt_t)(id->id_NumBlocks - id->id_NumBlocksUsed);
+    b->f_namemax = 107;
+    if (id->id_DiskState == ID_WRITE_PROTECTED) b->f_flag |= ST_RDONLY;
+}
+int statvfs(const char *path, struct statvfs *b)
+{
+    char apath[1024];
+    if (path[0] == '/') {
+        const char *s = strchr(path + 1, '/');
+        if (s) snprintf(apath, sizeof apath, "%.*s:%s", (int)(s - path - 1), path + 1, s + 1);
+        else snprintf(apath, sizeof apath, "%s:", path + 1);
+        path = apath;
+    }
+    BPTR lock = Lock((CONST_STRPTR)path, SHARED_LOCK);
+    if (!lock) { errno = ENOENT; return -1; }
+    struct InfoData *id = AllocVec(sizeof *id, MEMF_ANY | MEMF_CLEAR);
+    int ok = id && Info(lock, id);
+    UnLock(lock);
+    if (ok) fill_statvfs(id, b);
+    FreeVec(id);
+    if (!ok) { errno = EIO; return -1; }
+    return 0;
+}
+int fstatvfs(int fd, struct statvfs *b)
+{
+    long h = 0;
+    if (__get_default_file(fd, &h) || !h) { errno = EBADF; return -1; }
+    BPTR lock = DupLockFromFH((BPTR)h);
+    if (!lock) { errno = EBADF; return -1; }
+    struct InfoData *id = AllocVec(sizeof *id, MEMF_ANY | MEMF_CLEAR);
+    int ok = id && Info(lock, id);
+    UnLock(lock);
+    if (ok) fill_statvfs(id, b);
+    FreeVec(id);
+    if (!ok) { errno = EIO; return -1; }
+    return 0;
+}

@@ -32,10 +32,14 @@ static void lock_init(void)
     Permit();
 }
 
+int qrx_is_shm_fd(int fd);
+void *qrx_shm_mmap(size_t len, int prot, int fd, off_t off);
+int qrx_shm_munmap(void *addr, size_t len);
+
 void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)
 {
-    (void)prot; (void)off;
     if (!len) { errno = EINVAL; return MAP_FAILED; }
+    if ((flags & MAP_SHARED) && !(flags & MAP_ANON) && qrx_is_shm_fd(fd)) return qrx_shm_mmap(len, prot, fd, off);
     if (!(flags & MAP_ANON) || fd != -1) { errno = ENODEV; return MAP_FAILED; }
     len = (len + 4095) & ~(size_t)4095;
     lock_init();
@@ -74,6 +78,7 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)
 
 int munmap(void *addr, size_t len)
 {
+    if (qrx_shm_munmap(addr, len)) return 0;
     if (!len) { errno = EINVAL; return -1; }
     lock_init();
     ObtainSemaphore(&lock);
@@ -181,3 +186,22 @@ void syslog(int priority, const char *format, ...)
     if (l < sizeof b - 1) { b[l++] = '\n'; b[l] = 0; }
     write(2, b, l);
 }
+
+/* getrusage (AROS keeps no CPU accounting per task): AROS does not page, so the fault counts are
+ * exactly 0; the times and sizes are not measured and reported as 0 too. */
+#include <sys/resource.h>
+int getrusage(int who, struct rusage *u)
+{
+    if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) { errno = EINVAL; return -1; }
+    memset(u, 0, sizeof *u);
+    return 0;
+}
+
+/* pthread_sigmask: AROS's signals are per task, as a thread here is; sigprocmask serves */
+#include <signal.h>
+int pthread_sigmask(int how, const sigset_t *set, sigset_t *old)
+{
+    return sigprocmask(how, set, old) ? errno : 0;
+}
+/* alarm: AROS's C library delivers no SIGALRM; no alarm is set, there was none before (0) */
+unsigned alarm(unsigned seconds) { (void)seconds; return 0; }

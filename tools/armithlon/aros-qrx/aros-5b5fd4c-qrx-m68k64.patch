@@ -72,6 +72,23 @@ index de479bdc..817f9c5a 100644
 +  files="$(FILES)" uselibs="stdc.static"
  
  %common
+diff --git a/arch/all-runtime/bsdsocket/include/proto/bsdsocket.h b/arch/all-runtime/bsdsocket/include/proto/bsdsocket.h
+index 5c829a7c..9ea386d2 100644
+--- a/arch/all-runtime/bsdsocket/include/proto/bsdsocket.h
++++ b/arch/all-runtime/bsdsocket/include/proto/bsdsocket.h
+@@ -8,7 +8,12 @@
+ #include <exec/types.h>
+ #include <sys/cdefs.h>
+ 
++/* QRX: with BSDSOCKET_NOLIBDEFINES the program uses the POSIX socket functions (sys/socket.h,
++ * netdb.h, arpa/inet.h declare them; QRX OS One 64: libqrxaroscompat), not bsdsocket.library's,
++ * whose prototypes differ (int lengths and results) */
++#if !defined(BSDSOCKET_NOLIBDEFINES)
+ #include <clib/bsdsocket_protos.h>
++#endif
+ 
+ #if !defined(SocketBase) && !defined(__NOLIBBASE__) && !defined(__BSDSOCKET_NOLIBBASE__)
+  #ifdef __BSDSOCKET_STDLIBBASE__
 diff --git a/arch/m68k64-all/crt/mmakefile.src b/arch/m68k64-all/crt/mmakefile.src
 new file mode 100644
 index 00000000..6680ba15
@@ -7417,6 +7434,25 @@ index c21238d3..fc0a6354 100644
  #else
  #   error unsupported CPU type
  #endif
+diff --git a/compiler/crt/posixc/include/aros/features.h b/compiler/crt/posixc/include/aros/features.h
+index e9188a40..c7f53c7f 100644
+--- a/compiler/crt/posixc/include/aros/features.h
++++ b/compiler/crt/posixc/include/aros/features.h
+@@ -122,8 +122,13 @@
+      !defined(_XOPEN_SOURCE_EXTENDED) && \
+      !defined(_BSD_SOURCE) && \
+      !defined(_DEFAULT_SOURCE))
+-# define _XOPEN_SOURCE 500
++/* QRX: the default as glibc's (_DEFAULT_SOURCE): POSIX.1-2008 and the BSD/SVID extensions, not
++ * SUSv2. Ported programs (Gecko, NSS, libjpeg, dav1d) expect setenv(), posix_memalign() and the
++ * other POSIX.1-2001/2008 functions without asking for them. */
++# define _POSIX_C_SOURCE 200809L
++# define _XOPEN_SOURCE 700
+ # define _BSD_SOURCE 1
++# define _DEFAULT_SOURCE 1
+ #endif
+ 
+ /* Enable features based on _POSIX_C_SOURCE level */
 diff --git a/compiler/crt/posixc/include/aros/posixc/poll.h b/compiler/crt/posixc/include/aros/posixc/poll.h
 new file mode 100644
 index 00000000..cd4e4d9f
@@ -7461,12 +7497,25 @@ index 00000000..cd4e4d9f
 +__END_DECLS
 +
 +#endif /* _POSIXC_POLL_H_ */
+diff --git a/compiler/crt/posixc/include/aros/posixc/signal.h b/compiler/crt/posixc/include/aros/posixc/signal.h
+index af58738e..1c0f63fc 100644
+--- a/compiler/crt/posixc/include/aros/posixc/signal.h
++++ b/compiler/crt/posixc/include/aros/posixc/signal.h
+@@ -126,7 +126,7 @@ int	kill(pid_t, int);
+ /* NOTIMPL void   psiginfo(const siginfo_t *, const char *); */
+ /* NOTIMPL void   psignal(int, const char *); */
+ /* NOTIMPL int    pthread_kill(pthread_t, int); */
+-/* NOTIMPL int    pthread_sigmask(int, const sigset_t *restrict, sigset_t *restrict); */
++int    pthread_sigmask(int, const sigset_t *restrict, sigset_t *restrict);   /* QRX: libqrxaroscompat */
+ int	sigaction(int, const struct sigaction *, struct sigaction *);
+ int	sigaddset(sigset_t *, int);
+ /* NOTIMPL int	sigaltstack(const stack_t *, stack_t *); */
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/mman.h b/compiler/crt/posixc/include/aros/posixc/sys/mman.h
 new file mode 100644
-index 00000000..7f44d32c
+index 00000000..c84a735e
 --- /dev/null
 +++ b/compiler/crt/posixc/include/aros/posixc/sys/mman.h
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,59 @@
 +#ifndef _POSIXC_SYS_MMAN_H_
 +#define _POSIXC_SYS_MMAN_H_
 +/*
@@ -7509,6 +7558,8 @@ index 00000000..7f44d32c
 +#define MS_INVALIDATE 2
 +#define MS_SYNC       4
 +
++#include <aros/types/mode_t.h>
++
 +__BEGIN_DECLS
 +void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
 +int munmap(void *addr, size_t len);
@@ -7518,9 +7569,82 @@ index 00000000..7f44d32c
 +int msync(void *addr, size_t len, int flags);
 +int mlock(const void *addr, size_t len);
 +int munlock(const void *addr, size_t len);
++/* POSIX shared memory (libqrxaroscompat: one block for every mapping, see qrxshm.c) */
++int shm_open(const char *name, int oflag, mode_t mode);
++int shm_unlink(const char *name);
 +__END_DECLS
 +
 +#endif /* _POSIXC_SYS_MMAN_H_ */
+diff --git a/compiler/crt/posixc/include/aros/posixc/sys/resource.h b/compiler/crt/posixc/include/aros/posixc/sys/resource.h
+index 5aba0d51..a49a156b 100644
+--- a/compiler/crt/posixc/include/aros/posixc/sys/resource.h
++++ b/compiler/crt/posixc/include/aros/posixc/sys/resource.h
+@@ -28,10 +28,9 @@ RLIM_SAVED_MAX
+ RLIM_SAVED_CUR
+ */
+ 
+-/* NOTIMPL
+-RUSAGE_SELF
+-RUSAGE_CHILDREN
+-*/
++/* QRX: getrusage is in libqrxaroscompat (QRX OS One 64) */
++#define RUSAGE_SELF      0
++#define RUSAGE_CHILDREN  (-1)
+ 
+ struct rlimit {
+     rlim_t rlim_cur; /* The current (soft) limit */
+@@ -40,9 +39,24 @@ struct rlimit {
+ 
+ #include <aros/types/timeval_s.h>
+ 
+-/* NOTIMPL
+-struct rusage
+-*/
++struct rusage {
++    struct timeval ru_utime;  /* user time used */
++    struct timeval ru_stime;  /* system time used */
++    long ru_maxrss;           /* max resident set size */
++    long ru_ixrss;            /* integral shared text memory size */
++    long ru_idrss;            /* integral unshared data size */
++    long ru_isrss;            /* integral unshared stack size */
++    long ru_minflt;           /* page reclaims */
++    long ru_majflt;           /* page faults */
++    long ru_nswap;            /* swaps */
++    long ru_inblock;          /* block input operations */
++    long ru_oublock;          /* block output operations */
++    long ru_msgsnd;           /* messages sent */
++    long ru_msgrcv;           /* messages received */
++    long ru_nsignals;         /* signals received */
++    long ru_nvcsw;            /* voluntary context switches */
++    long ru_nivcsw;           /* involuntary context switches */
++};
+ 
+ #define RLIMIT_CORE     0	/* Limit on size of core file */
+ #define RLIMIT_CPU      1	/* Limit on CPU time per process */
+@@ -59,7 +73,7 @@ __BEGIN_DECLS
+ 
+ /* NOTIMPL int getpriority(int, id_t); */
+ int getrlimit(int, struct rlimit *);
+-/* NOTIMPL getrusage(int, struct rusage *); */
++int getrusage(int, struct rusage *);
+ /* NOTIMPL setpriority(int, id_t, int); */
+ int setrlimit(int, const struct rlimit *);
+ 
+diff --git a/compiler/crt/posixc/include/aros/posixc/sys/statvfs.h b/compiler/crt/posixc/include/aros/posixc/sys/statvfs.h
+index 2b1e1a53..1d26d01f 100644
+--- a/compiler/crt/posixc/include/aros/posixc/sys/statvfs.h
++++ b/compiler/crt/posixc/include/aros/posixc/sys/statvfs.h
+@@ -25,6 +25,10 @@ struct statvfs {
+     unsigned long  f_namemax;  // Maximum filename length
+ };
+ 
++/* f_flag values (POSIX) */
++#define ST_RDONLY 1
++#define ST_NOSUID 2
++
+ __BEGIN_DECLS
+ 
+ int statvfs(const char *path, struct statvfs *buf);
 diff --git a/compiler/crt/posixc/include/aros/posixc/time.h b/compiler/crt/posixc/include/aros/posixc/time.h
 index 88cddcd4..03631520 100644
 --- a/compiler/crt/posixc/include/aros/posixc/time.h
@@ -7538,7 +7662,7 @@ index 88cddcd4..03631520 100644
  __END_DECLS
  
 diff --git a/compiler/crt/posixc/include/aros/posixc/unistd.h b/compiler/crt/posixc/include/aros/posixc/unistd.h
-index 3859d78b..e6e8f19b 100644
+index 3859d78b..5a69b46e 100644
 --- a/compiler/crt/posixc/include/aros/posixc/unistd.h
 +++ b/compiler/crt/posixc/include/aros/posixc/unistd.h
 @@ -431,6 +431,9 @@ char *getpass(const char *prompt);
@@ -7551,6 +7675,29 @@ index 3859d78b..e6e8f19b 100644
  int link(const char *name1, const char *name2);
  int usleep(useconds_t microseconds);
  #endif
+@@ -439,6 +442,9 @@ int usleep(useconds_t microseconds);
+ /* NOTIMPL int unlinkat(int dirfd, const char *pathname, int flags); */
+ #endif
+ 
++/* QRX: libqrxaroscompat; AROS delivers no SIGALRM, so no alarm is ever set */
++unsigned alarm(unsigned seconds);
++
+ __END_DECLS
+ 
+ /* C library internal functions to initialize environ handling simulation
+diff --git a/compiler/crt/posixc/include/mmakefile.src b/compiler/crt/posixc/include/mmakefile.src
+index 6184560f..389b2673 100644
+--- a/compiler/crt/posixc/include/mmakefile.src
++++ b/compiler/crt/posixc/include/mmakefile.src
+@@ -1,7 +1,7 @@
+ include $(SRCDIR)/config/aros.cfg
+ 
+ INCLUDES := $(call WILDCARD, aros/*.h aros/posixc/*.h aros/posixc/sys/*.h aros/types/*.h)
+-FILTER_OUT :=   aros/posixc/sys/statvfs.h aros/posixc/ctype.h aros/posixc/langinfo.h \
++FILTER_OUT :=   aros/posixc/ctype.h aros/posixc/langinfo.h \
+                 aros/posixc/nl_types.h aros/posixc/wchar.h aros/posixc/wctype.h
+ INCLUDES :=  $(filter-out $(FILTER_OUT), $(INCLUDES))
+ 
 diff --git a/compiler/crt/posixc/vfwprintf.c b/compiler/crt/posixc/vfwprintf.c
 index 3835fe13..305a276f 100644
 --- a/compiler/crt/posixc/vfwprintf.c
@@ -8991,3 +9138,118 @@ index cf5700f0..3780afd1 100644
  
  #MM includes-copy
  
+diff --git a/workbench/network/common/include/arpa/inet.h b/workbench/network/common/include/arpa/inet.h
+index cbd735c3..7d92db1e 100644
+--- a/workbench/network/common/include/arpa/inet.h
++++ b/workbench/network/common/include/arpa/inet.h
+@@ -70,6 +70,14 @@
+ #define	INET_ADDRSTRLEN		16
+ #define	INET6_ADDRSTRLEN	46
+ 
++#if defined(__AROS__) && defined(BSDSOCKET_NOLIBDEFINES)
++/* QRX: the conversion functions of libqrxaroscompat, see proto/bsdsocket.h */
++__BEGIN_DECLS
++const char	*inet_ntop(int, const void * __restrict, char * __restrict, socklen_t);
++int		 inet_pton(int, const char * __restrict, void * __restrict);
++__END_DECLS
++#endif
++
+ #if !defined(__AROS__)
+ /* XXX all new diversions!! argh!! */
+ #if __BSD_VISIBLE
+diff --git a/workbench/network/common/include/netdb.h b/workbench/network/common/include/netdb.h
+index cdc9ab55..bf82e4cf 100644
+--- a/workbench/network/common/include/netdb.h
++++ b/workbench/network/common/include/netdb.h
+@@ -90,7 +90,10 @@ struct	protoent {
+  * Error return codes from gethostbyname() and gethostbyaddr()
+  * (left in extern int h_errno).
+  */
+-#ifndef KERNEL
++#if !defined(KERNEL) && defined(BSDSOCKET_NOLIBDEFINES)
++/* QRX: see proto/bsdsocket.h; h_errno is a plain variable then */
++extern int h_errno;
++#elif !defined(KERNEL)
+ 
+ #include <bsdsocket/socketbasetags.h>
+ #include <proto/socket.h>
+@@ -131,6 +134,7 @@ struct addrinfo {
+ 			/* following for getaddrinfo() */
+ #define	AI_PASSIVE	1      /* socket is intended for bind() + listen() */
+ #define	AI_CANONNAME	2      /* return canonical name */
++#define	AI_NUMERICHOST	4      /* QRX: do not resolve the node name */
+ 
+ 			/* following for getnameinfo() */
+ #define	NI_MAXHOST	  1025	/* max hostname returned */
+@@ -161,5 +165,20 @@ struct addrinfo {
+ #define NETDB_IFF_MODIFYOLD  2
+ #define NETDB_IFF_ADDNEW     4
+ 
++#if defined(BSDSOCKET_NOLIBDEFINES)
++/* QRX: the POSIX resolver functions (QRX OS One 64: libqrxaroscompat), see proto/bsdsocket.h */
++__BEGIN_DECLS
++struct hostent	*gethostbyname(const char *);
++struct hostent	*gethostbyname2(const char *, int);
++struct hostent	*gethostbyaddr(const void *, socklen_t, int);
++struct protoent	*getprotobyname(const char *);
++struct protoent	*getprotobynumber(int);
++int		 getaddrinfo(const char *, const char *, const struct addrinfo *, struct addrinfo **);
++void		 freeaddrinfo(struct addrinfo *);
++const char	*gai_strerror(int);
++int		 getnameinfo(const struct sockaddr *, socklen_t, char *, socklen_t, char *, socklen_t, int);
++__END_DECLS
++#endif
++
+ #endif /* !NETDB_H */
+ 
+diff --git a/workbench/network/common/include/proto/bsdsocket.h b/workbench/network/common/include/proto/bsdsocket.h
+index 5c829a7c..9ea386d2 100644
+--- a/workbench/network/common/include/proto/bsdsocket.h
++++ b/workbench/network/common/include/proto/bsdsocket.h
+@@ -8,7 +8,12 @@
+ #include <exec/types.h>
+ #include <sys/cdefs.h>
+ 
++/* QRX: with BSDSOCKET_NOLIBDEFINES the program uses the POSIX socket functions (sys/socket.h,
++ * netdb.h, arpa/inet.h declare them; QRX OS One 64: libqrxaroscompat), not bsdsocket.library's,
++ * whose prototypes differ (int lengths and results) */
++#if !defined(BSDSOCKET_NOLIBDEFINES)
+ #include <clib/bsdsocket_protos.h>
++#endif
+ 
+ #if !defined(SocketBase) && !defined(__NOLIBBASE__) && !defined(__BSDSOCKET_NOLIBBASE__)
+  #ifdef __BSDSOCKET_STDLIBBASE__
+diff --git a/workbench/network/common/include/sys/socket.h b/workbench/network/common/include/sys/socket.h
+index 1ff6d2ab..3efaecda 100644
+--- a/workbench/network/common/include/sys/socket.h
++++ b/workbench/network/common/include/sys/socket.h
+@@ -654,4 +654,29 @@ struct splice {
+ 
+ #endif /* __BSD_VISIBLE */
+ 
++#if defined(BSDSOCKET_NOLIBDEFINES)
++/* QRX: the POSIX socket functions (QRX OS One 64: libqrxaroscompat, on the board's network door),
++ * for programs that do not use bsdsocket.library (see proto/bsdsocket.h) */
++__BEGIN_DECLS
++int	socket(int, int, int);
++int	socketpair(int, int, int, int *);
++int	bind(int, const struct sockaddr *, socklen_t);
++int	listen(int, int);
++int	accept(int, struct sockaddr *, socklen_t *);
++int	accept4(int, struct sockaddr *, socklen_t *, int);
++int	connect(int, const struct sockaddr *, socklen_t);
++ssize_t	send(int, const void *, size_t, int);
++ssize_t	recv(int, void *, size_t, int);
++ssize_t	sendto(int, const void *, size_t, int, const struct sockaddr *, socklen_t);
++ssize_t	recvfrom(int, void *, size_t, int, struct sockaddr *, socklen_t *);
++ssize_t	sendmsg(int, const struct msghdr *, int);
++ssize_t	recvmsg(int, struct msghdr *, int);
++int	shutdown(int, int);
++int	setsockopt(int, int, int, const void *, socklen_t);
++int	getsockopt(int, int, int, void *, socklen_t *);
++int	getsockname(int, struct sockaddr *, socklen_t *);
++int	getpeername(int, struct sockaddr *, socklen_t *);
++__END_DECLS
++#endif
++
+ #endif /* !_SYS_SOCKET_H_ */

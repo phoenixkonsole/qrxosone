@@ -23,7 +23,7 @@ CORE = ['llvm/CMakeLists.txt', 'llvm/include/llvm/TargetParser/Triple.h', 'llvm/
         'libunwind/include/__libunwind_config.h', 'libunwind/include/libunwind.h', 'libunwind/src/Registers.hpp',
         'libunwind/src/UnwindCursor.hpp', 'libunwind/src/libunwind.cpp', 'libunwind/src/config.h',
         'libunwind/src/UnwindRegistersSave.S', 'libunwind/src/UnwindLevel1-gcc-ext.c', 'libunwind/src/UnwindRegistersRestore.S',
-        'libcxx/src/system_error.cpp', 'libcxx/src/chrono.cpp',
+        'libcxx/src/system_error.cpp', 'libcxx/src/chrono.cpp', 'libcxx/src/filesystem/operations.cpp',
         # libc++ localization on AROS (C locale only)
         'libcxx/include/__locale_dir/support/aros.h', 'libcxx/include/__locale_dir/locale_base_api.h',
         'libcxx/include/CMakeLists.txt', 'libcxx/include/__config',

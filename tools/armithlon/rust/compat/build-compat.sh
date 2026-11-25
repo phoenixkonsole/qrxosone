@@ -9,10 +9,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 B="$1"; SDK="$2"
 [ -x "$B/bin/clang" ] && [ -d "$SDK/include" ] || { echo "usage: $0 <llvm build> <AROS Development>"; exit 2; }
 T=$(mktemp -d)
-for c in qrxaroscompat qrxnet qrxwchar qrxmman; do
+for c in qrxaroscompat qrxnet qrxwchar qrxmman qrxshm qrxposix; do
   "$B/bin/clang" --target=m68k64-unknown-aros --sysroot "$SDK" -O2 -Wall -Werror -c "$HERE/$c.c" -o "$T/$c.o"
 done
 rm -f "$B/lib/libqrxaroscompat.a"
-"$B/bin/llvm-ar" rcs "$B/lib/libqrxaroscompat.a" "$T/qrxaroscompat.o" "$T/qrxnet.o" "$T/qrxwchar.o" "$T/qrxmman.o"
+"$B/bin/llvm-ar" rcs "$B/lib/libqrxaroscompat.a" "$T/qrxaroscompat.o" "$T/qrxnet.o" "$T/qrxwchar.o" "$T/qrxmman.o" "$T/qrxshm.o" "$T/qrxposix.o"
 rm -rf "$T"
 echo "installed $B/lib/libqrxaroscompat.a"
