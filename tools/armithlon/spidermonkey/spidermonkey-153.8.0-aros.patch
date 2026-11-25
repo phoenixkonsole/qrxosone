@@ -5081,7 +5081,7 @@
      ]
 --- a/xpcom/base/nsDebugImpl.cpp
 +++ b/xpcom/base/nsDebugImpl.cpp
-@@ -684,7 +684,31 @@
+@@ -684,7 +684,37 @@
    }
  }
  
@@ -5095,10 +5095,16 @@
 +  return ++*n < 24 ? _URC_NO_REASON : _URC_END_OF_STACK;
 +}
 +extern "C" void qrx_avail_mem(unsigned long* aFree, unsigned long* aLargest);
++extern "C" void qrx_malloc_probe(unsigned long aN, void** aM, int* aErr, void** aAm);
 +static void qrx_print_backtrace() {
 +  unsigned long freeMem = 0, largest = 0;
 +  qrx_avail_mem(&freeMem, &largest);
 +  printf_stderr("  free memory %lu, largest block %lu\n", freeMem, largest);
++  void* m = nullptr;
++  void* am = nullptr;
++  int err = 0;
++  qrx_malloc_probe(72, &m, &err, &am);
++  printf_stderr("  malloc(72) now: %p (errno %d), AllocMem(72): %p\n", m, err, am);
 +  int n = 0;
 +  _Unwind_Backtrace(qrx_bt_frame, &n);
 +}

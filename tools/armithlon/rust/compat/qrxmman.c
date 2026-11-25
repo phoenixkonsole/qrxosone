@@ -295,3 +295,15 @@ void qrx_avail_mem(unsigned long *total_free, unsigned long *largest)
     *total_free = (unsigned long)AvailMem(MEMF_ANY);
     *largest = (unsigned long)AvailMem(MEMF_ANY | MEMF_LARGEST);
 }
+
+/* qrx_malloc_probe: malloc and exec AllocMem of n bytes right now, for diagnostics (both freed) */
+#include <errno.h>
+void qrx_malloc_probe(unsigned long n, void **m, int *err, void **am)
+{
+    errno = 0;
+    *m = malloc(n);
+    *err = errno;
+    *am = AllocMem(n, MEMF_ANY);
+    if (*m) free(*m);
+    if (*am) FreeMem(*am, n);
+}
