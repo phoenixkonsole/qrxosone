@@ -1228,6 +1228,51 @@
    SDValue ShamtMinusRegisterSize =
        DAG.getNode(ISD::ADD, DL, VT, Shamt, MinusRegisterSize);
    SDValue RegisterSizeMinus1Shamt =
+@@ -3534,7 +3646,7 @@
+ // When legalizing carry, we create carries via add X, -1
+ // If that comes from an actual carry, via setcc, we use the
+ // carry directly.
+-static SDValue combineCarryThroughADD(SDValue CCR) {
++static SDValue combineCarryThroughADD(SDValue CCR, bool NeedX = false) {
+   if (CCR.getOpcode() == M68k64ISD::ADD) {
+     if (isAllOnesConstant(CCR.getOperand(1))) {
+       SDValue Carry = CCR.getOperand(0);
+@@ -3547,8 +3659,15 @@
+         Carry = Carry.getOperand(0);
+       if (Carry.getOpcode() == M68k64ISD::SETCC ||
+           Carry.getOpcode() == M68k64ISD::SETCC_CARRY) {
+-        if (Carry.getConstantOperandVal(0) == M68k64::COND_CS)
+-          return Carry.getOperand(1);
++        if (Carry.getConstantOperandVal(0) == M68k64::COND_CS) {
++          // QRX: ADDX/SUBX read X, which only the arithmetic instructions set (not CMP/TST/BTST)
++          SDValue Flags = Carry.getOperand(1);
++          unsigned FOp = Flags.getOpcode();
++          if (NeedX && !(FOp == M68k64ISD::ADD || FOp == M68k64ISD::SUB ||
++                         FOp == M68k64ISD::ADDX || FOp == M68k64ISD::SUBX))
++            return SDValue();
++          return Flags;
++        }
+       }
+     }
+   }
+@@ -3601,7 +3720,7 @@
+ }
+ 
+ static SDValue combineSUBX(SDNode *N, SelectionDAG &DAG) {
+-  if (SDValue Flags = combineCarryThroughADD(N->getOperand(2))) {
++  if (SDValue Flags = combineCarryThroughADD(N->getOperand(2), /*NeedX=*/true)) {
+     MVT VT = N->getSimpleValueType(0);
+     SDVTList VTs = DAG.getVTList(VT, MVT::i32);
+     return DAG.getNode(M68k64ISD::SUBX, SDLoc(N), VTs, N->getOperand(0),
+@@ -3614,7 +3733,7 @@
+ // Optimize RES, CCR = M68k64ISD::ADDX LHS, RHS, CCR
+ static SDValue combineADDX(SDNode *N, SelectionDAG &DAG,
+                            TargetLowering::DAGCombinerInfo &DCI) {
+-  if (SDValue Flags = combineCarryThroughADD(N->getOperand(2))) {
++  if (SDValue Flags = combineCarryThroughADD(N->getOperand(2), /*NeedX=*/true)) {
+     MVT VT = N->getSimpleValueType(0);
+     SDVTList VTs = DAG.getVTList(VT, MVT::i32);
+     return DAG.getNode(M68k64ISD::ADDX, SDLoc(N), VTs, N->getOperand(0),
 --- a/llvm/lib/Target/M68k64/M68k64ISelLowering.h
 +++ b/llvm/lib/Target/M68k64/M68k64ISelLowering.h
 @@ -176,6 +176,8 @@
@@ -1915,10 +1960,14 @@
  } // isCodeGenOnly = 1
  
  //===----------------------------------------------------------------------===//
-@@ -364,6 +374,8 @@
+@@ -362,8 +372,10 @@
+                          [(set MxDRD8:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
+ def SETCS_C16d : MxPseudo<(outs MxDRD16:$dst), (ins),
                            [(set MxDRD16:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
- def SETCS_C32d : MxPseudo<(outs MxXRD32:$dst), (ins),
-                           [(set MxXRD32:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
+-def SETCS_C32d : MxPseudo<(outs MxXRD32:$dst), (ins),
+-                          [(set MxXRD32:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
++def SETCS_C32d : MxPseudo<(outs MxDRD32:$dst), (ins),  // QRX: Scc/ext need a data register
++                          [(set MxDRD32:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
 +def SETCS_C64d : MxPseudo<(outs MxDRD64:$dst), (ins),
 +                          [(set MxDRD64:$dst, (MxSetCC_C MxCONDcs, CCR))]>;
  } // Uses = [CCR], Defs = [CCR], isPseudo = 1
@@ -2292,7 +2341,38 @@
  
      MIB->removeFromParent();
  
-@@ -640,6 +640,10 @@
+@@ -633,6 +633,30 @@
+   return true;
+ }
+ 
++/// QRX: %dN = SETCS_C -> scs.b; ext.w; ext.l; ext.q (as far as the width needs): 0 or all ones
++/// from the C flag.
++static bool ExpandSETCS_C(MachineInstrBuilder &MIB, const M68k64InstrInfo &TII,
++                          const M68k64RegisterInfo &RI, unsigned Bits) {
++  MachineInstr &MI = *MIB;
++  MachineBasicBlock &MBB = *MI.getParent();
++  DebugLoc DL = MI.getDebugLoc();
++  Register Reg = MI.getOperand(0).getReg();
++  Register R8 = Bits == 8 ? Reg : Register(RI.getSubReg(Reg, M68k64::MxSubRegIndex8Lo));
++  BuildMI(MBB, MI, DL, TII.get(M68k64::SETd8cs), R8);
++  if (Bits >= 16) {
++    Register R16 = Bits == 16 ? Reg : Register(RI.getSubReg(Reg, M68k64::MxSubRegIndex16Lo));
++    BuildMI(MBB, MI, DL, TII.get(M68k64::EXT16), R16).addReg(R16);
++  }
++  if (Bits >= 32) {
++    Register R32 = Bits == 32 ? Reg : Register(RI.getSubReg(Reg, M68k64::MxSubRegIndex32Lo));
++    BuildMI(MBB, MI, DL, TII.get(M68k64::EXT32), R32).addReg(R32);
++  }
++  if (Bits == 64)
++    BuildMI(MBB, MI, DL, TII.get(M68k64::EXT64), Reg).addReg(Reg);
++  MI.eraseFromParent();
++  return true;
++}
++
+ bool M68k64InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
+   MachineInstrBuilder MIB(*MI.getParent()->getParent(), MI);
+   switch (MI.getOpcode()) {
+@@ -640,6 +664,10 @@
      return ExpandPUSH_POP(MIB, get(M68k64::MOV8ed), true);
    case M68k64::PUSH16d:
      return ExpandPUSH_POP(MIB, get(M68k64::MOV16er), true);
@@ -2303,16 +2383,27 @@
    case M68k64::PUSH32r:
      return ExpandPUSH_POP(MIB, get(M68k64::MOV32er), true);
  
-@@ -656,6 +660,8 @@
-     return Expand2AddrUndef(MIB, get(M68k64::SUBX16dd));
+@@ -650,12 +678,16 @@
+   case M68k64::POP32r:
+     return ExpandPUSH_POP(MIB, get(M68k64::MOV32ro), false);
+ 
++  // QRX: all ones when the carry is set. Not with SUBX (x86's SBB): SUBX reads the X flag, and the
++  // compare this follows (CMP, TST) leaves X unchanged on the 68k. Scc reads C; ext widens it.
+   case M68k64::SETCS_C8d:
+-    return Expand2AddrUndef(MIB, get(M68k64::SUBX8dd));
++    return ExpandSETCS_C(MIB, *this, RI, 8);
+   case M68k64::SETCS_C16d:
+-    return Expand2AddrUndef(MIB, get(M68k64::SUBX16dd));
++    return ExpandSETCS_C(MIB, *this, RI, 16);
    case M68k64::SETCS_C32d:
-     return Expand2AddrUndef(MIB, get(M68k64::SUBX32dd));
+-    return Expand2AddrUndef(MIB, get(M68k64::SUBX32dd));
++    return ExpandSETCS_C(MIB, *this, RI, 32);
 +  case M68k64::SETCS_C64d:
-+    return Expand2AddrUndef(MIB, get(M68k64::SUBX64dd));
++    return ExpandSETCS_C(MIB, *this, RI, 64);
    }
    return false;
  }
-@@ -694,12 +700,20 @@
+@@ -694,12 +726,20 @@
    unsigned Opc = 0;
  
    // First deal with the normal symmetric copies.
@@ -2337,7 +2428,7 @@
  
    if (Opc) {
      BuildMI(MBB, MI, DL, get(Opc), DstReg)
-@@ -786,8 +800,8 @@
+@@ -786,8 +826,8 @@
    case 2:
      if (M68k64::XR16RegClass.hasSubClassEq(RC))
        return load ? M68k64::MOVM16mp_P : M68k64::MOVM16pm_P;
@@ -2348,7 +2439,7 @@
      if (M68k64::CCRCRegClass.hasSubClassEq(RC))
        return load ? M68k64::MOVM16mp_P : M68k64::MOVM16pm_P;
      llvm_unreachable("Unknown 2-byte regclass");
-@@ -795,6 +809,10 @@
+@@ -795,6 +835,10 @@
      if (M68k64::XR32RegClass.hasSubClassEq(RC))
        return load ? M68k64::MOVM32mp_P : M68k64::MOVM32pm_P;
      llvm_unreachable("Unknown 4-byte regclass");
@@ -2359,7 +2450,7 @@
    }
  }
  
-@@ -874,7 +892,7 @@
+@@ -874,7 +918,7 @@
    // lucky get one, otherwise it does not really matter which callee-save to
    // use.
    MachineRegisterInfo &RegInfo = MF->getRegInfo();
@@ -2368,7 +2459,7 @@
    MxFI->setGlobalBaseReg(GlobalBaseReg);
    return GlobalBaseReg;
  }
-@@ -930,7 +948,7 @@
+@@ -930,7 +974,7 @@
      const M68k64InstrInfo *TII = STI.getInstrInfo();
  
      // Generate lea (__GLOBAL_OFFSET_TABLE_,%PC), %A5
