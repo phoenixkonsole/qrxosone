@@ -205,6 +205,49 @@
  endif
  
  ifneq (1,$(PASS_ONLY_BASE_CFLAGS_TO_RUST))
+--- a/config/rules.mk
++++ b/config/rules.mk
+@@ -460,7 +460,11 @@
+ ifeq (clang-cl_WINNT,$(CC_TYPE)_$(OS_ARCH))
+ 	$(LINKER) -out:$@ -pdb:$(LINK_PDBFILE) $($@_OBJS) $(filter %.res,$^) $(WIN32_EXE_LDFLAGS) $(LDFLAGS) $(MOZ_PROGRAM_LDFLAGS) $(STATIC_LIBS) $(SHARED_LIBS) $(OS_LIBS)
+ else
++ifeq ($(OS_TARGET),AROS)
++	$(call EXPAND_CC_OR_CXX,$@) $(COMPUTED_CXX_LDFLAGS) -o $@ $($@_OBJS) $(filter %.res,$^) $(WIN32_EXE_LDFLAGS) $(LDFLAGS) $(STATIC_LIBS) $(MOZ_PROGRAM_LDFLAGS) $(shell $(PYTHON3) $(topsrcdir)/config/aros-dso-closure.py $(SHARED_LIBS)) $(OS_LIBS)
++else
+ 	$(call EXPAND_CC_OR_CXX,$@) $(COMPUTED_CXX_LDFLAGS) -o $@ $($@_OBJS) $(filter %.res,$^) $(WIN32_EXE_LDFLAGS) $(LDFLAGS) $(STATIC_LIBS) $(MOZ_PROGRAM_LDFLAGS) $(SHARED_LIBS) $(OS_LIBS)
++endif
+ 	$(call py_action,check_binary $(@F),$@)
+ endif # WINNT && clang-cl
+ 
+@@ -528,8 +532,15 @@
+ 	$(REPORT_BUILD)
+ 	$(call BUILDSTATUS,START_SharedLib $@)
+ 	$(RM) $@
++ifeq ($(OS_TARGET),AROS)
++# QRX: a relocatable object with only this library's code; what it needs is linked by the program
++# (config/aros-dso-closure.py reads $@.deps)
++	$(MKSHLIB) $($(notdir $@)_OBJS) $(LDFLAGS) $(STATIC_LIBS) $(EXTRA_DSO_LDOPTS)
++	printf '%s\n' $(abspath $(SHARED_LIBS)) $(addprefix OS:,$(OS_LIBS)) > $@.deps
++else
+ 	$(MKSHLIB) $(if $(filter clang-cl_WINNT,$(CC_TYPE)_$(OS_ARCH)),-IMPLIB:$(basename $(@F)).lib )$($(notdir $@)_OBJS) $(filter %.res,$^) $(RELRHACK_LDFLAGS) $(LDFLAGS) $(STATIC_LIBS) $(SHARED_LIBS) $(EXTRA_DSO_LDOPTS) $(MOZ_GLUE_LDFLAGS) $(OS_LIBS)
+ 	$(call py_action,check_binary,$@)
++endif
+ 
+ ifeq (clang-cl_WINNT,$(CC_TYPE)_$(OS_ARCH))
+ endif	# WINNT && !GCC
+--- a/dom/ipc/PContent.ipdl
++++ b/dom/ipc/PContent.ipdl
+@@ -202,8 +202,8 @@
+ // SetXPCOMProcessAttributes passes an array of font data to the child,
+ // but each platform needs different details so we have platform-specific
+ // versions of the SystemFontListEntry type:
+-#if defined(ANDROID)
+-// Used on Android to pass the list of fonts on the device
++#if defined(ANDROID) || defined(MOZ_WIDGET_AROS)
++// Used on Android (QRX: and AROS, gfxFT2FontList) to pass the list of fonts on the device
+ // to the child process
+ struct SystemFontListEntry {
+     nsCString familyName;
 --- a/dom/webidl/moz.build
 +++ b/dom/webidl/moz.build
 @@ -1146,7 +1146,7 @@
@@ -4921,6 +4964,44 @@
      mPid = static_cast<int32_t>(newPid);
    } else {
      return NS_ERROR_FAILURE;
+--- /dev/null
++++ b/config/aros-dso-closure.py
+@@ -0,0 +1,35 @@
++# QRX OS One 64: AROS has no dynamic linker, so Gecko's "shared libraries" are relocatable objects
++# (ld -r, see build/moz.configure/flags.configure). Each one holds only its own objects and static
++# libraries; next to it, <lib>.deps names the other libraries it needs and its OS_LIBS. A program
++# links the transitive closure: every library once, dependents before their dependencies, then the
++# OS libraries. usage: aros-dso-closure.py <shared libs of the program>...
++import os
++import sys
++
++order, seen, oslibs = [], set(), []
++
++
++def visit(lib):
++    lib = os.path.abspath(lib)
++    if lib in seen:
++        return
++    seen.add(lib)
++    deps = []
++    if os.path.exists(lib + ".deps"):
++        for line in open(lib + ".deps"):
++            line = line.strip()
++            if not line:
++                continue
++            if line.startswith("OS:"):
++                if line[3:] not in oslibs:
++                    oslibs.append(line[3:])
++            else:
++                deps.append(line)
++    order.append(lib)
++    for d in deps:
++        visit(d)
++
++
++for a in sys.argv[1:]:
++    visit(a)
++print(" ".join(order + oslibs))
 --- /dev/null
 +++ b/gfx/thebes/gfxAROSPlatform.cpp
 @@ -0,0 +1,105 @@

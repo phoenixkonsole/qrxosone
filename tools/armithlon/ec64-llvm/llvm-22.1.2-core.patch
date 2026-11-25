@@ -723,7 +723,7 @@
        break;
 --- a/clang/lib/Driver/ToolChains/AROS.cpp
 +++ b/clang/lib/Driver/ToolChains/AROS.cpp
-@@ -0,0 +1,408 @@
+@@ -0,0 +1,412 @@
 +//===--- AROS.cpp - AROS Tool Chain -------------===//
 +//
 +//                     The LLVM Compiler Infrastructure
@@ -1094,6 +1094,10 @@
 +    * even when no startfiles is specified
 +    */
 +    if (!D.CCCIsCXX() && Args.hasArg(options::OPT_nostartfiles))
++        return;
++    // QRX: a relocatable link (-r, e.g. Gecko's libraries on QRX OS One 64) or -nostdlib gets no
++    // startup objects: the program they end up in brings its own, once.
++    if (Args.hasArg(options::OPT_r) || Args.hasArg(options::OPT_nostdlib))
 +        return;
 +
 +    const std::string &SysRoot = D.SysRoot;
