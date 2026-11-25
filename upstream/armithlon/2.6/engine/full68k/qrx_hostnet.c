@@ -31,6 +31,8 @@ static uint8_t socks_buf[MAXSOCK][QRX_SOCKS_REPLY];
 static uint8_t socks_have[MAXSOCK];
 static int sock_err[MAXSOCK];
 static uint32_t peer_ip[MAXSOCK], peer_port[MAXSOCK];
+/* an IPv6 socket of the guest that is an IPv4 socket here, because this host has no IPv6 */
+static bool v4only[MAXSOCK];
 static bool loopback(uint32_t ip) { return (ip >> 24) == 127; }
 /* Advances a pending SOCKS connection: 1 connected, 0 still waiting, -1 failed (sock_err set) */
 static int socks_step(int s, int fd)
@@ -106,6 +108,62 @@ static void result(uint32_t *a, long r)
     if (r < 0) { a[8] = UINT32_MAX; a[9] = wsa_of(errno); }
     else a[8] = (uint32_t)r;
 }
+/* ---- IPv6: door address records (qrx_hostnet.h), big endian in guest memory */
+static uint32_t be32_get(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
+static void be32_put(uint8_t *p, uint32_t v) { p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16); p[2] = (uint8_t)(v >> 8); p[3] = (uint8_t)v; }
+static void rec_to_sa6(const uint8_t *r, struct sockaddr_in6 *sa)
+{
+    memset(sa, 0, sizeof *sa);
+    sa->sin6_family = AF_INET6;
+    memcpy(&sa->sin6_addr, r, 16);
+    sa->sin6_port = htons((uint16_t)be32_get(r + 16));
+    sa->sin6_scope_id = be32_get(r + 20);
+}
+/* any family the host gives back, as a record (IPv4 as ::ffff:a.b.c.d) */
+static void sa_to_rec(const struct sockaddr *sa, uint8_t *r)
+{
+    memset(r, 0, QRX_NET_ADDR6_SIZE);
+    if (sa->sa_family == AF_INET6) {
+        const struct sockaddr_in6 *s6 = (const struct sockaddr_in6 *)sa;
+        memcpy(r, &s6->sin6_addr, 16);
+        be32_put(r + 16, ntohs(s6->sin6_port));
+        be32_put(r + 20, s6->sin6_scope_id);
+    } else if (sa->sa_family == AF_INET) {
+        const struct sockaddr_in *s4 = (const struct sockaddr_in *)sa;
+        r[10] = r[11] = 0xFF;
+        memcpy(r + 12, &s4->sin_addr, 4);
+        be32_put(r + 16, ntohs(s4->sin_port));
+    }
+}
+/* the IPv4 address of a v4-mapped record, or 0 with *v4 false */
+static uint32_t rec_v4(const uint8_t *r, bool *v4)
+{
+    static const uint8_t pre[12] = { 0,0,0,0, 0,0,0,0, 0,0,0xFF,0xFF };
+    *v4 = !memcmp(r, pre, 12);
+    return *v4 ? be32_get(r + 12) : 0;
+}
+/* for a v4only socket: the IPv4 form of a record (v4-mapped, ::1, ::); false for real IPv6 */
+static bool rec_to_sa4(const uint8_t *r, struct sockaddr_in *sa)
+{
+    static const uint8_t z[16], lo[16] = { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 };
+    bool v4;
+    uint32_t ip = rec_v4(r, &v4);
+    if (!v4) {
+        if (!memcmp(r, z, 16)) ip = 0;
+        else if (!memcmp(r, lo, 16)) ip = 0x7F000001u;
+        else return false;
+    }
+    addr_make(sa, ip, be32_get(r + 16));
+    return true;
+}
+static bool rec_loopback(const uint8_t *r)
+{
+    static const uint8_t lo[16] = { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 };
+    bool v4;
+    uint32_t ip = rec_v4(r, &v4);
+    return v4 ? loopback(ip) : !memcmp(r, lo, 16);
+}
+
 void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
 {
     /* a[0..7] are the arguments, a[8] result, a[9] error, a[10] ip, a[11] port */
@@ -120,7 +178,7 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
         int nfd = socket(AF_INET, type, 0);
         if (nfd < 0) { result(a, -1); return; }
         int s = guest_slot(nfd);
-        if (s >= 0) { dgram[s] = type == SOCK_DGRAM; socks_wait[s] = false; sock_err[s] = 0; peer_ip[s] = peer_port[s] = 0; }
+        if (s >= 0) { dgram[s] = type == SOCK_DGRAM; socks_wait[s] = false; sock_err[s] = 0; peer_ip[s] = peer_port[s] = 0; v4only[s] = false; }
         result(a, s);
         return;
     }
@@ -173,6 +231,42 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
         result(a, gethostname(dst, a[2]));
         return;
     }
+    case QRX_NET_SOCKET6: {
+        int type = a[0] == 2 ? SOCK_DGRAM : SOCK_STREAM;
+        int nfd = socket(AF_INET6, type, 0), only4 = 0;
+        if (nfd < 0 && errno == EAFNOSUPPORT) { nfd = socket(AF_INET, type, 0); only4 = 1; }   /* no IPv6 on this host */
+        if (nfd < 0) { result(a, -1); return; }
+        int off = 0;
+        if (!only4) setsockopt(nfd, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof off);
+        int s = guest_slot(nfd);
+        if (s >= 0) { dgram[s] = type == SOCK_DGRAM; socks_wait[s] = false; sock_err[s] = 0; peer_ip[s] = peer_port[s] = 0; v4only[s] = only4; }
+        result(a, s);
+        return;
+    }
+    case QRX_NET_RESOLVE6: {
+        uint8_t *out = ram + a[2];
+        uint32_t max = a[3], n = 0;
+        if (qrx_net_mode() > 0) {         /* through the tunnel: IPv4 only, as NET_RESOLVE */
+            uint32_t ip;
+            if (max == 0 || qrx_net_resolve((const char *)ram + a[1], &ip)) { a[8] = UINT32_MAX; a[9] = 11001; return; }
+            memset(out, 0, QRX_NET_ADDR6_SIZE);
+            out[10] = out[11] = 0xFF;
+            be32_put(out + 12, ip);
+            a[8] = 1;
+            return;
+        }
+        struct addrinfo hints, *res = NULL, *ai;
+        memset(&hints, 0, sizeof hints);
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        if (getaddrinfo((const char *)ram + a[1], NULL, &hints, &res) || !res) { a[8] = UINT32_MAX; a[9] = 11001; return; }
+        for (ai = res; ai && n < max; ai = ai->ai_next)
+            if (ai->ai_family == AF_INET || ai->ai_family == AF_INET6) sa_to_rec(ai->ai_addr, out + QRX_NET_ADDR6_SIZE * n++);
+        freeaddrinfo(res);
+        if (!n) { a[8] = UINT32_MAX; a[9] = 11001; return; }
+        a[8] = n;
+        return;
+    }
     default: break;
     }
     if (fd < 0) { a[8] = UINT32_MAX; a[9] = 10038; return; }
@@ -193,7 +287,7 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
         a[11] = ntohs(sa.sin_port);
         {
             int s = guest_slot(nfd);
-            if (s >= 0) { dgram[s] = false; socks_wait[s] = false; sock_err[s] = 0; peer_ip[s] = a[10]; peer_port[s] = a[11]; }
+            if (s >= 0) { dgram[s] = false; socks_wait[s] = false; sock_err[s] = 0; peer_ip[s] = a[10]; peer_port[s] = a[11]; v4only[s] = false; }
             result(a, s);
         }
         break;
@@ -313,6 +407,103 @@ void qrx_hostnet_call(uint32_t op, uint32_t *a, uint8_t *ram)
         int r = op == NET_SOCKNAME ? getsockname(fd, (struct sockaddr *)&sa, &sl) : getpeername(fd, (struct sockaddr *)&sa, &sl);
         if (r == 0) { a[10] = ntohl(sa.sin_addr.s_addr); a[11] = ntohs(sa.sin_port); }
         result(a, r);
+        break;
+    }
+    case QRX_NET_BIND6: {
+        struct sockaddr_in6 s6;
+        int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        if (v4only[a[0]]) {
+            if (!rec_to_sa4(ram + a[1], &sa)) { errno = EADDRNOTAVAIL; result(a, -1); break; }
+            if (qrx_net_mode() > 0) sa.sin_addr.s_addr = htonl(0x7F000001u);
+            result(a, bind(fd, (struct sockaddr *)&sa, sizeof sa));
+            break;
+        }
+        rec_to_sa6(ram + a[1], &s6);
+        if (qrx_net_mode() > 0) s6.sin6_addr = in6addr_loopback;   /* through a tunnel: nothing on the Mac's addresses */
+        result(a, bind(fd, (struct sockaddr *)&s6, sizeof s6));
+        break;
+    }
+    case QRX_NET_CONNECT6: {
+        const uint8_t *r = ram + a[1];
+        bool v4;
+        uint32_t ip = rec_v4(r, &v4);
+        if (qrx_net_mode() > 0 && !rec_loopback(r)) {
+            /* an IPv4 address goes through the tunnel as with NET_CONNECT; IPv6 does not leave */
+            if (!v4 || dgram[a[0]]) { errno = ENETUNREACH; result(a, -1); break; }
+            int nfd = qrx_net_socks_connect(ip, (uint16_t)be32_get(r + 16));
+            if (nfd < 0) { result(a, -1); break; }
+            dup2(nfd, fd);
+            close(nfd);
+            fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+#ifdef SO_NOSIGPIPE
+            { int one = 1; setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one); }
+#endif
+            socks_wait[a[0]] = true;
+            socks_have[a[0]] = 0;
+            sock_err[a[0]] = 0;
+            peer_ip[a[0]] = ip; peer_port[a[0]] = be32_get(r + 16);
+            errno = EINPROGRESS;
+            result(a, -1);
+            break;
+        }
+        peer_ip[a[0]] = ip; peer_port[a[0]] = be32_get(r + 16);
+        if (v4only[a[0]]) {
+            if (!rec_to_sa4(r, &sa)) { errno = ENETUNREACH; result(a, -1); break; }
+            result(a, connect(fd, (struct sockaddr *)&sa, sizeof sa));
+            break;
+        }
+        struct sockaddr_in6 s6;
+        rec_to_sa6(r, &s6);
+        result(a, connect(fd, (struct sockaddr *)&s6, sizeof s6));
+        break;
+    }
+    case QRX_NET_SENDTO6: {
+        const uint8_t *r = ram + a[4];
+        if (qrx_net_mode() > 0 && !rec_loopback(r)) { errno = ENETUNREACH; result(a, -1); break; }
+        if (v4only[a[0]]) {
+            if (!rec_to_sa4(r, &sa)) { errno = ENETUNREACH; result(a, -1); break; }
+            result(a, sendto(fd, ram + a[1], a[2], 0, (struct sockaddr *)&sa, sizeof sa));
+            break;
+        }
+        struct sockaddr_in6 s6;
+        rec_to_sa6(r, &s6);
+        result(a, sendto(fd, ram + a[1], a[2], 0, (struct sockaddr *)&s6, sizeof s6));
+        break;
+    }
+    case QRX_NET_RECVFROM6: {
+        struct sockaddr_storage ss;
+        socklen_t l = sizeof ss;
+        ssize_t n = recvfrom(fd, ram + a[1], a[2], (a[3] & 2u) ? MSG_PEEK : 0, (struct sockaddr *)&ss, &l);
+        if (n >= 0) sa_to_rec((struct sockaddr *)&ss, ram + a[4]);
+        result(a, n);
+        break;
+    }
+    case QRX_NET_ACCEPT6: {
+        struct sockaddr_storage ss;
+        socklen_t l = sizeof ss;
+        int nfd = accept(fd, (struct sockaddr *)&ss, &l);
+        if (nfd < 0) { result(a, -1); break; }
+        sa_to_rec((struct sockaddr *)&ss, ram + a[1]);
+        int s = guest_slot(nfd);
+        if (s >= 0) { dgram[s] = false; socks_wait[s] = false; sock_err[s] = 0; peer_ip[s] = peer_port[s] = 0; v4only[s] = v4only[a[0]]; }
+        result(a, s);
+        break;
+    }
+    case QRX_NET_SOCKNAME6: case QRX_NET_PEERNAME6: {
+        uint8_t *r = ram + a[1];
+        if (qrx_net_mode() > 0) {         /* a tunnel's socket is a Unix stream: the guest's view */
+            memset(r, 0, QRX_NET_ADDR6_SIZE);
+            if (op == QRX_NET_PEERNAME6) { r[10] = r[11] = 0xFF; be32_put(r + 12, peer_ip[a[0]]); be32_put(r + 16, peer_port[a[0]]); }
+            else r[15] = 1;
+            a[8] = 0;
+            break;
+        }
+        struct sockaddr_storage ss;
+        socklen_t l = sizeof ss;
+        int rv = op == QRX_NET_SOCKNAME6 ? getsockname(fd, (struct sockaddr *)&ss, &l) : getpeername(fd, (struct sockaddr *)&ss, &l);
+        if (rv == 0) sa_to_rec((struct sockaddr *)&ss, r);
+        result(a, rv);
         break;
     }
     default: a[8] = UINT32_MAX; a[9] = 10045; break;

@@ -21,8 +21,13 @@ ausgepackt und gepatcht).
 - **Sockets:** AROS' `<netdb.h>` zieht `proto/socket.h` an und macht `socket()`, `connect()` usw. zu Inline-Aufrufen
   von bsdsocket.library. Mit `-DBSDSOCKET_NOLIBDEFINES -D__BSDSOCKET_NOLIBBASE__` gehen sie an libqrxaroscompat
   (die Host-Netz-Tür des Boards), `h_errno` ist eine Variable dort.
-- Nur IPv4 (die Tür löst IPv4 auf): `_PR_HAVE_GETADDRINFO` bleibt aus, NSPR nimmt `gethostbyname`; IPv6-Sockets
-  bildet NSPRs eigene Schicht auf IPv4 ab. Kein Multicast (AROS' Header haben keine `IP_ADD_MEMBERSHIP`).
+- **IPv6** (`_PR_INET6`, `_PR_HAVE_GETADDRINFO`, `_PR_HAVE_GETHOSTBYNAME2`, `_PR_HAVE_INET_NTOP`): die Host-Tür
+  hat dafür eigene Operationen (23–31, `qrx_hostnet.h`) mit der Adresse als 24-Byte-Satz im Gastspeicher;
+  libqrxaroscompat bildet darauf `AF_INET6`-Sockets, `getaddrinfo` mit beiden Familien, `gethostbyname2`,
+  `inet_pton`/`inet_ntop`, numerisches `getnameinfo`. Hat der Host kein IPv6 (wie dieser Build-Container), wird der
+  IPv6-Socket dort ein IPv4-Socket: `::ffff:a.b.c.d`, `::1` und `::` gehen, echte IPv6-Ziele melden
+  „nicht erreichbar“. Über Tor/WireGuard verlässt kein IPv6 den Rechner (nur `::1`), Namen lösen über den Tunnel
+  nach IPv4 auf. Kein Multicast (AROS' Header haben keine `IP_ADD_MEMBERSHIP`).
 - Ergänzt in libqrxaroscompat: `readv`/`writev`, `select`/`WaitSelect` (auf `poll`), `gethostbyname`,
   `gethostbyaddr` (ohne Rückwärtsauflösung), `getprotobyname`/`-number`; im AROS-Patch `<poll.h>` und ein
   variadisches `sem_open` (POSIX).
@@ -33,4 +38,6 @@ ausgepackt und gepatcht).
 Gast (qrxboot, zwei EC64-Kerne): **NSPR ALL PASS** — Systeminfo, 2 Prozessoren, Erzeuger/Verbraucher mit
 Lock/CondVar über 5 Threads, wiedereintrittsfähiger Monitor, Thread-private Daten mit Destruktor, `PR_Sleep` und
 Intervalle, Zeit zerlegen/parsen, Datei schreiben/lesen/Info/löschen, plds-Hash und plc-Strings, TCP-Echo über
-127.0.0.1 mit `PR_Poll`, `localhost` → 127.0.0.1, Zufallsrauschen.
+127.0.0.1 mit `PR_Poll`, IPv6-Textform, TCP-Echo über `[::1]` (hier über den IPv4-Rückfall, der Container hat kein
+IPv6), `PR_GetAddrInfoByName("localhost")` mit IPv4 und IPv6, `localhost` → 127.0.0.1, Zufallsrauschen.
+Nicht getestet: der echte IPv6-Weg der Tür auf einem Host mit IPv6.

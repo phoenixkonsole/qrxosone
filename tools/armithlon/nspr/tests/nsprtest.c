@@ -159,6 +159,49 @@ int main(void)
     if (listener) PR_Close(listener);
     CHECK("tcp loopback, poll", er == (PRInt32)sizeof msg && !strcmp(eb, msg));
 
+    /* IPv6: text form, TCP echo over [::1], getaddrinfo with both families */
+    PRNetAddr a6, b6;
+    char s6[64] = "";
+    int conv = PR_StringToNetAddr("2001:db8::1:0:0:42", &a6) == PR_SUCCESS && a6.raw.family == PR_AF_INET6 &&
+               PR_NetAddrToString(&a6, s6, sizeof s6) == PR_SUCCESS;
+    printf("2001:db8::1:0:0:42 -> %s\n", s6);
+    CHECK("ipv6 text form", conv && !strcmp(s6, "2001:db8::1:0:0:42") &&
+          PR_StringToNetAddr("::ffff:10.1.2.3", &b6) == PR_SUCCESS && PR_IsNetAddrType(&b6, PR_IpAddrV4Mapped));
+    listener = PR_OpenTCPSocket(PR_AF_INET6);
+    PR_SetNetAddr(PR_IpAddrLoopback, PR_AF_INET6, 0, &addr);
+    net_ok = listener && PR_Bind(listener, &addr) == PR_SUCCESS && PR_Listen(listener, 4) == PR_SUCCESS &&
+             PR_GetSockName(listener, &addr) == PR_SUCCESS && addr.raw.family == PR_AF_INET6;
+    char ls[64] = "";
+    if (net_ok) PR_NetAddrToString(&addr, ls, sizeof ls);
+    printf("listening on [%s]:%d\n", ls, net_ok ? PR_ntohs(addr.ipv6.port) : -1);
+    srv = net_ok ? PR_CreateThread(PR_USER_THREAD, echo_server, NULL, PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0) : NULL;
+    c = net_ok ? PR_OpenTCPSocket(PR_AF_INET6) : NULL;
+    conn = c && PR_Connect(c, &addr, PR_SecondsToInterval(20)) == PR_SUCCESS;
+    const char msg6[] = "Hallo IPv6";
+    sent = conn && PR_Send(c, msg6, sizeof msg6, 0, PR_SecondsToInterval(20)) == (PRInt32)sizeof msg6;
+    memset(eb, 0, sizeof eb);
+    er = sent ? PR_Recv(c, eb, sizeof eb, 0, PR_SecondsToInterval(20)) : -1;
+    PRNetAddr peer6;
+    int peer_ok = conn && PR_GetPeerName(c, &peer6) == PR_SUCCESS && peer6.raw.family == PR_AF_INET6 &&
+                  PR_IsNetAddrType(&peer6, PR_IpAddrLoopback);
+    if (c) PR_Close(c);
+    if (srv) PR_JoinThread(srv);
+    if (listener) PR_Close(listener);
+    /* a host without IPv6 runs the socket as IPv4 (qrx_hostnet.h): then ::1 reads back v4-mapped */
+    CHECK("tcp over [::1]", (!strcmp(ls, "::1") || !strcmp(ls, "::ffff:127.0.0.1")) && er == (PRInt32)sizeof msg6 && !strcmp(eb, msg6) && peer_ok);
+
+    PRAddrInfo *ai = PR_GetAddrInfoByName("localhost", PR_AF_UNSPEC, PR_AI_ADDRCONFIG);
+    int have4 = 0, have6 = 0;
+    void *it = NULL;
+    PRNetAddr ea;
+    while (ai && (it = PR_EnumerateAddrInfo(it, ai, 0, &ea)) != NULL) {
+        if (ea.raw.family == PR_AF_INET) have4 = 1;
+        if (ea.raw.family == PR_AF_INET6) have6 = 1;
+    }
+    if (ai) PR_FreeAddrInfo(ai);
+    printf("getaddrinfo(localhost): IPv4 %d, IPv6 %d\n", have4, have6);
+    CHECK("getaddrinfo both families", have4 && have6);
+
     char hb[PR_NETDB_BUF_SIZE];
     PRHostEnt he;
     PRNetAddr ha;

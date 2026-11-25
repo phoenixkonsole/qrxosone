@@ -980,7 +980,7 @@
 +#endif /* nspr_cpucfg___ */
 --- /dev/null
 +++ b/nsprpub/pr/include/md/_aros.h
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,233 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1007,6 +1007,12 @@
 +#define _PR_NO_LARGE_FILES
 +#define _PR_STAT_HAS_ST_ATIM
 +#define _PR_HAVE_POSIX_SEMAPHORES
++/* IPv6 through the board's door (dual-stack sockets, getaddrinfo with both families); through
++ * Tor/WireGuard the door itself keeps IPv6 inside (see qrx_hostnet.h) */
++#define _PR_INET6
++#define _PR_HAVE_INET_NTOP
++#define _PR_HAVE_GETADDRINFO
++#define _PR_HAVE_GETHOSTBYNAME2
 +
 +/* The socket functions are libqrxaroscompat's (the board's host network door), not inline calls of
 + * bsdsocket.library: AROS's netdb.h pulls in proto/socket.h, whose defines would route socket(),
@@ -1041,6 +1047,21 @@
 +#endif
 +extern int flock(int fd, int operation);
 +extern int socketpair(int domain, int type, int protocol, int sv[2]);   /* libqrxaroscompat */
++/* also libqrxaroscompat; AROS's headers have no inet_ntop/inet_pton/getnameinfo of their own */
++extern const char *inet_ntop(int af, const void *src, char *dst, socklen_t size);
++extern int inet_pton(int af, const char *src, void *dst);
++extern int getnameinfo(const struct sockaddr *sa, socklen_t salen, char *host, socklen_t hostlen,
++                       char *serv, socklen_t servlen, int flags);
++extern const struct in6_addr in6addr_any, in6addr_loopback;
++extern struct hostent *gethostbyname2(const char *name, int af);
++/* AROS's netdb.h has struct addrinfo but declares neither the functions nor AI_NUMERICHOST */
++#ifndef AI_NUMERICHOST
++#define AI_NUMERICHOST 4
++#endif
++extern int getaddrinfo(const char *node, const char *service, const struct addrinfo *hints,
++                       struct addrinfo **res);
++extern void freeaddrinfo(struct addrinfo *ai);
++extern const char *gai_strerror(int e);
 +
 +
 +#undef  HAVE_STACK_GROWING_UP

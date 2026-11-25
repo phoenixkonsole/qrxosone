@@ -40,6 +40,11 @@
 enum { NET_SOCKET = 1, NET_BIND, NET_LISTEN, NET_ACCEPT, NET_CONNECT, NET_SEND, NET_RECV, NET_SENDTO, NET_RECVFROM,
        NET_POLL, NET_CLOSE, NET_SHUTDOWN, NET_SETOPT, NET_GETOPT, NET_SOCKNAME, NET_PEERNAME, NET_RESOLVE, NET_HOSTNAME,
        NET_RANDOM };
+/* IPv6 (qrx_hostnet.h): the address as a 24-byte record in guest memory, 16 bytes address
+ * (IPv4 as ::ffff:a.b.c.d), port, scope id */
+enum { NET_SOCKET6 = 23, NET_BIND6, NET_CONNECT6, NET_SENDTO6, NET_RECVFROM6, NET_ACCEPT6, NET_SOCKNAME6,
+       NET_PEERNAME6, NET_RESOLVE6 };
+#define REC6 24
 
 /* AROS's (BSD) values, as in its headers and the libc crate */
 #define AF_INET_ 2
@@ -73,6 +78,7 @@ struct qaddrinfo {      /* AROS's netdb.h: the first four are long */
     void *ai_addr;
     struct qaddrinfo *ai_next;
 };
+struct qsockaddr_in6 { uint8_t len, family; uint16_t port; uint32_t flowinfo; uint8_t addr[16]; uint32_t scope; };
 struct qpollfd { int fd; short events; short revents; };
 #define POLLIN_ 0x1
 #define POLLPRI_ 0x2
@@ -92,7 +98,7 @@ int __get_default_file(int fd, long *fh);
 
 /* pend_err: an error the host reported with a poll. Its poll reads SO_ERROR, which clears it on
  * the host, so it is kept here until getsockopt(SO_ERROR) or connect takes it. */
-static struct { uint8_t open, nonblock, dgram; uint32_t rcv_ms, snd_ms; int pend_err; } sk[NSOCK];
+static struct { uint8_t open, nonblock, dgram, v6; uint32_t rcv_ms, snd_ms; int pend_err; } sk[NSOCK];
 
 static int sock_of(int fd) { int s = fd - QRX_SOCK_FD; return s >= 0 && s < NSOCK && sk[s].open ? s : -1; }
 static int is_sockfd(int fd) { return fd >= QRX_SOCK_FD && fd < QRX_SOCK_FD + NSOCK; }
@@ -202,6 +208,42 @@ static void put_in(void *sa, qsocklen_t *l, uint32_t ip, uint32_t port)
     memcpy(sa, &in, *l < sizeof in ? *l : sizeof in);
     *l = sizeof in;
 }
+/* a socket address of either family as a door record (an IPv4 one v4-mapped) */
+static int get_rec(const void *sa, qsocklen_t l, uint8_t *rec)
+{
+    memset(rec, 0, REC6);
+    if (!sa || l < 2) { errno = EINVAL; return -1; }
+    uint8_t fam = ((const uint8_t *)sa)[1];
+    if (fam == AF_INET_) {
+        uint32_t ip, port;
+        if (get_in(sa, l, &ip, &port)) return -1;
+        rec[10] = rec[11] = 0xFF;
+        memcpy(rec + 12, &ip, 4);
+        uint32_t p32 = port; memcpy(rec + 16, &p32, 4);
+        return 0;
+    }
+    if (fam != AF_INET6_ || l < sizeof(struct qsockaddr_in6)) { errno = EAFNOSUPPORT; return -1; }
+    const struct qsockaddr_in6 *in6 = sa;
+    memcpy(rec, in6->addr, 16);
+    uint32_t p32 = in6->port; memcpy(rec + 16, &p32, 4);
+    memcpy(rec + 20, &in6->scope, 4);
+    return 0;
+}
+/* a record as the socket address the caller gets: IPv6 for an IPv6 socket, else IPv4 */
+static void put_rec(void *sa, qsocklen_t *l, const uint8_t *rec, int v6)
+{
+    if (!sa || !l) return;
+    uint32_t port, ip;
+    memcpy(&port, rec + 16, 4);
+    if (!v6) { memcpy(&ip, rec + 12, 4); put_in(sa, l, ip, port); return; }
+    struct qsockaddr_in6 in6;
+    memset(&in6, 0, sizeof in6);
+    in6.len = sizeof in6; in6.family = AF_INET6_; in6.port = (uint16_t)port;
+    memcpy(in6.addr, rec, 16);
+    memcpy(&in6.scope, rec + 20, 4);
+    memcpy(sa, &in6, *l < sizeof in6 ? *l : sizeof in6);
+    *l = sizeof in6;
+}
 static int new_slot(int r, int dgram)
 {
     if (r < 0) return -1;
@@ -214,12 +256,14 @@ static int new_slot(int r, int dgram)
 int socket(int domain, int type, int protocol)
 {
     (void)protocol;
-    if (domain != AF_INET_) { errno = EAFNOSUPPORT; return -1; }
+    if (domain != AF_INET_ && domain != AF_INET6_) { errno = EAFNOSUPPORT; return -1; }
     type &= 0xFF;
     if (type != SOCK_STREAM_ && type != SOCK_DGRAM_) { errno = EPROTONOSUPPORT; return -1; }
     BLOCK(q);
     q[4] = type == SOCK_DGRAM_ ? 2 : 1;
-    return new_slot(net(q, NET_SOCKET), type == SOCK_DGRAM_);
+    int fd = new_slot(net(q, domain == AF_INET6_ ? NET_SOCKET6 : NET_SOCKET), type == SOCK_DGRAM_);
+    if (fd >= 0) sk[fd - QRX_SOCK_FD].v6 = domain == AF_INET6_;
+    return fd;
 }
 int socketpair(int d, int t, int p, int *sv) { (void)d; (void)t; (void)p; (void)sv; errno = EOPNOTSUPP; return -1; }
 
@@ -228,9 +272,13 @@ int bind(int fd, const void *sa, qsocklen_t l)
     int s = sock_of(fd);
     if (s < 0) { errno = ENOTSOCK; return -1; }
     BLOCK(q);
-    if (get_in(sa, l, &q[5], &q[6])) return -1;
+    uint8_t rec[REC6] __attribute__((aligned(8)));
+    if (sk[s].v6) {
+        if (get_rec(sa, l, rec)) return -1;
+        q[5] = (uint32_t)(uintptr_t)rec;
+    } else if (get_in(sa, l, &q[5], &q[6])) return -1;
     q[4] = (uint32_t)s;
-    return net(q, NET_BIND) < 0 ? -1 : 0;
+    return net(q, sk[s].v6 ? NET_BIND6 : NET_BIND) < 0 ? -1 : 0;
 }
 int listen(int fd, int backlog)
 {
@@ -246,11 +294,15 @@ int accept(int fd, void *sa, qsocklen_t *l)
     if (s < 0) { errno = ENOTSOCK; return -1; }
     for (;;) {
         BLOCK(q);
-        q[4] = (uint32_t)s;
-        int r = net(q, NET_ACCEPT);
+        uint8_t rec[REC6] __attribute__((aligned(8)));
+        q[4] = (uint32_t)s; q[5] = (uint32_t)(uintptr_t)rec;
+        int r = net(q, sk[s].v6 ? NET_ACCEPT6 : NET_ACCEPT);
         if (r >= 0) {
             int nfd = new_slot(r, 0);
-            if (nfd >= 0) put_in(sa, l, q[14], q[15]);
+            if (nfd >= 0) {
+                sk[nfd - QRX_SOCK_FD].v6 = sk[s].v6;
+                if (sk[s].v6) put_rec(sa, l, rec, 1); else put_in(sa, l, q[14], q[15]);
+            }
             return nfd;
         }
         if (errno != EAGAIN || sk[s].nonblock) return -1;
@@ -276,9 +328,13 @@ int connect(int fd, const void *sa, qsocklen_t l)
     int s = sock_of(fd);
     if (s < 0) { errno = ENOTSOCK; return -1; }
     BLOCK(q);
-    if (get_in(sa, l, &q[5], &q[6])) return -1;
+    uint8_t rec[REC6] __attribute__((aligned(8)));
+    if (sk[s].v6) {
+        if (get_rec(sa, l, rec)) return -1;
+        q[5] = (uint32_t)(uintptr_t)rec;
+    } else if (get_in(sa, l, &q[5], &q[6])) return -1;
     q[4] = (uint32_t)s;
-    if (net(q, NET_CONNECT) >= 0) return 0;
+    if (net(q, sk[s].v6 ? NET_CONNECT6 : NET_CONNECT) >= 0) return 0;
     if (errno != EINPROGRESS && errno != EAGAIN) return -1;
     if (sk[s].nonblock) { errno = EINPROGRESS; return -1; }
     if (wait_sock(s, 2, 0)) return -1;
@@ -299,9 +355,11 @@ static int name_of(int fd, void *sa, qsocklen_t *l, uint32_t op)
     int s = sock_of(fd);
     if (s < 0) { errno = ENOTSOCK; return -1; }
     BLOCK(q);
-    q[4] = (uint32_t)s;
+    uint8_t rec[REC6] __attribute__((aligned(8)));
+    q[4] = (uint32_t)s; q[5] = (uint32_t)(uintptr_t)rec;
+    if (sk[s].v6) op = op == NET_SOCKNAME ? NET_SOCKNAME6 : NET_PEERNAME6;
     if (net(q, op) < 0) return -1;
-    put_in(sa, l, q[14], q[15]);
+    if (sk[s].v6) put_rec(sa, l, rec, 1); else put_in(sa, l, q[14], q[15]);
     return 0;
 }
 int getsockname(int fd, void *sa, qsocklen_t *l) { return name_of(fd, sa, l, NET_SOCKNAME); }
@@ -374,11 +432,18 @@ static ssize_t xfer(int s, void *buf, size_t n, int flags, uint32_t op, const vo
         }
         q[4] = (uint32_t)s; q[5] = (uint32_t)(uintptr_t)p; q[6] = (uint32_t)k;
         q[7] = (uint32_t)(((flags & MSG_PEEK_) ? 2u : 0u) | ((flags & MSG_OOB_) ? 1u : 0u));
-        if (op == NET_SENDTO && to) { if (get_in(to, tl, &q[8], &q[9])) return -1; }
-        int r = net(q, op == NET_SENDTO && !to ? NET_SEND : op);
+        uint8_t rec[REC6] __attribute__((aligned(8)));
+        uint32_t o = op == NET_SENDTO && !to ? NET_SEND : op;
+        if (sk[s].v6 && (o == NET_SENDTO || o == NET_RECVFROM)) {
+            if (o == NET_SENDTO && get_rec(to, tl, rec)) return -1;
+            q[8] = (uint32_t)(uintptr_t)rec;
+            o = o == NET_SENDTO ? NET_SENDTO6 : NET_RECVFROM6;
+        } else if (op == NET_SENDTO && to) { if (get_in(to, tl, &q[8], &q[9])) return -1; }
+        int r = net(q, o);
         if (r >= 0) {
             if (!is_send && p == bounce) memcpy(buf, bounce, (size_t)r);
-            if (op == NET_RECVFROM) put_in(from, fl, q[14], q[15]);
+            if (o == NET_RECVFROM6) put_rec(from, fl, rec, 1);
+            else if (op == NET_RECVFROM) put_in(from, fl, q[14], q[15]);
             return r;
         }
         if (errno != EAGAIN || sk[s].nonblock) return -1;
@@ -612,12 +677,117 @@ int qrx_resolve4(const char *name, uint32_t *ip)
 #define EAI_SERVICE_ 9
 #define EAI_SOCKTYPE_ 10
 #define AI_PASSIVE_ 1
+#define AI_NUMERICHOST_ 4
+/* inet_pton/inet_ntop for both families (AROS's headers declare them, its C library has none) */
+static int pton6(const char *src, uint8_t *dst)
+{
+    uint16_t w[8] = { 0 };
+    int n = 0, gap = -1;
+    const char *p = src;
+    if (*p == ':') { if (p[1] != ':') return 0; p++; }
+    while (*p) {
+        if (*p == ':') {
+            if (gap >= 0) return 0;
+            gap = n; p++;
+            if (!*p) break;
+            continue;
+        }
+        if (n == 8) return 0;
+        /* an IPv4 tail: a.b.c.d */
+        const char *dot = strchr(p, '.');
+        if (dot && !strchr(p, ':')) {
+            uint32_t ip;
+            if (n > 6 || parse_ipv4(p, &ip)) return 0;
+            w[n++] = (uint16_t)(ip >> 16); w[n++] = (uint16_t)ip;
+            p += strlen(p);
+            break;
+        }
+        unsigned v = 0, k = 0;
+        while (k < 4 && ((*p >= '0' && *p <= '9') || ((*p | 32) >= 'a' && (*p | 32) <= 'f'))) {
+            v = v * 16 + (unsigned)(*p <= '9' ? *p - '0' : (*p | 32) - 'a' + 10); p++; k++;
+        }
+        if (!k) return 0;
+        w[n++] = (uint16_t)v;
+        if (*p == ':') { if (p[1] == ':') continue; p++; if (!*p) return 0; }
+        else if (*p) return 0;
+    }
+    if (gap >= 0) {
+        int tail = n - gap;
+        if (n == 8) return 0;
+        memmove(w + 8 - tail, w + gap, (size_t)tail * 2);
+        memset(w + gap, 0, (size_t)(8 - n) * 2);
+    } else if (n != 8) return 0;
+    for (int k = 0; k < 8; k++) { dst[2 * k] = (uint8_t)(w[k] >> 8); dst[2 * k + 1] = (uint8_t)w[k]; }
+    return 1;
+}
+int inet_pton(int af, const char *src, void *dst)
+{
+    if (af == AF_INET_) { uint32_t ip; if (parse_ipv4(src, &ip)) return 0; memcpy(dst, &ip, 4); return 1; }
+    if (af == AF_INET6_) return pton6(src, dst);
+    errno = EAFNOSUPPORT;
+    return -1;
+}
+const char *inet_ntop(int af, const void *src, char *dst, qsocklen_t size)
+{
+    char b[48];
+    const uint8_t *a = src;
+    if (af == AF_INET_) snprintf(b, sizeof b, "%u.%u.%u.%u", a[0], a[1], a[2], a[3]);
+    else if (af == AF_INET6_) {
+        static const uint8_t mapped[12] = { 0,0,0,0, 0,0,0,0, 0,0,0xFF,0xFF };
+        if (!memcmp(a, mapped, 12)) snprintf(b, sizeof b, "::ffff:%u.%u.%u.%u", a[12], a[13], a[14], a[15]);
+        else {
+            /* the longest run of zero words (two or more) becomes :: (RFC 5952) */
+            int best = -1, bestlen = 0;
+            for (int k = 0; k < 8;) {
+                if (a[2 * k] | a[2 * k + 1]) { k++; continue; }
+                int e = k; while (e < 8 && !(a[2 * e] | a[2 * e + 1])) e++;
+                if (e - k > bestlen && e - k >= 2) { best = k; bestlen = e - k; }
+                k = e;
+            }
+            char *o = b;
+            for (int k = 0; k < 8; k++) {
+                if (k == best) { *o++ = ':'; if (k == 0) *o++ = ':'; k += bestlen - 1; continue; }
+                o += sprintf(o, "%x", (unsigned)(a[2 * k] << 8 | a[2 * k + 1]));
+                if (k < 7) *o++ = ':';
+            }
+            *o = 0;
+        }
+    } else { errno = EAFNOSUPPORT; return NULL; }
+    if (strlen(b) >= size) { errno = ENOSPC; return NULL; }
+    strcpy(dst, b);
+    return dst;
+}
+
+void freeaddrinfo(struct qaddrinfo *ai);
+static struct qaddrinfo *ai_new(long family, long socktype, const uint8_t *addr, uint32_t port)
+{
+    size_t sl = family == AF_INET6_ ? sizeof(struct qsockaddr_in6) : sizeof(struct qsockaddr_in);
+    struct qaddrinfo *ai = calloc(1, sizeof *ai + sl);
+    if (!ai) return NULL;
+    if (family == AF_INET6_) {
+        struct qsockaddr_in6 *in6 = (struct qsockaddr_in6 *)(ai + 1);
+        in6->len = sizeof *in6; in6->family = AF_INET6_; in6->port = (uint16_t)port; memcpy(in6->addr, addr, 16);
+        ai->ai_addr = in6;
+    } else {
+        struct qsockaddr_in *in = (struct qsockaddr_in *)(ai + 1);
+        in->len = sizeof *in; in->family = AF_INET_; in->port = (uint16_t)port; memcpy(&in->addr, addr, 4);
+        ai->ai_addr = in;
+    }
+    ai->ai_family = family;
+    ai->ai_socktype = socktype ? socktype : SOCK_STREAM_;
+    ai->ai_protocol = ai->ai_socktype == SOCK_DGRAM_ ? 17 : 6;
+    ai->ai_addrlen = sl;
+    return ai;
+}
+/* getaddrinfo: IPv4 and IPv6 (the host's resolver through NET_RESOLVE6, in the order it gives;
+ * through Tor or WireGuard only IPv4). AF_UNSPEC gives both, IPv4 as AF_INET entries. */
 int getaddrinfo(const char *node, const char *service, const struct qaddrinfo *hints, struct qaddrinfo **res)
 {
-    uint32_t ip = 0, port = 0;
+    uint32_t port = 0;
     long family = hints ? hints->ai_family : 0, socktype = hints ? hints->ai_socktype : 0;
+    long flags = hints ? hints->ai_flags : 0;
     *res = NULL;
-    if (family != 0 && family != AF_INET_) return EAI_FAMILY_;
+    if (family != 0 && family != AF_INET_ && family != AF_INET6_) return EAI_FAMILY_;
     if (socktype != 0 && socktype != SOCK_STREAM_ && socktype != SOCK_DGRAM_) return EAI_SOCKTYPE_;
     if (!node && !service) return EAI_NONAME_;
     if (service) {
@@ -626,18 +796,80 @@ int getaddrinfo(const char *node, const char *service, const struct qaddrinfo *h
         if (*e || p > 65535) return EAI_SERVICE_;
         port = (uint32_t)p;
     }
-    if (!node) ip = hints && (hints->ai_flags & AI_PASSIVE_) ? 0 : 0x7F000001u;
-    else if (qrx_resolve4(node, &ip)) return EAI_NONAME_;
-    struct qaddrinfo *ai = calloc(1, sizeof *ai + sizeof(struct qsockaddr_in));
-    if (!ai) return EAI_MEMORY_;
-    struct qsockaddr_in *in = (struct qsockaddr_in *)(ai + 1);
-    in->len = sizeof *in; in->family = AF_INET_; in->port = (uint16_t)port; in->addr = ip;
-    ai->ai_family = AF_INET_;
-    ai->ai_socktype = socktype ? socktype : SOCK_STREAM_;
-    ai->ai_protocol = ai->ai_socktype == SOCK_DGRAM_ ? 17 : 6;
-    ai->ai_addrlen = sizeof *in;
-    ai->ai_addr = in;
-    *res = ai;
+    static const uint8_t any6[16], lo6[16] = { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 };
+    uint8_t a6[16];
+    uint32_t ip = 0;
+    struct qaddrinfo *head = NULL, **tail = &head;
+#define ADD(fam, addr) do { struct qaddrinfo *n_ = ai_new(fam, socktype, addr, port); \
+        if (!n_) { freeaddrinfo(head); return EAI_MEMORY_; } *tail = n_; tail = &n_->ai_next; } while (0)
+    if (!node) {                          /* the local addresses: any or loopback */
+        int passive = (flags & AI_PASSIVE_) != 0;
+        if (family == AF_INET6_ || family == 0) ADD(AF_INET6_, passive ? any6 : lo6);
+        ip = passive ? 0 : 0x7F000001u;
+        if (family == AF_INET_ || family == 0) ADD(AF_INET_, (uint8_t *)&ip);
+        *res = head;
+        return 0;
+    }
+    if (pton6(node, a6)) {                /* a numeric IPv6 address */
+        if (family == AF_INET_) return EAI_FAMILY_;
+        ADD(AF_INET6_, a6);
+        *res = head;
+        return 0;
+    }
+    if (!parse_ipv4(node, &ip) || family == AF_INET_) {   /* numeric IPv4, or IPv4 asked for */
+        if (family == AF_INET6_) return EAI_FAMILY_;
+        if (parse_ipv4(node, &ip) && (flags & AI_NUMERICHOST_)) return EAI_NONAME_;
+        if (parse_ipv4(node, &ip) && qrx_resolve4(node, &ip)) return EAI_NONAME_;
+        ADD(AF_INET_, (uint8_t *)&ip);
+        *res = head;
+        return 0;
+    }
+    if (!strcmp(node, "localhost")) {     /* IPv4 first: a server here may listen on 127.0.0.1 only */
+        ip = 0x7F000001u;
+        if (family != AF_INET6_) ADD(AF_INET_, (uint8_t *)&ip);
+        if (family != AF_INET_) ADD(AF_INET6_, lo6);
+        *res = head;
+        return 0;
+    }
+    if (flags & AI_NUMERICHOST_) return EAI_NONAME_;   /* a name, but only numbers were asked for */
+    size_t n = strlen(node);
+    char name[256] __attribute__((aligned(8)));
+    uint8_t recs[16 * REC6] __attribute__((aligned(8)));
+    if (n >= sizeof name) return EAI_NONAME_;
+    memcpy(name, node, n + 1);
+    BLOCK(q);
+    q[5] = (uint32_t)(uintptr_t)name; q[6] = (uint32_t)(uintptr_t)recs; q[7] = 16;
+    int k = net(q, NET_RESOLVE6);
+    if (k <= 0) return EAI_NONAME_;
+    static const uint8_t mapped[12] = { 0,0,0,0, 0,0,0,0, 0,0,0xFF,0xFF };
+    for (int i = 0; i < k; i++) {
+        const uint8_t *r = recs + i * REC6;
+        if (!memcmp(r, mapped, 12)) { if (family != AF_INET6_) ADD(AF_INET_, r + 12); }
+        else if (family != AF_INET_) ADD(AF_INET6_, r);
+    }
+#undef ADD
+    if (!head) return EAI_NONAME_;
+    *res = head;
+    return 0;
+}
+/* getnameinfo: numeric only (no reverse lookup through the door; NI_NAMEREQD fails) */
+#define NI_NAMEREQD_ 4
+int getnameinfo(const void *sa, qsocklen_t sl, char *host, qsocklen_t hl, char *serv, qsocklen_t svl, int flags)
+{
+    if (!sa || sl < 2) return EAI_FAMILY_;
+    uint8_t fam = ((const uint8_t *)sa)[1];
+    unsigned port;
+    if (flags & NI_NAMEREQD_) return EAI_NONAME_;
+    if (fam == AF_INET_ && sl >= sizeof(struct qsockaddr_in)) {
+        const struct qsockaddr_in *in = sa;
+        if (host && hl && !inet_ntop(AF_INET_, &in->addr, host, hl)) return EAI_MEMORY_;
+        port = in->port;
+    } else if (fam == AF_INET6_ && sl >= sizeof(struct qsockaddr_in6)) {
+        const struct qsockaddr_in6 *in6 = sa;
+        if (host && hl && !inet_ntop(AF_INET6_, in6->addr, host, hl)) return EAI_MEMORY_;
+        port = in6->port;
+    } else return EAI_FAMILY_;
+    if (serv && svl && (qsocklen_t)snprintf(serv, svl, "%u", port) >= svl) return EAI_MEMORY_;
     return 0;
 }
 void freeaddrinfo(struct qaddrinfo *ai)
@@ -741,3 +973,37 @@ struct qprotoent *getprotobynumber(int proto)
     for (unsigned i = 0; i < sizeof protos / sizeof protos[0]; i++) if (protos[i].p_proto == proto) return &protos[i];
     return NULL;
 }
+
+/* gethostbyname2 (NSPR with IPv6): AF_INET as gethostbyname, AF_INET6 the IPv6 addresses of
+ * NET_RESOLVE6 (up to 8), in the same static storage */
+static struct { struct qhostent he; char name[256]; char *aliases[1]; uint8_t addr[8][16]; char *list[9]; } host6buf;
+struct qhostent *gethostbyname2(const char *name, int af)
+{
+    if (af == AF_INET_) return gethostbyname(name);
+    if (af != AF_INET6_ || !name) { h_errno = 1; return NULL; }
+    uint8_t a6[16];
+    int k = 0;
+    if (pton6(name, a6)) { memcpy(host6buf.addr[0], a6, 16); k = 1; }
+    else {
+        size_t n = strlen(name);
+        char tmp[256] __attribute__((aligned(8)));
+        uint8_t recs[8 * REC6] __attribute__((aligned(8)));
+        if (n >= sizeof tmp) { h_errno = 1; return NULL; }
+        memcpy(tmp, name, n + 1);
+        BLOCK(q);
+        q[5] = (uint32_t)(uintptr_t)tmp; q[6] = (uint32_t)(uintptr_t)recs; q[7] = 8;
+        int r = net(q, NET_RESOLVE6);
+        static const uint8_t mapped[12] = { 0,0,0,0, 0,0,0,0, 0,0,0xFF,0xFF };
+        for (int i = 0; i < r; i++) if (memcmp(recs + i * REC6, mapped, 12)) memcpy(host6buf.addr[k++], recs + i * REC6, 16);
+    }
+    if (!k) { h_errno = 4; /* NO_DATA: the name has no IPv6 address */ return NULL; }
+    snprintf(host6buf.name, sizeof host6buf.name, "%s", name);
+    host6buf.aliases[0] = NULL;
+    for (int i = 0; i < k; i++) host6buf.list[i] = (char *)host6buf.addr[i];
+    host6buf.list[k] = NULL;
+    host6buf.he.h_name = host6buf.name; host6buf.he.h_aliases = host6buf.aliases;
+    host6buf.he.h_addrtype = AF_INET6_; host6buf.he.h_length = 16; host6buf.he.h_addr_list = host6buf.list;
+    return &host6buf.he;
+}
+const uint8_t in6addr_any[16] = { 0 };
+const uint8_t in6addr_loopback[16] = { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 };

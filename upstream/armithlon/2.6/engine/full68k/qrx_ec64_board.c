@@ -78,6 +78,16 @@ static int net_args_ok(const qec64_board *b, uint32_t op, const uint32_t *a)
         for (uint64_t p = a[1]; p < lim && p < (uint64_t)a[1] + 1024; p++) if (!b->ram[p]) return 1;
         return 0;
     }
+    /* IPv6: the address record (QRX_NET_ADDR6_SIZE bytes) and, for send/receive, the buffer */
+    case QRX_NET_BIND6: case QRX_NET_CONNECT6: case QRX_NET_ACCEPT6: case QRX_NET_SOCKNAME6: case QRX_NET_PEERNAME6:
+        return (uint64_t)a[1] + QRX_NET_ADDR6_SIZE <= lim;
+    case QRX_NET_SENDTO6: case QRX_NET_RECVFROM6:
+        return (uint64_t)a[1] + a[2] <= lim && (uint64_t)a[4] + QRX_NET_ADDR6_SIZE <= lim;
+    case QRX_NET_RESOLVE6: {
+        if (a[3] > 64 || (uint64_t)a[2] + (uint64_t)a[3] * QRX_NET_ADDR6_SIZE > lim) return 0;
+        for (uint64_t p = a[1]; p < lim && p < (uint64_t)a[1] + 1024; p++) if (!b->ram[p]) return 1;
+        return 0;
+    }
     default: return 1;
     }
 }
