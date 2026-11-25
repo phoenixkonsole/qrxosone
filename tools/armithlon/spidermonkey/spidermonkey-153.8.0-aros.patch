@@ -4949,6 +4949,18 @@
  #define PROTOBUF_DESCRIPTOR_WEAK_MESSAGES_ALLOWED
  #endif
  
+--- a/toolkit/library/build/moz.build
++++ b/toolkit/library/build/moz.build
+@@ -12,7 +12,8 @@
+ 
+ Libxul("xul-real")
+ 
+-if CONFIG["COMPILE_ENVIRONMENT"]:
++# QRX: on AROS libxul is linked into the program; there are no libraries to preload
++if CONFIG["COMPILE_ENVIRONMENT"] and CONFIG["OS_TARGET"] != "AROS":
+     if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("cocoa", "uikit"):
+         full_libname = SHARED_LIBRARY_NAME
+     else:
 --- a/toolkit/library/gen_buildid.py
 +++ b/toolkit/library/gen_buildid.py
 @@ -48,6 +48,7 @@
@@ -4993,6 +5005,18 @@
  #  include "prsystem.h"
  #  include "prenv.h"
  #  include "mozilla/Printf.h"
+--- a/toolkit/xre/nsAppRunner.cpp
++++ b/toolkit/xre/nsAppRunner.cpp
+@@ -4383,7 +4383,8 @@
+   }
+ 
+   if (gfxPlatform::IsHeadless()) {
+-#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK) || defined(XP_MACOSX)
++#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK) || defined(XP_MACOSX) || \
++    defined(MOZ_WIDGET_AROS)  // QRX: AROS's widget backend is headless (stage 1)
+     printf_stderr("*** You are running in headless mode.\n");
+ #else
+     Output(
 --- a/toolkit/xre/nsXREDirProvider.cpp
 +++ b/toolkit/xre/nsXREDirProvider.cpp
 @@ -1164,7 +1164,7 @@
