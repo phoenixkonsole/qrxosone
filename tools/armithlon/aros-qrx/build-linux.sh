@@ -34,6 +34,11 @@ mkdir -p "$B"
 cd "$B"
 [ -f config.status ] || CC=gcc CXX=g++ "$SRC/configure" --target=qrx-m68k64 --with-toolchain=llvm \
     --with-aros-toolchain=yes --with-aros-toolchain-install="$TC" --disable-crosstools
+# a removed gen/ (a rebuild from scratch with a kept config.status) loses the generated configs;
+# config.status and features.status write them again
+[ -f bin/native-m68k64/gen/config/target.cfg ] || ./config.status
+[ -f bin/native-m68k64/gen/config/compiler.cfg ] || [ ! -f config/features.status ] ||
+  (cd config && ./features.status)
 J="-j${QRX_BUILD_JOBS:-4}"
 # AROS' parallel make sometimes races copying the same header twice ("File exists"), and a -quick
 # target can stop with "Error 20" while generating includes, its include/{proto,clib,defines,inline}
