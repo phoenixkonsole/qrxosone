@@ -97,5 +97,8 @@ cp "$HERE/qrxpipe/mmakefile.src" "$HERE/qrxpipe/qrxpipe-handler.c" "$SRC/workben
 mk workbench-fs-qrxpipe
 if [[ "${QRX_BUILD_PTHREAD:-0}" == 1 ]]; then
   mk pthread-includes-copy linklibs-pthread
+  # the builtins again, now with the SDK: emutls.c (thread_local) needs the pthread headers
+  bash "$HERE/../ec64-llvm/build-builtins.sh" "$LB" "$LS" "$TC/lib/generic" "$B/bin/native-m68k64/AROS/Development"
+  cp "$TC/lib/generic/libclang_rt.builtins-m68k64.a" bin/native-m68k64/AROS/Development/lib/
 fi
 echo "QRX OS One 64 built: $B/bin/native-m68k64"
