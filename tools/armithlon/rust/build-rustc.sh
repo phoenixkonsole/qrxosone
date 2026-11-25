@@ -55,5 +55,7 @@ download-rustc = false
 llvm-config = "$LLVM/bin/llvm-config"
 EOF
 cd "$V"
-python3 x.py build --stage 1 compiler/rustc library/std
+python3 x.py build --stage 1 compiler/rustc library
+# the target std in the stage 1 sysroot (x.py removes it with each compiler build)
+bash "$HERE/build-target-std.sh" "$W/$V"
 echo "stage 1: $W/$V/build/host/stage1/bin/rustc"

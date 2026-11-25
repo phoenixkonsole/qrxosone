@@ -13,7 +13,8 @@ von Firefox ESR 153.8.0 (Basis von Tor Browser 16), nur als Interpreter (`--disa
 | `configure.sh`, `make.sh` | Umgebung (m68k64-clang mit Sysroot, rustc mit der Zielbeschreibung über `RUST_TARGET_PATH`) und Aufruf |
 
 Rust: Die Standardbibliothek für `m68k64-unknown-aros` liegt fertig im Sysroot des Stufe-1-rustc
-(`lib/rustlib/m68k64-unknown-aros/lib`, gebaut mit `cargo -Zbuild-std` über den Zielnamen), Mozillas Build ruft also
+(`lib/rustlib/m68k64-unknown-aros/lib`, gebaut von `../rust/build-target-std.sh` mit `cargo -Zbuild-std` über den Zielnamen;
+x.py löscht das Verzeichnis bei jedem Compiler-Neubau, das Skript also danach wieder laufen lassen), Mozillas Build ruft also
 nur `rustc --target m68k64-unknown-aros` mit `-Zunstable-options` auf.
 
 ## Stand (25.11.2026)
