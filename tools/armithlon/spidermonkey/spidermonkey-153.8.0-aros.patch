@@ -1,3 +1,15 @@
+--- a/browser/app/moz.build
++++ b/browser/app/moz.build
+@@ -33,7 +33,8 @@
+     DIRS += ["macbuild/Contents"]
+ 
+ browser_linkage = "standalone"
+-if CONFIG["FUZZING_SNAPSHOT"] or CONFIG["AFLFUZZ"]:
++if CONFIG["FUZZING_SNAPSHOT"] or CONFIG["AFLFUZZ"] or CONFIG["OS_TARGET"] == "AROS":
++    # QRX: on AROS libxul is a relocatable object linked into the program (no dlopen)
+     browser_linkage = "dependent"
+ 
+ if CONFIG["MOZ_NO_PIE_COMPAT"]:
 --- a/build/autoconf/config.sub
 +++ b/build/autoconf/config.sub
 @@ -1344,7 +1344,7 @@
@@ -40,7 +52,20 @@
  set_define("PIC", True, when=target_is_netbsd)
  
  # DSO flags manipulations
-@@ -539,7 +554,7 @@
+@@ -396,6 +411,12 @@
+     have_linker_support_ignore_unresolved,
+ ):
+     ldopts = []
++    if target.kernel == "AROS":
++        # QRX: AROS has no dynamic linker; its ELF loader relocates ET_REL objects. A "shared
++        # library" (libxul) is linked as one relocatable object and the program links it in
++        # (browser/app: dependent linkage, XRE_GetBootstrap called directly).
++        dso_flags.ldopts.extend(["-r", "-nostdlib"])
++        return
+     if target.kernel != "Darwin":
+         ldopts.append("-shared")
+ 
+@@ -539,7 +560,7 @@
  # ---------------------------------
  @depends(building_with_gnu_compatible_cc, target)
  def moz_program_ldflags(building_with_gnu_compatible_cc, target):
@@ -72,6 +97,25 @@
      elif cpu in ("m68k"):
          canonical_cpu = "m68k"
          endianness = "big"
+--- a/build/moz.configure/lto-pgo.configure
++++ b/build/moz.configure/lto-pgo.configure
+@@ -458,12 +458,15 @@
+ 
+ @depends(
+     dso_flags,
++    target,
+     when=building_with_gnu_compatible_cc
+     & gcc_use_gnu_ld
+     & ~developer_options
+     & ~enable_profile_generate,
+ )
+-def remove_dead_symbols(dso_flags):
++def remove_dead_symbols(dso_flags, target):
++    if target.kernel == "AROS":
++        return  # QRX: relocatable link (-r), see flags.configure; lld refuses --gc-sections with -r
+     dso_flags.ldopts.append("-Wl,--gc-sections")
+ 
+ 
 --- a/build/moz.configure/rust.configure
 +++ b/build/moz.configure/rust.configure
 @@ -544,6 +544,10 @@
@@ -157,6 +201,194 @@
  endif
  
  ifneq (1,$(PASS_ONLY_BASE_CFLAGS_TO_RUST))
+--- a/gfx/2d/2D.h
++++ b/gfx/2d/2D.h
+@@ -34,7 +34,7 @@
+ #include "mozilla/gfx/FontData.h"
+ #include "nsRegionFwd.h"
+ 
+-#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GTK)
++#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_AROS)
+ #  ifndef MOZ_ENABLE_FREETYPE
+ #    define MOZ_ENABLE_FREETYPE
+ #  endif
+@@ -2256,7 +2256,8 @@
+       RefPtr<SharedFTFace> aFace, FcPattern* aPattern);
+ #endif
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++// QRX: AROS uses the FreeType font backend of Android (gfxFT2FontList, ScaledFontFreeType)
++#if (defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_AROS))
+   static already_AddRefed<ScaledFont> CreateScaledFontForFreeTypeFont(
+       const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
+       RefPtr<SharedFTFace> aFace, bool aApplySyntheticBold = false);
+--- a/gfx/2d/DrawTargetSkia.cpp
++++ b/gfx/2d/DrawTargetSkia.cpp
+@@ -1857,7 +1857,7 @@
+   SkScalar gamma = SK_Scalar1;
+ #endif
+ 
+-#if defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_ANDROID)
++#if defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_AROS)
+   int32_t gammaVal = StaticPrefs::gfx_font_rendering_freetype_gamma();
+   int32_t contrastVal =
+       StaticPrefs::gfx_font_rendering_freetype_enhanced_contrast();
+--- a/gfx/2d/Factory.cpp
++++ b/gfx/2d/Factory.cpp
+@@ -27,7 +27,7 @@
+ #  include "UnscaledFontFreeType.h"
+ #endif
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++#if (defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_AROS))
+ #  include "ScaledFontFreeType.h"
+ #  include "NativeFontResourceFreeType.h"
+ #  include "UnscaledFontFreeType.h"
+@@ -413,7 +413,7 @@
+     case FontType::FONTCONFIG:
+       return NativeFontResourceFontconfig::Create(
+           aData, aSize, static_cast<FT_Library>(aFontContext));
+-#elif defined(MOZ_WIDGET_ANDROID)
++#elif (defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_AROS))
+     case FontType::FREETYPE:
+       return NativeFontResourceFreeType::Create(
+           aData, aSize, static_cast<FT_Library>(aFontContext));
+@@ -441,7 +441,7 @@
+     case FontType::FONTCONFIG:
+       return UnscaledFontFontconfig::ValidateFontDescriptor(
+           aName, aNameLength, aResultName, aIndex);
+-#elif defined(MOZ_WIDGET_ANDROID)
++#elif (defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_AROS))
+     case FontType::FREETYPE:
+       return UnscaledFontFreeType::ValidateFontDescriptor(aName, aNameLength,
+                                                           aResultName, aIndex);
+@@ -468,7 +468,7 @@
+     case FontType::FONTCONFIG:
+       return UnscaledFontFontconfig::CreateFromFontDescriptor(
+           aData, aDataLength, aIndex);
+-#elif defined(MOZ_WIDGET_ANDROID)
++#elif (defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_AROS))
+     case FontType::FREETYPE:
+       return UnscaledFontFreeType::CreateFromFontDescriptor(aData, aDataLength,
+                                                             aIndex);
+@@ -498,7 +498,7 @@
+ }
+ #endif
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++#if (defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_AROS))
+ already_AddRefed<ScaledFont> Factory::CreateScaledFontForFreeTypeFont(
+     const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
+     RefPtr<SharedFTFace> aFace, bool aApplySyntheticBold) {
+--- a/gfx/2d/NativeFontResourceFreeType.cpp
++++ b/gfx/2d/NativeFontResourceFreeType.cpp
+@@ -33,7 +33,7 @@
+   return resource.forget();
+ }
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++#if (defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_AROS))
+ already_AddRefed<NativeFontResourceFreeType> NativeFontResourceFreeType::Create(
+     const uint8_t* aFontData, uint32_t aDataLength, FT_Library aFTLibrary) {
+   return CreateInternal<NativeFontResourceFreeType>(aFontData, aDataLength,
+--- a/gfx/2d/NativeFontResourceFreeType.h
++++ b/gfx/2d/NativeFontResourceFreeType.h
+@@ -18,7 +18,7 @@
+  public:
+   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(NativeFontResourceFreeType, override)
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++#if (defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_AROS))
+   static already_AddRefed<NativeFontResourceFreeType> Create(
+       const uint8_t* aFontData, uint32_t aDataLength,
+       FT_Library aFTLibrary = nullptr);
+--- a/gfx/2d/UnscaledFontFreeType.cpp
++++ b/gfx/2d/UnscaledFontFreeType.cpp
+@@ -186,7 +186,7 @@
+   }
+ }
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++#if (defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_AROS))
+ 
+ #  ifndef TMPFS_MAGIC
+ #    define TMPFS_MAGIC 0x01021994
+@@ -211,6 +211,13 @@
+   std::string path((const char*)aName, aNameLength);
+ 
+   struct stat st{};
++#  ifdef MOZ_WIDGET_AROS
++  // QRX: AROS has no tmpfs/proc/sysfs to keep out: any regular file is a font file candidate
++  if (stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
++    aResultName = std::move(path);
++    return true;
++  }
++#  else
+   if (stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode) && st.st_nlink > 0) {
+     struct statfs sfs{};
+     if (statfs(path.c_str(), &sfs) == 0) {
+@@ -227,6 +234,7 @@
+       }
+     }
+   }
++#  endif
+ 
+   gfxWarning() << "Failed identifying font descriptor.";
+   return false;
+@@ -285,6 +293,6 @@
+   return MakeAndAddRef<UnscaledFontFreeType>(std::move(path), aIndex);
+ }
+ 
+-#endif  // MOZ_WIDGET_ANDROID
++#endif  // MOZ_WIDGET_ANDROID || MOZ_WIDGET_AROS
+ 
+ }  // namespace mozilla::gfx
+--- a/gfx/2d/UnscaledFontFreeType.h
++++ b/gfx/2d/UnscaledFontFreeType.h
+@@ -48,7 +48,7 @@
+ 
+   RefPtr<SharedFTFace> InitFace();
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++#if (defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_AROS))
+   static bool ValidateFontDescriptor(const uint8_t* aName, size_t aNameLength,
+                                      std::string& aResultName,
+                                      uint32_t& aIndex);
+--- a/gfx/2d/moz.build
++++ b/gfx/2d/moz.build
+@@ -89,7 +89,7 @@
+     ]
+     DEFINES["WIN32"] = True
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk"):
++if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "aros", "gtk"):
+     EXPORTS.mozilla.gfx += [
+         "UnscaledFontFreeType.h",
+     ]
+@@ -103,7 +103,7 @@
+         "ScaledFontFontconfig.cpp",
+     ]
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] == "android":
++if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "aros"):
+     SOURCES += [
+         "ScaledFontFreeType.cpp",
+     ]
+@@ -195,12 +195,12 @@
+ for var in ("USE_CAIRO", "MOZ2D_HAS_MOZ_CAIRO"):
+     DEFINES[var] = True
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk"):
++if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "aros", "gtk"):
+     DEFINES["MOZ_ENABLE_FREETYPE"] = True
+ 
+ COMPILE_FLAGS["WARNINGS_CXXFLAGS"] += ["-Werror=switch"]
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk"):
++if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "aros", "gtk"):
+     CXXFLAGS += CONFIG["CAIRO_FT_CFLAGS"]
+ 
+ LOCAL_INCLUDES += CONFIG["SKIA_INCLUDES"]
 --- a/gfx/angle/checkout/include/EGL/eglplatform.h
 +++ b/gfx/angle/checkout/include/EGL/eglplatform.h
 @@ -119,7 +119,7 @@
@@ -191,6 +423,142 @@
  
      auto MutTiedFields() {
        return std::tie(mCreatorPid, mSize, mStride, mConsumers, mCreatorRef,
+--- a/gfx/skia/moz.build
++++ b/gfx/skia/moz.build
+@@ -544,6 +544,16 @@
+         'skia/src/pdf/SkPDFFont.cpp',
+         'skia/src/pdf/SkPDFType1Font.cpp',
+     ]
++if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'aros':
++    # QRX OS One 64: the FreeType font host of Android and GTK, without Android's log
++    UNIFIED_SOURCES += [
++        'skia/src/ports/SkLog_stdio.cpp',
++        'skia/src/ports/SkOSFile_posix.cpp',
++    ]
++    SOURCES += [
++        'skia/src/ports/SkFontHost_cairo.cpp',
++        'skia/src/ports/SkFontHost_FreeType_common.cpp',
++    ]
+ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+     UNIFIED_SOURCES += [
+         'skia/src/ports/SkLog_android.cpp',
+@@ -655,7 +665,7 @@
+     "/gfx/harfbuzz/src",
+ ]
+ 
+-if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('gtk', 'android'):
++if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('gtk', 'android', 'aros'):
+     LOCAL_INCLUDES += [
+         "/gfx/cairo/cairo/src",
+     ]
+--- a/gfx/thebes/gfxFT2FontList.cpp
++++ b/gfx/thebes/gfxFT2FontList.cpp
+@@ -1601,9 +1601,17 @@
+ 
+   if (!useSystemFontAPI)
+ #endif
++#if defined(MOZ_WIDGET_AROS)
++  // QRX OS One 64: AROS installs its TrueType/OpenType fonts in
++  // Fonts:TrueType; the program runs in AROS's Unix path mode.
++  {
++    FindFontsInDir("/FONTS/TrueType"_ns, mFontNameCache.get());
++  }
++#else
+   {
+     FindFontsInDir(androidFontsRoot, mFontNameCache.get());
+   }
++#endif
+ 
+   // Look for fonts stored in omnijar, unless we're on a low-memory
+   // device where we don't want to spend the RAM to decompress them.
+@@ -1931,6 +1939,11 @@
+   if (ff.IsNull()) {
+     ff = FindFamily(aFontVisibilityProvider, "Droid Sans"_ns);
+   }
++#elif defined(MOZ_WIDGET_AROS)
++  ff = FindFamily(aFontVisibilityProvider, "Bitstream Vera Sans"_ns);
++  if (ff.IsNull()) {
++    ff = FindFamily(aFontVisibilityProvider, "Open Sans"_ns);
++  }
+ #endif
+   /* TODO: what about Qt or other platforms that may use this? */
+   return ff;
+--- a/gfx/thebes/gfxPlatform.cpp
++++ b/gfx/thebes/gfxPlatform.cpp
+@@ -84,6 +84,8 @@
+ #  include "DMABufFormats.h"
+ #elif defined(ANDROID)
+ #  include "gfxAndroidPlatform.h"
++#elif defined(MOZ_WIDGET_AROS)
++#  include "gfxAROSPlatform.h"
+ #endif
+ #if defined(MOZ_WIDGET_ANDROID)
+ #  include "mozilla/java/HardwareCodecCapabilityUtilsWrappers.h"
+@@ -793,6 +795,8 @@
+     sHasVariationFontSupport = gfxPlatformGtk::CheckVariationFontSupport();
+ #elif defined(ANDROID)
+     sHasVariationFontSupport = gfxAndroidPlatform::CheckVariationFontSupport();
++#elif defined(MOZ_WIDGET_AROS)
++    sHasVariationFontSupport = gfxAROSPlatform::CheckVariationFontSupport();
+ #else
+ #  error "No gfxPlatform implementation available"
+ #endif
+@@ -918,6 +922,8 @@
+   gPlatform = new gfxPlatformGtk;
+ #elif defined(ANDROID)
+   gPlatform = new gfxAndroidPlatform;
++#elif defined(MOZ_WIDGET_AROS)
++  gPlatform = new gfxAROSPlatform;
+ #else
+ #  error "No gfxPlatform implementation available"
+ #endif
+--- a/gfx/thebes/moz.build
++++ b/gfx/thebes/moz.build
+@@ -100,6 +100,20 @@
+     UNIFIED_SOURCES += [
+         "AndroidSystemFontIterator.cpp",
+     ]
++elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "aros":
++    # QRX OS One 64: Skia in memory, fonts through FreeType (gfxFT2FontList)
++    EXPORTS += [
++        "gfxAROSPlatform.h",
++        "gfxFT2FontBase.h",
++        "gfxFT2Fonts.h",
++    ]
++    SOURCES += [
++        "gfxAROSPlatform.cpp",
++        "gfxFT2FontBase.cpp",
++        "gfxFT2FontList.cpp",
++        "gfxFT2Fonts.cpp",
++        "gfxFT2Utils.cpp",
++    ]
+ elif CONFIG["MOZ_WIDGET_TOOLKIT"] in ("cocoa", "uikit"):
+     EXPORTS += [
+         "gfxMacUtils.h",
+@@ -280,10 +294,10 @@
+     "/widget/gtk",
+ ]
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk"):
++if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "aros", "gtk"):
+     DEFINES["MOZ_ENABLE_FREETYPE"] = True
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android"):
++if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "aros"):
+     CXXFLAGS += CONFIG["CAIRO_FT_CFLAGS"]
+ 
+ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
+--- a/gfx/webrender_bindings/moz.build
++++ b/gfx/webrender_bindings/moz.build
+@@ -105,7 +105,7 @@
+         "RenderCompositorNative.cpp",
+     ]
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk"):
++if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "aros", "gtk"):
+     CXXFLAGS += CONFIG["CAIRO_FT_CFLAGS"]
+ 
+ if CONFIG["COMPILE_ENVIRONMENT"]:
 --- a/intl/icu/source/common/putilimp.h
 +++ b/intl/icu/source/common/putilimp.h
 @@ -134,7 +134,7 @@
@@ -4093,6 +4461,28 @@
  ))]
  type IovLen = c_int;
  
+--- a/toolkit/components/ml/backends/llama/moz.build
++++ b/toolkit/components/ml/backends/llama/moz.build
+@@ -2,7 +2,7 @@
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
++if CONFIG["MOZ_WIDGET_TOOLKIT"] not in ("android", "aros"):  # QRX: no local ML backend on AROS
+     DIRS += ["/third_party/llama.cpp"]
+ 
+     UNIFIED_SOURCES += [
+--- a/toolkit/components/ml/moz.build
++++ b/toolkit/components/ml/moz.build
+@@ -18,7 +18,7 @@
+     "tests",
+ ]
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
++if CONFIG["MOZ_WIDGET_TOOLKIT"] not in ("android", "aros"):  # QRX: no local ML backend on AROS
+     DIRS += ["backends/llama"]
+ 
+ XPCSHELL_TESTS_MANIFESTS += ["tests/xpcshell/xpcshell.toml"]
 --- a/toolkit/moz.configure
 +++ b/toolkit/moz.configure
 @@ -529,6 +529,9 @@
@@ -4105,6 +4495,16 @@
      else:
          # cairo-gtk3 - X11 backend with optional Wayland backend (auto detected)
          # cairo-gtk3-wayland - Wayland backend with optional X11 backend (auto detected)
+@@ -1307,7 +1310,8 @@
+ # ==============================================================
+ @depends(target)
+ def tree_freetype(target):
+-    if target.os == "Android":
++    # QRX OS One 64: AROS has no system FreeType for programs; the in-tree one, as on Android
++    if target.os in ("Android", "AROS"):
+         return True
+ 
+ 
 --- a/widget/moz.build
 +++ b/widget/moz.build
 @@ -53,7 +53,7 @@
@@ -4143,6 +4543,165 @@
  #else
  #  error Oops, you need platform-specific code here
  #endif
+--- /dev/null
++++ b/gfx/thebes/gfxAROSPlatform.cpp
+@@ -0,0 +1,105 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++/* QRX OS One 64 (m68k64 AROS): see gfxAROSPlatform.h. Derived from
++ * gfxAndroidPlatform without its Java, hardware-buffer and codec parts. */
++
++#include "gfxAROSPlatform.h"
++#include "mozilla/gfx/2D.h"
++#include "mozilla/CountingAllocatorBase.h"
++#include "gfxFT2FontList.h"
++#include "gfxImageSurface.h"
++#include "gfxTextRun.h"
++#include "nsIMemoryReporter.h"
++#include "nsUnicodeProperties.h"
++#include "VsyncSource.h"
++
++#include "ft2build.h"
++#include FT_FREETYPE_H
++#include FT_MODULE_H
++
++using namespace mozilla;
++using namespace mozilla::gfx;
++
++static FT_Library gPlatformFTLibrary = nullptr;
++
++class FreetypeReporter final : public nsIMemoryReporter,
++                               public CountingAllocatorBase<FreetypeReporter> {
++ private:
++  ~FreetypeReporter() {}
++
++ public:
++  NS_DECL_ISUPPORTS
++
++  static void* Malloc(FT_Memory, long size) { return CountingMalloc(size); }
++  static void Free(FT_Memory, void* p) { return CountingFree(p); }
++  static void* Realloc(FT_Memory, long cur_size, long new_size, void* p) {
++    return CountingRealloc(p, new_size);
++  }
++
++  NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
++                            nsISupports* aData, bool aAnonymize) override {
++    MOZ_COLLECT_REPORT("explicit/freetype", KIND_HEAP, UNITS_BYTES,
++                       MemoryAllocated(), "Memory used by Freetype.");
++    return NS_OK;
++  }
++};
++
++NS_IMPL_ISUPPORTS(FreetypeReporter, nsIMemoryReporter)
++
++static FT_MemoryRec_ sFreetypeMemoryRecord;
++
++gfxAROSPlatform::gfxAROSPlatform() {
++  sFreetypeMemoryRecord.user = nullptr;
++  sFreetypeMemoryRecord.alloc = FreetypeReporter::Malloc;
++  sFreetypeMemoryRecord.free = FreetypeReporter::Free;
++  sFreetypeMemoryRecord.realloc = FreetypeReporter::Realloc;
++
++  // Equivalent to FT_Init_FreeType(), with the counting allocator.
++  FT_New_Library(&sFreetypeMemoryRecord, &gPlatformFTLibrary);
++  FT_Add_Default_Modules(gPlatformFTLibrary);
++
++  Factory::SetFTLibrary(gPlatformFTLibrary);
++
++  RegisterStrongMemoryReporter(MakeAndAddRef<FreetypeReporter>());
++}
++
++gfxAROSPlatform::~gfxAROSPlatform() {
++  FT_Done_Library(gPlatformFTLibrary);
++  gPlatformFTLibrary = nullptr;
++}
++
++already_AddRefed<gfxASurface> gfxAROSPlatform::CreateOffscreenSurface(
++    const IntSize& aSize, gfxImageFormat aFormat) {
++  if (!Factory::AllowedSurfaceSize(aSize)) {
++    return nullptr;
++  }
++  RefPtr<gfxASurface> newSurface = new gfxImageSurface(aSize, aFormat);
++  return newSurface.forget();
++}
++
++void gfxAROSPlatform::GetCommonFallbackFonts(uint32_t aCh, Script aRunScript,
++                                             FontPresentation aPresentation,
++                                             nsTArray<const char*>& aFontList) {
++  // The TrueType fonts AROS installs in Fonts:TrueType, then what the
++  // browser brings in its own fonts directory.
++  aFontList.AppendElement("Bitstream Vera Sans");
++  aFontList.AppendElement("Open Sans");
++  aFontList.AppendElement("DejaVu Sans");
++}
++
++bool gfxAROSPlatform::CreatePlatformFontList() {
++  return gfxPlatformFontList::Initialize(new gfxFT2FontList);
++}
++
++void gfxAROSPlatform::ReadSystemFontList(
++    mozilla::dom::SystemFontList* aFontList) {
++  gfxFT2FontList::PlatformFontList()->ReadSystemFontList(aFontList);
++}
++
++already_AddRefed<mozilla::gfx::VsyncSource>
++gfxAROSPlatform::CreateGlobalHardwareVsyncSource() {
++  // No display vsync is reported to programs on AROS: a timer drives refresh.
++  return GetSoftwareVsyncSource();
++}
+--- /dev/null
++++ b/gfx/thebes/gfxAROSPlatform.h
+@@ -0,0 +1,48 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++/* QRX OS One 64 (m68k64 AROS): the graphics platform. Drawing is done in
++ * memory by Skia (no GPU), fonts are TrueType/OpenType files read with the
++ * in-tree FreeType through gfxFT2FontList, the font backend Android uses. */
++
++#ifndef GFX_PLATFORM_AROS_H
++#define GFX_PLATFORM_AROS_H
++
++#include "gfxPlatform.h"
++#include "nsTArray.h"
++
++class gfxAROSPlatform final : public gfxPlatform {
++ public:
++  gfxAROSPlatform();
++  virtual ~gfxAROSPlatform();
++
++  static gfxAROSPlatform* GetPlatform() {
++    return (gfxAROSPlatform*)gfxPlatform::GetPlatform();
++  }
++
++  already_AddRefed<gfxASurface> CreateOffscreenSurface(
++      const IntSize& aSize, gfxImageFormat aFormat) override;
++
++  gfxImageFormat GetOffscreenFormat() override {
++    return mozilla::gfx::SurfaceFormat::X8R8G8B8_UINT32;
++  }
++
++  bool CreatePlatformFontList() override;
++
++  void ReadSystemFontList(mozilla::dom::SystemFontList*) override;
++
++  void GetCommonFallbackFonts(uint32_t aCh, Script aRunScript,
++                              FontPresentation aPresentation,
++                              nsTArray<const char*>& aFontList) override;
++
++  already_AddRefed<mozilla::gfx::VsyncSource> CreateGlobalHardwareVsyncSource()
++      override;
++
++  static bool CheckVariationFontSupport() { return true; }
++
++ protected:
++  bool AccelerateLayersByDefault() override { return false; }
++};
++
++#endif /* GFX_PLATFORM_AROS_H */
 --- /dev/null
 +++ b/ipc/chromium/src/third_party/libevent/aros/event2/event-config.h
 @@ -0,0 +1,609 @@

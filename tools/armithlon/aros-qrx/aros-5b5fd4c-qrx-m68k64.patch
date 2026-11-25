@@ -7453,6 +7453,63 @@ index e9188a40..c7f53c7f 100644
  #endif
  
  /* Enable features based on _POSIX_C_SOURCE level */
+diff --git a/compiler/crt/posixc/include/aros/posixc/alloca.h b/compiler/crt/posixc/include/aros/posixc/alloca.h
+index 7bbba37f..e3a5ebc2 100644
+--- a/compiler/crt/posixc/include/aros/posixc/alloca.h
++++ b/compiler/crt/posixc/include/aros/posixc/alloca.h
+@@ -12,7 +12,8 @@
+  * This header is only available if explicitly requested.
+  * It is not part of ISO C or POSIX, so we check for the appropriate feature macros.
+  */
+-#if defined(_GNU_SOURCE) || defined(_BSD_SOURCE) || defined(_SVID_SOURCE)
++/* QRX: as glibc's alloca.h, without a feature macro guard (whoever includes it wants alloca) */
++#if 1
+ 
+ #include <aros/system.h>
+ #include <aros/types/size_t.h>
+diff --git a/compiler/crt/posixc/include/aros/posixc/dlfcn.h b/compiler/crt/posixc/include/aros/posixc/dlfcn.h
+new file mode 100644
+index 00000000..367dd9a6
+--- /dev/null
++++ b/compiler/crt/posixc/include/aros/posixc/dlfcn.h
+@@ -0,0 +1,37 @@
++#ifndef _POSIXC_DLFCN_H_
++#define _POSIXC_DLFCN_H_
++
++/*
++    Copyright (C) 2026, QRX OS One.
++
++    POSIX.1-2008 header file dlfcn.h. QRX OS One 64: AROS loads libraries as Exec libraries, not
++    as ELF shared objects, so there is no dynamic linker behind these functions. They are in
++    libqrxaroscompat: dlopen and dlsym return NULL with a dlerror() text, dladdr finds nothing.
++*/
++
++#include <aros/system.h>
++
++#define RTLD_LAZY     1
++#define RTLD_NOW      2
++#define RTLD_GLOBAL   0x100
++#define RTLD_LOCAL    0
++#define RTLD_DEFAULT  ((void *)0)
++
++typedef struct {
++    const char *dli_fname;
++    void       *dli_fbase;
++    const char *dli_sname;
++    void       *dli_saddr;
++} Dl_info;
++
++__BEGIN_DECLS
++
++void *dlopen(const char *file, int mode);
++void *dlsym(void *handle, const char *name);
++int   dlclose(void *handle);
++char *dlerror(void);
++int   dladdr(const void *addr, Dl_info *info);
++
++__END_DECLS
++
++#endif /* _POSIXC_DLFCN_H_ */
 diff --git a/compiler/crt/posixc/include/aros/posixc/errno.h b/compiler/crt/posixc/include/aros/posixc/errno.h
 index e6ba2c36..6b0446ea 100644
 --- a/compiler/crt/posixc/include/aros/posixc/errno.h
@@ -7698,6 +7755,23 @@ index 5aba0d51..3fcb62e5 100644
  int setrlimit(int, const struct rlimit *);
  
  __END_DECLS
+diff --git a/compiler/crt/posixc/include/aros/posixc/sys/select.h b/compiler/crt/posixc/include/aros/posixc/sys/select.h
+index 5376ef09..dd4ca11c 100644
+--- a/compiler/crt/posixc/include/aros/posixc/sys/select.h
++++ b/compiler/crt/posixc/include/aros/posixc/sys/select.h
+@@ -45,8 +45,10 @@ __BEGIN_DECLS
+ 
+ /* NOTIMPL int  pselect(int, fd_set *restrict, fd_set *restrict, fd_set *restrict,
+    const struct timespec *restrict, const sigset_t *restrict); */
+-/* NOTIMPL int  select(int, fd_set *restrict, fd_set *restrict, fd_set *restrict,
+-   struct timeval *restrict); */
++/* QRX: in libqrxaroscompat (sockets of the board's host door through WaitSelect) */
++struct timeval;
++int  select(int, fd_set *restrict, fd_set *restrict, fd_set *restrict,
++   struct timeval *restrict);
+ 
+ __END_DECLS
+ 
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/stat.h b/compiler/crt/posixc/include/aros/posixc/sys/stat.h
 index a7e99803..6f30e61c 100644
 --- a/compiler/crt/posixc/include/aros/posixc/sys/stat.h
@@ -7789,7 +7863,7 @@ index 88cddcd4..03631520 100644
  __END_DECLS
  
 diff --git a/compiler/crt/posixc/include/aros/posixc/unistd.h b/compiler/crt/posixc/include/aros/posixc/unistd.h
-index 3859d78b..5a69b46e 100644
+index 3859d78b..4d51f875 100644
 --- a/compiler/crt/posixc/include/aros/posixc/unistd.h
 +++ b/compiler/crt/posixc/include/aros/posixc/unistd.h
 @@ -431,6 +431,9 @@ char *getpass(const char *prompt);
@@ -7802,12 +7876,16 @@ index 3859d78b..5a69b46e 100644
  int link(const char *name1, const char *name2);
  int usleep(useconds_t microseconds);
  #endif
-@@ -439,6 +442,9 @@ int usleep(useconds_t microseconds);
+@@ -439,6 +442,13 @@ int usleep(useconds_t microseconds);
  /* NOTIMPL int unlinkat(int dirfd, const char *pathname, int flags); */
  #endif
  
 +/* QRX: libqrxaroscompat; AROS delivers no SIGALRM, so no alarm is ever set */
 +unsigned alarm(unsigned seconds);
++
++/* QRX: in libqrxaroscompat (QRX OS One 64) */
++int gethostname(char *name, size_t len);
++int getpagesize(void);
 +
  __END_DECLS
  
@@ -7850,6 +7928,30 @@ index 3835fe13..305a276f 100644
      BPTR fh = MKBADDR(fhp);
      if (FWrite(fh, &wc, 1, sizeof(wchar_t)) == WEOF)
      {
+diff --git a/compiler/crt/stdc/include/aros/stdc/_strings.h b/compiler/crt/stdc/include/aros/stdc/_strings.h
+index e68bd88b..dd30caf1 100644
+--- a/compiler/crt/stdc/include/aros/stdc/_strings.h
++++ b/compiler/crt/stdc/include/aros/stdc/_strings.h
+@@ -62,9 +62,16 @@ static __inline__ char *rindex(const char * s, int c)
+ /* BSD */
+ char *strcasestr(const char * str, const char * search);
+ 
+-/* Extension */
+-#define stricmp strcasecmp
+-#define strnicmp strncasecmp
++/* Extension. QRX: functions, not macros: a macro "strnicmp" also renamed struct members and
++   calls through them (SQLite's sqlite3_api->strnicmp). */
++static __inline__ int stricmp(const char *s1, const char *s2)
++{
++    return strcasecmp(s1, s2);
++}
++static __inline__ int strnicmp(const char *s1, const char *s2, size_t n)
++{
++    return strncasecmp(s1, s2, n);
++}
+ 
+ __END_DECLS
+ 
 diff --git a/compiler/crt/stdc/include/aros/stdc/fenv.h b/compiler/crt/stdc/include/aros/stdc/fenv.h
 index 8655d386..7ad54e0b 100644
 --- a/compiler/crt/stdc/include/aros/stdc/fenv.h
