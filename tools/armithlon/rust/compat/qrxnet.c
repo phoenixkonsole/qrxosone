@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -430,6 +431,35 @@ ssize_t write(int fd, const void *b, size_t n)
     if (!is_sockfd(fd)) return __write_CrtBase_wrapper(fd, b, n);
     return send(fd, b, n, 0);
 }
+/* readv/writev (declared by AROS's sys/uio.h, not implemented): one buffer at a time. A socket or
+ * pipe may take less than asked; then the call returns what went through, as a short transfer. */
+struct qiovec { void *base; size_t len; };
+ssize_t writev(int fd, const struct qiovec *iov, int cnt)
+{
+    ssize_t total = 0;
+    if (cnt < 0) { errno = EINVAL; return -1; }
+    for (int i = 0; i < cnt; i++) {
+        if (!iov[i].len) continue;
+        ssize_t r = write(fd, iov[i].base, iov[i].len);
+        if (r < 0) return total ? total : -1;
+        total += r;
+        if ((size_t)r < iov[i].len) break;
+    }
+    return total;
+}
+ssize_t readv(int fd, const struct qiovec *iov, int cnt)
+{
+    ssize_t total = 0;
+    if (cnt < 0) { errno = EINVAL; return -1; }
+    for (int i = 0; i < cnt; i++) {
+        if (!iov[i].len) continue;
+        ssize_t r = read(fd, iov[i].base, iov[i].len);
+        if (r < 0) return total ? total : -1;
+        total += r;
+        if ((size_t)r < iov[i].len) break;
+    }
+    return total;
+}
 int fcntl(int fd, int cmd, ...)
 {
     va_list ap;
@@ -635,4 +665,79 @@ int gethostname(char *name, size_t len)
     if (strlen(tmp) >= len) { errno = ENAMETOOLONG; return -1; }
     strcpy(name, tmp);
     return 0;
+}
+
+/* gethostbyname/gethostbyaddr (NSPR's PR_GetHostByName, the IPv4 path): through qrx_resolve4, one
+ * address. As in the classic interface the result lives in static storage, one per program; NSPR
+ * calls it under its own lock (_PR_HAVE_GETHOST_R is not set). */
+struct qhostent { char *h_name; char **h_aliases; int h_addrtype; int h_length; char **h_addr_list; };
+int h_errno;
+static struct { struct qhostent he; char name[256]; char *aliases[1]; uint32_t addr; char *list[2]; } hostbuf;
+struct qhostent *gethostbyname(const char *name)
+{
+    uint32_t ip;
+    if (!name || qrx_resolve4(name, &ip)) { h_errno = 1; /* HOST_NOT_FOUND */ return NULL; }
+    snprintf(hostbuf.name, sizeof hostbuf.name, "%s", name);
+    hostbuf.aliases[0] = NULL;
+    hostbuf.addr = ip;                    /* network order, as qrx_resolve4 gives it */
+    hostbuf.list[0] = (char *)&hostbuf.addr; hostbuf.list[1] = NULL;
+    hostbuf.he.h_name = hostbuf.name; hostbuf.he.h_aliases = hostbuf.aliases;
+    hostbuf.he.h_addrtype = AF_INET_; hostbuf.he.h_length = 4; hostbuf.he.h_addr_list = hostbuf.list;
+    return &hostbuf.he;
+}
+struct qhostent *gethostbyaddr(const void *addr, qsocklen_t len, int type)
+{
+    (void)addr; (void)len; (void)type;
+    h_errno = 1;                          /* no reverse lookup through the host door */
+    return NULL;
+}
+
+/* select (AROS's sys/select.h leaves it out; bsdsocket's headers make it WaitSelect): on poll()
+ * above. AROS's fd_set holds descriptors below FD_SETSIZE (64), so the door's sockets (from
+ * QRX_SOCK_FD up) cannot be selected; NSPR and Gecko poll. The signal mask of WaitSelect is not
+ * waited on. */
+#include <sys/select.h>
+int WaitSelect(int nfds, fd_set *r, fd_set *w, fd_set *e, struct timeval *tv, unsigned long *sigs)
+{
+    struct qpollfd p[FD_SETSIZE];
+    unsigned n = 0;
+    if (sigs) *sigs = 0;
+    if (nfds > FD_SETSIZE) { errno = EINVAL; return -1; }
+    for (int fd = 0; fd < nfds; fd++) {
+        short ev = 0;
+        if (r && FD_ISSET(fd, r)) ev |= POLLIN_;
+        if (w && FD_ISSET(fd, w)) ev |= POLLOUT_;
+        if (e && FD_ISSET(fd, e)) ev |= POLLPRI_;
+        if (ev) { p[n].fd = fd; p[n].events = ev; p[n].revents = 0; n++; }
+    }
+    int ms = tv ? (int)(tv->tv_sec * 1000 + tv->tv_usec / 1000) : -1;
+    int k = poll(p, n, ms);
+    if (k < 0) return -1;
+    if (r) FD_ZERO(r);
+    if (w) FD_ZERO(w);
+    if (e) FD_ZERO(e);
+    int ready = 0;
+    for (unsigned i = 0; i < n; i++) {
+        short rv = p[i].revents;
+        if (r && (rv & (POLLIN_ | POLLHUP_ | POLLERR_))) { FD_SET(p[i].fd, r); ready++; }
+        if (w && (rv & (POLLOUT_ | POLLERR_))) { FD_SET(p[i].fd, w); ready++; }
+        if (e && (rv & POLLPRI_)) { FD_SET(p[i].fd, e); ready++; }
+    }
+    return ready;
+}
+int select(int nfds, fd_set *r, fd_set *w, fd_set *e, struct timeval *tv) { return WaitSelect(nfds, r, w, e, tv, NULL); }
+
+/* getprotobyname/getprotobynumber: the two protocols there are */
+struct qprotoent { char *p_name; char **p_aliases; int p_proto; };
+static char *no_aliases[1];
+static struct qprotoent protos[] = { { "tcp", no_aliases, 6 }, { "udp", no_aliases, 17 }, { "ip", no_aliases, 0 } };
+struct qprotoent *getprotobyname(const char *name)
+{
+    for (unsigned i = 0; i < sizeof protos / sizeof protos[0]; i++) if (name && !strcmp(name, protos[i].p_name)) return &protos[i];
+    return NULL;
+}
+struct qprotoent *getprotobynumber(int proto)
+{
+    for (unsigned i = 0; i < sizeof protos / sizeof protos[0]; i++) if (protos[i].p_proto == proto) return &protos[i];
+    return NULL;
 }
