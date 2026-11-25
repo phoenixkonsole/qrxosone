@@ -5081,13 +5081,30 @@
      ]
 --- a/xpcom/base/nsDebugImpl.cpp
 +++ b/xpcom/base/nsDebugImpl.cpp
-@@ -685,6 +685,10 @@
+@@ -684,7 +684,27 @@
+   }
  }
  
++#ifdef __AROS__
++// QRX: a backtrace through libunwind (the unwind tables are there; no debugger on AROS). Map the
++// addresses with QRX_TEXTBASE (libqrxaroscompat prints where the program was loaded).
++#  include <unwind.h>
++static _Unwind_Reason_Code qrx_bt_frame(struct _Unwind_Context* aCtx, void* aN) {
++  int* n = static_cast<int*>(aN);
++  printf_stderr("  #%d %p\n", *n, (void*)_Unwind_GetIP(aCtx));
++  return ++*n < 24 ? _URC_NO_REASON : _URC_END_OF_STACK;
++}
++static void qrx_print_backtrace() {
++  int n = 0;
++  _Unwind_Backtrace(qrx_bt_frame, &n);
++}
++#endif
++
  void NS_ABORT_OOM(size_t aSize) {
 +#ifdef __AROS__
 +  // QRX: say how much was asked for (AROS has no crash reporter to annotate)
 +  printf_stderr("NS_ABORT_OOM: %zu bytes\n", aSize);
++  qrx_print_backtrace();
 +#endif
    CrashReporter::AnnotateOOMAllocationSize(aSize);
    MOZ_CRASH("OOM");
