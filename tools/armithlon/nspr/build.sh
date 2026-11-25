@@ -32,3 +32,11 @@ build() {   # lib, src dir, files
 build libnspr4 "$N/pr/src" $PR
 build libplc4 "$N/lib/libc/src" plvrsion strdup strcase strlen strcpy strcat strcmp strchr strpbrk strstr strtok base64 plerror plgetopt
 build libplds4 "$N/lib/ds" plarena plhash plvrsion
+# the headers as one directory, like Mozilla's dist/include/nspr: NSS and Gecko include them from there
+rm -rf "$O/include"; mkdir -p "$O/include/md" "$O/include/obsolete"
+cp "$N"/pr/include/*.h "$O/include/"; cp "$N"/pr/include/md/*.cfg "$N"/pr/include/md/*.h "$O/include/md/"
+cp "$N"/pr/include/obsolete/*.h "$O/include/obsolete/"
+mkdir -p "$O/include/private"; cp "$N"/pr/include/private/pprio.h "$N"/pr/include/private/pprthred.h "$N"/pr/include/private/prpriv.h "$O/include/private/"
+cp "$N"/lib/ds/*.h "$N"/lib/libc/include/*.h "$O/include/"
+cp "$T/config/external/nspr/prcpucfg.h" "$O/include/prcpucfg.h"
+echo "$O/include: NSPR headers"

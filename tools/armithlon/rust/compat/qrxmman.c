@@ -161,3 +161,23 @@ __attribute__((constructor)) void qrx_report_textbase(void)
         write(2, b, (size_t)n);
     }
 }
+
+/* getpagesize (BSD; SQLite asks for it): the page of sysconf above */
+int getpagesize(void) { return 4096; }
+/* fchown: AROS has no owners (as lchown in qrxaroscompat.c) */
+int fchown(int fd, uid_t o, gid_t g) { (void)fd; (void)o; (void)g; errno = ENOSYS; return -1; }
+
+/* syslog: AROS has no system log; the message goes to the error output with its priority */
+#include <stdarg.h>
+void syslog(int priority, const char *format, ...)
+{
+    char b[512];
+    va_list ap;
+    va_start(ap, format);
+    int n = snprintf(b, sizeof b, "syslog <%d>: ", priority);
+    if (n > 0 && n < (int)sizeof b) vsnprintf(b + n, sizeof b - (size_t)n, format, ap);
+    va_end(ap);
+    size_t l = strlen(b);
+    if (l < sizeof b - 1) { b[l++] = '\n'; b[l] = 0; }
+    write(2, b, l);
+}

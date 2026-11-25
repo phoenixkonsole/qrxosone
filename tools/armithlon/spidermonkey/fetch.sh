@@ -22,7 +22,8 @@ xz -dc dl/$V.esr.tar.xz | tar -x --wildcards \
   "$V/testing/performance" "$V/testing/test" "$V/testing/web-platform/*.ini" \
   "$V/toolkit/crashreporter/tools/symbolstore.py" "$V/toolkit/mozapps/installer/package-name.mk" \
   "$V/toolkit/components/glean" "$V/toolkit/moz.configure" "$V/xpcom/ds/tools/perfecthash.py" \
-  "$V/xpcom/geckoprocesstypes_generator" "$V/modules/libpref/init/StaticPrefList.yaml" "$V/js"
+  "$V/xpcom/geckoprocesstypes_generator" "$V/modules/libpref/init/StaticPrefList.yaml" "$V/js" \
+  "$V/security/nss" "$V/security/moz.build" "$V/security/generate_mapfile.py"
 patch -p1 -d $V < "$HERE/spidermonkey-153.8.0-aros.patch"
 # the patch changes vendored crates (libc, getrandom: AROS); cargo checks their file checksums
 python3 -I "$HERE/fix-checksums.py" $V/third_party/rust/libc $V/third_party/rust/getrandom
