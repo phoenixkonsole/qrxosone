@@ -161,7 +161,7 @@ ssize_t pwritev(int fd, const struct iovec *iov, int cnt, off_t off)
     }
     return total;
 }
-int waitid(int idtype, id_t id, siginfo_t *info, int options)
+int waitid(idtype_t idtype, id_t id, siginfo_t *info, int options)
 {
     if (idtype != QP_PID) { errno = EINVAL; return -1; }
     int status = 0;
@@ -299,4 +299,12 @@ int fchownat(int dirfd, const char *path, uid_t owner, gid_t group, int flags)
 {
     if (!at_ok(dirfd, path)) return -1;
     return (flags & QAT_SYMLINK_NOFOLLOW) ? lchown(path, owner, group) : chown(path, owner, group);
+}
+
+/* sigaltstack: AROS delivers signals on the task's own stack; there is no alternate stack */
+int sigaltstack(const stack_t *ss, stack_t *old)
+{
+    if (old) { memset(old, 0, sizeof *old); old->ss_flags = SS_DISABLE; }
+    if (ss) { errno = ENOSYS; return -1; }
+    return 0;
 }

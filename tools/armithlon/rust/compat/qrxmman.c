@@ -20,6 +20,8 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <proto/exec.h>
+#include <aros/libcall.h>
+#include <exec/memory.h>
 #include <exec/semaphores.h>
 
 struct region {
@@ -218,6 +220,14 @@ long sysconf(int name)
     case _SC_PAGE_SIZE:
 #endif
         return 4096;
+    case _SC_NPROCESSORS_CONF:
+    case _SC_NPROCESSORS_ONLN: {     /* the EC64 cores AROS runs on (kernel.resource) */
+        APTR KernelBase = OpenResource((CONST_STRPTR)"kernel.resource");
+        unsigned int n = KernelBase ? AROS_LC0(unsigned int, KrnGetCPUCount, APTR, KernelBase, 40, Kernel) : 1;
+        return n ? (long)n : 1;
+    }
+    case _SC_PHYS_PAGES:
+        return (long)(AvailMem(MEMF_TOTAL) / 4096);
     default:
         return __sysconf_CrtBase_wrapper(name);
     }
@@ -244,6 +254,9 @@ int fchown(int fd, uid_t o, gid_t g) { (void)fd; (void)o; (void)g; errno = ENOSY
 
 /* syslog: AROS has no system log; the message goes to the error output with its priority */
 #include <stdarg.h>
+void openlog(const char *ident, int option, int facility) { (void)ident; (void)option; (void)facility; }
+void closelog(void) {}
+int setlogmask(int mask) { (void)mask; return 0xff; }
 void syslog(int priority, const char *format, ...)
 {
     char b[512];

@@ -1068,3 +1068,55 @@ int socketpair(int d, int t, int p, int *sv)
     sv[0] = c; sv[1] = s2;
     return 0;
 }
+
+/* inet_addr/inet_ntoa (IPv4 only, as POSIX): through inet_pton/inet_ntop above */
+uint32_t inet_addr(const char *cp)
+{
+    uint32_t a;
+    return inet_pton(AF_INET_, cp, &a) == 1 ? a : 0xffffffffu;   /* INADDR_NONE */
+}
+struct qin_addr_ntoa { uint32_t s_addr; };
+char *inet_ntoa(struct qin_addr_ntoa in)
+{
+    static char b[16];
+    inet_ntop(AF_INET_, &in, b, sizeof b);
+    return b;
+}
+
+/* getservbyname/getservbyport: AROS has no services database; the services Gecko and libevent ask
+ * for by name, in network byte order */
+struct qservent { char *s_name; char **s_aliases; int s_port; char *s_proto; };
+static char *serv_no_aliases[1];
+static struct { const char *name; int port; } servs[] = {
+    { "http", 80 }, { "https", 443 }, { "ftp", 21 }, { "ssh", 22 }, { "domain", 53 }, { "socks", 1080 },
+};
+static struct qservent servbuf;
+static struct qservent *serv_entry(unsigned i, const char *proto)
+{
+    servbuf.s_name = (char *)servs[i].name; servbuf.s_aliases = serv_no_aliases;
+    servbuf.s_port = (int)(uint16_t)((servs[i].port >> 8) | ((servs[i].port & 0xff) << 8));
+    servbuf.s_proto = (char *)(proto ? proto : "tcp");
+    return &servbuf;
+}
+struct qservent *getservbyname(const char *name, const char *proto)
+{
+    for (unsigned i = 0; name && i < sizeof servs / sizeof servs[0]; i++)
+        if (!strcmp(name, servs[i].name)) return serv_entry(i, proto);
+    return NULL;
+}
+struct qservent *getservbyport(int port, const char *proto)
+{
+    int p = (int)(uint16_t)(((unsigned)port >> 8 & 0xff) | (((unsigned)port & 0xff) << 8));
+    for (unsigned i = 0; i < sizeof servs / sizeof servs[0]; i++)
+        if (servs[i].port == p) return serv_entry(i, proto);
+    return NULL;
+}
+
+/* if_nametoindex/if_indextoname: the host door has one interface name for programs, "lo" */
+unsigned int if_nametoindex(const char *name) { return name && !strcmp(name, "lo") ? 1 : 0; }
+char *if_indextoname(unsigned int index, char *buf)
+{
+    if (index != 1) { errno = ENXIO; return NULL; }
+    strcpy(buf, "lo");
+    return buf;
+}

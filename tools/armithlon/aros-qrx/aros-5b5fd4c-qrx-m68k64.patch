@@ -7469,10 +7469,10 @@ index 7bbba37f..e3a5ebc2 100644
  #include <aros/types/size_t.h>
 diff --git a/compiler/crt/posixc/include/aros/posixc/dlfcn.h b/compiler/crt/posixc/include/aros/posixc/dlfcn.h
 new file mode 100644
-index 00000000..367dd9a6
+index 00000000..9dd28bd5
 --- /dev/null
 +++ b/compiler/crt/posixc/include/aros/posixc/dlfcn.h
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,38 @@
 +#ifndef _POSIXC_DLFCN_H_
 +#define _POSIXC_DLFCN_H_
 +
@@ -7490,6 +7490,7 @@ index 00000000..367dd9a6
 +#define RTLD_NOW      2
 +#define RTLD_GLOBAL   0x100
 +#define RTLD_LOCAL    0
++#define RTLD_NOLOAD   4
 +#define RTLD_DEFAULT  ((void *)0)
 +
 +typedef struct {
@@ -7523,10 +7524,10 @@ index e6ba2c36..6b0446ea 100644
  #define	ENOLCK		77		/* No locks available */
  #define	EFTYPE		79		/* Inappropriate file type or format */
 diff --git a/compiler/crt/posixc/include/aros/posixc/fcntl.h b/compiler/crt/posixc/include/aros/posixc/fcntl.h
-index 69124257..c779fcbf 100644
+index 69124257..2b01e254 100644
 --- a/compiler/crt/posixc/include/aros/posixc/fcntl.h
 +++ b/compiler/crt/posixc/include/aros/posixc/fcntl.h
-@@ -88,14 +88,17 @@
+@@ -88,14 +88,18 @@
  #define O_WRITE         O_WRONLY
  #endif
  
@@ -7535,6 +7536,9 @@ index 69124257..c779fcbf 100644
 -/* NOTIMPL #define AT_SYMLINK_NOFOLLOW */
 -/* NOTIMPL #define AT_SYMLINK_FOLLOW */
 -/* NOTIMPL #define AT_REMOVEDIR */
+-/* NOTIMPL #define O_CLOEXEC */
+-/* NOTIMPL #define O_DIRECTORY */
+-/* NOTIMPL #define O_NOFOLLOW */
 +/* QRX: the *at() functions of libqrxaroscompat (QRX OS One 64) accept AT_FDCWD and absolute
 +   paths. O_DIRECTORY and O_NOFOLLOW are accepted by open() and ignored (AROS has no symlink
 +   following to suppress on most handlers). */
@@ -7543,14 +7547,22 @@ index 69124257..c779fcbf 100644
 +#define AT_SYMLINK_NOFOLLOW     0x200
 +#define AT_SYMLINK_FOLLOW       0x400
 +#define AT_REMOVEDIR            0x800
- /* NOTIMPL #define O_CLOEXEC */
--/* NOTIMPL #define O_DIRECTORY */
--/* NOTIMPL #define O_NOFOLLOW */
++/* QRX: AROS has no exec(): close-on-exec has nothing to do (0, as in the Rust libc module) */
++#define O_CLOEXEC               0
 +#define O_DIRECTORY             0x20000
 +#define O_NOFOLLOW              0x40000
  
  /* Advice for posix_fadvise */
  #define POSIX_FADV_DONTNEED     1
+@@ -140,7 +144,7 @@ int creat(const char * filename, int mode);
+ int fcntl(int fd, int cmd, ...);
+ int open(const char *filename, int flags, ...);
+ 
+-/* NOTIMPL int openat(int, const char *, int, ...); */
++int openat(int, const char *, int, ...);   /* QRX: libqrxaroscompat */
+ /* NOTIMPL int posix_fadvise(int fd, off_t offset, size_t len, int advice); */
+ /* NOTIMPL int posix_fallocate(int fd, off_t offset, size_t len); */
+ 
 diff --git a/compiler/crt/posixc/include/aros/posixc/poll.h b/compiler/crt/posixc/include/aros/posixc/poll.h
 new file mode 100644
 index 00000000..cd4e4d9f
@@ -7596,7 +7608,7 @@ index 00000000..cd4e4d9f
 +
 +#endif /* _POSIXC_POLL_H_ */
 diff --git a/compiler/crt/posixc/include/aros/posixc/signal.h b/compiler/crt/posixc/include/aros/posixc/signal.h
-index af58738e..47542f59 100644
+index af58738e..a03393c1 100644
 --- a/compiler/crt/posixc/include/aros/posixc/signal.h
 +++ b/compiler/crt/posixc/include/aros/posixc/signal.h
 @@ -112,7 +112,7 @@
@@ -7608,7 +7620,7 @@ index af58738e..47542f59 100644
  /*  BSD defines SIGIO and SIGINFO, we should probably include these */
  // NOTIMPL #define SIGIO		30	/* IO event */
  // NOTIMPL #define SIGINFO		31	/* terminal info request */
-@@ -126,7 +126,7 @@ int	kill(pid_t, int);
+@@ -126,10 +126,10 @@ int	kill(pid_t, int);
  /* NOTIMPL void   psiginfo(const siginfo_t *, const char *); */
  /* NOTIMPL void   psignal(int, const char *); */
  /* NOTIMPL int    pthread_kill(pthread_t, int); */
@@ -7616,7 +7628,11 @@ index af58738e..47542f59 100644
 +int    pthread_sigmask(int, const sigset_t *restrict, sigset_t *restrict);   /* QRX: libqrxaroscompat */
  int	sigaction(int, const struct sigaction *, struct sigaction *);
  int	sigaddset(sigset_t *, int);
- /* NOTIMPL int	sigaltstack(const stack_t *, stack_t *); */
+-/* NOTIMPL int	sigaltstack(const stack_t *, stack_t *); */
++int	sigaltstack(const stack_t *, stack_t *);   /* QRX: libqrxaroscompat, fails with ENOSYS */
+ int	sigdelset(sigset_t *, int);
+ int	sigemptyset(sigset_t *);
+ int	sigfillset(sigset_t *);
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/mman.h b/compiler/crt/posixc/include/aros/posixc/sys/mman.h
 new file mode 100644
 index 00000000..c84a735e
@@ -7683,7 +7699,7 @@ index 00000000..c84a735e
 +
 +#endif /* _POSIXC_SYS_MMAN_H_ */
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/resource.h b/compiler/crt/posixc/include/aros/posixc/sys/resource.h
-index 5aba0d51..3fcb62e5 100644
+index 5aba0d51..6935373a 100644
 --- a/compiler/crt/posixc/include/aros/posixc/sys/resource.h
 +++ b/compiler/crt/posixc/include/aros/posixc/sys/resource.h
 @@ -13,11 +13,10 @@
@@ -7744,9 +7760,12 @@ index 5aba0d51..3fcb62e5 100644
  
  #define RLIMIT_CORE     0	/* Limit on size of core file */
  #define RLIMIT_CPU      1	/* Limit on CPU time per process */
-@@ -59,8 +72,8 @@ __BEGIN_DECLS
+@@ -57,10 +70,10 @@ struct rusage
  
- /* NOTIMPL int getpriority(int, id_t); */
+ __BEGIN_DECLS
+ 
+-/* NOTIMPL int getpriority(int, id_t); */
++int getpriority(int, id_t);
  int getrlimit(int, struct rlimit *);
 -/* NOTIMPL getrusage(int, struct rusage *); */
 -/* NOTIMPL setpriority(int, id_t, int); */
@@ -7773,19 +7792,45 @@ index 5376ef09..dd4ca11c 100644
  __END_DECLS
  
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/stat.h b/compiler/crt/posixc/include/aros/posixc/sys/stat.h
-index a7e99803..6f30e61c 100644
+index a7e99803..6e7bce30 100644
 --- a/compiler/crt/posixc/include/aros/posixc/sys/stat.h
 +++ b/compiler/crt/posixc/include/aros/posixc/sys/stat.h
-@@ -152,7 +152,8 @@ static __inline__  int fstat(int fd, struct stat *sb)
+@@ -140,7 +140,7 @@ __BEGIN_DECLS
+ 
+ int chmod(const char *path, mode_t mode);
+ int fchmod(int fildes, mode_t mode);
+-/* NOTIMPL int fchmodat(int, const char *, mode_t, int); */
++int fchmodat(int, const char *, mode_t, int);   /* QRX: libqrxaroscompat */
+ int fstat64(int fd, struct stat64 *sb);
+ #if defined(__USE_FILE_OFFSET64)
+ static __inline__  int fstat(int fd, struct stat *sb)
+@@ -151,8 +151,9 @@ static __inline__  int fstat(int fd, struct stat *sb)
+ #else
  int fstat(int fd, struct stat *sb);
  #endif
- /* NOTIMPL int fstatat(int, const char *restrict, struct stat *restrict, int); */
+-/* NOTIMPL int fstatat(int, const char *restrict, struct stat *restrict, int); */
 -/* NOTIMPL int futimens(int, const struct timespec [2]); */
++int fstatat(int, const char *restrict, struct stat *restrict, int);   /* QRX: libqrxaroscompat */
 +/* QRX: futimens, utimensat and mknodat are in libqrxaroscompat (QRX OS One 64) */
 +int futimens(int, const struct timespec [2]);
  int lstat64(const char * restrict path, struct stat64 * restrict sb);
  #if defined(__USE_FILE_OFFSET64)
  static __inline__  int lstat(const char * restrict path, struct stat * restrict sb)
+@@ -164,11 +165,11 @@ static __inline__  int lstat(const char * restrict path, struct stat * restrict
+ int lstat(const char * restrict path, struct stat * restrict sb);
+ #endif
+ int mkdir(const char *path, mode_t mode);
+-/* NOTIMPL int mkdirat(int, const char *, mode_t); */
+-/* NOTIMPL int mkfifo(const char *path, mode_t mode); */
++int mkdirat(int, const char *, mode_t);   /* QRX: libqrxaroscompat */
++int mkfifo(const char *path, mode_t mode);   /* QRX: libqrxaroscompat, fails with ENOSYS */
+ /* NOTIMPL int mkfifoat(int, const char *, mode_t); */
+ int mknod(const char *path, mode_t mode, dev_t dev);
+-/* NOTIMPL int mknodat(int, const char *, mode_t, dev_t); */
++int mknodat(int, const char *, mode_t, dev_t);   /* QRX: libqrxaroscompat, ENOSYS */
+ int stat64(const char * restrict path, struct stat64 * restrict sb);
+ #if defined(__USE_FILE_OFFSET64)
+ static __inline__  int stat(const char * restrict path, struct stat * restrict sb)
 @@ -180,7 +181,9 @@ static __inline__  int stat(const char * restrict path, struct stat * restrict s
  int stat(const char * restrict path, struct stat * restrict sb);
  #endif
@@ -7813,7 +7858,7 @@ index 2b1e1a53..1d26d01f 100644
  
  int statvfs(const char *path, struct statvfs *buf);
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/wait.h b/compiler/crt/posixc/include/aros/posixc/sys/wait.h
-index 76e58e6c..c2e7452e 100644
+index 76e58e6c..17b9b22e 100644
 --- a/compiler/crt/posixc/include/aros/posixc/sys/wait.h
 +++ b/compiler/crt/posixc/include/aros/posixc/sys/wait.h
 @@ -15,7 +15,7 @@
@@ -7846,6 +7891,15 @@ index 76e58e6c..c2e7452e 100644
  
  #include <aros/types/id_t.h>
  #include <aros/types/pid_t.h>
+@@ -40,7 +42,7 @@ typedef enum {
+ __BEGIN_DECLS
+ 
+ pid_t wait(int *status);
+-/* NOTIMPL int    waitid(idtype_t, id_t, siginfo_t *, int); */
++int    waitid(idtype_t, id_t, siginfo_t *, int);
+ pid_t waitpid(pid_t pid, int *status, int options);
+ 
+ __END_DECLS
 diff --git a/compiler/crt/posixc/include/aros/posixc/time.h b/compiler/crt/posixc/include/aros/posixc/time.h
 index 88cddcd4..03631520 100644
 --- a/compiler/crt/posixc/include/aros/posixc/time.h
@@ -7863,10 +7917,10 @@ index 88cddcd4..03631520 100644
  __END_DECLS
  
 diff --git a/compiler/crt/posixc/include/aros/posixc/unistd.h b/compiler/crt/posixc/include/aros/posixc/unistd.h
-index 3859d78b..4d51f875 100644
+index 3859d78b..edb1cd7b 100644
 --- a/compiler/crt/posixc/include/aros/posixc/unistd.h
 +++ b/compiler/crt/posixc/include/aros/posixc/unistd.h
-@@ -431,6 +431,9 @@ char *getpass(const char *prompt);
+@@ -431,14 +431,38 @@ char *getpass(const char *prompt);
  pid_t getpgid(pid_t);
  pid_t getpgrp(void);
  pid_t vfork(void);
@@ -7876,8 +7930,10 @@ index 3859d78b..4d51f875 100644
  int link(const char *name1, const char *name2);
  int usleep(useconds_t microseconds);
  #endif
-@@ -439,6 +442,13 @@ int usleep(useconds_t microseconds);
- /* NOTIMPL int unlinkat(int dirfd, const char *pathname, int flags); */
+ 
+ #if defined(_GNU_SOURCE) || (_POSIX_C_SOURCE >= 200809L)
+-/* NOTIMPL int unlinkat(int dirfd, const char *pathname, int flags); */
++int unlinkat(int dirfd, const char *pathname, int flags);   /* QRX: libqrxaroscompat */
  #endif
  
 +/* QRX: libqrxaroscompat; AROS delivers no SIGALRM, so no alarm is ever set */
@@ -7886,6 +7942,20 @@ index 3859d78b..4d51f875 100644
 +/* QRX: in libqrxaroscompat (QRX OS One 64) */
 +int gethostname(char *name, size_t len);
 +int getpagesize(void);
++int pipe2(int fds[2], int flags);
++int faccessat(int, const char *, int, int);
++int fchownat(int, const char *, uid_t, gid_t, int);
++int linkat(int, const char *, int, const char *, int);
++ssize_t readlinkat(int, const char *, char *, size_t);
++int symlinkat(const char *, int, const char *);
++int dup3(int, int, int);
++int fdatasync(int);
++ssize_t pread(int fd, void *buf, size_t n, off_t off);
++ssize_t pwrite(int fd, const void *buf, size_t n, off_t off);
++/* QRX: sysconf names AROS's enum lacks, answered by libqrxaroscompat */
++#define _SC_NPROCESSORS_CONF 1000
++#define _SC_NPROCESSORS_ONLN 1001
++#define _SC_PHYS_PAGES       1002
 +
  __END_DECLS
  
@@ -9368,10 +9438,10 @@ index cf5700f0..3780afd1 100644
  #MM includes-copy
  
 diff --git a/workbench/network/common/include/arpa/inet.h b/workbench/network/common/include/arpa/inet.h
-index cbd735c3..7d92db1e 100644
+index cbd735c3..add9110c 100644
 --- a/workbench/network/common/include/arpa/inet.h
 +++ b/workbench/network/common/include/arpa/inet.h
-@@ -70,6 +70,14 @@
+@@ -70,6 +70,16 @@
  #define	INET_ADDRSTRLEN		16
  #define	INET6_ADDRSTRLEN	46
  
@@ -9380,14 +9450,35 @@ index cbd735c3..7d92db1e 100644
 +__BEGIN_DECLS
 +const char	*inet_ntop(int, const void * __restrict, char * __restrict, socklen_t);
 +int		 inet_pton(int, const char * __restrict, void * __restrict);
++in_addr_t	 inet_addr(const char *);
++char		*inet_ntoa(struct in_addr);
 +__END_DECLS
 +#endif
 +
  #if !defined(__AROS__)
  /* XXX all new diversions!! argh!! */
  #if __BSD_VISIBLE
+diff --git a/workbench/network/common/include/net/if.h b/workbench/network/common/include/net/if.h
+index 0acb732f..0f2812f5 100644
+--- a/workbench/network/common/include/net/if.h
++++ b/workbench/network/common/include/net/if.h
+@@ -511,6 +511,14 @@ struct if_nameindex {
+ 	char 			*if_name;
+ };
+ 
++#if defined(BSDSOCKET_NOLIBDEFINES)
++/* QRX: libqrxaroscompat; the board's host door has one interface name, "lo" (index 1) */
++__BEGIN_DECLS
++unsigned int	 if_nametoindex(const char *);
++char		*if_indextoname(unsigned int, char *);
++__END_DECLS
++#endif
++
+ #ifndef NET_IF_ARP_H
+ #include <net/if_arp.h>
+ #endif
 diff --git a/workbench/network/common/include/netdb.h b/workbench/network/common/include/netdb.h
-index cdc9ab55..bf82e4cf 100644
+index cdc9ab55..4ea11961 100644
 --- a/workbench/network/common/include/netdb.h
 +++ b/workbench/network/common/include/netdb.h
 @@ -90,7 +90,10 @@ struct	protoent {
@@ -9410,7 +9501,7 @@ index cdc9ab55..bf82e4cf 100644
  
  			/* following for getnameinfo() */
  #define	NI_MAXHOST	  1025	/* max hostname returned */
-@@ -161,5 +165,20 @@ struct addrinfo {
+@@ -161,5 +165,22 @@ struct addrinfo {
  #define NETDB_IFF_MODIFYOLD  2
  #define NETDB_IFF_ADDNEW     4
  
@@ -9426,6 +9517,8 @@ index cdc9ab55..bf82e4cf 100644
 +void		 freeaddrinfo(struct addrinfo *);
 +const char	*gai_strerror(int);
 +int		 getnameinfo(const struct sockaddr *, socklen_t, char *, socklen_t, char *, socklen_t, int);
++struct servent	*getservbyname(const char *, const char *);
++struct servent	*getservbyport(int, const char *);
 +__END_DECLS
 +#endif
 +
@@ -9525,3 +9618,15 @@ index 1ff6d2ab..3efaecda 100644
 +#endif
 +
  #endif /* !_SYS_SOCKET_H_ */
+diff --git a/workbench/network/common/include/sys/syslog.h b/workbench/network/common/include/sys/syslog.h
+index b083557d..5dff85f2 100644
+--- a/workbench/network/common/include/sys/syslog.h
++++ b/workbench/network/common/include/sys/syslog.h
+@@ -191,6 +191,7 @@ CODE facilitynames[] = {
+ #define	LOG_PERROR	0x20	/* log to stderr as well */
+ 
+ #ifndef KERNEL
++void syslog(int, const char *, ...);   /* QRX: libqrxaroscompat (to the error output) */
+ void openlog(const char *, int, int);
+ void closelog(void);
+ int setlogmask(int);
