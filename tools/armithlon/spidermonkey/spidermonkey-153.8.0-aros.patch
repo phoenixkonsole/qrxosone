@@ -1,6 +1,6 @@
 --- a/browser/app/moz.build
 +++ b/browser/app/moz.build
-@@ -33,8 +33,12 @@
+@@ -33,8 +33,15 @@
      DIRS += ["macbuild/Contents"]
  
  browser_linkage = "standalone"
@@ -11,6 +11,9 @@
 +if CONFIG["OS_TARGET"] == "AROS":
 +    # QRX: AROS's Unix path mode (nixmain.o): "/T/x" is T:x, as Gecko's paths expect
 +    LDFLAGS += ["-nix"]
++    # AROS executables are relocatable objects; dissolve the C++ COMDAT groups so that the final
++    # link merges them into .text/.rodata/.data (else ~190000 sections for AROS's ELF loader)
++    LDFLAGS += ["-Wl,--force-group-allocation"]
  
  if CONFIG["MOZ_NO_PIE_COMPAT"]:
      GeckoProgram(CONFIG["MOZ_APP_NAME"] + "-bin", linkage=browser_linkage)
