@@ -820,6 +820,17 @@
      int result;
  
      while (fileBytes < maxLen) {
+--- a/third_party/rust/errno/src/unix.rs
++++ b/third_party/rust/errno/src/unix.rs
+@@ -88,6 +88,8 @@
+         link_name = "___errno"
+     )]
+     #[cfg_attr(target_os = "haiku", link_name = "_errnop")]
++    // QRX: AROS's errno.h: #define errno (*___geterrnoptr())
++    #[cfg_attr(target_os = "aros", link_name = "___geterrnoptr")]
+     #[cfg_attr(
+         any(
+             target_os = "linux",
 --- a/third_party/rust/getrandom/Cargo.toml
 +++ b/third_party/rust/getrandom/Cargo.toml
 @@ -117,7 +117,7 @@
@@ -909,6 +920,52 @@
      } else if #[cfg(target_os = "nuttx")] {
          mod nuttx;
          pub use self::nuttx::*;
+--- a/third_party/rust/libloading/src/os/unix/consts.rs
++++ b/third_party/rust/libloading/src/os/unix/consts.rs
+@@ -86,6 +86,7 @@
+ 
+             target_os = "fuchsia",
+             target_os = "redox",
++            target_os = "aros",
+             target_os = "nto",
+             target_os = "hurd",
+         ))] {
+@@ -125,6 +126,7 @@
+ 
+             target_os = "fuchsia",
+             target_os = "redox",
++            target_os = "aros",
+             target_os = "nto",
+             target_os = "hurd",
+         ))] {
+@@ -177,6 +179,7 @@
+ 
+             target_os = "fuchsia",
+             target_os = "redox",
++            target_os = "aros",
+             target_os = "nto",
+             target_os = "hurd",
+         ))] {
+@@ -223,6 +226,7 @@
+ 
+             target_os = "fuchsia",
+             target_os = "redox",
++            target_os = "aros",
+             target_os = "hurd",
+         ))] {
+             pub(super) const RTLD_LOCAL: c_int = 0;
+--- a/third_party/rust/mtu/src/lib.rs
++++ b/third_party/rust/mtu/src/lib.rs
+@@ -114,7 +114,8 @@
+     target_os = "ios",
+     target_os = "tvos",
+     target_os = "visionos",
+-    target_os = "redox"
++    target_os = "redox",
++    target_os = "aros"
+ ))]
+ pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
+     return Err(default_err());
 --- a/third_party/rust/rustix/src/backend/libc/event/syscalls.rs
 +++ b/third_party/rust/rustix/src/backend/libc/event/syscalls.rs
 @@ -29,7 +29,7 @@
@@ -1025,7 +1082,39 @@
      target_os = "horizon",
      target_os = "redox",
      target_os = "solaris",
-@@ -254,7 +254,7 @@
+@@ -161,6 +161,7 @@
+     #[cfg(any(
+         apple,
+         freebsdlike,
++        target_os = "aros",
+         all(target_os = "android", target_pointer_width = "32")
+     ))]
+     let mode: c::c_uint = mode.bits().into();
+@@ -169,6 +170,7 @@
+     #[cfg(not(any(
+         apple,
+         freebsdlike,
++        target_os = "aros",
+         all(target_os = "android", target_pointer_width = "32")
+     )))]
+     let mode: c::mode_t = mode.bits() as _;
+@@ -229,6 +231,7 @@
+     #[cfg(any(
+         apple,
+         freebsdlike,
++        target_os = "aros",
+         all(target_os = "android", target_pointer_width = "32")
+     ))]
+     let mode: c::c_uint = mode.bits().into();
+@@ -237,6 +240,7 @@
+     #[cfg(not(any(
+         apple,
+         freebsdlike,
++        target_os = "aros",
+         all(target_os = "android", target_pointer_width = "32")
+     )))]
+     let mode: c::mode_t = mode.bits() as _;
+@@ -254,7 +258,7 @@
  #[cfg(not(any(
      solarish,
      target_os = "espidf",
@@ -1034,7 +1123,7 @@
      target_os = "horizon",
      target_os = "netbsd",
      target_os = "nto",
-@@ -1278,7 +1278,7 @@
+@@ -1278,7 +1282,7 @@
      netbsdlike,
      target_os = "dragonfly",
      target_os = "espidf",
@@ -1043,7 +1132,7 @@
      target_os = "horizon",
      target_os = "redox",
      target_os = "solaris",
-@@ -1593,7 +1593,7 @@
+@@ -1593,7 +1597,7 @@
  #[cfg(not(any(
      solarish,
      target_os = "espidf",
@@ -1052,7 +1141,7 @@
      target_os = "horizon",
      target_os = "netbsd",
      target_os = "nto",
-@@ -1823,7 +1823,7 @@
+@@ -1823,7 +1827,7 @@
      apple,
      target_os = "dragonfly",
      target_os = "espidf",
@@ -1944,7 +2033,7 @@
                  target_os = "horizon",
                  target_os = "nto",
                  target_os = "hurd",
-@@ -120,12 +120,12 @@
+@@ -120,13 +120,15 @@
              #[cfg(not(any(
                  bsd,
                  target_os = "aix",
@@ -1954,12 +2043,14 @@
                  target_os = "nto"
              )))]
              sun_path: [0; 108],
--            #[cfg(target_os = "haiku")]
-+            #[cfg(any(target_os = "haiku", target_os = "aros"))]
+             #[cfg(target_os = "haiku")]
              sun_path: [0; 126],
++            #[cfg(target_os = "aros")]
++            sun_path: [0; 104],
              #[cfg(target_os = "aix")]
              sun_path: [0; 1023],
-@@ -206,11 +206,11 @@
+         }
+@@ -206,11 +208,11 @@
  
      #[inline]
      pub(crate) fn addr_len(&self) -> SocketAddrLen {
@@ -1973,7 +2064,7 @@
          {
              bitcast!(c::socklen_t::from(self.unix.sun_len))
          }
-@@ -343,7 +343,7 @@
+@@ -343,7 +345,7 @@
          #[cfg(any(
              bsd,
              target_os = "aix",
@@ -1982,7 +2073,7 @@
              target_os = "horizon",
              target_os = "hurd",
              target_os = "nto",
-@@ -355,7 +355,7 @@
+@@ -355,7 +357,7 @@
              bsd,
              target_os = "aix",
              target_os = "espidf",
@@ -1991,7 +2082,7 @@
              target_os = "hurd",
              target_os = "nto",
              target_os = "vita"
-@@ -365,7 +365,7 @@
+@@ -365,7 +367,7 @@
              bsd,
              target_os = "aix",
              target_os = "espidf",
@@ -2000,7 +2091,7 @@
              target_os = "hurd",
              target_os = "nto",
              target_os = "vita"
-@@ -376,12 +376,12 @@
+@@ -376,13 +378,15 @@
          #[cfg(not(any(
              bsd,
              target_os = "aix",
@@ -2010,11 +2101,13 @@
              target_os = "nto"
          )))]
          sun_path: [0; 108],
--        #[cfg(target_os = "haiku")]
-+        #[cfg(any(target_os = "haiku", target_os = "aros"))]
+         #[cfg(target_os = "haiku")]
          sun_path: [0; 126],
++        #[cfg(target_os = "aros")]
++        sun_path: [0; 104],
          #[cfg(target_os = "aix")]
          sun_path: [0; 1023],
+     };
 --- a/third_party/rust/rustix/src/backend/libc/net/ext.rs
 +++ b/third_party/rust/rustix/src/backend/libc/net/ext.rs
 @@ -82,7 +82,7 @@
@@ -2102,7 +2195,7 @@
              target_os = "hurd",
              target_os = "nto",
              target_os = "vita"
-@@ -81,17 +81,17 @@
+@@ -81,7 +81,7 @@
              bsd,
              target_os = "aix",
              target_os = "espidf",
@@ -2111,18 +2204,6 @@
              target_os = "hurd",
              target_os = "nto",
              target_os = "vita"
-         )))]
-         sa_family: 0_u16,
--        #[cfg(not(any(target_os = "haiku", target_os = "horizon")))]
-+        #[cfg(not(any(target_os = "haiku", target_os = "aros", target_os = "horizon")))]
-         sa_data: [0; 14],
-         #[cfg(target_os = "horizon")]
-         sa_data: [0; 26],
--        #[cfg(target_os = "haiku")]
-+        #[cfg(any(target_os = "haiku", target_os = "aros"))]
-         sa_data: [0; 30],
-     };
- 
 --- a/third_party/rust/rustix/src/backend/libc/net/send_recv.rs
 +++ b/third_party/rust/rustix/src/backend/libc/net/send_recv.rs
 @@ -19,7 +19,7 @@
@@ -2364,18 +2445,6 @@
              target_os = "hurd",
              target_os = "nto",
              target_os = "vita",
-@@ -20,9 +20,9 @@
-         sin_family: c::AF_INET as _,
-         sin_port: u16::to_be(v4.port()),
-         sin_addr: in_addr_new(u32::from_ne_bytes(v4.ip().octets())),
--        #[cfg(not(any(target_os = "haiku", target_os = "vita")))]
-+        #[cfg(not(any(target_os = "haiku", target_os = "aros", target_os = "vita")))]
-         sin_zero: [0; 8_usize],
--        #[cfg(target_os = "haiku")]
-+        #[cfg(any(target_os = "haiku", target_os = "aros"))]
-         sin_zero: [0; 24_usize],
-         #[cfg(target_os = "vita")]
-         sin_zero: [0; 6_usize],
 @@ -36,7 +36,7 @@
          bsd,
          target_os = "aix",
@@ -2689,15 +2758,14 @@
      target_os = "redox",
 --- a/third_party/rust/rustix/src/ioctl/mod.rs
 +++ b/third_party/rust/rustix/src/ioctl/mod.rs
-@@ -317,7 +317,7 @@
+@@ -328,6 +328,7 @@
  #[cfg(any(
-     bsd,
-     target_os = "redox",
--    target_os = "haiku",
-+    target_os = "haiku", target_os = "aros",
-     target_os = "horizon",
-     target_os = "hurd",
-     target_os = "vita"
+     solarish,
+     target_os = "aix",
++    target_os = "aros",
+     target_os = "cygwin",
+     target_os = "fuchsia",
+     target_os = "emscripten",
 --- a/third_party/rust/rustix/src/net/sockopt.rs
 +++ b/third_party/rust/rustix/src/net/sockopt.rs
 @@ -155,7 +155,7 @@
@@ -3089,15 +3157,6 @@
          target_os = "nto"
      ))]
      pub const LINK: Self = Self(c::AF_LINK as _);
-@@ -690,7 +690,7 @@
-     #[cfg(solarish)]
-     pub const NIT: Self = Self(c::AF_NIT as _);
-     /// `AF_NOTIFY`
--    #[cfg(target_os = "haiku")]
-+    #[cfg(any(target_os = "haiku", target_os = "aros"))]
-     pub const NOTIFY: Self = Self(c::AF_NOTIFY as _);
-     /// `AF_NFC`
-     #[cfg(any(target_os = "emscripten", target_os = "fuchsia"))]
 @@ -726,7 +726,7 @@
          target_os = "android",
          target_os = "emscripten",
@@ -4024,6 +4083,16 @@
      target_os = "horizon",
      target_os = "openbsd",
      target_os = "redox",
+--- a/third_party/rust/socket2/src/sys/unix.rs
++++ b/third_party/rust/socket2/src/sys/unix.rs
+@@ -406,6 +406,7 @@
+     target_os = "espidf",
+     target_os = "vita",
+     target_os = "cygwin",
++    target_os = "aros",
+ ))]
+ type IovLen = c_int;
+ 
 --- a/toolkit/moz.configure
 +++ b/toolkit/moz.configure
 @@ -529,6 +529,9 @@
@@ -5139,7 +5208,7 @@
 +};
 --- /dev/null
 +++ b/third_party/rust/libc/src/unix/aros/mod.rs
-@@ -0,0 +1,632 @@
+@@ -0,0 +1,942 @@
 +///! Definitions for Apache NuttX RTOS.
 +///!
 +///! Following definitions are based on NuttX 13.0.0.
@@ -5430,6 +5499,35 @@
 +        pub imr_interface: in_addr,
 +        pub imr_sourceaddr: in_addr,
 +    }
++
++    // QRX-EXT-1: fcntl.h, sys/resource.h, sys/socket.h, signal.h (layouts checked with the m68k64 clang)
++    pub struct flock {
++        pub l_type: c_short,
++        pub l_whence: c_short,
++        pub l_start: off_t,
++        pub l_len: off_t,
++        pub l_pid: pid_t,
++    }
++
++
++    pub struct cmsghdr {
++        pub cmsg_len: socklen_t,
++        pub cmsg_level: c_int,
++        pub cmsg_type: c_int,
++    }
++
++    pub struct siginfo_t {
++        pub si_signo: c_int,
++        pub si_code: c_int,
++        pub si_errno: c_int,
++        pub si_pid: pid_t,
++        pub si_uid: uid_t,
++        pub si_addr: *mut c_void,
++        pub si_status: c_int,
++        pub si_band: c_long,
++        pub si_value: crate::sigval,
++    }
++
 +}
 +
 +// Reserved two pointer size for reserved area for some structures.
@@ -5648,7 +5746,7 @@
 +pub const TCP_NODELAY: i32 = 1;
 +
 +// nuttx/fs/ioctl.h
-+pub const FIONBIO: i32 = 2148034174;
++pub const FIONBIO: i32 = 0x8004667E_u32 as i32;
 +
 +// unistd.h
 +pub const _SC_PAGESIZE: i32 = 54;
@@ -5698,6 +5796,8 @@
 +pub const IPV6_V6ONLY: i32 = 26;
 +
 +extern "C" {
++    // QRX: AROS's errno.h: #define errno (*___geterrnoptr())
++    #[link_name = "___geterrnoptr"]
 +    pub fn __errno() -> *mut c_int;
 +    pub fn bind(sockfd: i32, addr: *const sockaddr, addrlen: socklen_t) -> i32;
 +    pub fn ioctl(fd: i32, request: i32, ...) -> i32;
@@ -5709,7 +5809,7 @@
 +        flags: i32,
 +        src_addr: *mut sockaddr,
 +        addrlen: *mut socklen_t,
-+    ) -> i32;
++    ) -> ssize_t;
 +
 +    pub fn pthread_create(
 +        thread: *mut pthread_t,
@@ -5772,6 +5872,285 @@
 +pub const IPV6_MULTICAST_LOOP: c_int = 11;
 +pub const IPV6_JOIN_GROUP: c_int = 12;
 +pub const IPV6_LEAVE_GROUP: c_int = 13;
++
++// QRX-EXT-1: values as AROS's SDK headers define them (gen-libc-aros.py checks every one)
++pub const PROT_NONE: c_int = 0;
++pub const PROT_READ: c_int = 1;
++pub const PROT_WRITE: c_int = 2;
++pub const PROT_EXEC: c_int = 4;
++pub const MAP_SHARED: c_int = 1;
++pub const MAP_PRIVATE: c_int = 2;
++pub const MAP_FIXED: c_int = 0x10;
++pub const MAP_ANON: c_int = 0x1000;
++pub const MAP_ANONYMOUS: c_int = 0x1000;
++pub const MAP_FAILED: *mut c_void = !0 as *mut c_void;
++pub const MADV_NORMAL: c_int = 0;
++pub const MADV_RANDOM: c_int = 1;
++pub const MADV_SEQUENTIAL: c_int = 2;
++pub const MADV_WILLNEED: c_int = 3;
++pub const MADV_DONTNEED: c_int = 4;
++pub const MS_ASYNC: c_int = 1;
++pub const MS_INVALIDATE: c_int = 2;
++pub const MS_SYNC: c_int = 4;
++pub const LOCK_SH: c_int = 1;
++pub const LOCK_EX: c_int = 2;
++pub const LOCK_NB: c_int = 4;
++pub const LOCK_UN: c_int = 8;
++pub const F_OK: c_int = 0;
++pub const X_OK: c_int = 1;
++pub const W_OK: c_int = 2;
++pub const R_OK: c_int = 4;
++pub const F_DUPFD: c_int = 0;
++pub const F_GETLK: c_int = 6;
++pub const F_SETLK: c_int = 7;
++pub const F_SETLKW: c_int = 8;
++pub const F_RDLCK: c_short = 0;
++pub const F_WRLCK: c_short = 1;
++pub const F_UNLCK: c_short = 2;
++pub const FD_CLOEXEC: c_int = 1;
++pub const O_SYNC: c_int = 0x1000;
++pub const O_DIRECTORY: c_int = 0x20000;
++pub const O_NOFOLLOW: c_int = 0x40000;
++pub const AT_FDCWD: c_int = -100;
++pub const AT_EACCESS: c_int = 0x100;
++pub const AT_SYMLINK_NOFOLLOW: c_int = 0x200;
++pub const AT_SYMLINK_FOLLOW: c_int = 0x400;
++pub const AT_REMOVEDIR: c_int = 0x800;
++pub const UTIME_NOW: c_long = (1 << 30) - 1;
++pub const UTIME_OMIT: c_long = (1 << 30) - 2;
++pub const S_IRWXU: mode_t = 448;
++pub const S_IRWXG: mode_t = 56;
++pub const S_IRWXO: mode_t = 7;
++pub const S_ISUID: mode_t = 0o4000;
++pub const S_ISGID: mode_t = 0o2000;
++pub const S_ISVTX: mode_t = 0o1000;
++pub const MSG_CTRUNC: c_int = 0x20;
++pub const MSG_DONTROUTE: c_int = 0x4;
++pub const MSG_WAITALL: c_int = 0x40;
++pub const MSG_DONTWAIT: c_int = 0x80;
++pub const MSG_NOSIGNAL: c_int = 0x20000;
++pub const MSG_CMSG_CLOEXEC: c_int = 0x40000;
++pub const SCM_RIGHTS: c_int = 1;
++pub const SO_ACCEPTCONN: c_int = 2;
++pub const SO_DEBUG: c_int = 1;
++pub const SO_DONTROUTE: c_int = 0x10;
++pub const SO_REUSEPORT: c_int = 0x200;
++pub const SO_RCVLOWAT: c_int = 0x1004;
++pub const SO_SNDLOWAT: c_int = 0x1003;
++pub const IPPROTO_IP: c_int = 0;
++pub const IPPROTO_ICMP: c_int = 1;
++pub const IPPROTO_TCP: c_int = 6;
++pub const IPPROTO_UDP: c_int = 17;
++pub const IPPROTO_IPV6: c_int = 41;
++// FreeBSD values (AROS's netinet/in.h lacks them; AROS's setsockopt answers ENOPROTOOPT)
++pub const IPPROTO_ICMPV6: c_int = 58;
++pub const IPPROTO_RAW: c_int = 255;
++pub const IPV6_UNICAST_HOPS: c_int = 4;
++pub const IP_RECVTOS: c_int = 68;
++pub const IP_ADD_SOURCE_MEMBERSHIP: c_int = 70;
++pub const IP_DROP_SOURCE_MEMBERSHIP: c_int = 71;
++pub const IPV6_RECVHOPLIMIT: c_int = 37;
++pub const IPV6_RECVTCLASS: c_int = 57;
++pub const IPV6_TCLASS: c_int = 61;
++pub const IPV6_ADD_MEMBERSHIP: c_int = IPV6_JOIN_GROUP;
++pub const IPV6_DROP_MEMBERSHIP: c_int = IPV6_LEAVE_GROUP;
++// in AROS's headers
++pub const TCP_MAXSEG: c_int = 2;
++pub const TCP_KEEPIDLE: c_int = 256;
++pub const TCP_KEEPINTVL: c_int = 512;
++pub const TCP_KEEPCNT: c_int = 1024;
++pub const SOCK_RDM: c_int = 4;
++pub const IP_HDRINCL: c_int = 2;
++pub const IP_RECVDSTADDR: c_int = 7;
++pub const FIONREAD: c_int = 0x4008667F;
++// errno.h defines these only when sys/cdefs.h came first (__BSD_VISIBLE)
++pub const EHOSTDOWN: c_int = 64;
++pub const EPFNOSUPPORT: c_int = 46;
++pub const ESHUTDOWN: c_int = 58;
++pub const ENOATTR: c_int = 97;
++pub const AF_APPLETALK: c_int = 16;
++pub const AF_ROUTE: c_int = 17;
++pub const AF_LINK: c_int = 18;
++pub const AF_IPX: c_int = 23;
++pub const AF_DLI: c_int = 13;
++pub const AF_BLUETOOTH: c_int = 36;
++pub const RLIMIT_CORE: c_int = 0;
++pub const RLIMIT_CPU: c_int = 1;
++pub const RLIMIT_DATA: c_int = 2;
++pub const RLIMIT_FSIZE: c_int = 3;
++pub const RLIMIT_NOFILE: c_int = 4;
++pub const RLIMIT_STACK: c_int = 5;
++pub const RLIMIT_AS: c_int = 6;
++pub const RLIM_INFINITY: rlim_t = -1;
++pub const RUSAGE_SELF: c_int = 0;
++pub const CLOCK_PROCESS_CPUTIME_ID: clockid_t = 1;
++pub const CLOCK_THREAD_CPUTIME_ID: clockid_t = 3;
++pub const WNOHANG: c_int = 1;
++pub const WUNTRACED: c_int = 2;
++pub const WSTOPPED: c_int = 2;
++pub const WEXITED: c_int = 4;
++pub const WCONTINUED: c_int = 8;
++pub const WNOWAIT: c_int = 0x10;
++pub const P_ALL: idtype_t = 0;
++pub const P_PID: idtype_t = 1;
++pub const P_PGID: idtype_t = 2;
++pub const PRIO_PROCESS: c_int = 0;
++pub const PRIO_PGRP: c_int = 1;
++pub const PRIO_USER: c_int = 2;
++pub const SIGWINCH: c_int = 27;
++pub const CLD_EXITED: c_int = 1;
++pub const CLD_KILLED: c_int = 2;
++pub const CLD_DUMPED: c_int = 3;
++pub const CLD_TRAPPED: c_int = 4;
++pub const CLD_STOPPED: c_int = 5;
++pub const CLD_CONTINUED: c_int = 6;
++pub const _SC_CLK_TCK: c_int = 28;
++
++pub type idtype_t = c_uint;
++pub type id_t = c_uint;
++
++// QRX-EXT-1: sys/socket.h's CMSG_* (AROS_ALIGN: 16 bytes on m68k64) and sys/wait.h's W* macros
++impl siginfo_t {
++    pub unsafe fn si_addr(&self) -> *mut c_void {
++        self.si_addr
++    }
++    pub unsafe fn si_value(&self) -> crate::sigval {
++        self.si_value
++    }
++    pub unsafe fn si_pid(&self) -> pid_t {
++        self.si_pid
++    }
++    pub unsafe fn si_uid(&self) -> uid_t {
++        self.si_uid
++    }
++    pub unsafe fn si_status(&self) -> c_int {
++        self.si_status
++    }
++}
++
++const fn qrx_cmsg_align(len: usize) -> usize {
++    (len + 15) & !15
++}
++
++f! {
++    pub fn CMSG_FIRSTHDR(mhdr: *const msghdr) -> *mut cmsghdr {
++        if (*mhdr).msg_controllen as usize >= size_of::<cmsghdr>() {
++            (*mhdr).msg_control.cast::<cmsghdr>()
++        } else {
++            core::ptr::null_mut::<cmsghdr>()
++        }
++    }
++
++    pub fn CMSG_DATA(cmsg: *const cmsghdr) -> *mut c_uchar {
++        (cmsg as *mut c_uchar).add(qrx_cmsg_align(size_of::<cmsghdr>()))
++    }
++
++    pub fn CMSG_NXTHDR(mhdr: *const msghdr, cmsg: *const cmsghdr) -> *mut cmsghdr {
++        if cmsg.is_null() {
++            return CMSG_FIRSTHDR(mhdr);
++        }
++        let next = (cmsg as usize) + qrx_cmsg_align((*cmsg).cmsg_len as usize);
++        let max = ((*mhdr).msg_control as usize) + ((*mhdr).msg_controllen as usize);
++        if next + qrx_cmsg_align(size_of::<cmsghdr>()) > max {
++            core::ptr::null_mut::<cmsghdr>()
++        } else {
++            next as *mut cmsghdr
++        }
++    }
++}
++
++safe_f! {
++    pub const fn CMSG_ALIGN(len: usize) -> usize {
++        qrx_cmsg_align(len)
++    }
++
++    pub const fn CMSG_SPACE(length: c_uint) -> c_uint {
++        (qrx_cmsg_align(size_of::<cmsghdr>()) + qrx_cmsg_align(length as usize)) as c_uint
++    }
++
++    pub const fn CMSG_LEN(length: c_uint) -> c_uint {
++        (qrx_cmsg_align(size_of::<cmsghdr>()) + length as usize) as c_uint
++    }
++
++    // AROS's wait() reports every child as exited normally with its return code in the low byte
++    pub const fn WEXITSTATUS(status: c_int) -> c_int {
++        status & 0xff
++    }
++
++    pub const fn WIFEXITED(_status: c_int) -> bool {
++        true
++    }
++
++    pub const fn WIFSIGNALED(_status: c_int) -> bool {
++        false
++    }
++
++    pub const fn WIFSTOPPED(_status: c_int) -> bool {
++        false
++    }
++
++    pub const fn WIFCONTINUED(_status: c_int) -> bool {
++        false
++    }
++
++    pub const fn WSTOPSIG(_status: c_int) -> c_int {
++        0
++    }
++
++    pub const fn WTERMSIG(_status: c_int) -> c_int {
++        0
++    }
++}
++
++extern "C" {
++    // QRX-EXT-1: in AROS's posixc (sync, seekdir, telldir, getrlimit, setrlimit) or libqrxaroscompat
++    pub fn mmap(addr: *mut c_void, len: size_t, prot: c_int, flags: c_int, fd: c_int, off: off_t)
++        -> *mut c_void;
++    pub fn munmap(addr: *mut c_void, len: size_t) -> c_int;
++    pub fn mprotect(addr: *mut c_void, len: size_t, prot: c_int) -> c_int;
++    pub fn msync(addr: *mut c_void, len: size_t, flags: c_int) -> c_int;
++    pub fn madvise(addr: *mut c_void, len: size_t, advice: c_int) -> c_int;
++    pub fn mlock(addr: *const c_void, len: size_t) -> c_int;
++    pub fn munlock(addr: *const c_void, len: size_t) -> c_int;
++    pub fn readv(fd: c_int, iov: *const iovec, iovcnt: c_int) -> ssize_t;
++    pub fn writev(fd: c_int, iov: *const iovec, iovcnt: c_int) -> ssize_t;
++    pub fn preadv(fd: c_int, iov: *const iovec, iovcnt: c_int, offset: off_t) -> ssize_t;
++    pub fn pwritev(fd: c_int, iov: *const iovec, iovcnt: c_int, offset: off_t) -> ssize_t;
++    pub fn utimensat(dirfd: c_int, path: *const c_char, times: *const timespec, flag: c_int) -> c_int;
++    pub fn faccessat(dirfd: c_int, pathname: *const c_char, mode: c_int, flags: c_int) -> c_int;
++    pub fn mknodat(dirfd: c_int, pathname: *const c_char, mode: mode_t, dev: dev_t) -> c_int;
++    pub fn posix_fallocate(fd: c_int, offset: off_t, len: off_t) -> c_int;
++    pub fn posix_fadvise(fd: c_int, offset: off_t, len: off_t, advise: c_int) -> c_int;
++    pub fn fdatasync(fd: c_int) -> c_int;
++    pub fn dup3(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int;
++    pub fn clock_getres(clk_id: clockid_t, tp: *mut timespec) -> c_int;
++    pub fn clock_settime(clk_id: clockid_t, tp: *const timespec) -> c_int;
++    pub fn getrlimit(resource: c_int, rlim: *mut crate::rlimit) -> c_int;
++    pub fn setrlimit(resource: c_int, rlim: *const crate::rlimit) -> c_int;
++    pub fn getpriority(which: c_int, who: id_t) -> c_int;
++    pub fn setpriority(which: c_int, who: id_t, prio: c_int) -> c_int;
++    pub fn waitid(idtype: idtype_t, id: id_t, infop: *mut siginfo_t, options: c_int) -> c_int;
++    pub fn sync();
++    pub fn seekdir(dirp: *mut DIR, loc: c_long);
++    pub fn telldir(dirp: *mut DIR) -> c_long;
++    pub fn flock(fd: c_int, operation: c_int) -> c_int;
++    pub fn socketpair(domain: c_int, ty: c_int, protocol: c_int, sv: *mut c_int) -> c_int;
++    pub fn shm_open(name: *const c_char, oflag: c_int, mode: mode_t) -> c_int;
++    pub fn shm_unlink(name: *const c_char) -> c_int;
++    pub fn pthread_atfork(
++        prepare: Option<unsafe extern "C" fn()>,
++        parent: Option<unsafe extern "C" fn()>,
++        child: Option<unsafe extern "C" fn()>,
++    ) -> c_int;
++    pub fn pthread_sigmask(how: c_int, set: *const sigset_t, oldset: *mut sigset_t) -> c_int;
++    pub fn getpwuid_r(
++        uid: uid_t,
++        pwd: *mut passwd,
++        buf: *mut c_char,
++        buflen: size_t,
++        result: *mut *mut passwd,
++    ) -> c_int;
++}
 --- /dev/null
 +++ b/widget/aros/GfxInfo.cpp
 @@ -0,0 +1,216 @@

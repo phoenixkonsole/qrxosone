@@ -3,8 +3,9 @@
  * call and that AROS's C library lacks. What AROS can do is done; what it cannot (device nodes,
  * setting the clock, process groups) fails with a POSIX error, never claims success.
  *
- *   *at functions          only with AT_FDCWD (AROS has no directory descriptors); the paths go
- *                          to AROS's C library, which converts Unix paths in its *nix mode
+ *   *at functions          with AT_FDCWD or an absolute path ("/..." or "VOLUME:..."): AROS has no
+ *                          directory descriptors; otherwise ENOSYS. The paths go to AROS's C library,
+ *                          which converts Unix paths in its *nix mode
  *   utimensat, futimens    through utimes(); UTIME_NOW and UTIME_OMIT
  *   clock_getres           the resolution of clock_gettime (1 us: timer.device)
  *   clock_settime          EPERM: the clock is the host's
@@ -16,9 +17,14 @@
  *   get/setpriority        the task priority of the calling process (PRIO_PROCESS, 0 = self)
  *   pthread_atfork         0: there is no fork() on AROS, so the handlers never run
  *   getpwuid_r             getpwuid copied into the caller's buffer
+ *   dlopen, dlsym, ...     AROS has no dynamic linker for ELF objects: dlopen and dlsym return NULL
+ *                          and dlerror says why; dladdr finds nothing (0)
  */
 #define _GNU_SOURCE
 #include <errno.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <unistd.h>
 #include <fcntl.h>
 #include <pwd.h>
 #include <signal.h>
@@ -39,6 +45,7 @@
 #define QAT_FDCWD (-100)
 #define QAT_EACCESS 0x100
 #define QAT_SYMLINK_NOFOLLOW 0x200
+#define QAT_REMOVEDIR 0x800
 #define QUTIME_NOW ((1l << 30) - 1l)
 #define QUTIME_OMIT ((1l << 30) - 2l)
 #define QP_PID 1
@@ -47,10 +54,19 @@
 int __get_default_file(int fd, long *fh);
 ssize_t pread(int fd, void *buf, size_t n, off_t off);          /* qrxaroscompat.c */
 ssize_t pwrite(int fd, const void *buf, size_t n, off_t off);
+int lchown(const char *path, uid_t owner, gid_t group);           /* qrxaroscompat.c */
+
+/* A path the *at functions can take: relative to the current directory, or absolute */
+static int at_ok(int dirfd, const char *path)
+{
+    if (dirfd == QAT_FDCWD || (path && (path[0] == '/' || strchr(path, ':')))) return 1;
+    errno = ENOSYS;
+    return 0;
+}
 
 int faccessat(int dirfd, const char *path, int mode, int flags)
 {
-    if (dirfd != QAT_FDCWD && path[0] != '/') { errno = ENOSYS; return -1; }
+    if (!at_ok(dirfd, path)) return -1;
     (void)flags;           /* AT_EACCESS: AROS has one user, effective = real */
     return access(path, mode);
 }
@@ -72,7 +88,7 @@ static int to_timeval(const struct timespec *ts, struct timeval *tv, const char 
 int utimensat(int dirfd, const char *path, const struct timespec ts[2], int flags)
 {
     (void)flags;
-    if (dirfd != QAT_FDCWD && path[0] != '/') { errno = ENOSYS; return -1; }
+    if (!at_ok(dirfd, path)) return -1;
     if (ts && ts[0].tv_nsec == QUTIME_OMIT && ts[1].tv_nsec == QUTIME_OMIT) return 0;
     struct timeval tv[2];
     if (to_timeval(ts, tv, path, -1)) return -1;
@@ -195,4 +211,92 @@ int getpwuid_r(uid_t uid, struct passwd *pw, char *buf, size_t len, struct passw
     }
     *res = pw;
     return 0;
+}
+
+/* dlfcn.h: AROS loads libraries as Exec libraries, not as ELF shared objects. */
+static const char *qrx_dl_err;
+void *dlopen(const char *file, int mode)
+{
+    (void)file; (void)mode;
+    qrx_dl_err = "dlopen: AROS has no dynamic linker for ELF shared objects";
+    return NULL;
+}
+void *dlsym(void *handle, const char *name)
+{
+    (void)handle; (void)name;
+    qrx_dl_err = "dlsym: AROS has no dynamic linker for ELF shared objects";
+    return NULL;
+}
+int dlclose(void *handle)
+{
+    (void)handle;
+    qrx_dl_err = "dlclose: no such handle";
+    return -1;
+}
+char *dlerror(void)
+{
+    const char *e = qrx_dl_err;
+    qrx_dl_err = NULL;
+    return (char *)e;
+}
+int dladdr(const void *addr, void *info)
+{
+    (void)addr; (void)info;
+    return 0;
+}
+
+/* the rest of the *at family */
+int openat(int dirfd, const char *path, int flags, ...)
+{
+    mode_t mode = 0;
+    if (flags & O_CREAT) { va_list ap; va_start(ap, flags); mode = (mode_t)va_arg(ap, unsigned int); va_end(ap); }
+    if (!at_ok(dirfd, path)) return -1;
+    return open(path, flags & ~(O_DIRECTORY | O_NOFOLLOW), mode);
+}
+int fstatat(int dirfd, const char *path, struct stat *st, int flags)
+{
+    if (!at_ok(dirfd, path)) return -1;
+    return (flags & QAT_SYMLINK_NOFOLLOW) ? lstat(path, st) : stat(path, st);
+}
+int mkdirat(int dirfd, const char *path, mode_t mode)
+{
+    if (!at_ok(dirfd, path)) return -1;
+    return mkdir(path, mode);
+}
+int unlinkat(int dirfd, const char *path, int flags)
+{
+    if (!at_ok(dirfd, path)) return -1;
+    return (flags & QAT_REMOVEDIR) ? rmdir(path) : unlink(path);
+}
+int renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath)
+{
+    if (!at_ok(olddirfd, oldpath) || !at_ok(newdirfd, newpath)) return -1;
+    return rename(oldpath, newpath);
+}
+int linkat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int flags)
+{
+    (void)flags;
+    if (!at_ok(olddirfd, oldpath) || !at_ok(newdirfd, newpath)) return -1;
+    return link(oldpath, newpath);
+}
+int symlinkat(const char *target, int newdirfd, const char *linkpath)
+{
+    if (!at_ok(newdirfd, linkpath)) return -1;
+    return symlink(target, linkpath);
+}
+ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t len)
+{
+    if (!at_ok(dirfd, path)) return -1;
+    return readlink(path, buf, len);
+}
+int fchmodat(int dirfd, const char *path, mode_t mode, int flags)
+{
+    (void)flags;
+    if (!at_ok(dirfd, path)) return -1;
+    return chmod(path, mode);
+}
+int fchownat(int dirfd, const char *path, uid_t owner, gid_t group, int flags)
+{
+    if (!at_ok(dirfd, path)) return -1;
+    return (flags & QAT_SYMLINK_NOFOLLOW) ? lchown(path, owner, group) : chown(path, owner, group);
 }

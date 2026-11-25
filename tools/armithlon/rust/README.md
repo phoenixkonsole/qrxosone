@@ -9,7 +9,7 @@ Voraussetzung für Gecko/SpiderMonkey, die Rust zwingend brauchen.
 | std für AROS | `rustc-1.100.0-aros-std.patch` (`std::os::aros`, Plattformschicht), `libc-0.2.189-aros.patch` |
 | POSIX-Funktionen, die AROS fehlen | `compat/qrxaroscompat.c` (Prozesse, Zufall, pread/pwrite, …), `compat/qrxnet.c` (Sockets, poll, Deskriptoren), `compat/build-compat.sh` → `libqrxaroscompat.a` |
 | `PIPE:` für pipe() | `../aros-qrx/qrxpipe/qrxpipe-handler.c` (von `build-linux.sh` gebaut) |
-| Tests | `tests/rhello` (ohne std), `tests/rstd` (std), `tests/runwind` (Panic-Abwicklung), `tests/rsys` (Netz, Prozesse, Pipes, Zufall), `tests/run-guest.sh` |
+| Tests | `tests/rhello` (ohne std), `tests/rstd` (std), `tests/runwind` (Panic-Abwicklung), `tests/rsys` (Netz, Prozesse, Pipes, Zufall), `tests/rcrates` (Geckos Crates), `tests/run-guest.sh` |
 
 ```sh
 tools/armithlon/rust/build-rustc.sh /opt/qrx-os-one/ec64llvm/build /opt/qrx-os-one/rust
@@ -83,6 +83,58 @@ Grenzen: höchstens 64 Sockets für das ganze System (Tabelle des Hosts), kein I
 Puffer über 4 GB gehen über einen Zwischenpuffer (der Dienst nimmt 32-Bit-Adressen). Ein Kindprozess bekommt keine
 eigene Umgebung (AROS-Prozesse teilen ihre Variablen); `pre_exec` und Prozessgruppen gibt es nicht; `kill` schickt
 Ctrl-C. Im Tor-Modus der Engine gehen TCP-Verbindungen über `qrxnetd`, UDP verlässt den Rechner dann nicht.
+
+### Geckos Crates (`tests/rcrates` → `CRATES ALL PASS`, 25.11.2026)
+
+Die Crates, die Gecko mitbringt, laufen gegen das `libc`-AROS-Modul im Gecko-Baum
+(`third_party/rust/libc/src/unix/aros/mod.rs`, im Gecko-Patch). Gebaut mit `tests/rcrates/build.sh`,
+gelaufen im AROS-64-Gast auf zwei EC64-Kernen. Das Programm läuft im Unix-Pfadmodus von AROS, weil es
+mit `nixmain.o` gelinkt ist: `/T/x` ist dann `T:x`. Rust hält nur Pfade mit führendem `/` für absolut.
+In AmigaDOS bedeutet dagegen `T:/x` das Elternverzeichnis von `T:`. Mit AROS-Pfaden gehen `Path::join`
+und `tempfile` deshalb fehl; Gecko läuft ebenfalls im Unix-Pfadmodus.
+
+| Crate | Ergebnis |
+|---|---|
+| `rustix` 1.1.4 | open/write/fstat/seek/read, getpid, clock_gettime: PASS |
+| `memmap2` 0.9.11 | anonym 64 KB, Datei nur lesen, Datei geteilt beschreibbar mit `flush` (msync): PASS |
+| `socket2` 0.6.3 | TCP über Loopback (bind, listen, connect, accept, TCP_NODELAY): PASS |
+| `rand` 0.8.6, `tempfile` 3.27.0 | Zufall vom Host; Temporärdatei in `$TMPDIR` (`/T`): PASS |
+| `libloading` 0.8.6 | `dlopen` meldet den Fehler „AROS has no dynamic linker for ELF shared objects“: PASS (erwartet) |
+| `mtu` 0.4.1 | „nicht unterstützt“ wie auf iOS/Redox; neqo nimmt dann die Standard-MTU: PASS (erwartet) |
+
+Was dafür geändert ist:
+
+- **libc AROS-Modul:**
+  - Neu: flock, cmsghdr, siginfo_t (mit `si_status()` usw.), CMSG_*, die W*-Makros, die mmap-, flock-, access-, AT_-, UTIME-, MSG-, SO-, RLIMIT-, PRIO- und P_-Konstanten sowie Deklarationen für mmap, readv, utimensat, getrlimit, waitid, pthread_atfork usw.
+  - `gen-libc-aros.py` hat jede Konstante gegen die SDK-Header geprüft; nur `_SC_CLK_TCK` war falsch.
+  - Ohne AROS-Header sind nur ein paar IPv6-/Multicast-Optionen mit FreeBSD-Werten (der Host ignoriert unbekannte Optionen), dazu EHOSTDOWN, EPFNOSUPPORT und ESHUTDOWN (errno.h nur mit `__BSD_VISIBLE`).
+  - `errno` geht über `___geterrnoptr`, `recvfrom` gibt `ssize_t` zurück, und FIONBIO ist als `i32` dargestellt.
+- **rustix:**
+  - AROS ist wie Haiku eingeordnet, aber mit eigenen Abweichungen:
+    - ioctl-Opcode `c_int`;
+    - BSD-Größen für `sun_path`, `sa_data` und `sin_zero`;
+    - `mode_t` als `c_uint` durch die Varargs von `open`;
+    - `flock.l_pid` wird umgewandelt: `pid_t` ist zeigergroß, die Werte sind ETask-IDs (ULONG);
+    - kein TIOCSCTTY, kein AF_NOTIFY.
+- **socket2:** `msg_iovlen` ist `c_int`.
+- **mtu:** wie Redox als „nicht unterstützt“ eingeordnet.
+- **libloading:** RTLD_* wie bei glibc.
+- **errno:** `___geterrnoptr`.
+- **AROS-Header:**
+  - `AT_*`, `O_DIRECTORY`, `O_NOFOLLOW`;
+  - `UTIME_*`, `utimensat`, `futimens`, `mknodat`;
+  - `SIGWINCH` (wird nie ausgelöst);
+  - `WNOWAIT`, `idtype_t`, `waitid`;
+  - `PRIO_*`, `get/setpriority`;
+  - `ENOATTR` (97).
+  - **`sys/cdefs.h` korrigiert:** Mit dem POSIX-2008-Standard aus `features.h` waren die BSD-Teile von `sys/socket.h` verschwunden (CMSG_*, MSG_NOSIGNAL), sobald `sys/types.h` zuerst eingebunden war. `_BSD_SOURCE`/`_DEFAULT_SOURCE` setzt jetzt `__BSD_VISIBLE`, und `_XOPEN_SOURCE 700` ergibt `__POSIX_VISIBLE 200809`.
+- **libqrxaroscompat:**
+  - Die ganze `*at`-Familie (openat, fstatat, mkdirat, unlinkat, renameat, linkat, symlinkat, readlinkat, fchmodat, fchownat) arbeitet mit AT_FDCWD oder absolutem Pfad, sonst ENOSYS.
+  - `dlopen`/`dlsym` geben NULL mit einem `dlerror`-Text zurück.
+  - **Datei-mmap:** AROS hat keine MMU-Seiten, also liest `pread` den Inhalt in einen Block. MAP_SHARED mit PROT_WRITE schreibt bei `msync` und `munmap` zurück; dazwischen sieht `write()` die Änderungen nicht.
+  - **Behobener Fehler in `munmap`:** Eine Länge, die kein Vielfaches von 4 KB war, gab das Mapping nie frei (Speicherleck; bei Datei-Mappings blieb der Deskriptor offen).
+
+Mit der neuen Compat-Bibliothek gelaufen: `rsys` → `SYS ALL PASS`, SHM- und socketpair-Test → PASS.
 
 Das AROS-64-System ist mit dem korrigierten Backend neu gebaut (alle Objekte neu übersetzt, `build-linux.sh`), darauf
 laufen `rstd`, `runwind`, `rsys`, GeckoRuntime und die C++-Registertests wieder fehlerfrei.

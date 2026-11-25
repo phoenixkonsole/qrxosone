@@ -7453,6 +7453,47 @@ index e9188a40..c7f53c7f 100644
  #endif
  
  /* Enable features based on _POSIX_C_SOURCE level */
+diff --git a/compiler/crt/posixc/include/aros/posixc/errno.h b/compiler/crt/posixc/include/aros/posixc/errno.h
+index e6ba2c36..6b0446ea 100644
+--- a/compiler/crt/posixc/include/aros/posixc/errno.h
++++ b/compiler/crt/posixc/include/aros/posixc/errno.h
+@@ -90,6 +90,7 @@
+ #define	ENETUNREACH	51		/* Network is unreachable */
+ #define	ENFILE		23		/* Too many open files in system */
+ #define ENODATA		89		/* No message available */
++#define ENOATTR		97		/* QRX: attribute not found (no extended attributes on AROS) */
+ #define	ENODEV		19		/* Operation not supported by device */
+ #define	ENOLCK		77		/* No locks available */
+ #define	EFTYPE		79		/* Inappropriate file type or format */
+diff --git a/compiler/crt/posixc/include/aros/posixc/fcntl.h b/compiler/crt/posixc/include/aros/posixc/fcntl.h
+index 69124257..c779fcbf 100644
+--- a/compiler/crt/posixc/include/aros/posixc/fcntl.h
++++ b/compiler/crt/posixc/include/aros/posixc/fcntl.h
+@@ -88,14 +88,17 @@
+ #define O_WRITE         O_WRONLY
+ #endif
+ 
+-/* NOTIMPL #define AT_FDCWD */
+-/* NOTIMPL #define AT_EACCESS */
+-/* NOTIMPL #define AT_SYMLINK_NOFOLLOW */
+-/* NOTIMPL #define AT_SYMLINK_FOLLOW */
+-/* NOTIMPL #define AT_REMOVEDIR */
++/* QRX: the *at() functions of libqrxaroscompat (QRX OS One 64) accept AT_FDCWD and absolute
++   paths. O_DIRECTORY and O_NOFOLLOW are accepted by open() and ignored (AROS has no symlink
++   following to suppress on most handlers). */
++#define AT_FDCWD                (-100)
++#define AT_EACCESS              0x100
++#define AT_SYMLINK_NOFOLLOW     0x200
++#define AT_SYMLINK_FOLLOW       0x400
++#define AT_REMOVEDIR            0x800
+ /* NOTIMPL #define O_CLOEXEC */
+-/* NOTIMPL #define O_DIRECTORY */
+-/* NOTIMPL #define O_NOFOLLOW */
++#define O_DIRECTORY             0x20000
++#define O_NOFOLLOW              0x40000
+ 
+ /* Advice for posix_fadvise */
+ #define POSIX_FADV_DONTNEED     1
 diff --git a/compiler/crt/posixc/include/aros/posixc/poll.h b/compiler/crt/posixc/include/aros/posixc/poll.h
 new file mode 100644
 index 00000000..cd4e4d9f
@@ -7498,9 +7539,18 @@ index 00000000..cd4e4d9f
 +
 +#endif /* _POSIXC_POLL_H_ */
 diff --git a/compiler/crt/posixc/include/aros/posixc/signal.h b/compiler/crt/posixc/include/aros/posixc/signal.h
-index af58738e..1c0f63fc 100644
+index af58738e..47542f59 100644
 --- a/compiler/crt/posixc/include/aros/posixc/signal.h
 +++ b/compiler/crt/posixc/include/aros/posixc/signal.h
+@@ -112,7 +112,7 @@
+ */
+ #if !defined(_POSIX_SOURCE)
+ // NOTIMPL #define SIGEMT		7	/* EMT instruction (emulator trap) */
+-// NOTIMPL #define SIGWINCH	27	/* window size changes */
++#define SIGWINCH	27	/* QRX: window size changes (never raised, may be caught) */
+ /*  BSD defines SIGIO and SIGINFO, we should probably include these */
+ // NOTIMPL #define SIGIO		30	/* IO event */
+ // NOTIMPL #define SIGINFO		31	/* terminal info request */
 @@ -126,7 +126,7 @@ int	kill(pid_t, int);
  /* NOTIMPL void   psiginfo(const siginfo_t *, const char *); */
  /* NOTIMPL void   psignal(int, const char *); */
@@ -7576,10 +7626,26 @@ index 00000000..c84a735e
 +
 +#endif /* _POSIXC_SYS_MMAN_H_ */
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/resource.h b/compiler/crt/posixc/include/aros/posixc/sys/resource.h
-index 5aba0d51..a49a156b 100644
+index 5aba0d51..3fcb62e5 100644
 --- a/compiler/crt/posixc/include/aros/posixc/sys/resource.h
 +++ b/compiler/crt/posixc/include/aros/posixc/sys/resource.h
-@@ -28,10 +28,9 @@ RLIM_SAVED_MAX
+@@ -13,11 +13,10 @@
+ #include <aros/system.h>
+ #include <aros/cpu.h>
+ 
+-/* NOTIMPL
+-PRIO_PROCESS
+-PRIO_PGRP
+-PRIO_USER
+-*/
++/* QRX: getpriority/setpriority are in libqrxaroscompat (QRX OS One 64) */
++#define PRIO_PROCESS 0
++#define PRIO_PGRP    1
++#define PRIO_USER    2
+ 
+ typedef signed AROS_64BIT_TYPE rlim_t;
+ 
+@@ -28,10 +27,9 @@ RLIM_SAVED_MAX
  RLIM_SAVED_CUR
  */
  
@@ -7593,7 +7659,7 @@ index 5aba0d51..a49a156b 100644
  
  struct rlimit {
      rlim_t rlim_cur; /* The current (soft) limit */
-@@ -40,9 +39,24 @@ struct rlimit {
+@@ -40,9 +38,24 @@ struct rlimit {
  
  #include <aros/types/timeval_s.h>
  
@@ -7621,14 +7687,41 @@ index 5aba0d51..a49a156b 100644
  
  #define RLIMIT_CORE     0	/* Limit on size of core file */
  #define RLIMIT_CPU      1	/* Limit on CPU time per process */
-@@ -59,7 +73,7 @@ __BEGIN_DECLS
+@@ -59,8 +72,8 @@ __BEGIN_DECLS
  
  /* NOTIMPL int getpriority(int, id_t); */
  int getrlimit(int, struct rlimit *);
 -/* NOTIMPL getrusage(int, struct rusage *); */
+-/* NOTIMPL setpriority(int, id_t, int); */
 +int getrusage(int, struct rusage *);
- /* NOTIMPL setpriority(int, id_t, int); */
++int setpriority(int, id_t, int);
  int setrlimit(int, const struct rlimit *);
+ 
+ __END_DECLS
+diff --git a/compiler/crt/posixc/include/aros/posixc/sys/stat.h b/compiler/crt/posixc/include/aros/posixc/sys/stat.h
+index a7e99803..6f30e61c 100644
+--- a/compiler/crt/posixc/include/aros/posixc/sys/stat.h
++++ b/compiler/crt/posixc/include/aros/posixc/sys/stat.h
+@@ -152,7 +152,8 @@ static __inline__  int fstat(int fd, struct stat *sb)
+ int fstat(int fd, struct stat *sb);
+ #endif
+ /* NOTIMPL int fstatat(int, const char *restrict, struct stat *restrict, int); */
+-/* NOTIMPL int futimens(int, const struct timespec [2]); */
++/* QRX: futimens, utimensat and mknodat are in libqrxaroscompat (QRX OS One 64) */
++int futimens(int, const struct timespec [2]);
+ int lstat64(const char * restrict path, struct stat64 * restrict sb);
+ #if defined(__USE_FILE_OFFSET64)
+ static __inline__  int lstat(const char * restrict path, struct stat * restrict sb)
+@@ -180,7 +181,9 @@ static __inline__  int stat(const char * restrict path, struct stat * restrict s
+ int stat(const char * restrict path, struct stat * restrict sb);
+ #endif
+ mode_t umask(mode_t numask);
+-/* NOTIMPL int utimensat(int, const char *, const struct timespec [2], int); */
++int utimensat(int, const char *, const struct timespec [2], int);
++#define UTIME_NOW   ((1L << 30) - 1L)
++#define UTIME_OMIT  ((1L << 30) - 2L)
+ 
+ __END_DECLS
  
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/statvfs.h b/compiler/crt/posixc/include/aros/posixc/sys/statvfs.h
 index 2b1e1a53..1d26d01f 100644
@@ -7645,6 +7738,40 @@ index 2b1e1a53..1d26d01f 100644
  __BEGIN_DECLS
  
  int statvfs(const char *path, struct statvfs *buf);
+diff --git a/compiler/crt/posixc/include/aros/posixc/sys/wait.h b/compiler/crt/posixc/include/aros/posixc/sys/wait.h
+index 76e58e6c..c2e7452e 100644
+--- a/compiler/crt/posixc/include/aros/posixc/sys/wait.h
++++ b/compiler/crt/posixc/include/aros/posixc/sys/wait.h
+@@ -15,7 +15,7 @@
+ #define WSTOPPED        WUNTRACED
+ #define WEXITED         0x00000004
+ #define WCONTINUED      0x00000008
+-/* NOTIMPL #define WNOWAIT */
++#define WNOWAIT         0x00000010
+ 
+ #define WEXITSTATUS(status)     (status & 0xff)
+ #define WIFCONTINUED(status)    0
+@@ -25,13 +25,15 @@
+ #define WSTOPSIG(status)        0
+ #define WTERMSIG(status)        0
+ 
+-/* NOTIMPL
++/* QRX: waitid (P_PID) is in libqrxaroscompat (QRX OS One 64) */
+ typedef enum {
+-     P_ALL,
+-     P_PGID,
+-     P_PID
++     P_ALL = 0,
++     P_PID = 1,
++     P_PGID = 2
+ } idtype_t;
+-*/
++#define P_ALL  P_ALL
++#define P_PID  P_PID
++#define P_PGID P_PGID
+ 
+ #include <aros/types/id_t.h>
+ #include <aros/types/pid_t.h>
 diff --git a/compiler/crt/posixc/include/aros/posixc/time.h b/compiler/crt/posixc/include/aros/posixc/time.h
 index 88cddcd4..03631520 100644
 --- a/compiler/crt/posixc/include/aros/posixc/time.h
@@ -9219,6 +9346,49 @@ index 5c829a7c..9ea386d2 100644
  
  #if !defined(SocketBase) && !defined(__NOLIBBASE__) && !defined(__BSDSOCKET_NOLIBBASE__)
   #ifdef __BSDSOCKET_STDLIBBASE__
+diff --git a/workbench/network/common/include/sys/cdefs.h b/workbench/network/common/include/sys/cdefs.h
+index ee0fc143..afc28190 100644
+--- a/workbench/network/common/include/sys/cdefs.h
++++ b/workbench/network/common/include/sys/cdefs.h
+@@ -95,6 +95,12 @@
+ #define __BSD_VISIBLE   1
+ #endif
+ 
++/* QRX: AROS's features.h defaults to _POSIX_C_SOURCE 200809L plus _BSD_SOURCE/_DEFAULT_SOURCE (as
++   glibc does); keep the BSD socket API (CMSG_*, struct cmsgcred, ...) visible in that default. */
++#if !defined(__BSD_VISIBLE) && (defined(_BSD_SOURCE) || defined(_DEFAULT_SOURCE))
++#define __BSD_VISIBLE   1
++#endif
++
+ /*-
+  * POSIX.1 requires that the macros we test be defined before any standard
+  * header file is included.
+@@ -129,7 +135,12 @@
+ 
+ /* Deal with various X/Open Portability Guides and Single UNIX Spec. */
+ #ifdef _XOPEN_SOURCE
+-#if _XOPEN_SOURCE - 0 >= 600
++#if _XOPEN_SOURCE - 0 >= 700
++/* QRX: SUSv4 / POSIX.1-2008 (FreeBSD's cdefs.h does the same) */
++#define __XSI_VISIBLE           700
++#undef _POSIX_C_SOURCE
++#define _POSIX_C_SOURCE         200809
++#elif _XOPEN_SOURCE - 0 >= 600
+ #define __XSI_VISIBLE           600
+ #undef _POSIX_C_SOURCE
+ #define _POSIX_C_SOURCE         200112
+@@ -148,7 +159,10 @@
+ #define _POSIX_C_SOURCE         198808
+ #endif
+ #ifdef _POSIX_C_SOURCE
+-#if _POSIX_C_SOURCE >= 200112
++#if _POSIX_C_SOURCE >= 200809
++#define __POSIX_VISIBLE         200809
++#define __ISO_C_VISIBLE         1999
++#elif _POSIX_C_SOURCE >= 200112
+ #define __POSIX_VISIBLE         200112
+ #define __ISO_C_VISIBLE         1999
+ #elif _POSIX_C_SOURCE >= 199506
 diff --git a/workbench/network/common/include/sys/socket.h b/workbench/network/common/include/sys/socket.h
 index 1ff6d2ab..3efaecda 100644
 --- a/workbench/network/common/include/sys/socket.h
