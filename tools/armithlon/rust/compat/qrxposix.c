@@ -308,3 +308,19 @@ int sigaltstack(const stack_t *ss, stack_t *old)
     if (ss) { errno = ENOSYS; return -1; }
     return 0;
 }
+
+/* pthread_mutexattr_setpshared: every AROS task shares one address space, so a mutex in shared
+ * memory works between processes as it is; both values are accepted.
+ * pthread_condattr_setclock: AROS's pthread_cond_timedwait measures against the real-time clock
+ * (gettimeofday); only CLOCK_REALTIME can be honoured. */
+#include <pthread.h>
+int pthread_mutexattr_setpshared(pthread_mutexattr_t *attr, int pshared)
+{
+    (void)attr;
+    return (pshared == PTHREAD_PROCESS_PRIVATE || pshared == PTHREAD_PROCESS_SHARED) ? 0 : EINVAL;
+}
+int pthread_condattr_setclock(pthread_condattr_t *attr, clockid_t clock)
+{
+    (void)attr;
+    return clock == CLOCK_REALTIME ? 0 : EINVAL;
+}
