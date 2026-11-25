@@ -224,6 +224,23 @@
              return ("-fvisibility=hidden", "-fvisibility-inlines-hidden")
          return (
              "-I%s/system_wrappers" % os.path.join(env.dist),
+--- a/config/external/nspr/pr/moz.build
++++ b/config/external/nspr/pr/moz.build
+@@ -78,6 +78,14 @@
+         # macros (ENTRY/SET_SIZE); without preprocessing it won't build.
+         ASFLAGS += ["-x", "assembler-with-cpp"]
+         SOURCES += ["/nsprpub/pr/src/md/unix/os_SunOS_sparcv9.s"]
++elif CONFIG["OS_TARGET"] == "AROS":
++    # QRX OS One 64: the md layer of nsprpub/pr/include/md/_aros.h; sockets, poll() and the
++    # rest through libqrxaroscompat, not the inline calls of bsdsocket.library
++    DEFINES["AROS"] = True
++    DEFINES["BSDSOCKET_NOLIBDEFINES"] = True
++    DEFINES["__BSDSOCKET_NOLIBBASE__"] = True
++    DEFINES["HAVE_POINTER_LOCALTIME_R"] = True
++    SOURCES += ["/nsprpub/pr/src/md/unix/aros.c"]
+ elif CONFIG["OS_TARGET"] == "WINNT":
+     OS_LIBS += [
+         "advapi32",
 --- a/config/external/nspr/prcpucfg.h
 +++ b/config/external/nspr/prcpucfg.h
 @@ -23,6 +23,8 @@
@@ -772,6 +789,36 @@
          for prefix, info in TEST_MANIFESTS.items():
              for path, manifest in context.get("%s_MANIFESTS" % prefix, []):
                  for obj in self._process_test_manifest(context, info, path, manifest):
+--- a/python/mozbuild/mozbuild/testing.py
++++ b/python/mozbuild/mozbuild/testing.py
+@@ -258,6 +258,11 @@
+ # Convenience methods for test manifest reading.
+ def read_manifestparser_manifest(context, manifest_path):
+     path = manifest_path.full_path
++    # QRX: a source extract without the test data (QRX_NO_TESTS=1): a missing manifest reads as
++    # empty; the emitter does not process test manifests then either
++    if os.environ.get("QRX_NO_TESTS") and not os.path.exists(path):
++        return manifestparser.TestManifest(manifests=[], strict=True, rootdir=context.config.topsrcdir,
++                                           finder=context._finder, handle_defaults=False)
+     return manifestparser.TestManifest(
+         manifests=[path],
+         strict=True,
+@@ -271,6 +276,15 @@
+     import reftest
+ 
+     path = manifest_path.full_path
++    if os.environ.get("QRX_NO_TESTS"):
++        # QRX: see above; a manifest may also include ones whose directories are not there
++        manifest = reftest.ReftestManifest(finder=context._finder)
++        try:
++            if os.path.exists(path):
++                manifest.load(path)
++        except (AttributeError, OSError):
++            manifest = reftest.ReftestManifest(finder=context._finder)
++        return manifest
+     manifest = reftest.ReftestManifest(finder=context._finder)
+     manifest.load(path)
+     return manifest
 --- a/security/nss/lib/freebl/unix_urandom.c
 +++ b/security/nss/lib/freebl/unix_urandom.c
 @@ -4,6 +4,9 @@
@@ -883,6 +930,29 @@
      } else if #[cfg(target_os = "nuttx")] {
          mod nuttx;
          pub use self::nuttx::*;
+--- a/toolkit/moz.configure
++++ b/toolkit/moz.configure
+@@ -529,6 +529,9 @@
+         return ("cairo-uikit",)
+     elif target.os == "Android":
+         return ("cairo-android",)
++    elif target.os == "AROS":
++        # QRX OS One 64: Intuition windows, software rendering (widget/aros)
++        return ("cairo-aros",)
+     else:
+         # cairo-gtk3 - X11 backend with optional Wayland backend (auto detected)
+         # cairo-gtk3-wayland - Wayland backend with optional X11 backend (auto detected)
+--- a/widget/moz.build
++++ b/widget/moz.build
+@@ -53,7 +53,7 @@
+     "components.conf",
+ ]
+ 
+-if toolkit in ("android", "cocoa", "gtk", "uikit", "windows"):
++if toolkit in ("android", "aros", "cocoa", "gtk", "uikit", "windows"):
+     DIRS += [toolkit]
+ 
+ if toolkit == "cocoa":
 --- /dev/null
 +++ b/nsprpub/pr/include/md/_aros.cfg
 @@ -0,0 +1,114 @@
@@ -1969,3 +2039,1003 @@
 +pub const IPV6_MULTICAST_LOOP: c_int = 11;
 +pub const IPV6_JOIN_GROUP: c_int = 12;
 +pub const IPV6_LEAVE_GROUP: c_int = 13;
+--- /dev/null
++++ b/widget/aros/GfxInfo.cpp
+@@ -0,0 +1,216 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "GfxInfo.h"
++#include "nsServiceManagerUtils.h"
++
++namespace mozilla {
++namespace widget {
++
++#ifdef DEBUG
++NS_IMPL_ISUPPORTS_INHERITED(GfxInfo, GfxInfoBase, nsIGfxInfoDebug)
++#endif
++
++GfxInfo::GfxInfo() {}
++
++GfxInfo::~GfxInfo() {}
++
++NS_IMETHODIMP
++GfxInfo::GetDWriteEnabled(bool* aEnabled) { return NS_ERROR_FAILURE; }
++
++NS_IMETHODIMP
++GfxInfo::GetEmbeddedInFirefoxReality(bool* aEmbeddedInFirefoxReality) {
++  *aEmbeddedInFirefoxReality = false;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetHasBattery(bool* aHasBattery) { return NS_ERROR_NOT_IMPLEMENTED; }
++
++NS_IMETHODIMP
++GfxInfo::GetDWriteVersion(nsAString& aDwriteVersion) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetCleartypeParameters(nsAString& aCleartypeParams) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetWindowProtocol(nsAString& aWindowProtocol) {
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetTestType(nsAString& aTestType) { return NS_ERROR_NOT_IMPLEMENTED; }
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterDescription(nsAString& aAdapterDescription) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterDescription2(nsAString& aAdapterDescription) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterRAM(uint32_t* aAdapterRAM) { return NS_ERROR_FAILURE; }
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterRAM2(uint32_t* aAdapterRAM) { return NS_ERROR_FAILURE; }
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterDriverVendor(nsAString& aAdapterDriverVendor) {
++  aAdapterDriverVendor.AssignLiteral("");
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterDriverVendor2(nsAString& aAdapterDriverVendor2) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterDriver(nsAString& aAdapterDriver) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterDriver2(nsAString& aAdapterDriver) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterDriverVersion(nsAString& aAdapterDriverVersion) {
++  aAdapterDriverVersion = EmptyString();
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterDriverVersion2(nsAString& aAdapterDriverVersion) {
++  aAdapterDriverVersion = EmptyString();
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterDriverDate(nsAString& aAdapterDriverDate) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterDriverDate2(nsAString& aAdapterDriverDate) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterVendorID(nsAString& aAdapterVendorID) {
++  aAdapterVendorID = EmptyString();
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterVendorID2(nsAString& aAdapterVendorID) {
++  aAdapterVendorID = EmptyString();
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterDeviceID(nsAString& aAdapterDeviceID) {
++  aAdapterDeviceID = EmptyString();
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterDeviceID2(nsAString& aAdapterDeviceID) {
++  aAdapterDeviceID = EmptyString();
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterSubsysID(nsAString& aAdapterSubsysID) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetAdapterSubsysID2(nsAString& aAdapterSubsysID) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP
++GfxInfo::GetIsGPU2Active(bool* aIsGPU2Active) { return NS_ERROR_FAILURE; }
++
++NS_IMETHODIMP
++GfxInfo::GetDrmRenderDevice(nsACString& aDrmRenderDevice) {
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++const nsTArray<RefPtr<GfxDriverInfo>>& GfxInfo::GetGfxDriverInfo() {
++  if (sDriverInfo->IsEmpty()) {
++    APPEND_TO_DRIVER_BLOCKLIST2(
++        OperatingSystem::Unknown, DeviceFamily::All,
++        nsIGfxInfo::FEATURE_OPENGL_LAYERS, nsIGfxInfo::FEATURE_STATUS_OK,
++        DRIVER_COMPARISON_IGNORED, GfxDriverInfo::allDriverVersions,
++        "FEATURE_OK_FORCE_OPENGL");
++  }
++
++  return *sDriverInfo;
++}
++
++nsresult GfxInfo::GetFeatureStatusImpl(
++    int32_t aFeature, int32_t* aStatus, nsAString& aSuggestedDriverVersion,
++    const nsTArray<RefPtr<GfxDriverInfo>>& aDriverInfo, nsACString& aFailureId,
++    OperatingSystem* aOS /* = nullptr */) {
++  NS_ENSURE_ARG_POINTER(aStatus);
++  aSuggestedDriverVersion.SetIsVoid(true);
++  *aStatus = nsIGfxInfo::FEATURE_STATUS_UNKNOWN;
++  if (aOS) *aOS = OperatingSystem::Unknown;
++
++  if (sShutdownOccurred) {
++    return NS_OK;
++  }
++
++  // OpenGL layers are never blocklisted on iOS.
++  // This early return is so we avoid potentially slow
++  // GLStrings initialization on startup when we initialize GL layers.
++  if (aFeature == nsIGfxInfo::FEATURE_OPENGL_LAYERS ||
++      aFeature == nsIGfxInfo::FEATURE_WEBGL_OPENGL) {
++    *aStatus = nsIGfxInfo::FEATURE_STATUS_OK;
++    return NS_OK;
++  }
++
++  return GfxInfoBase::GetFeatureStatusImpl(
++      aFeature, aStatus, aSuggestedDriverVersion, aDriverInfo, aFailureId, aOS);
++}
++
++#ifdef DEBUG
++
++// Implement nsIGfxInfoDebug
++
++NS_IMETHODIMP GfxInfo::SpoofVendorID(const nsAString& aVendorID) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP GfxInfo::SpoofDeviceID(const nsAString& aDeviceID) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP GfxInfo::SpoofDriverVersion(const nsAString& aDriverVersion) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP GfxInfo::SpoofOSVersion(uint32_t aVersion) {
++  return NS_ERROR_FAILURE;
++}
++
++NS_IMETHODIMP GfxInfo::SpoofOSVersionEx(uint32_t aMajor, uint32_t aMinor,
++                                        uint32_t aBuild, uint32_t aRevision) {
++  return NS_ERROR_FAILURE;
++}
++
++#endif
++
++}  // namespace widget
++}  // namespace mozilla
+--- /dev/null
++++ b/widget/aros/GfxInfo.h
+@@ -0,0 +1,87 @@
++/*
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef _mozilla_widget_aros_GfxInfo_h_
++#define _mozilla_widget_aros_GfxInfo_h_
++
++#include "GfxInfoBase.h"
++#include "GfxDriverInfo.h"
++
++#include "nsString.h"
++
++namespace mozilla {
++
++namespace gl {
++class GLContext;
++}
++
++namespace widget {
++
++class GfxInfo : public GfxInfoBase {
++ private:
++  ~GfxInfo();
++
++ public:
++  GfxInfo();
++
++  OperatingSystem GetOperatingSystem() override { return OperatingSystem::Unknown; }
++
++  // We only declare the subset of nsIGfxInfo that we actually implement. The
++  // rest is brought forward from GfxInfoBase.
++  NS_IMETHOD GetDWriteEnabled(bool* aDWriteEnabled) override;
++  NS_IMETHOD GetEmbeddedInFirefoxReality(
++      bool* aEmbeddedInFirefoxReality) override;
++  NS_IMETHOD GetHasBattery(bool* aHasBattery) override;
++  NS_IMETHOD GetDWriteVersion(nsAString& aDwriteVersion) override;
++  NS_IMETHOD GetCleartypeParameters(nsAString& aCleartypeParams) override;
++  NS_IMETHOD GetWindowProtocol(nsAString& aWindowProtocol) override;
++  NS_IMETHOD GetTestType(nsAString& aTestType) override;
++  NS_IMETHOD GetAdapterDescription(nsAString& aAdapterDescription) override;
++  NS_IMETHOD GetAdapterDriver(nsAString& aAdapterDriver) override;
++  NS_IMETHOD GetAdapterVendorID(nsAString& aAdapterVendorID) override;
++  NS_IMETHOD GetAdapterDeviceID(nsAString& aAdapterDeviceID) override;
++  NS_IMETHOD GetAdapterSubsysID(nsAString& aAdapterSubsysID) override;
++  NS_IMETHOD GetAdapterRAM(uint32_t* aAdapterRAM) override;
++  NS_IMETHOD GetAdapterDriverVendor(nsAString& aAdapterDriverVendor) override;
++  NS_IMETHOD GetAdapterDriverVersion(nsAString& aAdapterDriverVersion) override;
++  NS_IMETHOD GetAdapterDriverDate(nsAString& aAdapterDriverDate) override;
++  NS_IMETHOD GetAdapterDescription2(nsAString& aAdapterDescription) override;
++  NS_IMETHOD GetAdapterDriver2(nsAString& aAdapterDriver) override;
++  NS_IMETHOD GetAdapterVendorID2(nsAString& aAdapterVendorID) override;
++  NS_IMETHOD GetAdapterDeviceID2(nsAString& aAdapterDeviceID) override;
++  NS_IMETHOD GetAdapterSubsysID2(nsAString& aAdapterSubsysID) override;
++  NS_IMETHOD GetAdapterRAM2(uint32_t* aAdapterRAM) override;
++  NS_IMETHOD GetAdapterDriverVendor2(nsAString& aAdapterDriverVendor) override;
++  NS_IMETHOD GetAdapterDriverVersion2(
++      nsAString& aAdapterDriverVersion) override;
++  NS_IMETHOD GetAdapterDriverDate2(nsAString& aAdapterDriverDate) override;
++  NS_IMETHOD GetIsGPU2Active(bool* aIsGPU2Active) override;
++  NS_IMETHOD GetDrmRenderDevice(nsACString& aDrmRenderDevice) override;
++  using GfxInfoBase::GetFeatureStatus;
++  using GfxInfoBase::GetFeatureSuggestedDriverVersion;
++
++#ifdef DEBUG
++  NS_DECL_ISUPPORTS_INHERITED
++
++  NS_IMETHOD SpoofVendorID(const nsAString& aVendorID) override;
++  NS_IMETHOD SpoofDeviceID(const nsAString& aDeviceID) override;
++  NS_IMETHOD SpoofDriverVersion(const nsAString& aDriverVersion) override;
++  NS_IMETHOD SpoofOSVersion(uint32_t aVersion) override;
++  NS_IMETHOD SpoofOSVersionEx(uint32_t aMajor, uint32_t aMinor, uint32_t aBuild,
++                              uint32_t aRevision) override;
++#endif
++
++ protected:
++  nsresult GetFeatureStatusImpl(
++      int32_t aFeature, int32_t* aStatus, nsAString& aSuggestedDriverVersion,
++      const nsTArray<RefPtr<GfxDriverInfo>>& aDriverInfo,
++      nsACString& aFailureId, OperatingSystem* aOS = nullptr) override;
++  const nsTArray<RefPtr<GfxDriverInfo>>& GetGfxDriverInfo() override;
++};
++
++}  // namespace widget
++}  // namespace mozilla
++
++#endif /* _mozilla_widget_aros_GfxInfo_h_ */
+--- /dev/null
++++ b/widget/aros/aros_appshell_glue.c
+@@ -0,0 +1,50 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++/*
++ * QRX OS One 64 (AROS): the Exec side of nsAppShell. Kept in C and apart from Gecko's C++: AROS's
++ * exec headers define Wait(), Signal() and others as macros, which would clash with Gecko's own
++ * names. The main thread's task waits on one signal bit that any thread may set to tell it that
++ * Gecko events are pending (nsBaseAppShell::ScheduleNativeEventCallback).
++ */
++#include <proto/exec.h>
++#include <exec/tasks.h>
++#include <dos/dos.h>
++#include "aros_appshell_glue.h"
++
++static struct Task *main_task;
++static BYTE wake_bit = -1;
++static volatile ULONG extra_mask;      /* window ports later (nsWindow on Intuition) */
++
++int qrx_appshell_init(void)
++{
++    main_task = FindTask(NULL);
++    wake_bit = AllocSignal(-1);
++    return wake_bit >= 0 ? 0 : -1;
++}
++
++void qrx_appshell_shutdown(void)
++{
++    if (wake_bit >= 0) FreeSignal(wake_bit);
++    wake_bit = -1;
++}
++
++void qrx_appshell_wake(void)
++{
++    if (main_task && wake_bit >= 0) Signal(main_task, 1UL << wake_bit);
++}
++
++void qrx_appshell_add_wait_mask(unsigned long mask) { extra_mask |= mask; }
++
++unsigned qrx_appshell_wait(int may_wait)
++{
++    ULONG wake = wake_bit >= 0 ? 1UL << wake_bit : 0;
++    ULONG mask = wake | extra_mask | SIGBREAKF_CTRL_C;
++    ULONG got = may_wait ? Wait(mask) : SetSignal(0, mask) & mask;
++    unsigned r = 0;
++    if (got & wake) r |= QRX_APPSHELL_GECKO;
++    if (got & SIGBREAKF_CTRL_C) r |= QRX_APPSHELL_BREAK;
++    if (got & extra_mask) r |= QRX_APPSHELL_WINDOW;
++    return r;
++}
+--- /dev/null
++++ b/widget/aros/aros_appshell_glue.h
+@@ -0,0 +1,26 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef widget_aros_appshell_glue_h
++#define widget_aros_appshell_glue_h
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define QRX_APPSHELL_GECKO 1   /* Gecko events are pending */
++#define QRX_APPSHELL_BREAK 2   /* Ctrl-C: the user asks the program to stop */
++#define QRX_APPSHELL_WINDOW 4  /* a window's port has messages */
++
++int qrx_appshell_init(void);
++void qrx_appshell_shutdown(void);
++void qrx_appshell_wake(void);                       /* any thread */
++void qrx_appshell_add_wait_mask(unsigned long mask);
++unsigned qrx_appshell_wait(int may_wait);           /* main thread: QRX_APPSHELL_* bits */
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+--- /dev/null
++++ b/widget/aros/components.conf
+@@ -0,0 +1,69 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++Headers = '/widget/aros/nsWidgetFactory.h',
++
++InitFunc = 'nsWidgetAROSModuleCtor'
++UnloadFunc = 'nsWidgetAROSModuleDtor'
++
++Classes = [
++    {
++        'cid': '{49f428e8-baf9-4ba3-b1b0-7d2fd3abbcea}',
++        'contract_ids': ['@mozilla.org/widget/parent/clipboard;1'],
++        'interfaces': ['nsIClipboard'],
++        'type': 'nsIClipboard',
++        'processes': ProcessSelector.MAIN_PROCESS_ONLY,
++    },
++    {
++        'name': 'GfxInfo',
++        'cid': '{d755a760-9f27-11df-0800-200c9a664242}',
++        'contract_ids': ['@mozilla.org/gfx/info;1'],
++        'type': 'mozilla::widget::GfxInfo',
++        'headers': ['/widget/aros/GfxInfo.h'],
++        'init_method': 'Init',
++    },
++    {
++        'cid': '{2d96b3df-c051-11d1-a827-0040959a28c9}',
++        'contract_ids': ['@mozilla.org/widget/appshell/aros;1'],
++        'legacy_constructor': 'nsAppShellConstructor',
++        'headers': ['/widget/aros/nsWidgetFactory.h'],
++        'processes': ProcessSelector.ALLOW_IN_GPU_RDD_VR_SOCKET_AND_UTILITY_PROCESS,
++    },
++    {
++        'cid': '{8b5314bc-db01-11d2-96ce-0060b0fb9956}',
++        'contract_ids': ['@mozilla.org/widget/transferable;1'],
++        'type': 'nsTransferable',
++        'headers': ['/widget/nsTransferable.h'],
++    },
++    {
++        'cid': '{948a0023-e3a7-11d2-96cf-0060b0fb9956}',
++        'contract_ids': ['@mozilla.org/widget/htmlformatconverter;1'],
++        'type': 'nsHTMLFormatConverter',
++        'headers': ['/widget/nsHTMLFormatConverter.h'],
++    },
++    {
++        'cid': '{77221d5a-1dd2-11b2-8c69-c710f15d2ed5}',
++        'contract_ids': ['@mozilla.org/widget/clipboardhelper;1'],
++        'type': 'nsClipboardHelper',
++        'headers': ['/widget/nsClipboardHelper.h'],
++    },
++    {
++        'cid': '{f0ddedd7-e8d5-4f95-a5b4-0f48f1741b36}',
++        'contract_ids': ['@mozilla.org/gfx/parent/screenmanager;1'],
++        'type': 'mozilla::widget::ScreenManager',
++        'headers': ['mozilla/widget/ScreenManager.h'],
++        'constructor': 'mozilla::widget::ScreenManager::GetAddRefedSingleton',
++        'processes': ProcessSelector.MAIN_PROCESS_ONLY,
++        'singleton': True,
++    },
++    {
++        'cid': '{6987230e-0089-4e78-bc5f-1493ee7519fa}',
++        'contract_ids': ['@mozilla.org/widget/useridleservice;1'],
++        'type': 'nsUserIdleServiceAROS',
++        'headers': ['/widget/aros/nsUserIdleServiceAROS.h'],
++        'constructor': 'nsUserIdleServiceAROS::GetInstance',
++        'singleton': True,
++        'processes': ProcessSelector.ALLOW_IN_GPU_RDD_VR_SOCKET_AND_UTILITY_PROCESS,
++    },
++]
+--- /dev/null
++++ b/widget/aros/moz.build
+@@ -0,0 +1,37 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++# QRX OS One 64 (AROS): the widget backend. First stage: an Exec event loop, fixed look and feel,
++# the windows and clipboard of the headless backend.
++
++with Files("**"):
++    BUG_COMPONENT = ("Core", "Widget")
++
++EXPORTS.mozilla.widget += [
++    "GfxInfo.h",
++]
++
++SOURCES += [
++    "aros_appshell_glue.c",
++    "GfxInfo.cpp",
++    "nsAppShell.cpp",
++    "nsBidiKeyboard.cpp",
++    "nsLookAndFeel.cpp",
++    "nsUserIdleServiceAROS.cpp",
++    "nsWidgetFactory.cpp",
++]
++
++include("/ipc/chromium/chromium-config.mozbuild")
++
++FINAL_LIBRARY = "xul"
++LOCAL_INCLUDES += [
++    "/toolkit/xre",
++    "/widget",
++    "/widget/headless",
++    "/xpcom/components",
++]
++
++XPCOM_MANIFESTS += [
++    "components.conf",
++]
+--- /dev/null
++++ b/widget/aros/nsAppShell.cpp
+@@ -0,0 +1,51 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "nsAppShell.h"
++#include "aros_appshell_glue.h"
++#include "gfxPlatform.h"
++#include "HeadlessScreenHelper.h"
++#include "mozilla/Hal.h"
++#include "mozilla/widget/ScreenManager.h"
++#include "nsCOMPtr.h"
++#include "nsIAppStartup.h"
++#include "nsServiceManagerUtils.h"
++#include "nsXULAppAPI.h"
++
++using namespace mozilla;
++using namespace mozilla::widget;
++
++nsresult nsAppShell::Init() {
++  if (qrx_appshell_init()) return NS_ERROR_FAILURE;
++  hal::Init();
++  if (XRE_IsParentProcess()) {
++    /* the screens: the headless helper until widget/aros has Intuition windows */
++    ScreenManager::GetSingleton().SetHelper(MakeUnique<HeadlessScreenHelper>());
++  }
++  return nsBaseAppShell::Init();
++}
++
++nsAppShell::~nsAppShell() {
++  hal::Shutdown();
++  qrx_appshell_shutdown();
++}
++
++void nsAppShell::ScheduleNativeEventCallback() { qrx_appshell_wake(); }
++
++bool nsAppShell::ProcessNextNativeEvent(bool aMayWait) {
++  unsigned got = qrx_appshell_wait(aMayWait);
++  if (got & QRX_APPSHELL_BREAK) {
++    /* Ctrl-C as on any AROS program: quit the application */
++    nsCOMPtr<nsIAppStartup> appStartup = do_GetService(NS_APPSTARTUP_CONTRACTID);
++    if (appStartup) {
++      bool userAllowedQuit = true;
++      appStartup->Quit(nsIAppStartup::eAttemptQuit, 0, &userAllowedQuit);
++    }
++  }
++  if (got & QRX_APPSHELL_GECKO) {
++    NativeEventCallback();
++    return true;
++  }
++  return got != 0;
++}
+--- /dev/null
++++ b/widget/aros/nsAppShell.h
+@@ -0,0 +1,22 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef widget_aros_nsAppShell_h
++#define widget_aros_nsAppShell_h
++
++#include "nsBaseAppShell.h"
++
++/* QRX OS One 64 (AROS): the main thread waits on Exec signals (aros_appshell_glue.c) */
++class nsAppShell : public nsBaseAppShell {
++ public:
++  nsAppShell() = default;
++  nsresult Init();
++
++ protected:
++  virtual ~nsAppShell();
++  void ScheduleNativeEventCallback() override;
++  bool ProcessNextNativeEvent(bool aMayWait) override;
++};
++
++#endif
+--- /dev/null
++++ b/widget/aros/nsBidiKeyboard.cpp
+@@ -0,0 +1,32 @@
++/*
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "nsBidiKeyboard.h"
++#include "nsIWidget.h"
++
++
++using namespace mozilla::widget;
++
++NS_IMPL_ISUPPORTS(nsBidiKeyboard, nsIBidiKeyboard)
++
++nsBidiKeyboard::nsBidiKeyboard() : nsIBidiKeyboard() { Reset(); }
++
++nsBidiKeyboard::~nsBidiKeyboard() {}
++
++NS_IMETHODIMP nsBidiKeyboard::Reset() { return NS_OK; }
++
++NS_IMETHODIMP nsBidiKeyboard::IsLangRTL(bool* aIsRTL) {
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP nsBidiKeyboard::GetHaveBidiKeyboards(bool* aResult) {
++  // not implemented yet
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++// static
++already_AddRefed<nsIBidiKeyboard> nsIWidget::CreateBidiKeyboardInner() {
++  return do_AddRef(new nsBidiKeyboard());
++}
+--- /dev/null
++++ b/widget/aros/nsBidiKeyboard.h
+@@ -0,0 +1,22 @@
++/*
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef nsBidiKeyboard_h_
++#define nsBidiKeyboard_h_
++
++#include "nsIBidiKeyboard.h"
++
++class nsBidiKeyboard : public nsIBidiKeyboard {
++ public:
++  NS_DECL_ISUPPORTS
++  NS_DECL_NSIBIDIKEYBOARD
++
++  nsBidiKeyboard();
++
++ protected:
++  virtual ~nsBidiKeyboard();
++};
++
++#endif  // nsBidiKeyboard_h_
+--- /dev/null
++++ b/widget/aros/nsLookAndFeel.cpp
+@@ -0,0 +1,215 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "nsLookAndFeel.h"
++#include "nsStyleConsts.h"
++
++/* QRX OS One 64 (AROS): fixed values, those of the headless backend (HeadlessLookAndFeelGTK.cpp);
++ * Intuition has no theme API to ask. */
++
++using namespace mozilla;
++using namespace mozilla::widget;
++
++
++static const char16_t UNICODE_BULLET = 0x2022;
++
++nsLookAndFeel::nsLookAndFeel() = default;
++
++nsLookAndFeel::~nsLookAndFeel() = default;
++
++nsresult nsLookAndFeel::NativeGetColor(ColorID aID, ColorScheme aScheme,
++                                             nscolor& aResult) {
++  aResult = GetStandinForNativeColor(aID, aScheme);
++  return NS_OK;
++}
++
++nsresult nsLookAndFeel::NativeGetInt(IntID aID, int32_t& aResult) {
++  nsresult res = NS_OK;
++  // These values should be sane defaults for headless mode under GTK.
++  switch (aID) {
++    case IntID::CaretBlinkTime:
++      aResult = 567;
++      break;
++    case IntID::CaretWidth:
++      aResult = 1;
++      break;
++    case IntID::SelectTextfieldsOnKeyFocus:
++      aResult = 1;
++      break;
++    case IntID::SubmenuDelay:
++      aResult = 200;
++      break;
++    case IntID::MenusCanOverlapOSBar:
++      aResult = 0;
++      break;
++    case IntID::UseOverlayScrollbars:
++      aResult = 0;
++      break;
++    case IntID::AllowOverlayScrollbarsOverlap:
++      aResult = 0;
++      break;
++    case IntID::SkipNavigatingDisabledMenuItem:
++      aResult = 1;
++      break;
++    case IntID::DragThresholdX:
++    case IntID::DragThresholdY:
++      aResult = 4;
++      break;
++    case IntID::UseAccessibilityTheme:
++      aResult = 0;
++      break;
++    case IntID::ScrollArrowStyle:
++      aResult = eScrollArrow_None;
++      break;
++    case IntID::ScrollButtonLeftMouseButtonAction:
++      aResult = 0;
++      return NS_OK;
++    case IntID::ScrollButtonMiddleMouseButtonAction:
++      aResult = 3;
++      return NS_OK;
++    case IntID::ScrollButtonRightMouseButtonAction:
++      aResult = 3;
++      return NS_OK;
++    case IntID::TreeOpenDelay:
++      aResult = 1000;
++      break;
++    case IntID::TreeCloseDelay:
++      aResult = 1000;
++      break;
++    case IntID::TreeLazyScrollDelay:
++      aResult = 150;
++      break;
++    case IntID::TreeScrollDelay:
++      aResult = 100;
++      break;
++    case IntID::TreeScrollLinesMax:
++      aResult = 3;
++      break;
++    case IntID::ChosenMenuItemsShouldBlink:
++      aResult = 1;
++      break;
++    case IntID::WindowsAccentColorInTitlebar:
++      aResult = 0;
++      res = NS_ERROR_NOT_IMPLEMENTED;
++      break;
++    case IntID::AlertNotificationOrigin:
++      aResult = NS_ALERT_TOP;
++      break;
++    case IntID::ScrollToClick:
++      aResult = 0;
++      break;
++    case IntID::IMERawInputUnderlineStyle:
++    case IntID::IMESelectedRawTextUnderlineStyle:
++    case IntID::IMEConvertedTextUnderlineStyle:
++    case IntID::IMESelectedConvertedTextUnderline:
++      aResult = static_cast<int32_t>(StyleTextDecorationStyle::Solid);
++      break;
++    case IntID::SpellCheckerUnderlineStyle:
++      aResult = static_cast<int32_t>(StyleTextDecorationStyle::Dotted);
++      break;
++    case IntID::MenuBarDrag:
++      aResult = 0;
++      break;
++    case IntID::ScrollbarButtonAutoRepeatBehavior:
++      aResult = 0;
++      break;
++    case IntID::SwipeAnimationEnabled:
++      aResult = 0;
++      break;
++    case IntID::ScrollbarDisplayOnMouseMove:
++      aResult = 0;
++      break;
++    case IntID::ScrollbarFadeBeginDelay:
++      aResult = 0;
++      break;
++    case IntID::ScrollbarFadeDuration:
++      aResult = 0;
++      break;
++    case IntID::ContextMenuOffsetVertical:
++      aResult = -6;
++      break;
++    case IntID::ContextMenuOffsetHorizontal:
++      aResult = 1;
++      break;
++    case IntID::GTKCSDAvailable:
++      aResult = 0;
++      break;
++    case IntID::GTKCSDMinimizeButton:
++      aResult = 0;
++      break;
++    case IntID::GTKCSDMaximizeButton:
++      aResult = 0;
++      break;
++    case IntID::GTKCSDCloseButton:
++      aResult = 1;
++      break;
++    case IntID::GTKCSDReversedPlacement:
++      aResult = 0;
++      break;
++    case IntID::SystemUsesDarkTheme:
++      aResult = 0;
++      break;
++    case IntID::PrefersReducedMotion:
++    case IntID::PrefersReducedTransparency:
++      aResult = 0;
++      break;
++    case IntID::InvertedColors:
++      aResult = 0;
++      break;
++    case IntID::PrimaryPointerCapabilities:
++      aResult = 0;
++      break;
++    case IntID::AllPointerCapabilities:
++      aResult = 0;
++      break;
++    default:
++      aResult = 0;
++      res = NS_ERROR_FAILURE;
++      break;
++  }
++  return res;
++}
++
++nsresult nsLookAndFeel::NativeGetFloat(FloatID aID, float& aResult) {
++  nsresult res = NS_OK;
++
++  // Hardcoded values for GTK.
++  switch (aID) {
++    case FloatID::IMEUnderlineRelativeSize:
++      aResult = 1.0f;
++      break;
++    case FloatID::SpellCheckerUnderlineRelativeSize:
++      aResult = 1.0f;
++      break;
++    case FloatID::CaretAspectRatio:
++      // Intentionally failing to quietly indicate lack of support.
++      aResult = -1.0;
++      res = NS_ERROR_FAILURE;
++      break;
++    default:
++      aResult = -1.0;
++      res = NS_ERROR_FAILURE;
++      break;
++  }
++
++  return res;
++}
++
++bool nsLookAndFeel::NativeGetFont(FontID aID, nsString& aFontName,
++                                        gfxFontStyle& aFontStyle) {
++  // Default to san-serif for everything.
++  aFontStyle.style = FontSlantStyle::NORMAL;
++  aFontStyle.weight = FontWeight::NORMAL;
++  aFontStyle.stretch = FontStretch::NORMAL;
++  aFontStyle.size = 14;
++  aFontStyle.systemFont = true;
++
++  aFontName.AssignLiteral("sans-serif");
++  return true;
++}
++
++char16_t nsLookAndFeel::GetPasswordCharacterImpl() {
++  return UNICODE_BULLET;
++}
++
+--- /dev/null
++++ b/widget/aros/nsLookAndFeel.h
+@@ -0,0 +1,24 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef widget_aros_nsLookAndFeel_h
++#define widget_aros_nsLookAndFeel_h
++
++#include "nsXPLookAndFeel.h"
++
++/* QRX OS One 64 (AROS): fixed values; also HeadlessLookAndFeel on AROS (headless/HeadlessLookAndFeel.h) */
++class nsLookAndFeel final : public nsXPLookAndFeel {
++ public:
++  nsLookAndFeel();
++  virtual ~nsLookAndFeel();
++
++  void NativeInit() final {}
++  nsresult NativeGetInt(IntID aID, int32_t& aResult) override;
++  nsresult NativeGetFloat(FloatID aID, float& aResult) override;
++  nsresult NativeGetColor(ColorID, ColorScheme, nscolor& aResult) override;
++  bool NativeGetFont(FontID aID, nsString& aFontName, gfxFontStyle& aFontStyle) override;
++  char16_t GetPasswordCharacterImpl() override;
++};
++
++#endif
+--- /dev/null
++++ b/widget/aros/nsUserIdleServiceAROS.cpp
+@@ -0,0 +1,7 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "nsUserIdleServiceAROS.h"
++
++bool nsUserIdleServiceAROS::PollIdleTime(uint32_t* aIdleTime) { return false; }
+--- /dev/null
++++ b/widget/aros/nsUserIdleServiceAROS.h
+@@ -0,0 +1,37 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef nsUserIdleServiceAROS_h_
++#define nsUserIdleServiceAROS_h_
++
++#include "nsUserIdleService.h"
++#include "mozilla/AppShutdown.h"
++
++class nsUserIdleServiceAROS : public nsUserIdleService {
++ public:
++  NS_INLINE_DECL_REFCOUNTING_INHERITED(nsUserIdleServiceAROS,
++                                       nsUserIdleService)
++
++  bool PollIdleTime(uint32_t* aIdleTime) override;
++
++  static already_AddRefed<nsUserIdleServiceAROS> GetInstance() {
++    RefPtr<nsUserIdleService> idleService = nsUserIdleService::GetInstance();
++    if (!idleService) {
++      // Avoid late instantiation or resurrection during shutdown.
++      if (mozilla::AppShutdown::IsInOrBeyond(
++              mozilla::ShutdownPhase::AppShutdownConfirmed)) {
++        return nullptr;
++      }
++      idleService = new nsUserIdleServiceAROS();
++    }
++
++    return idleService.forget().downcast<nsUserIdleServiceAROS>();
++  }
++
++ protected:
++  nsUserIdleServiceAROS() {}
++  virtual ~nsUserIdleServiceAROS() {}
++};
++
++#endif  // nsUserIdleServiceAROS_h_
+--- /dev/null
++++ b/widget/aros/nsWidgetFactory.cpp
+@@ -0,0 +1,39 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "nsISupports.h"
++#include "mozilla/Components.h"
++#include "mozilla/ModuleUtils.h"
++#include "mozilla/WidgetUtils.h"
++
++#include "nsWidgetsCID.h"
++#include "nsWidgetFactory.h"
++
++#include "nsAppShell.h"
++#include "nsAppShellSingleton.h"
++#include "nsLookAndFeel.h"
++#include "nsIWidget.h"
++
++#include "HeadlessClipboard.h"
++
++using namespace mozilla;
++using namespace mozilla::widget;
++
++/* QRX OS One 64 (AROS), first stage: the clipboard and the windows of the headless backend; the
++ * Intuition windows of widget/aros come next */
++NS_IMPL_COMPONENT_FACTORY(nsIClipboard) {
++  nsCOMPtr<nsIClipboard> inst = new HeadlessClipboard();
++  return inst.forget();
++}
++
++already_AddRefed<nsIWidget> nsIWidget::CreateTopLevelWindow() { return CreateHeadlessWidget(); }
++already_AddRefed<nsIWidget> nsIWidget::CreateChildWindow() { return CreateHeadlessWidget(); }
++
++void nsWidgetAROSModuleCtor() { nsAppShellInit(); }
++
++void nsWidgetAROSModuleDtor() {
++  WidgetUtils::Shutdown();
++  nsLookAndFeel::Shutdown();
++  nsAppShellShutdown();
++}
+--- /dev/null
++++ b/widget/aros/nsWidgetFactory.h
+@@ -0,0 +1,18 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef widget_aros_nsWidgetFactory_h
++#define widget_aros_nsWidgetFactory_h
++
++#include "nscore.h"
++#include "nsID.h"
++
++class nsISupports;
++
++nsresult nsAppShellConstructor(const nsIID& iid, void** result);
++
++void nsWidgetAROSModuleCtor();
++void nsWidgetAROSModuleDtor();
++
++#endif
