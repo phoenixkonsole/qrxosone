@@ -158,6 +158,17 @@
              return ("-fvisibility=hidden", "-fvisibility-inlines-hidden")
          return (
              "-I%s/system_wrappers" % os.path.join(env.dist),
+--- a/config/external/moz.build
++++ b/config/external/moz.build
+@@ -11,7 +11,7 @@
+     "sqlite",
+ ]
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
++if CONFIG["MOZ_WIDGET_TOOLKIT"] not in ("android", "aros"):  # QRX: its only content (llama.cpp) is left out on AROS
+     DIRS += ["mozinference"]
+ 
+ if CONFIG["MOZ_USING_WASM_SANDBOXING"]:
 --- a/config/external/nspr/pr/moz.build
 +++ b/config/external/nspr/pr/moz.build
 @@ -78,6 +78,14 @@
