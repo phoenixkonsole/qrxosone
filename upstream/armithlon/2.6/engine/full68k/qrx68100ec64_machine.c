@@ -442,9 +442,31 @@ enum qec64_status qec64_machine_run(qec64_machine *m, uint64_t pc, uint64_t sp, 
     m->cpu[0].started = true;
     for (unsigned i = 0; i < m->cores; i++) pthread_create(&m->thread[i], NULL, core_thread, &m->cpu[i]);
     uint64_t limit = now_us() + (uint64_t)(seconds * 1e6);
+    /* QRX_EC64_PCSAMPLE=<file>: every 20 ms each running core's pc, its supervisor flag and the
+     * 16 bytes at the pc (to find the code in a relocated program) and 64 words of its stack,
+     * one line per sample: a
+     * profile for a program that runs too long. The values are read while the cores run. */
+    const char *sample_path = getenv("QRX_EC64_PCSAMPLE");
+    FILE *sample = sample_path ? fopen(sample_path, "w") : NULL;
     pthread_mutex_lock(&m->lock);
     while (!m->stopping && now_us() < limit) {
         struct timespec t;
+        if (sample)
+            for (unsigned i = 0; i < m->cores; i++) {
+                const qec64_cpu *c = &m->cpu[i];
+                uint64_t pc = c->pc;
+                fprintf(sample, "%u %016llx %d", i, (unsigned long long)pc, (int)c->supervisor);
+                for (unsigned k = 0; k < 16 && pc + k < c->ram_size; k++) fprintf(sample, " %02x", c->ram[pc + k]);
+                /* then the stack: 64 big-endian 64-bit words from a7, for return addresses */
+                uint64_t sp = c->a[7];
+                fprintf(sample, " |");
+                for (unsigned k = 0; k < 64 && sp + 8 * k + 8 <= c->ram_size; k++) {
+                    uint64_t v = 0;
+                    for (unsigned b = 0; b < 8; b++) v = v << 8 | c->ram[sp + 8 * k + b];
+                    fprintf(sample, " %llx", (unsigned long long)v);
+                }
+                fputc('\n', sample);
+            }
         clock_gettime(CLOCK_REALTIME, &t);
         t.tv_nsec += 20000000;
         t.tv_sec += t.tv_nsec / 1000000000;
@@ -455,6 +477,7 @@ enum qec64_status qec64_machine_run(qec64_machine *m, uint64_t pc, uint64_t sp, 
     pthread_cond_broadcast(&m->wake);
     pthread_mutex_unlock(&m->lock);
     for (unsigned i = 0; i < m->cores; i++) pthread_join(m->thread[i], NULL);
+    if (sample) fclose(sample);
     if (which) *which = m->end_core;
     return m->end;
 }

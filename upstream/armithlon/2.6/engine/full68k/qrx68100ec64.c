@@ -3,6 +3,8 @@
  * Anything not listed there stops with QEC64_UNIMPLEMENTED rather than guessing. */
 #include "qrx68100ec64.h"
 #include <setjmp.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define XF 0x10
@@ -95,8 +97,24 @@ static void code_written(qec64_cpu *c, uint64_t a, unsigned n)
         __atomic_store_n(&c->code_map[g], 0, __ATOMIC_RELAXED);
     __atomic_fetch_add(c->code_gen, 1, __ATOMIC_SEQ_CST);
 }
+/* QRX_EC64_WATCH=<hex address>: every write that touches the 8 bytes there is logged (pc, size,
+ * value); QRX_EC64_WATCHPC=<hex pc>: every write by that instruction. For the interpreter: run
+ * with QRX_EC64_JIT=0. */
+static uint64_t watch_addr = 1, watch_pc = 1;
+static void watch_check(ctx *x, uint64_t a, unsigned n, uint64_t v)
+{
+    if (watch_addr == 1) {
+        const char *w = getenv("QRX_EC64_WATCH"), *p = getenv("QRX_EC64_WATCHPC");   /* WATCHPC: writes by that pc */
+        watch_addr = w ? strtoull(w, NULL, 16) : 0;
+        watch_pc = p ? strtoull(p, NULL, 16) : 0;
+    }
+    if ((watch_addr && a < watch_addr + 8 && a + n > watch_addr) || (watch_pc && x->start_pc == watch_pc))
+        fprintf(stderr, "[EC64] watch: write %u bytes at %016llx = %llx, pc %016llx\n", n, (unsigned long long)a,
+                (unsigned long long)v, (unsigned long long)x->start_pc);
+}
 static void wr(ctx *x, uint64_t a, unsigned n, uint64_t v)
 {
+    watch_check(x, a, n, v);
     if (__builtin_expect(a >= QEC64_MMIO_BASE, 0)) { v &= size_mask(n); mmio(x, a, n, true, &v); return; }
     uint8_t *p = mem_at(x, a, n);
     if (__builtin_expect(qec64_undo_log != NULL, 0)) undo_note(x->c, a, n);
@@ -1241,7 +1259,25 @@ static bool to_exception(ctx *x)
     enum qec64_status st = c->status;
     c->status = QEC64_RUNNING;
     switch (st) {
-    case QEC64_BUS_FAULT: return take_exception(x, 2, x->start_pc, true, c->fault_addr);
+    case QEC64_BUS_FAULT:
+        if (getenv("QRX_EC64_FAULTLOG")) {      /* the registers as the faulting instruction saw them */
+            fprintf(stderr, "[EC64] bus fault at %016llx, pc %016llx, op %04x pfx %x\n",
+                    (unsigned long long)c->fault_addr, (unsigned long long)x->start_pc, x->op, x->pfx);
+            for (unsigned i = 0; i < 16; i++)
+                fprintf(stderr, "  d%-2u %016llx  a%-2u %016llx\n", i, (unsigned long long)c->d[i], i, (unsigned long long)c->a[i]);
+            for (unsigned i = 0; i < 8; i++) {      /* 32 bytes at each address register */
+                uint64_t a = c->a[i];
+                if (a + 32 > c->ram_size) continue;
+                fprintf(stderr, "  (a%u)", i);
+                for (unsigned k = 0; k < 4; k++) {
+                    uint64_t v = 0;
+                    for (unsigned b = 0; b < 8; b++) v = v << 8 | c->ram[a + 8 * k + b];
+                    fprintf(stderr, " %016llx", (unsigned long long)v);
+                }
+                fputc('\n', stderr);
+            }
+        }
+        return take_exception(x, 2, x->start_pc, true, c->fault_addr);
     case QEC64_UNIMPLEMENTED:
         return take_exception(x, (x->op >> 12) == 0xA ? 10 : (x->op >> 12) == 0xF ? 11 : 4, x->start_pc, false, 0);
     case QEC64_DIVIDE_ZERO: return take_exception(x, 5, pc_here, false, 0);

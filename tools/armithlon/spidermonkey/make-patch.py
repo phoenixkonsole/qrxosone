@@ -9,7 +9,8 @@ out = []
 pairs = []
 for d, _, files in os.walk(top):
     for f in files:
-        if f.endswith('.qrxorig'):
+        # .cargo-checksum.json is not in the patch: fetch.sh recomputes it (fix-checksums.py)
+        if f.endswith('.qrxorig') and f != '.cargo-checksum.json.qrxorig':
             pairs.append(os.path.relpath(os.path.join(d, f[:-8]), top))
 new = []
 nf = os.path.join(top, 'qrx-new-files.txt')

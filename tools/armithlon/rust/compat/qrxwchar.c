@@ -258,3 +258,66 @@ typedef unsigned int qrx_wctrans_t;
 #define wctrans_t qrx_wctrans_t
 wctrans_t wctrans(const char *n) { return !strcmp(n, "tolower") ? 1 : !strcmp(n, "toupper") ? 2 : 0; }
 wint_t towctrans(wint_t c, wctrans_t t) { return t == 1 ? towlower(c) : t == 2 ? towupper(c) : c; }
+
+/*
+ * The string conversions, as the C standard has them. AROS's count only up to len also when dst
+ * is NULL (where len is to be ignored), so asking for the length first, as SpiderMonkey does
+ * (mbsrtowcs(NULL, &s, 0, &st)), gives 0. These use AROS's mbrtowc and wcrtomb, which are right.
+ */
+size_t mbsrtowcs(wchar_t *dst, const char **src, size_t len, mbstate_t *ps)
+{
+    static mbstate_t own;
+    const char *s = *src;
+    size_t n = 0;
+    if (!ps) ps = &own;
+    for (;;) {
+        if (dst && n == len) { *src = s; return n; }
+        wchar_t wc;
+        size_t r = mbrtowc(&wc, s, 8, ps);      /* AROS has MB_LEN_MAX 1 but may run a UTF-8 locale */
+        if (r == (size_t)-1) { if (dst) *src = s; errno = EILSEQ; return (size_t)-1; }
+        if (r == (size_t)-2) { if (dst) *src = s; errno = EILSEQ; return (size_t)-1; }  /* string ends mid character */
+        if (r == 0) {
+            if (dst) { dst[n] = L'\0'; *src = NULL; }
+            return n;
+        }
+        if (dst) dst[n] = wc;
+        s += r; n++;
+    }
+}
+size_t mbstowcs(wchar_t *dst, const char *src, size_t len)
+{
+    mbstate_t st;
+    memset(&st, 0, sizeof st);
+    return mbsrtowcs(dst, &src, len, &st);
+}
+size_t wcsrtombs(char *dst, const wchar_t **src, size_t len, mbstate_t *ps)
+{
+    static mbstate_t own;
+    const wchar_t *s = *src;
+    size_t n = 0;
+    char buf[8];
+    if (!ps) ps = &own;
+    for (;; s++) {
+        mbstate_t before = *ps;
+        size_t r = wcrtomb(buf, *s, ps);
+        if (r == (size_t)-1) { if (dst) *src = s; errno = EILSEQ; return (size_t)-1; }
+        if (*s == L'\0') r--;                  /* the terminator is not counted */
+        if (dst) {
+            if (n + r > len) { *ps = before; *src = s; return n; }
+            memcpy(dst + n, buf, r);
+            if (*s == L'\0') {
+                if (n + r < len) dst[n + r] = 0; else { *ps = before; *src = s; return n + r; }
+                *src = NULL;
+                return n + r;
+            }
+        }
+        n += r;
+        if (*s == L'\0') return n;
+    }
+}
+size_t wcstombs(char *dst, const wchar_t *src, size_t len)
+{
+    mbstate_t st;
+    memset(&st, 0, sizeof st);
+    return wcsrtombs(dst, &src, len, &st);
+}

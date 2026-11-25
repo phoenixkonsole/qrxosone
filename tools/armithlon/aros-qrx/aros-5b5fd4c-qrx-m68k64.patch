@@ -7417,6 +7417,96 @@ index c21238d3..fc0a6354 100644
  #else
  #   error unsupported CPU type
  #endif
+diff --git a/compiler/crt/posixc/include/aros/posixc/sys/mman.h b/compiler/crt/posixc/include/aros/posixc/sys/mman.h
+new file mode 100644
+index 00000000..7f44d32c
+--- /dev/null
++++ b/compiler/crt/posixc/include/aros/posixc/sys/mman.h
+@@ -0,0 +1,54 @@
++#ifndef _POSIXC_SYS_MMAN_H_
++#define _POSIXC_SYS_MMAN_H_
++/*
++    QRX OS One 64: memory mapping. AROS has one address space and no MMU paging for programs, so
++    only anonymous private mappings exist: libqrxaroscompat (tools/armithlon/rust/compat/qrxmman.c)
++    hands out zeroed, page-aligned memory (aligned to 1 MB from 1 MB up, which is what garbage
++    collectors ask for) and frees it again with munmap. Protection changes and advice are accepted
++    and do nothing. Mapping files is not supported (ENODEV).
++*/
++#include <aros/system.h>
++#include <aros/types/size_t.h>
++#include <aros/types/off_t.h>
++
++#define PROT_NONE   0x0
++#define PROT_READ   0x1
++#define PROT_WRITE  0x2
++#define PROT_EXEC   0x4
++
++#define MAP_SHARED     0x0001
++#define MAP_PRIVATE    0x0002
++#define MAP_FIXED      0x0010
++#define MAP_ANON       0x1000
++#define MAP_ANONYMOUS  MAP_ANON
++#define MAP_NORESERVE  0x0040
++#define MAP_FAILED     ((void *)-1)
++
++#define MADV_NORMAL     0
++#define MADV_RANDOM     1
++#define MADV_SEQUENTIAL 2
++#define MADV_WILLNEED   3
++#define MADV_DONTNEED   4
++#define MADV_FREE       5
++#define POSIX_MADV_NORMAL     MADV_NORMAL
++#define POSIX_MADV_RANDOM     MADV_RANDOM
++#define POSIX_MADV_SEQUENTIAL MADV_SEQUENTIAL
++#define POSIX_MADV_WILLNEED   MADV_WILLNEED
++#define POSIX_MADV_DONTNEED   MADV_DONTNEED
++
++#define MS_ASYNC      1
++#define MS_INVALIDATE 2
++#define MS_SYNC       4
++
++__BEGIN_DECLS
++void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
++int munmap(void *addr, size_t len);
++int mprotect(void *addr, size_t len, int prot);
++int madvise(void *addr, size_t len, int advice);
++int posix_madvise(void *addr, size_t len, int advice);
++int msync(void *addr, size_t len, int flags);
++int mlock(const void *addr, size_t len);
++int munlock(const void *addr, size_t len);
++__END_DECLS
++
++#endif /* _POSIXC_SYS_MMAN_H_ */
+diff --git a/compiler/crt/posixc/include/aros/posixc/time.h b/compiler/crt/posixc/include/aros/posixc/time.h
+index 88cddcd4..03631520 100644
+--- a/compiler/crt/posixc/include/aros/posixc/time.h
++++ b/compiler/crt/posixc/include/aros/posixc/time.h
+@@ -54,7 +54,11 @@ char *strptime(const char *, const char *, struct tm *);
+ /* NOTIMPL int timer_gettime(timer_t, struct itimerspec *); */
+ /* NOTIMPL int timer_settime(timer_t, int, const struct itimerspec *,
+                struct itimerspec *); */
++#if defined(__m68k64__)
++void tzset(void);                       /* QRX: libqrxaroscompat (AROS keeps the zone in locale.library) */
++#else
+ /* NOTIMPL void tzset(void); */
++#endif
+ 
+ __END_DECLS
+ 
+diff --git a/compiler/crt/posixc/include/aros/posixc/unistd.h b/compiler/crt/posixc/include/aros/posixc/unistd.h
+index 3859d78b..e6e8f19b 100644
+--- a/compiler/crt/posixc/include/aros/posixc/unistd.h
++++ b/compiler/crt/posixc/include/aros/posixc/unistd.h
+@@ -431,6 +431,9 @@ char *getpass(const char *prompt);
+ pid_t getpgid(pid_t);
+ pid_t getpgrp(void);
+ pid_t vfork(void);
++#if defined(__m68k64__)
++pid_t fork(void);   /* QRX: libqrxaroscompat, fails with ENOSYS (one address space, no copy) */
++#endif
+ int link(const char *name1, const char *name2);
+ int usleep(useconds_t microseconds);
+ #endif
 diff --git a/compiler/crt/posixc/vfwprintf.c b/compiler/crt/posixc/vfwprintf.c
 index 3835fe13..305a276f 100644
 --- a/compiler/crt/posixc/vfwprintf.c
@@ -7511,6 +7601,20 @@ index 17e60324..07f7ef47 100644
  #ifdef __GNUC__
  #define offsetof(type, member)      __builtin_offsetof(type, member)
  #else
+diff --git a/compiler/crt/stdc/include/aros/stdc/string.h b/compiler/crt/stdc/include/aros/stdc/string.h
+index 8fe62c9c..8d55f75f 100644
+--- a/compiler/crt/stdc/include/aros/stdc/string.h
++++ b/compiler/crt/stdc/include/aros/stdc/string.h
+@@ -73,6 +73,9 @@ STDC_STRING_NOTIMPL(
+ char *strerror_l(int, locale_t);
+ int strerror_r(int, char *, size_t);
+ )
++#if defined(__m68k64__)
++int strerror_r(int, char *, size_t);    /* QRX: libqrxaroscompat */
++#endif
+ char *strndup(const char *, size_t);
+ size_t strnlen(const char *, size_t);
+ STDC_STRING_NOTIMPL(
 diff --git a/compiler/crt/stdc/include/aros/stdc/wchar.h b/compiler/crt/stdc/include/aros/stdc/wchar.h
 index 9a11f07e..fb962b8c 100644
 --- a/compiler/crt/stdc/include/aros/stdc/wchar.h
@@ -7788,6 +7892,174 @@ index 6b67c3f4..1e2321a3 100644
  
  struct TagItem
  {
+diff --git a/compiler/pthread/pthread.h b/compiler/pthread/pthread.h
+index 3239e940..4ad70b59 100644
+--- a/compiler/pthread/pthread.h
++++ b/compiler/pthread/pthread.h
+@@ -25,8 +25,16 @@
+ #include <sys/types.h>
+ #include <sys/time.h>
+ #include <errno.h>
++/* QRX OS One 64: code outside AROS's own pthread library sees the lock types as opaque blocks of
++   the same size and alignment (measured with the m68k64 clang), without exec/ headers, whose
++   macros (REGISTER, GLOBAL, ListLength, ...) clash with ordinary C and C++ code */
++#if defined(__m68k64__) && !defined(__QRX_PTHREAD_INTERNAL__)
++#define __QRX_PTHREAD_OPAQUE 1
++#endif
++#ifndef __QRX_PTHREAD_OPAQUE
+ #include <exec/types.h>
+ #include <exec/semaphores.h>
++#endif
+ #include <sched.h>
+ 
+ //
+@@ -144,12 +152,18 @@ struct pthread_mutexattr
+ 
+ typedef struct pthread_mutexattr pthread_mutexattr_t;
+ 
++#ifdef __QRX_PTHREAD_OPAQUE
++struct pthread_mutex { unsigned long long __qrx_opaque[15]; };      /* 120 bytes; kind: the first int */
++struct pthread_cond { unsigned long long __qrx_opaque[17]; };       /* 136 bytes */
++struct pthread_rwlock { unsigned long long __qrx_opaque[13]; };     /* 104 bytes */
++#else
+ struct pthread_mutex
+ {
+     int kind;
+     struct SignalSemaphore semaphore;
+     int incond;
+ };
++#endif
+ 
+ typedef struct pthread_mutex pthread_mutex_t;
+ 
+@@ -163,9 +177,15 @@ typedef struct pthread_mutex pthread_mutex_t;
+ #define NULL_SEMAPHOREREQUEST {NULL_MINNODE, 0}
+ #define NULL_SEMAPHORE {NULL_NODE, 0, NULL_MINLIST, NULL_SEMAPHOREREQUEST, 0, 0}
+ 
++#ifdef __QRX_PTHREAD_OPAQUE
++#define PTHREAD_MUTEX_INITIALIZER {{0}}
++#define PTHREAD_RECURSIVE_MUTEX_INITIALIZER {{(unsigned long long)PTHREAD_MUTEX_RECURSIVE << 32}}
++#define PTHREAD_ERRORCHECK_MUTEX_INITIALIZER {{(unsigned long long)PTHREAD_MUTEX_ERRORCHECK << 32}}
++#else
+ #define PTHREAD_MUTEX_INITIALIZER {PTHREAD_MUTEX_NORMAL, NULL_SEMAPHORE, 0}
+ #define PTHREAD_RECURSIVE_MUTEX_INITIALIZER {PTHREAD_MUTEX_RECURSIVE, NULL_SEMAPHORE, 0}
+ #define PTHREAD_ERRORCHECK_MUTEX_INITIALIZER {PTHREAD_MUTEX_ERRORCHECK, NULL_SEMAPHORE, 0}
++#endif
+ 
+ //
+ // Condition variables
+@@ -178,16 +198,22 @@ struct pthread_condattr
+ 
+ typedef struct pthread_condattr pthread_condattr_t;
+ 
++#ifndef __QRX_PTHREAD_OPAQUE
+ struct pthread_cond
+ {
+     int pad1;
+     struct SignalSemaphore semaphore;
+     struct MinList waiters;
+ };
++#endif
+ 
+ typedef struct pthread_cond pthread_cond_t;
+ 
++#ifdef __QRX_PTHREAD_OPAQUE
++#define PTHREAD_COND_INITIALIZER {{0}}
++#else
+ #define PTHREAD_COND_INITIALIZER {0, NULL_SEMAPHORE, NULL_MINLIST}
++#endif
+ 
+ //
+ // Barriers
+@@ -223,14 +249,20 @@ struct pthread_rwlockattr
+ 
+ typedef struct pthread_rwlockattr pthread_rwlockattr_t;
+ 
++#ifndef __QRX_PTHREAD_OPAQUE
+ struct pthread_rwlock
+ {
+     struct SignalSemaphore semaphore;
+ };
++#endif
+ 
+ typedef struct pthread_rwlock pthread_rwlock_t;
+ 
++#ifdef __QRX_PTHREAD_OPAQUE
++#define PTHREAD_RWLOCK_INITIALIZER {{0}}
++#else
+ #define PTHREAD_RWLOCK_INITIALIZER {NULL_SEMAPHORE}
++#endif
+ 
+ //
+ // Spinlocks
+@@ -439,6 +471,7 @@ int pthread_kill(pthread_t thread, int sig);
+ #define open(...) (pthread_testcancel(), open(__VA_ARGS__))
+ #endif
+ 
++#ifndef __QRX_PTHREAD_OPAQUE   /* QRX: these macros break C++ (std::system(...)); no deferred cancellation here */
+ #ifdef _TIME_H_
+ #define nanosleep(...) (pthread_testcancel(), nanosleep(__VA_ARGS__))
+ #endif
+@@ -450,6 +483,7 @@ int pthread_kill(pthread_t thread, int sig);
+ #ifdef _STDLIB_H_
+ #define system(...) (pthread_testcancel(), system(__VA_ARGS__))
+ #endif
++#endif /* !__QRX_PTHREAD_OPAQUE */
+ 
+ #if defined(CLIB_BSDSOCKET_PROTOS_H) || defined(CLIB_SOCKET_PROTOS_H)
+ #if defined(DEFINES_BSDSOCKET_PROTOS_H) || defined(DEFINES_SOCKET_PROTOS_H)
+diff --git a/compiler/pthread/pthread_intern.h b/compiler/pthread/pthread_intern.h
+index f91f3c55..1759b645 100644
+--- a/compiler/pthread/pthread_intern.h
++++ b/compiler/pthread/pthread_intern.h
+@@ -1,3 +1,5 @@
++/* QRX: AROS's own pthread code sees the real lock structures (pthread.h) */
++#define __QRX_PTHREAD_INTERNAL__
+ /*
+   Copyright (C) 2014 Szilard Biro
+   Copyright (C) 2018 Harry Sintonen
+diff --git a/compiler/pthread/sched.c b/compiler/pthread/sched.c
+index b5274f00..7facfc58 100644
+--- a/compiler/pthread/sched.c
++++ b/compiler/pthread/sched.c
+@@ -1,3 +1,5 @@
++/* QRX: AROS's own pthread code sees the real lock structures (pthread.h) */
++#define __QRX_PTHREAD_INTERNAL__
+ /*
+   Copyright (C) 2014 Szilard Biro
+   Copyright (C) 2018 Harry Sintonen
+diff --git a/compiler/pthread/semaphore.c b/compiler/pthread/semaphore.c
+index a74eb75e..535a5aab 100644
+--- a/compiler/pthread/semaphore.c
++++ b/compiler/pthread/semaphore.c
+@@ -1,3 +1,5 @@
++/* QRX: AROS's own pthread code sees the real lock structures (pthread.h) */
++#define __QRX_PTHREAD_INTERNAL__
+ /*
+     Copyright (C) 2015 Szilard Biro
+     Copyright (C) 2018 Harry Sintonen
+diff --git a/compiler/pthread/semaphore.h b/compiler/pthread/semaphore.h
+index 30756652..90bfa1a1 100644
+--- a/compiler/pthread/semaphore.h
++++ b/compiler/pthread/semaphore.h
+@@ -37,6 +37,9 @@
+ #undef SEM_FAILED
+ #define SEM_FAILED ((sem_t *)(-1))
+ 
++#ifdef __QRX_PTHREAD_OPAQUE
++struct sema { unsigned long long __qrx_opaque[37]; };     /* 296 bytes, see pthread.h */
++#else
+ struct sema
+ {
+     struct Node node;
+@@ -45,6 +48,7 @@ struct sema
+     pthread_mutex_t lock;
+     pthread_cond_t count_nonzero;
+ };
++#endif
+ 
+ typedef struct sema sem_t;
+ 
 diff --git a/configure.in b/configure.in
 index ecfba952..bbb25f8f 100644
 --- a/configure.in
@@ -8345,6 +8617,283 @@ index c4f70888..2183751c 100644
 +  files="shellcommands_init $(FILES)" uselibs="stdc.static"
  
  %common
+diff --git a/workbench/fs/qrxpipe/mmakefile.src b/workbench/fs/qrxpipe/mmakefile.src
+new file mode 100644
+index 00000000..dc7fad42
+--- /dev/null
++++ b/workbench/fs/qrxpipe/mmakefile.src
+@@ -0,0 +1,13 @@
++include $(SRCDIR)/config/aros.cfg
++
++# QRX OS One 64: PIPE: (see qrxpipe-handler.c); build-linux.sh copies this directory to
++# workbench/fs/qrxpipe of the AROS tree.
++
++USER_LDFLAGS := -noclibs -lstdc.static
++
++%build_prog mmake=workbench-fs-qrxpipe \
++	progname=qrxpipe-handler targetdir=$(AROS_FS) \
++	files="qrxpipe-handler" \
++	usestartup=no
++
++%common
+diff --git a/workbench/fs/qrxpipe/qrxpipe-handler.c b/workbench/fs/qrxpipe/qrxpipe-handler.c
+new file mode 100644
+index 00000000..4c766fbe
+--- /dev/null
++++ b/workbench/fs/qrxpipe/qrxpipe-handler.c
+@@ -0,0 +1,252 @@
++/*
++ * qrxpipe-handler: PIPE: for QRX OS One 64 (AROS on the 68100EC64), 64-bit clean.
++ *
++ * AROS's C library makes pipe() from two opens of PIPE:<name> (MODE_NEWFILE for the writer, then
++ * MODE_OLDFILE for the reader), std::process and the shell's redirections use it. The old
++ * pipe-handler in workbench/fs/pipe (1990, K&R C) does not start on this 64-bit system, so this one
++ * replaces it, mounted by DEVS:DOSDrivers/PIPE.
++ *
++ * A pipe is created by the first open of its name and lives until its last opener closes it.
++ * Writes never block: the data goes into a list of chunks. A read with nothing there waits (its
++ * packet is kept) until data arrives or the last writer has closed; then it returns 0 (end of
++ * file). A reader that opens before any writer waits the same way.
++ *
++ * Private packets for libqrxaroscompat (dp_Arg1 = fh_Arg1), answered with ERROR_ACTION_NOT_KNOWN
++ * by every other handler, so they also tell a pipe from anything else:
++ *   ACTION_QRX_PIPE_AVAIL  bytes waiting, or -1 at end of file (poll(); AROS's ACTION_WAIT_CHAR
++ *                          carries no file handle)
++ *   ACTION_QRX_PIPE_NAME   copies the pipe's name to dp_Arg2 (dp_Arg3 bytes): a child process gets
++ *                          its own handle by opening PIPE:<name> again
++ * Every packet's fh_Arg1 is checked against the opens of this handler first.
++ */
++#include <proto/exec.h>
++#include <proto/dos.h>
++#include <exec/memory.h>
++#include <dos/dos.h>
++#include <dos/dosextens.h>
++#include <dos/filehandler.h>
++#include <aros/asmcall.h>
++#include <string.h>
++
++#define ACTION_QRX_PIPE_AVAIL 0x51525001
++#define ACTION_QRX_PIPE_NAME 0x51525002
++#define CHUNK 4096
++#define NAMELEN 108
++
++struct ExecBase *SysBase;
++struct DosLibrary *DOSBase;
++
++struct Chunk { struct Chunk *next; ULONG start, end; UBYTE data[CHUNK]; };
++struct Pipe {
++    struct Pipe *next;
++    char name[NAMELEN];
++    ULONG readers, writers;
++    BOOL had_writer;
++    struct Chunk *head, *tail;
++    ULONG bytes;
++    struct DosPacket *waiting[16];   /* reads waiting for data, in arrival order */
++    ULONG nwait;
++};
++struct Open { struct Open *next; struct Pipe *pipe; LONG mode; };
++static struct Open *opens;          /* every open handle, to check the packets' fh_Arg1 */
++static struct Open *valid(SIPTR a) { for (struct Open *o = opens; o; o = o->next) if ((SIPTR)o == a) return o; return NULL; }
++
++static struct Pipe *pipes;
++
++static struct Pipe *find_pipe(const char *name, BOOL create)
++{
++    struct Pipe *p;
++    for (p = pipes; p; p = p->next)
++        if (!strcmp(p->name, name)) return p;
++    if (!create) return NULL;
++    p = AllocVec(sizeof *p, MEMF_ANY | MEMF_CLEAR);
++    if (!p) return NULL;
++    strncpy(p->name, name, NAMELEN - 1);
++    p->next = pipes;
++    pipes = p;
++    return p;
++}
++static void free_pipe(struct Pipe *p)
++{
++    struct Pipe **pp;
++    struct Chunk *c, *n;
++    for (pp = &pipes; *pp; pp = &(*pp)->next)
++        if (*pp == p) { *pp = p->next; break; }
++    for (c = p->head; c; c = n) { n = c->next; FreeVec(c); }
++    FreeVec(p);
++}
++/* copies up to len bytes out of the pipe */
++static ULONG take(struct Pipe *p, UBYTE *buf, ULONG len)
++{
++    ULONG got = 0;
++    while (got < len && p->head) {
++        struct Chunk *c = p->head;
++        ULONG k = c->end - c->start;
++        if (k > len - got) k = len - got;
++        CopyMem(c->data + c->start, buf + got, k);
++        c->start += k; got += k; p->bytes -= k;
++        if (c->start == c->end) { p->head = c->next; if (!p->head) p->tail = NULL; FreeVec(c); }
++    }
++    return got;
++}
++static LONG put(struct Pipe *p, const UBYTE *buf, ULONG len)
++{
++    ULONG done = 0;
++    while (done < len) {
++        struct Chunk *c = p->tail;
++        if (!c || c->end == CHUNK) {
++            c = AllocVec(sizeof *c, MEMF_ANY);
++            if (!c) return done ? (LONG)done : -1;
++            c->next = NULL; c->start = c->end = 0;
++            if (p->tail) p->tail->next = c; else p->head = c;
++            p->tail = c;
++        }
++        ULONG k = CHUNK - c->end;
++        if (k > len - done) k = len - done;
++        CopyMem((APTR)(buf + done), c->data + c->end, k);
++        c->end += k; done += k; p->bytes += k;
++    }
++    return (LONG)done;
++}
++static BOOL at_eof(struct Pipe *p) { return !p->bytes && !p->writers && p->had_writer; }
++/* answers the waiting reads that can be answered now */
++static void serve(struct Pipe *p)
++{
++    while (p->nwait && (p->bytes || at_eof(p))) {
++        struct DosPacket *dp = p->waiting[0];
++        ULONG n = take(p, (UBYTE *)dp->dp_Arg2, (ULONG)dp->dp_Arg3);
++        memmove(&p->waiting[0], &p->waiting[1], (p->nwait - 1) * sizeof p->waiting[0]);
++        p->nwait--;
++        ReplyPkt(dp, (SIPTR)n, 0);
++    }
++}
++/* the name after the device part, without a trailing /size the old handler accepted */
++static void pipe_name(const char *full, char *out)
++{
++    const char *c = strchr(full, ':');
++    c = c ? c + 1 : full;
++    strncpy(out, c, NAMELEN - 1);
++    out[NAMELEN - 1] = 0;
++    char *slash = strchr(out, '/');
++    if (slash) *slash = 0;
++}
++
++static BOOL do_open(struct DosPacket *dp, LONG mode)
++{
++    struct FileHandle *fh = BADDR(dp->dp_Arg1);
++    char name[NAMELEN];
++    pipe_name((const char *)AROS_BSTR_ADDR(dp->dp_Arg3), name);
++    struct Pipe *p = find_pipe(name, TRUE);
++    struct Open *o = p ? AllocVec(sizeof *o, MEMF_ANY | MEMF_CLEAR) : NULL;
++    if (!o) { if (p && !p->readers && !p->writers) free_pipe(p); SetIoErr(ERROR_NO_FREE_STORE); return FALSE; }
++    o->pipe = p; o->mode = mode;
++    o->next = opens; opens = o;
++    if (mode == ACTION_FINDINPUT) p->readers++;
++    else { p->writers++; p->had_writer = TRUE; if (mode == ACTION_FINDUPDATE) p->readers++; }
++    fh->fh_Arg1 = (SIPTR)o;
++    fh->fh_Port = DOSFALSE;     /* fh_Port is the "interactive" flag here: not interactive */
++    return TRUE;
++}
++static void do_end(struct Open *o)
++{
++    struct Pipe *p = o->pipe;
++    for (struct Open **op = &opens; *op; op = &(*op)->next) if (*op == o) { *op = o->next; break; }
++    if (o->mode == ACTION_FINDINPUT) p->readers--;
++    else { p->writers--; if (o->mode == ACTION_FINDUPDATE) p->readers--; }
++    FreeVec(o);
++    serve(p);                       /* the last writer gone: waiting reads see end of file */
++    if (!p->readers && !p->writers) {
++        while (p->nwait) { ReplyPkt(p->waiting[--p->nwait], 0, 0); }
++        free_pipe(p);
++    }
++}
++
++__startup static AROS_PROCH(qrxpipe_main, argstr, argsize, sysBase)
++{
++    AROS_PROCFUNC_INIT
++    SysBase = sysBase;
++    struct Process *me = (struct Process *)FindTask(NULL);
++    struct MsgPort *port = &me->pr_MsgPort;
++    struct DosPacket *dp;
++
++    DOSBase = (struct DosLibrary *)OpenLibrary("dos.library", 36);
++    WaitPort(port);
++    dp = (struct DosPacket *)GetMsg(port)->mn_Node.ln_Name;
++    if (!DOSBase) { dp->dp_Res1 = DOSFALSE; dp->dp_Res2 = ERROR_NO_FREE_STORE; ReplyMsg(dp->dp_Link); return RETURN_FAIL; }
++    {
++        struct DeviceNode *dn = BADDR(dp->dp_Arg3);
++        if (dn) dn->dn_Task = port;
++    }
++    ReplyPkt(dp, DOSTRUE, 0);
++
++    for (;;) {
++        struct Message *m;
++        WaitPort(port);
++        while ((m = GetMsg(port)) != NULL) {
++            dp = (struct DosPacket *)m->mn_Node.ln_Name;
++            SIPTR r1 = DOSTRUE, r2 = 0;
++            switch (dp->dp_Type) {
++            case ACTION_END: case ACTION_READ: case ACTION_WRITE: case ACTION_QRX_PIPE_AVAIL:
++            case ACTION_QRX_PIPE_NAME:
++                if (!valid(dp->dp_Arg1)) { ReplyPkt(dp, dp->dp_Type == ACTION_END ? DOSFALSE : -1, ERROR_INVALID_LOCK); continue; }
++                break;
++            }
++            switch (dp->dp_Type) {
++            case ACTION_FINDINPUT: case ACTION_FINDOUTPUT: case ACTION_FINDUPDATE:
++                if (!do_open(dp, dp->dp_Type)) { r1 = DOSFALSE; r2 = IoErr(); }
++                break;
++            case ACTION_END:
++                do_end((struct Open *)dp->dp_Arg1);
++                break;
++            case ACTION_READ: {
++                struct Open *o = (struct Open *)dp->dp_Arg1;
++                struct Pipe *p = o->pipe;
++                if (o->mode == ACTION_FINDOUTPUT) { r1 = -1; r2 = ERROR_READ_PROTECTED; break; }
++                if (!dp->dp_Arg3 || p->bytes || at_eof(p)) {
++                    r1 = (SIPTR)take(p, (UBYTE *)dp->dp_Arg2, (ULONG)dp->dp_Arg3);
++                    break;
++                }
++                if (p->nwait == sizeof p->waiting / sizeof p->waiting[0]) { r1 = -1; r2 = ERROR_TASK_TABLE_FULL; break; }
++                p->waiting[p->nwait++] = dp;     /* answered by serve() */
++                continue;
++            }
++            case ACTION_WRITE: {
++                struct Open *o = (struct Open *)dp->dp_Arg1;
++                if (o->mode == ACTION_FINDINPUT) { r1 = -1; r2 = ERROR_WRITE_PROTECTED; break; }
++                r1 = put(o->pipe, (const UBYTE *)dp->dp_Arg2, (ULONG)dp->dp_Arg3);
++                if (r1 < 0) r2 = ERROR_NO_FREE_STORE;
++                serve(o->pipe);
++                break;
++            }
++            case ACTION_QRX_PIPE_AVAIL: {
++                struct Pipe *p = ((struct Open *)dp->dp_Arg1)->pipe;
++                r1 = at_eof(p) ? -1 : (SIPTR)p->bytes;
++                break;
++            }
++            case ACTION_QRX_PIPE_NAME: {
++                struct Pipe *p = ((struct Open *)dp->dp_Arg1)->pipe;
++                if ((ULONG)dp->dp_Arg3 <= strlen(p->name)) { r1 = DOSFALSE; r2 = ERROR_LINE_TOO_LONG; break; }
++                strcpy((char *)dp->dp_Arg2, p->name);
++                break;
++            }
++            case ACTION_WAIT_CHAR:
++                r1 = DOSFALSE;          /* no file handle in this packet; see ACTION_QRX_PIPE_AVAIL */
++                break;
++            case ACTION_IS_FILESYSTEM:
++                r1 = DOSFALSE;
++                break;
++            case ACTION_DELETE_OBJECT:   /* pipe() deletes the name when its second open fails */
++                break;
++            case ACTION_SEEK:
++                r1 = -1; r2 = ERROR_ACTION_NOT_KNOWN;
++                break;
++            default:
++                r1 = DOSFALSE; r2 = ERROR_ACTION_NOT_KNOWN;
++                break;
++            }
++            ReplyPkt(dp, r1, r2);
++        }
++    }
++    return RETURN_OK;
++    AROS_PROCFUNC_EXIT
++}
 diff --git a/workbench/libs/cgfx/mmakefile.src b/workbench/libs/cgfx/mmakefile.src
 index cf5700f0..3780afd1 100644
 --- a/workbench/libs/cgfx/mmakefile.src
