@@ -1,6 +1,6 @@
 --- a/browser/app/moz.build
 +++ b/browser/app/moz.build
-@@ -33,7 +33,8 @@
+@@ -33,8 +33,12 @@
      DIRS += ["macbuild/Contents"]
  
  browser_linkage = "standalone"
@@ -8,8 +8,12 @@
 +if CONFIG["FUZZING_SNAPSHOT"] or CONFIG["AFLFUZZ"] or CONFIG["OS_TARGET"] == "AROS":
 +    # QRX: on AROS libxul is a relocatable object linked into the program (no dlopen)
      browser_linkage = "dependent"
++if CONFIG["OS_TARGET"] == "AROS":
++    # QRX: AROS's Unix path mode (nixmain.o): "/T/x" is T:x, as Gecko's paths expect
++    LDFLAGS += ["-nix"]
  
  if CONFIG["MOZ_NO_PIE_COMPAT"]:
+     GeckoProgram(CONFIG["MOZ_APP_NAME"] + "-bin", linkage=browser_linkage)
 --- a/build/autoconf/config.sub
 +++ b/build/autoconf/config.sub
 @@ -1344,7 +1344,7 @@
