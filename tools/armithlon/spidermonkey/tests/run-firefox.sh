@@ -13,14 +13,12 @@ AROSSRC=${QRX_AROS_SRC:-/opt/qrx-os-one/aros64/src}
 T=$(mktemp -d)
 mkdir -p $T/fonts
 cp $AROSSRC/workbench/fonts/truetype/bitstream/*.ttf $AROSSRC/workbench/fonts/truetype/opensans/*.ttf $T/fonts/
-# dist/bin with the program (Gecko finds its files next to it), without the relocatable "shared
-# libraries" (linked into firefox) and the other programs
-mkdir -p $T/ff
-(cd "$OBJ/dist/bin" && tar -ch --exclude='*.so' --exclude='*.so.deps' --exclude=plugin-container --exclude=xpcshell \
-   --exclude=pingsender --exclude=nsinstall --exclude=certutil --exclude=pk12util --exclude='gmp-*' .) | tar -x -C $T/ff
+# the browser packed as shipped (package-browser.py: omni.ja, browser/omni.ja, the firefox program)
+python3 -I "$HERE/../package-browser.py" "$OBJ/dist/bin" $T/ff
 URL="${QRX_URL:-file:///SYS/Web/qrxrocks/index.html}"
 export QRX_TREES="$T/ff:Firefox $T/fonts:Fonts/TrueType $WEB:Web/qrxrocks"
-export QRX_IMG_MB=${QRX_IMG_MB:-768} QRX_MEM_MB=${QRX_MEM_MB:-3072}
+# the disk image lives in guest memory; the guest boots with at most 2048 MB (qrxboot)
+export QRX_IMG_MB=${QRX_IMG_MB:-600} QRX_MEM_MB=${QRX_MEM_MB:-2048}
 export QRX_PRE='Assign FONTS: SYS:Fonts\nStack 2000000\nSet TMPDIR /T\nSet HOME /T\nMakeDir T:profile\n'
 export QRX_CMD="SYS:Firefox/firefox"
 export QRX_ARGS="--headless --profile /T/profile --screenshot /T/shot.png --window-size 1280,900 $URL\nType T:shot.png HEX"

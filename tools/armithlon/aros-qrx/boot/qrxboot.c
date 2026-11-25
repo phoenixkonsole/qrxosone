@@ -190,7 +190,7 @@ static long long boot(int argc, char **argv, double seconds, unsigned cores, con
     qec64_board_init(&board, ram, ram_size);
     board.cores = cores;
     qec64_machine_set_mmio(m, qec64_board_mmio, &board);
-    static char out[1 << 20];
+    static char out[1 << 24];   /* 16 MB: a browser screenshot comes back as a hex dump */
     unsigned who = 0;
     qec64_machine_console(m, out, sizeof out - 1);
     if (input) qec64_machine_console_input(m, input, strlen(input));
