@@ -20,3 +20,7 @@ mk_add_options MOZ_OBJDIR=/opt/qrx-os-one/gecko/obj-browser
 ac_add_options --disable-audio-backends
 ac_add_options --with-libclang-path=/opt/qrx-os-one/ec64llvm/build/lib
 ac_add_options --disable-ctypes
+# QRX: smaller build (disk and time); none of these exist on AROS or are needed to show pages
+ac_add_options --disable-accessibility
+ac_add_options --disable-ffmpeg
+ac_add_options --disable-negotiateauth
