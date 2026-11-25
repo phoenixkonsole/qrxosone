@@ -280,3 +280,23 @@ int kill(pid_t pid, int sig)
 int mkfifo(const char *path, mode_t mode) { (void)path; (void)mode; errno = ENOSYS; return -1; }
 int lchown(const char *path, uid_t o, gid_t g) { (void)path; (void)o; (void)g; errno = ENOSYS; return -1; }
 int chroot(const char *path) { (void)path; errno = ENOSYS; return -1; }
+
+/* qrx_program_path: the running program's file, as a Unix path (/Volume/dir/file, the form AROS's C
+ * library uses in its *nix mode, see compiler/crt/posixc/__upath.c) when unix is set, else as an
+ * AmigaDOS path (Volume:dir/file). For Gecko's BinaryPath. 0 or -1. */
+int qrx_program_path(char *buf, size_t n, int unix)
+{
+    char dir[1024], name[256];
+    BPTR lock = GetProgramDir();
+    if (!lock || !NameFromLock(lock, (STRPTR)dir, sizeof dir)) return -1;
+    if (!GetProgramName((STRPTR)name, sizeof name)) return -1;
+    const char *file = (const char *)FilePart((CONST_STRPTR)name);
+    char full[1300];
+    snprintf(full, sizeof full, "%s%s%s", dir, dir[strlen(dir) - 1] == ':' ? "" : "/", file);
+    if (!unix) { if (strlen(full) >= n) return -1; strcpy(buf, full); return 0; }
+    char *colon = strchr(full, ':');
+    if (!colon) { if (strlen(full) >= n) return -1; strcpy(buf, full); return 0; }
+    *colon = 0;
+    int k = snprintf(buf, n, "/%s%s%s", full, colon[1] ? "/" : "", colon + 1);
+    return k > 0 && (size_t)k < n ? 0 : -1;
+}

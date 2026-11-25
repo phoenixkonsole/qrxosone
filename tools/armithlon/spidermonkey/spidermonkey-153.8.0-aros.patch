@@ -1,127 +1,3 @@
---- a/Cargo.toml
-+++ b/Cargo.toml
-@@ -5,73 +5,7 @@
- # and do not need to be listed here. Their external dependencies are vendored
- # into `third_party/rust` by `mach vendor rust`.
- members = [
--  "browser/app/nmhproxy/",
-   "js/src/rust",
--  "netwerk/base/idna_glue",
--  "netwerk/test/http3server",
--  "security/lockstore/lockstore_ffi",
--  "security/lockstore/lockstore_rs",
--  "security/manager/ssl/tests/unit/pkcs11testmodule",
--  "security/manager/ssl/tests/unit/test_trust_anchors",
--  "services/app-services-tools/embedded-uniffi-bindgen",
--  "services/app-services-tools/nimbus-fml",
--  "testing/geckodriver",
--  "third_party/application-services/tools/embedded-uniffi-bindgen",
--  "third_party/application-services/tools/uniffi-bindgen-library-mode",
--  "third_party/application-services/components/ads-client",
--  "third_party/application-services/components/autofill",
--  "third_party/application-services/components/context_id",
--  "third_party/application-services/components/crashtest",
--  "third_party/application-services/components/example",
--  "third_party/application-services/components/filter_adult",
--  "third_party/application-services/components/fxa-client",
--  "third_party/application-services/components/init_rust_components",
--  "third_party/application-services/components/logins",
--  "third_party/application-services/components/merino",
--  "third_party/application-services/components/places",
--  "third_party/application-services/components/push",
--  "third_party/application-services/components/relay",
--  "third_party/application-services/components/relevancy",
--  "third_party/application-services/components/remote_settings",
--  "third_party/application-services/components/search",
--  "third_party/application-services/components/suggest",
--  "third_party/application-services/components/support/error",
--  "third_party/application-services/components/support/find-places-db",
--  "third_party/application-services/components/support/firefox-versioning",
--  "third_party/application-services/components/support/guid",
--  "third_party/application-services/components/support/interrupt",
--  "third_party/application-services/components/support/jwcrypto",
--  "third_party/application-services/components/support/payload",
--  "third_party/application-services/components/support/nimbus-fml",
--  "third_party/application-services/components/support/rand_rccrypto",
--  "third_party/application-services/components/support/rate-limiter",
--  "third_party/application-services/components/support/restmail-client",
--  "third_party/application-services/components/support/rc_crypto",
--  "third_party/application-services/components/support/rc_crypto/nss",
--  "third_party/application-services/components/support/rc_crypto/nss/nss_build_common",
--  "third_party/application-services/components/support/rc_crypto/nss/nss_sys",
--  "third_party/application-services/components/support/rust-log-forwarder",
--  "third_party/application-services/components/support/sql",
--  "third_party/application-services/components/support/text-table",
--  "third_party/application-services/components/support/tracing",
--  "third_party/application-services/components/support/types",
--  "third_party/application-services/components/sync_manager",
--  "third_party/application-services/components/sync15",
--  "third_party/application-services/components/tabs",
--  "third_party/application-services/components/viaduct",
--  "third_party/application-services/components/webext-storage",
--  "third_party/application-services/components/webext-storage/ffi",
--  "third_party/application-services/megazords/full",
--  "toolkit/components/uniffi-bindgen-gecko-js",
--  "toolkit/crashreporter/android/export",
--  "toolkit/crashreporter/client/app",
--  "toolkit/crashreporter/crash_helper_server",
--  "toolkit/crashreporter/crash_helper_client",
--  "toolkit/crashreporter/crashping",
--  "toolkit/crashreporter/mozwer-rust",
--  "toolkit/library/gtest/rust",
--  "toolkit/library/rust/",
--  "services/application-services/components/viaduct-necko",
-   "js/src/builtin/normalizer_glue",
- ]
- 
-@@ -345,7 +279,6 @@
- rusqlite = { path = "build/rust/rusqlite" }
- 
- # Overrides to allow easier use of common internal crates.
--moz_asserts = { path = "mozglue/static/rust/moz_asserts" }
- 
- # Patch `rure` to disable building the cdylib and staticlib targets
- # Cargo has no way to disable building targets your dependencies provide which
-@@ -364,16 +297,12 @@
- # Other overrides
- any_all_workaround = { git = "https://github.com/hsivonen/any_all_workaround", rev = "7fb1b7034c9f172aade21ee1c8554e8d8a48af80" }
- cose = { git = "https://github.com/franziskuskiefer/cose-rust", rev = "43c22248d136c8b38fe42ea709d08da6355cf04b" }
--firefox-on-glean = { path = "toolkit/components/glean/api" }
- icu_capi = { path = "intl/icu_capi" }
- icu_segmenter_data = { path = "intl/icu_segmenter_data" }
--libudev-sys = { path = "dom/webauthn/libudev-sys" }
- midir = { git = "https://github.com/mozilla/midir.git", rev = "54759f681f3b523e120d047adec2bb1a97152017" }
- # Allow webrender to have a versioned dependency on the older crate on crates.io
- # in order to build standalone.
--malloc_size_of_derive = { path = "xpcom/rust/malloc_size_of_derive" }
- # Use the in-tree code instead of pulling it in. It matches the crates.io version
--wr_malloc_size_of = { path = "gfx/wr/wr_malloc_size_of" }
- # Remove HarfBuzz itself from harfbuzz-sys, since we already maintain HarfBuzz itself in the tree.
- harfbuzz-sys = { git = "https://github.com/hsivonen/rust-harfbuzz", rev = "9d58a23a98772a197291d04af93f7041b7093d95" }
- # Make `harfbuzz` compile for targets with unsigned C char, such as aarch64 Android.
-@@ -388,22 +317,6 @@
- allocator-api2 = { git = "https://github.com/glandium/allocator-api2", rev = "ad5f3d56a5a4519eff52af4ff85293431466ef5c" }
- 
- # application-services overrides to make updating them all simpler.
--context_id = { path = "third_party/application-services/components/context_id" }
--error-support = { path = "third_party/application-services/components/support/error" }
--filter_adult = { path = "third_party/application-services/components/filter_adult" }
--interrupt-support = { path = "third_party/application-services/components/support/interrupt" }
--relevancy = { path = "third_party/application-services/components/relevancy" }
--search = { path = "third_party/application-services/components/search" }
--sql-support = { path = "third_party/application-services/components/support/sql" }
--suggest = { path = "third_party/application-services/components/suggest" }
--sync15 = { path = "third_party/application-services/components/sync15" }
--tabs = { path = "third_party/application-services/components/tabs" }
--tracing-support = { path = "third_party/application-services/components/support/tracing" }
--viaduct = { path = "third_party/application-services/components/viaduct" }
--webext-storage = { path = "third_party/application-services/components/webext-storage" }
--logins = { path = "third_party/application-services/components/logins" }
--init_rust_components = { path = "third_party/application-services/components/init_rust_components" }
--breach-alerts = { path = "third_party/application-services/components/breach-alerts" }
- # temporary ohttp override enabling app-services build-related hacks while we wait for a new version.
- ohttp = { git = "https://github.com/martinthomson/ohttp", revision = "324f876e79394c9b815dcacda3fd4f48f105fdf2" }
- 
 --- a/build/autoconf/config.sub
 +++ b/build/autoconf/config.sub
 @@ -1344,7 +1344,7 @@
@@ -241,6 +117,14 @@
  elif CONFIG["OS_TARGET"] == "WINNT":
      OS_LIBS += [
          "advapi32",
+@@ -252,6 +260,7 @@
+ ]
+ 
+ EXPORTS.nspr.md += [
++    "/nsprpub/pr/include/md/_aros.cfg",
+     "/nsprpub/pr/include/md/_darwin.cfg",
+     "/nsprpub/pr/include/md/_freebsd.cfg",
+     "/nsprpub/pr/include/md/_linux.cfg",
 --- a/config/external/nspr/prcpucfg.h
 +++ b/config/external/nspr/prcpucfg.h
 @@ -23,6 +23,8 @@
@@ -953,6 +837,33 @@
      DIRS += [toolkit]
  
  if toolkit == "cocoa":
+--- a/xpcom/build/BinaryPath.h
++++ b/xpcom/build/BinaryPath.h
+@@ -4,6 +4,10 @@
+ 
+ #ifndef mozilla_BinaryPath_h
+ #define mozilla_BinaryPath_h
++
++#if defined(__AROS__)
++extern "C" int qrx_program_path(char* aBuf, size_t aSize, int aUnix);
++#endif
+ 
+ #include "nsXPCOMPrivate.h"  // for MAXPATHLEN
+ #ifdef XP_WIN
+@@ -271,6 +275,13 @@
+     return NS_ERROR_FAILURE;
+   }
+ 
++#elif defined(__AROS__)
++  /* QRX OS One 64: the program's file from AROS (GetProgramDir, GetProgramName) through
++   * libqrxaroscompat, as a Unix path: Gecko runs with AROS's C library in its *nix mode (nixmain) */
++  static nsresult Get(char aResult[MAXPATHLEN]) {
++    return qrx_program_path(aResult, MAXPATHLEN, 1) == 0 ? NS_OK : NS_ERROR_FAILURE;
++  }
++
+ #else
+ #  error Oops, you need platform-specific code here
+ #endif
 --- /dev/null
 +++ b/nsprpub/pr/include/md/_aros.cfg
 @@ -0,0 +1,114 @@
