@@ -1,0 +1,3 @@
+# cargo build output of the guest tests
+*/target/
+*/Cargo.lock
