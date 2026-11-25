@@ -14,8 +14,16 @@ W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
 mkdir -p "$W/src"
 printf '[package]\nname = "qrxsysroot"\nversion = "0.1.0"\nedition = "2021"\n[lib]\npath = "src/lib.rs"\n' > "$W/Cargo.toml"
 echo '#![no_std]' > "$W/src/lib.rs"
+# like x.py's rustc shim: panic_abort itself is compiled with the abort strategy, the rest unwinds
+cat > "$W/rustc-wrap" <<'EOS'
+#!/bin/sh
+r="$1"; shift
+case " $* " in *" --crate-name panic_abort "*) exec "$r" "$@" -C panic=abort;; esac
+exec "$r" "$@"
+EOS
+chmod +x "$W/rustc-wrap"
 cd "$W"
-RUSTC="$RUSTC" RUSTC_BOOTSTRAP=1 RUST_TARGET_PATH="$HERE" RUSTFLAGS=-Zunstable-options \
+RUSTC_WRAPPER="$W/rustc-wrap" RUSTC="$RUSTC" RUSTC_BOOTSTRAP=1 RUST_TARGET_PATH="$HERE" RUSTFLAGS=-Zunstable-options \
   "$CARGO" build --release --target $T -Zbuild-std=std,panic_unwind,panic_abort
 D="$R/build/host/stage1/lib/rustlib/$T/lib"
 rm -rf "$D"; mkdir -p "$D"
