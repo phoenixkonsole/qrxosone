@@ -288,3 +288,10 @@ int pthread_sigmask(int how, const sigset_t *set, sigset_t *old)
 }
 /* alarm: AROS's C library delivers no SIGALRM; no alarm is set, there was none before (0) */
 unsigned alarm(unsigned seconds) { (void)seconds; return 0; }
+
+/* qrx_avail_mem: free memory and the largest free block (exec AvailMem), for diagnostics */
+void qrx_avail_mem(unsigned long *total_free, unsigned long *largest)
+{
+    *total_free = (unsigned long)AvailMem(MEMF_ANY);
+    *largest = (unsigned long)AvailMem(MEMF_ANY | MEMF_LARGEST);
+}
