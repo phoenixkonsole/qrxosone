@@ -10,5 +10,5 @@ SDK=${QRX_SDK:-/opt/qrx-os-one/aros64/build-qrx/bin/native-m68k64/AROS/Developme
 export RUSTC=$R/build/host/stage1/bin/rustc RUSTC_BOOTSTRAP=1 RUST_TARGET_PATH=$(cd ../.. && pwd)
 export RUSTFLAGS="-Zunstable-options -Clink-arg=$SDK/lib/nixmain.o"
 export PATH=$SDK/../../../linux-x86_64/tools:$PATH
-$R/build/x86_64-unknown-linux-gnu/stage0/bin/cargo build --offline --release --target m68k64-unknown-aros
+$R/build/x86_64-unknown-linux-gnu/stage0/bin/cargo build --release --target m68k64-unknown-aros
 QRX_PRE='Set TMPDIR /T\n' ../run-guest.sh target/m68k64-unknown-aros/release/cratetest

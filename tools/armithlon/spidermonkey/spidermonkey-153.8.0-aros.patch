@@ -5193,6 +5193,30 @@
  
  if CONFIG["OS_ARCH"] == "GNU":
      if CONFIG["TARGET_CPU"] == "x86":
+--- a/xpcom/string/RustStringAPI.cpp
++++ b/xpcom/string/RustStringAPI.cpp
+@@ -114,8 +114,19 @@
+ uint32_t Gecko_StartBulkWriteString(nsAString* aThis, uint32_t aCapacity,
+                                     uint32_t aUnitsToPreserve,
+                                     bool aAllowShrinking) {
+-  return aThis->StartBulkWriteImpl(aCapacity, aUnitsToPreserve, aAllowShrinking)
+-      .unwrapOr(UINT32_MAX);
++  uint32_t r =
++      aThis->StartBulkWriteImpl(aCapacity, aUnitsToPreserve, aAllowShrinking)
++          .unwrapOr(UINT32_MAX);
++#ifdef __AROS__
++  // QRX: diagnostics for a failing UTF-8 to UTF-16 append
++  static int sCalls = 0;
++  if (r == UINT32_MAX || sCalls < 3) {
++    sCalls++;
++    printf_stderr("Gecko_StartBulkWriteString(%p, cap %u, keep %u, shrink %d) = %u\n",
++                  aThis, aCapacity, aUnitsToPreserve, (int)aAllowShrinking, r);
++  }
++#endif
++  return r;
+ }
+ 
+ }  // extern "C"
 --- a/xpcom/threads/nsProcessCommon.cpp
 +++ b/xpcom/threads/nsProcessCommon.cpp
 @@ -425,8 +425,10 @@

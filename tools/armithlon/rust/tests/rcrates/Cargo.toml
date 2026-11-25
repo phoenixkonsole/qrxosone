@@ -11,6 +11,7 @@ libloading = "=0.8.6"
 mtu = "=0.4.1"
 rand = "=0.8.6"
 tempfile = "=3.27.0"
+encoding_rs = "=0.8.40"
 
 [patch.crates-io]
 cmake = { path = "/opt/qrx-os-one/gecko/firefox-153.8.0/build/rust/cmake" }

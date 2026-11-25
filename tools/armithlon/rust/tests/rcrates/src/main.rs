@@ -120,5 +120,18 @@ fn main() {
         Ok(v) => check("mtu", false, format!("unexpected {:?}", v), &mut f),
         Err(e) => check("mtu", true, format!("error as expected: {e}"), &mut f),
     }
+    // encoding_rs: Gecko's UTF-8 -> UTF-16 conversion (nsLocalFile::GetPath and every string)
+    {
+        let src = "/QRXSYS/Firefox";
+        let mut dst = [0u16; 32];
+        let n = encoding_rs::mem::convert_utf8_to_utf16(src.as_bytes(), &mut dst);
+        let back = String::from_utf16_lossy(&dst[..n]);
+        let valid = encoding_rs::mem::utf8_latin1_up_to(src.as_bytes());
+        check("encoding_rs utf8->utf16", n == src.len() && back == src, format!("{} units {:?}, latin1_up_to {}", n, back, valid), &mut f);
+        let umlaut = "Grüße, 世界";
+        let mut d2 = [0u16; 32];
+        let n2 = encoding_rs::mem::convert_utf8_to_utf16(umlaut.as_bytes(), &mut d2);
+        check("encoding_rs non-ASCII", String::from_utf16_lossy(&d2[..n2]) == umlaut, format!("{} units", n2), &mut f);
+    }
     println!("{}", if f == 0 { "CRATES ALL PASS".to_string() } else { format!("CRATES {f} FAILED") });
 }
