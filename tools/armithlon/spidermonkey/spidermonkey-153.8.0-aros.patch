@@ -1461,6 +1461,20 @@
  #define ABSL_HAVE_MMAP 1
  #endif
  
+--- a/third_party/abseil-cpp/absl/base/internal/thread_identity.h
++++ b/third_party/abseil-cpp/absl/base/internal/thread_identity.h
+@@ -148,7 +148,11 @@
+ 
+   // Private: Reserved for absl::synchronization_internal::Waiter.
+   struct WaiterState {
++#ifdef __AROS__
++    alignas(void*) char data[512];  // QRX: AROS pthread mutex + cond are 256 bytes
++#else
+     alignas(void*) char data[256];
++#endif
+   } waiter_state;
+ 
+   // Used by PerThreadSem::{Get,Set}ThreadBlockedCounter().
 --- a/third_party/abseil-cpp/absl/debugging/internal/elf_mem_image.h
 +++ b/third_party/abseil-cpp/absl/debugging/internal/elf_mem_image.h
 @@ -35,7 +35,8 @@
@@ -1473,6 +1487,26 @@
  #define ABSL_HAVE_ELF_MEM_IMAGE 1
  #endif
  
+--- a/third_party/abseil-cpp/absl/log/internal/log_message.cc
++++ b/third_party/abseil-cpp/absl/log/internal/log_message.cc
+@@ -357,7 +357,7 @@
+   return *this;
+ }
+ 
+-#ifdef __ELF__
++#if defined(__ELF__) && !defined(__AROS__)  // QRX: AROS resolves no weak undefined symbols
+ extern "C" void __gcov_dump() ABSL_ATTRIBUTE_WEAK;
+ extern "C" void __gcov_flush() ABSL_ATTRIBUTE_WEAK;
+ #endif
+@@ -370,7 +370,7 @@
+   __debugbreak();
+ #endif
+ 
+-#ifdef __ELF__
++#if defined(__ELF__) && !defined(__AROS__)
+   // For b/8737634, flush coverage if we are in coverage mode.
+   if (&__gcov_dump != nullptr) {
+     __gcov_dump();
 --- a/third_party/rust/errno/src/unix.rs
 +++ b/third_party/rust/errno/src/unix.rs
 @@ -88,6 +88,8 @@

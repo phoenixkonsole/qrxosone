@@ -7901,10 +7901,10 @@ index 76e58e6c..17b9b22e 100644
  
  __END_DECLS
 diff --git a/compiler/crt/posixc/include/aros/posixc/time.h b/compiler/crt/posixc/include/aros/posixc/time.h
-index 88cddcd4..03631520 100644
+index 88cddcd4..2eca2e73 100644
 --- a/compiler/crt/posixc/include/aros/posixc/time.h
 +++ b/compiler/crt/posixc/include/aros/posixc/time.h
-@@ -54,7 +54,11 @@ char *strptime(const char *, const char *, struct tm *);
+@@ -54,8 +54,13 @@ char *strptime(const char *, const char *, struct tm *);
  /* NOTIMPL int timer_gettime(timer_t, struct itimerspec *); */
  /* NOTIMPL int timer_settime(timer_t, int, const struct itimerspec *,
                 struct itimerspec *); */
@@ -7914,12 +7914,23 @@ index 88cddcd4..03631520 100644
  /* NOTIMPL void tzset(void); */
 +#endif
  
++time_t timegm(struct tm *);   /* QRX: libqrxaroscompat */
  __END_DECLS
  
+ #endif /* _POSIXC_TIME_H_ */
 diff --git a/compiler/crt/posixc/include/aros/posixc/unistd.h b/compiler/crt/posixc/include/aros/posixc/unistd.h
-index 3859d78b..edb1cd7b 100644
+index 3859d78b..05cc84d4 100644
 --- a/compiler/crt/posixc/include/aros/posixc/unistd.h
 +++ b/compiler/crt/posixc/include/aros/posixc/unistd.h
+@@ -44,7 +44,7 @@
+ #define _POSIX_MEMLOCK_RANGE                -1
+ #define _POSIX_MEMORY_PROTECTION            -1
+ #define _POSIX_MESSAGE_PASSING              -1
+-#define _POSIX_MONOTONIC_CLOCK              -1
++#define _POSIX_MONOTONIC_CLOCK              0   /* QRX: clock_gettime(CLOCK_MONOTONIC) works */
+ #define _POSIX_NO_TRUNC                     1
+ #define _POSIX_PRIORITIZED_IO               -1
+ #define _POSIX_PRIORITY_SCHEDULING          -1
 @@ -431,14 +431,38 @@ char *getpass(const char *prompt);
  pid_t getpgid(pid_t);
  pid_t getpgrp(void);

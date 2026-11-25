@@ -324,3 +324,18 @@ int pthread_condattr_setclock(pthread_condattr_t *attr, clockid_t clock)
     (void)attr;
     return clock == CLOCK_REALTIME ? 0 : EINVAL;
 }
+
+/* timegm: struct tm in UTC to seconds since the epoch (days from civil date, H. Hinnant) */
+time_t timegm(struct tm *tm)
+{
+    long long y = (long long)tm->tm_year + 1900, m = tm->tm_mon + 1;
+    y += m > 12 ? (m - 1) / 12 : (m < 1 ? (m - 12) / 12 : 0);
+    m = ((m - 1) % 12 + 12) % 12 + 1;
+    y -= m <= 2;
+    long long era = (y >= 0 ? y : y - 399) / 400;
+    long long yoe = y - era * 400;
+    long long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + tm->tm_mday - 1;
+    long long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    long long days = era * 146097 + doe - 719468;
+    return (time_t)(days * 86400 + tm->tm_hour * 3600LL + tm->tm_min * 60LL + tm->tm_sec);
+}
