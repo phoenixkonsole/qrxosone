@@ -830,6 +830,29 @@
            }
          }
          if (region.GetExtendMode() != gfx::ExtendMode::CLAMP) {
+--- a/image/remote/RemoteImageProtocolHandler.cpp
++++ b/image/remote/RemoteImageProtocolHandler.cpp
+@@ -3,6 +3,7 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "RemoteImageProtocolHandler.h"
++#include "nsIXULRuntime.h"
+ 
+ #include "gfxContext.h"
+ #include "gfxUtils.h"
+@@ -94,6 +95,12 @@
+                                const Maybe<ContentParentId> aContentParentId,
+                                ColorScheme aColorScheme,
+                                nsIAsyncOutputStream* aOutputStream) {
++  // Without content processes (QRX OS One 64: MOZ_FORCE_DISABLE_E10S) there is none to decode in;
++  // launching one would stop the browser. The image is then missing, as for a failed decode.
++  if (!mozilla::BrowserTabsRemoteAutostart()) {
++    aOutputStream->CloseWithStatus(NS_ERROR_NOT_AVAILABLE);
++    return;
++  }
+   UniqueContentParentKeepAlive cp =
+       GetLaunchingContentParentForDecode(aContentParentId);
+   if (NS_WARN_IF(!cp)) {
 --- a/intl/icu/source/common/putilimp.h
 +++ b/intl/icu/source/common/putilimp.h
 @@ -134,7 +134,7 @@
