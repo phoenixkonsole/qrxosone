@@ -8868,6 +8868,50 @@ index 36c15163..3db52ff6 100644
              APTR vectors;
              APTR structure;
              ULONG_FUNC init;
+diff --git a/rom/filesys/afs/filehandles1.c b/rom/filesys/afs/filehandles1.c
+index b699dfbe..31e16707 100644
+--- a/rom/filesys/afs/filehandles1.c
++++ b/rom/filesys/afs/filehandles1.c
+@@ -250,6 +250,13 @@ UBYTE buffer[32];
+                         pos = buffer;
+                         while ((*name != 0) && (*name != '/'))
+                         {
++                                /* QRX: a component longer than a name can be is not on the disk;
++                                 * copying it on would run over buffer and the caller's stack */
++                                if (pos == buffer + sizeof(buffer) - 1)
++                                {
++                                        *error = ERROR_OBJECT_NOT_FOUND;
++                                        return NULL;
++                                }
+                                 *pos++ = *name++;
+                         }
+                         if (*name == '/')
+diff --git a/rom/filesys/afs/filehandles2.c b/rom/filesys/afs/filehandles2.c
+index 2a961c41..88178d6d 100644
+--- a/rom/filesys/afs/filehandles2.c
++++ b/rom/filesys/afs/filehandles2.c
+@@ -454,9 +454,21 @@ UBYTE buffer[256];
+         end = PathPart(name);
+         if (end[0] == '/')
+                 end++;
++        /* QRX: entryname is a buffer of 34 bytes in every caller, and a file system name has at
++         * most 30 characters; longer names or paths were copied on over the caller's stack */
++        if ((ULONG)(end-name) >= sizeof(buffer))
++        {
++                *error = ERROR_LINE_TOO_LONG;
++                return NULL;
++        }
+         CopyMem(name, buffer, end-name);
+         buffer[end-name] = 0;
+         len = strlen(name)+name-end;
++        if (len > 30)
++        {
++                *error = ERROR_INVALID_COMPONENT_NAME;
++                return NULL;
++        }
+         CopyMem(end, entryname, len);   /* skip slash or colon */
+         entryname[len] = 0;
+         return findBlock(afsbase, ah, buffer, &block, error);
 diff --git a/rom/intuition/intuition_intern.h b/rom/intuition/intuition_intern.h
 index b38f24da..a2f7f51a 100644
 --- a/rom/intuition/intuition_intern.h

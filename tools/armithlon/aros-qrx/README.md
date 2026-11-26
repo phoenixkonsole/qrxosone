@@ -287,4 +287,8 @@ Two `bench` at once take as long on 4 cores as on 1: a new task stays on the cor
   spinlock fail hook (task spinning) is not used.
 - Found on the way, fixed in the patch: big-endian 64-bit bugs in AROS that little-endian x86_64 hides
   (the AutoInit table size read as ULONG, a 32-bit `Tag` at the start of IPTR tag arrays), and
-  task.resource putting back vectors it never patched.
+  task.resource putting back vectors it never patched. afs.handler copied path components and new
+  names into 32- and 34-byte stack buffers without a length check: Firefox's profile has longer
+  names, which ran over the handler's stack and left eight characters of a hex file name as the key
+  of a lock (a bus fault in examine). Longer names are now ERROR_OBJECT_NOT_FOUND on lookup and
+  ERROR_INVALID_COMPONENT_NAME on create; the Fast File System keeps at most 30 characters.
