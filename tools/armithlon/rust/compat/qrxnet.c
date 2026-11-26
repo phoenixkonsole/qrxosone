@@ -100,6 +100,8 @@ int __get_default_file(int fd, long *fh);
 int qrx_is_shm_fd(int fd);             /* qrxshm.c */
 int qrx_shm_close(int fd);
 int qrx_shm_fcntl(int fd, int cmd, long arg);
+void qrx_fd_lock(void);           /* qrxfd.c */
+void qrx_fd_unlock(void);
 
 /* pend_err: an error the host reported with a poll. Its poll reads SO_ERROR, which clears it on
  * the host, so it is kept here until getsockopt(SO_ERROR) or connect takes it. */
@@ -491,7 +493,13 @@ int close(int fd)
 {
     if (fd >= 0 && fd < NB_FDS) file_nonblock[fd] = 0;
     if (qrx_is_shm_fd(fd)) return qrx_shm_close(fd);
-    if (!is_sockfd(fd)) return __close_CrtBase_wrapper(fd);
+    if (!is_sockfd(fd)) {
+        qrx_fd_lock();
+        int r = __close_CrtBase_wrapper(fd), e = errno;
+        qrx_fd_unlock();
+        errno = e;
+        return r;
+    }
     int s = sock_of(fd);
     if (s < 0) { errno = EBADF; return -1; }
     BLOCK(q);
@@ -616,6 +624,13 @@ int fcntl(int fd, int cmd, ...)
             return 0;
         }
         if (cmd == F_GETLK || cmd == F_SETLK || cmd == F_SETLKW) return file_lock(fd, cmd, (struct flock *)arg);
+        if (cmd == F_DUPFD) {
+            qrx_fd_lock();
+            int r = __fcntl_CrtBase_wrapper(fd, cmd, arg), e = errno;
+            qrx_fd_unlock();
+            errno = e;
+            return r;
+        }
         return __fcntl_CrtBase_wrapper(fd, cmd, arg);
     }
     int s = sock_of(fd);

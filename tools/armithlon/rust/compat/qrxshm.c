@@ -141,9 +141,11 @@ int fstat(int fd, struct stat *st)
     st->st_blksize = 4096;
     return 0;
 }
+void qrx_fd_lock(void);           /* qrxfd.c */
+void qrx_fd_unlock(void);
 int dup(int fd)
 {
-    if (!qrx_is_shm_fd(fd)) return __dup_CrtBase_wrapper(fd);
+    if (!qrx_is_shm_fd(fd)) { qrx_fd_lock(); int r = __dup_CrtBase_wrapper(fd), e = errno; qrx_fd_unlock(); errno = e; return r; }
     LOCK();
     int f = fd - QRX_SHM_FD;
     int r = new_fd(fds[f].obj, fds[f].rdonly);
@@ -152,7 +154,7 @@ int dup(int fd)
 }
 int dup2(int fd, int to)
 {
-    if (!qrx_is_shm_fd(fd)) return __dup2_CrtBase_wrapper(fd, to);
+    if (!qrx_is_shm_fd(fd)) { qrx_fd_lock(); int r = __dup2_CrtBase_wrapper(fd, to), e = errno; qrx_fd_unlock(); errno = e; return r; }
     errno = EINVAL;     /* a shared memory descriptor goes only to a new number (dup) */
     return -1;
 }
