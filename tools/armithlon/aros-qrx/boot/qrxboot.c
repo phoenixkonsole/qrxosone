@@ -161,7 +161,7 @@ static void *live_thread(void *arg)
                 if (stack < 0) stack = getenv("QRXBOOT_LIVE_STACK") != NULL;
                 if (stack && c->a[7] + 8 <= c->ram_size) {
                     unsigned shown = 0;
-                    for (uint64_t at = c->a[7]; at + 8 <= c->ram_size && at < c->a[7] + 16384 && shown < 48; at += 8) {
+                    for (uint64_t at = c->a[7]; at + 8 <= c->ram_size && at < c->a[7] + 65536 && shown < 400; at += 8) {
                         uint64_t v = 0;
                         for (int b = 0; b < 8; b++) v = v << 8 | c->ram[at + b];
                         if (v >= 0x100000 && v < c->ram_size && !(v & 1)) {

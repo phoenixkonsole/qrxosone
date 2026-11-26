@@ -77,6 +77,11 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)
         return MAP_FAILED;
     }
     size_t align = len >= (1u << 20) ? (1u << 20) : 4096;
+    /* More than the largest free block can never be had: fail at once. AROS has no address space to
+     * reserve, and asking exec for it anyway runs the low-memory handlers (libraries expunged from
+     * inside AllocMem), which on AROS 64 can break the allocator: Gecko reserves 16 GB with
+     * PROT_NONE to find free address space (shared_memory::FindFreeAddressSpace). */
+    if (len + align > (size_t)AvailMem(MEMF_ANY | MEMF_LARGEST)) { errno = ENOMEM; return MAP_FAILED; }
     void *p = NULL;
     if (posix_memalign(&p, align, len) || !p) { errno = ENOMEM; return MAP_FAILED; }
     memset(p, 0, len);
