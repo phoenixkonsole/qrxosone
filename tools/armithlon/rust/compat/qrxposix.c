@@ -527,7 +527,18 @@ char *realpath(const char *path, char *resolved)
  * that is not a directory is deleted and the rename tried again. Not atomic as on Unix: between
  * the two steps the target is missing. */
 int __rename_CrtBase_wrapper(const char *, const char *);
+void qrx_fd_lock(void);           /* qrxfd.c: AROS's path conversion is one buffer for all threads */
+void qrx_fd_unlock(void);
+static int rename_locked(const char *from, const char *to);
 int rename(const char *from, const char *to)
+{
+    qrx_fd_lock();
+    int r = rename_locked(from, to), e = errno;
+    qrx_fd_unlock();
+    errno = e;
+    return r;
+}
+static int rename_locked(const char *from, const char *to)
 {
     if (__rename_CrtBase_wrapper(from, to) == 0) return 0;
     int e = errno;
