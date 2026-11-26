@@ -29,6 +29,7 @@
 #include <proto/dos.h>
 #include <proto/exec.h>
 #include <dos/dosextens.h>
+#include <dos/record.h>
 
 #define QRX_SOCK_FD 0x40000
 #define NSOCK 64
@@ -543,6 +544,53 @@ ssize_t readv(int fd, const struct qiovec *iov, int cnt)
     }
     return total;
 }
+/* POSIX record locks (F_GETLK, F_SETLK, F_SETLKW), which AROS's fcntl does not take: dos.library's
+ * LockRecord on the file's handle, so they hold between programs where the file system keeps record
+ * locks. A handler without them (ERROR_ACTION_NOT_KNOWN) has no locks to conflict with: the request
+ * is granted, as on a local file system nobody else locks. Length 0 is "to the end of the file", here
+ * to the largest offset; a lock taken through one descriptor is not seen as the program's own by
+ * another descriptor of the same file (POSIX would let those overlap). */
+static int file_lock(int fd, int cmd, struct flock *fl)
+{
+    long fh = 0;
+    if (!fl) { errno = EFAULT; return -1; }
+    if (fd < 0 || __get_default_file(fd, &fh) || !fh) { errno = EBADF; return -1; }
+    int64_t start = fl->l_start;
+    if (fl->l_whence == SEEK_CUR) start += lseek(fd, 0, SEEK_CUR);
+    else if (fl->l_whence == SEEK_END) {
+        off_t here = lseek(fd, 0, SEEK_CUR);
+        start += lseek(fd, 0, SEEK_END);
+        lseek(fd, here, SEEK_SET);
+    }
+    else if (fl->l_whence != SEEK_SET) { errno = EINVAL; return -1; }
+    if (start < 0 || fl->l_len < 0) { errno = EINVAL; return -1; }
+    uint64_t len = fl->l_len ? (uint64_t)fl->l_len : UINT64_MAX - (uint64_t)start;
+    BPTR f = (BPTR)fh;
+    if (cmd != F_GETLK && fl->l_type == F_UNLCK) {
+        if (!UnLockRecord(f, start, len) && IoErr() != ERROR_ACTION_NOT_KNOWN && IoErr() != ERROR_RECORD_NOT_LOCKED) {
+            errno = EINVAL; return -1;
+        }
+        return 0;
+    }
+    if (fl->l_type != F_RDLCK && fl->l_type != F_WRLCK) { errno = EINVAL; return -1; }
+    ULONG mode = fl->l_type == F_WRLCK ? (cmd == F_SETLKW ? REC_EXCLUSIVE : REC_EXCLUSIVE_IMMED)
+                                       : (cmd == F_SETLKW ? REC_SHARED : REC_SHARED_IMMED);
+    if (LockRecord(f, start, len, mode, cmd == F_SETLKW ? (ULONG)~0u : 0)) {
+        if (cmd == F_GETLK) { UnLockRecord(f, start, len); fl->l_type = F_UNLCK; }
+        return 0;
+    }
+    LONG e = IoErr();
+    if (e == ERROR_ACTION_NOT_KNOWN) {
+        if (cmd == F_GETLK) fl->l_type = F_UNLCK;
+        return 0;
+    }
+    if (cmd == F_GETLK) {               /* someone holds it; AROS does not say who */
+        fl->l_whence = SEEK_SET; fl->l_start = start; fl->l_pid = -1;
+        return 0;
+    }
+    errno = e == ERROR_LOCK_COLLISION || e == ERROR_LOCK_TIMEOUT ? EAGAIN : EINVAL;
+    return -1;
+}
 int fcntl(int fd, int cmd, ...)
 {
     va_list ap;
@@ -567,6 +615,7 @@ int fcntl(int fd, int cmd, ...)
                 return -1;
             return 0;
         }
+        if (cmd == F_GETLK || cmd == F_SETLK || cmd == F_SETLKW) return file_lock(fd, cmd, (struct flock *)arg);
         return __fcntl_CrtBase_wrapper(fd, cmd, arg);
     }
     int s = sock_of(fd);
