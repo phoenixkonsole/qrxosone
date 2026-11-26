@@ -479,8 +479,16 @@ ssize_t recvfrom(int fd, void *b, size_t n, int f, void *from, qsocklen_t *fl)
 }
 
 /* ---- the descriptor functions: sockets here, the rest to AROS */
+/* O_NONBLOCK for AROS's own descriptors (pipes of PIPE:, consoles): AROS's fcntl does not know it
+ * (the handlers answer "action unknown"), so it is kept here and read() checks first whether
+ * anything is waiting (file_ready, as poll() does) and else fails with EAGAIN. Writes do not block. */
+#define NB_FDS 1024
+static unsigned char file_nonblock[NB_FDS];
+static short file_ready(int fd, short ev);
+static int file_is_nonblock(int fd) { return fd >= 0 && fd < NB_FDS && file_nonblock[fd]; }
 int close(int fd)
 {
+    if (fd >= 0 && fd < NB_FDS) file_nonblock[fd] = 0;
     if (qrx_is_shm_fd(fd)) return qrx_shm_close(fd);
     if (!is_sockfd(fd)) return __close_CrtBase_wrapper(fd);
     int s = sock_of(fd);
@@ -492,7 +500,13 @@ int close(int fd)
 }
 ssize_t read(int fd, void *b, size_t n)
 {
-    if (!is_sockfd(fd)) return __read_CrtBase_wrapper(fd, b, n);
+    if (!is_sockfd(fd)) {
+        if (n && file_is_nonblock(fd) && !(file_ready(fd, POLLIN_) & (POLLIN_ | POLLHUP_ | POLLNVAL_))) {
+            errno = EAGAIN;
+            return -1;
+        }
+        return __read_CrtBase_wrapper(fd, b, n);
+    }
     return recv(fd, b, n, 0);
 }
 ssize_t write(int fd, const void *b, size_t n)
@@ -540,6 +554,19 @@ int fcntl(int fd, int cmd, ...)
         /* close-on-exec: AROS has no such flag; qrx_spawn closes the parent's other descriptors */
         if (cmd == F_GETFD_) return __fcntl_CrtBase_wrapper(fd, F_GETFL_) < 0 ? -1 : 0;
         if (cmd == F_SETFD_) return __fcntl_CrtBase_wrapper(fd, F_GETFL_) < 0 ? -1 : 0;
+        if ((cmd == F_GETFL_ || cmd == F_SETFL_) && fd >= 0 && fd < NB_FDS) {
+            long fh = 0;
+            if (__get_default_file(fd, &fh) || !fh) { errno = EBADF; return -1; }
+            int e = errno;
+            int fl = __fcntl_CrtBase_wrapper(fd, F_GETFL_);
+            if (fl < 0) { fl = O_RDWR; errno = e; }      /* the handler does not answer: read/write */
+            if (cmd == F_GETFL_) return (fl & ~O_NONBLOCK_) | (file_nonblock[fd] ? O_NONBLOCK_ : 0);
+            file_nonblock[fd] = (arg & O_NONBLOCK_) != 0;
+            /* the other status flags (O_APPEND) still go to AROS where it takes them */
+            if ((arg & ~O_NONBLOCK_) != (fl & ~O_NONBLOCK_) && __fcntl_CrtBase_wrapper(fd, F_SETFL_, arg & ~O_NONBLOCK_) < 0)
+                return -1;
+            return 0;
+        }
         return __fcntl_CrtBase_wrapper(fd, cmd, arg);
     }
     int s = sock_of(fd);
