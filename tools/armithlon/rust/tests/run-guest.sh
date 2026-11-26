@@ -16,6 +16,14 @@ cp $A/Libs/crt.library $A/Libs/stdlib.library $A/Libs/m.library $A/Libs/locale.l
 cp $A/C/* $SYS/C/; mkdir -p $SYS/L $SYS/Devs/DOSDrivers
 # PIPE: for pipe() (std::process): qrxpipe-handler (aros-qrx/qrxpipe, built by build-linux.sh)
 [ -f $A/L/qrxpipe-handler ] && cp $A/L/qrxpipe-handler $SYS/L/ && printf 'Handler = L:qrxpipe-handler\nStackSize = 16384\nPriority = 5\nGlobVec = -1\n' > $SYS/Devs/DOSDrivers/PIPE
+# QRX_HOSTFS=<dir>: that host directory as HOST: (qrxhostfs-handler, host service 12); QRX_HOSTFS_RO=1
+# read-only. Mount it with "Mount HOST:" in QRX_PRE.
+if [ -n "${QRX_HOSTFS:-}" ]; then
+  cp $A/L/qrxhostfs-handler $SYS/L/
+  printf 'Handler = L:qrxhostfs-handler\nStackSize = 16384\nPriority = 5\nGlobVec = -1\nStartup = "Host"\n' > $SYS/Devs/DOSDrivers/HOST
+  export QRXBOOT_HOSTFS="$QRX_HOSTFS"
+  [ -n "${QRX_HOSTFS_RO:-}" ] && export QRXBOOT_HOSTFS_RO=1
+fi
 printf 'SetClock LOAD\n' > $SYS/S/Startup-Sequence
 # this boot (econsole-startup) does not run S:Startup-Sequence: the setup goes in as typed commands
 PRE='Assign L: SYS:L\nAssign DEVS: SYS:Devs\nAssign T: SYS:T\nMount DEVS:DOSDrivers/PIPE\n'"${QRX_PRE:-}"   # QRX_PRE: more commands

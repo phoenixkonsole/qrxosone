@@ -95,6 +95,10 @@ mk workbench-libs-asl-catalogs workbench-libs-coolimages-quick workbench-libs-as
 mkdir -p "$SRC/workbench/fs/qrxpipe"
 cp "$HERE/qrxpipe/mmakefile.src" "$HERE/qrxpipe/qrxpipe-handler.c" "$SRC/workbench/fs/qrxpipe/"
 mk workbench-fs-qrxpipe
+# HOST: and the system on a host directory (aros-qrx/qrxhostfs; host service 12 of the board)
+mkdir -p "$SRC/workbench/fs/qrxhostfs"
+cp "$HERE/qrxhostfs/mmakefile.src" "$HERE/qrxhostfs/qrxhostfs-handler.c" "$SRC/workbench/fs/qrxhostfs/"
+mk workbench-fs-qrxhostfs
 if [[ "${QRX_BUILD_PTHREAD:-0}" == 1 ]]; then
   mk pthread-includes-copy linklibs-pthread
   # the builtins again, now with the SDK: emutls.c (thread_local) needs the pthread headers

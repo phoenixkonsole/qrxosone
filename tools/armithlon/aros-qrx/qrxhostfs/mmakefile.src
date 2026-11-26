@@ -1,0 +1,13 @@
+include $(SRCDIR)/config/aros.cfg
+
+# QRX OS One 64: a volume on a host directory (see qrxhostfs-handler.c); build-linux.sh copies this
+# directory to workbench/fs/qrxhostfs of the AROS tree.
+
+USER_LDFLAGS := -noclibs -lstdc.static
+
+%build_prog mmake=workbench-fs-qrxhostfs \
+	progname=qrxhostfs-handler targetdir=$(AROS_FS) \
+	files="qrxhostfs-handler" \
+	usestartup=no
+
+%common

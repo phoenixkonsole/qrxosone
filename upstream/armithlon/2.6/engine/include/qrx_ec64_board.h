@@ -58,6 +58,7 @@
 #define QEC64_HOST_FEATURES     0x0408u  /* .l read: the services the host has */
 #define QEC64_FEATURE_NET       1u
 #define QEC64_FEATURE_GL        2u
+#define QEC64_FEATURE_HOSTFS    4u   /* service 12, qrx_ec64_hostfs.h: a host directory is shared */
 
 /* Sound: 48 kHz stereo, 16 bit. A frame is one big endian 32-bit word, left << 16 | right. The guest
  * writes the address and count of a run of frames, then GO queues them on the host's ring; frames that

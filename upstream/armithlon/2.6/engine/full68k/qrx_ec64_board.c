@@ -3,6 +3,7 @@
 #include "qrx_hostnet.h"
 #include "qrx_netpolicy.h"
 #include "qrx_vault.h"
+#include "qrx_ec64_hostfs.h"
 #include "qrx_hostctl.h"
 #include "qrx_gl68k.h"
 #include <pthread.h>
@@ -103,6 +104,10 @@ static void host_call(qec64_board *b, uint64_t addr)
         pthread_mutex_lock(&gl_lock);
         qrx_gl68k_service(b->ram, b->ram_size, q);
         pthread_mutex_unlock(&gl_lock);
+        return;
+    }
+    if (be32(q) == QRX_HFS64_SERVICE) {          /* the system's file system on a host directory */
+        qrx_ec64_hostfs_call(b->ram, b->ram_size, q);
         return;
     }
     uint32_t a[13];
@@ -215,6 +220,7 @@ bool qec64_board_mmio(qec64_cpu *c, uint64_t addr, unsigned size, bool write, ui
 #else
         *value = QEC64_FEATURE_NET;
 #endif
+        if (qrx_ec64_hostfs_mounted()) *value |= QEC64_FEATURE_HOSTFS;
         return true;
     case QEC64_IDLE: {
         /* The idle task writes this in a loop. By default the core sleeps here until an interrupt

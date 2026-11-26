@@ -12,6 +12,7 @@
  * with $QRXBOOT_DISK_WRITE set they are written back to the file at the end. */
 #include "qrx68100ec64.h"
 #include "qrx_ec64_board.h"
+#include "qrx_ec64_hostfs.h"
 #include <inttypes.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -303,6 +304,13 @@ static long long boot(int argc, char **argv, double seconds, unsigned cores, con
     qec64_machine *m = qec64_machine_new(ram, ram_size, cores);
     static qec64_board board;           /* the emulator's devices: the clock for battclock.resource */
     qec64_board_init(&board, ram, ram_size);
+    /* $QRXBOOT_HOSTFS=<dir>: that host directory for the guest's qrxhostfs-handler (host service 12,
+     * qrx_ec64_hostfs.h); $QRXBOOT_HOSTFS_RO: read-only */
+    if (getenv("QRXBOOT_HOSTFS") && !qrx_ec64_hostfs_mounted() &&
+        !qrx_ec64_hostfs_mount(getenv("QRXBOOT_HOSTFS"), getenv("QRXBOOT_HOSTFS_RO") != NULL)) {
+        perror(getenv("QRXBOOT_HOSTFS"));
+        exit(2);
+    }
     board.cores = cores;
     qec64_machine_set_mmio(m, qec64_board_mmio, &board);
     static char out[1 << 24];   /* 16 MB: a browser screenshot comes back as a hex dump */
