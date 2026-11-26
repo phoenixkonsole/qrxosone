@@ -153,8 +153,23 @@ static void *live_thread(void *arg)
         if (++ticks % 60 == 0) {
             for (unsigned k = 0; k < live.cores; k++) {
                 qec64_cpu *c = qec64_machine_core(live.m, k);
-                fprintf(live.f, "[qrxboot %us] core %u pc %016" PRIx64 " %s, %" PRIu64 " instructions\n", ticks, k,
-                        c->pc, c->supervisor ? "super" : "user", c->instructions);
+                fprintf(live.f, "[qrxboot %us] core %u pc %016" PRIx64 " %s, %" PRIu64 " instructions, sp %016" PRIx64 "\n", ticks, k,
+                        c->pc, c->supervisor ? "super" : "user", c->instructions, c->a[7]);
+                /* QRXBOOT_LIVE_STACK=1: the words on the stack that point into the kernel or far above it
+                 * (programs), big-endian as the guest stores them */
+                static int stack = -1;
+                if (stack < 0) stack = getenv("QRXBOOT_LIVE_STACK") != NULL;
+                if (stack && c->a[7] + 8 <= c->ram_size) {
+                    unsigned shown = 0;
+                    for (uint64_t at = c->a[7]; at + 8 <= c->ram_size && at < c->a[7] + 16384 && shown < 48; at += 8) {
+                        uint64_t v = 0;
+                        for (int b = 0; b < 8; b++) v = v << 8 | c->ram[at + b];
+                        if (v >= 0x100000 && v < c->ram_size && !(v & 1)) {
+                            fprintf(live.f, "[qrxboot %us]   core %u stack +%04" PRIx64 " %016" PRIx64 "\n", ticks, k, at - c->a[7], v);
+                            shown++;
+                        }
+                    }
+                }
             }
             fflush(live.f);
         }
