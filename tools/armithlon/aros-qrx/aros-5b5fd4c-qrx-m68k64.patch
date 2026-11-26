@@ -2637,10 +2637,10 @@ index 00000000..9a7f1247
 +}
 diff --git a/arch/m68k64-native/kernel/intr.c b/arch/m68k64-native/kernel/intr.c
 new file mode 100644
-index 00000000..848a5610
+index 00000000..aa2575bf
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/intr.c
-@@ -0,0 +1,451 @@
+@@ -0,0 +1,467 @@
 +/*
 +    Copyright (C) 2026, The AROS Development Team. All rights reserved.
 +
@@ -2909,6 +2909,8 @@ index 00000000..848a5610
 +        GET_THIS_TASK ? GET_THIS_TASK->tc_Node.ln_Name : "");
 +}
 +
++int m68k64_FaultDump;
++
 +static void cpu_Fault(regs_t *regs, unsigned long vector)
 +{
 +    struct KernelBase *KernelBase = (struct KernelBase *)TLS_GET(KernelBase);
@@ -2920,6 +2922,20 @@ index 00000000..848a5610
 +    if (SysBase && task && !(regs->sr & SR_SUPERVISOR))
 +    {
 +        void (*trap)(ULONG, struct ExceptionContext *) = task->tc_TrapCode;
++
++        /* "faultdump" on the command line: the registers and the task's stack on the debug console
++           first, also when Intuition then shows the alert only on the screen */
++        if (m68k64_FaultDump)
++        {
++            UQUAD *sp = (UQUAD *)regs->a[7], *top = (UQUAD *)task->tc_SPUpper;
++            int n = 0;
++
++            cpu_Dump(regs, vector);
++            bug("[Kernel] fault stack:");
++            for (; sp < top && n < 512; sp++, n++)
++                bug("%s %016lx", n % 4 ? "" : "\n[Kernel]  ", (unsigned long)*sp);
++            bug("\n[Kernel] fault dump end\n");
++        }
 +
 +        if (!trap)
 +            trap = SysBase->TaskTrapCode;
@@ -6235,10 +6251,10 @@ index 00000000..4fff861f
 +#endif /* VESAGFX_SUPPORT_H */
 diff --git a/arch/m68k64-native/qrx/kernel/kernel_startup.c b/arch/m68k64-native/qrx/kernel/kernel_startup.c
 new file mode 100644
-index 00000000..e628507e
+index 00000000..20a4fa6a
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/kernel/kernel_startup.c
-@@ -0,0 +1,273 @@
+@@ -0,0 +1,275 @@
 +/*
 +    Copyright (C) 2013-2026, The AROS Development Team. All rights reserved.
 +*/
@@ -6429,9 +6445,11 @@ index 00000000..e628507e
 +    mh = (struct MemHeader *)memlower;
 +
 +    {
-+        extern int m68k64_IdleDump;
++        extern int m68k64_IdleDump, m68k64_FaultDump;
 +        if (cmdline && strstr(cmdline, "idledump"))
 +            m68k64_IdleDump = 1;
++        if (cmdline && strstr(cmdline, "faultdump"))
++            m68k64_FaultDump = 1;
 +    }
 +    if (cmdline && strstr(cmdline, "notlsf"))
 +    {
