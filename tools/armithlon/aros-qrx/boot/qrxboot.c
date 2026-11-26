@@ -173,6 +173,16 @@ static void *live_thread(void *arg)
                             for (int b = 0; b < 16; b++) fprintf(live.f, " %02x", c0->ram[v + o + b]);
                             fprintf(live.f, "\n");
                         }
+                        /* one level further: what the first eight words there point to (a packet's
+                         * arguments, a lock's key) */
+                        for (uint64_t o = 0; o < 64; o += 8) {
+                            uint64_t w = 0;
+                            for (int b = 0; b < 8; b++) w = w << 8 | c0->ram[v + o + b];
+                            if (w < 0x1000 || w + 64 > c0->ram_size || (w & 1)) continue;
+                            fprintf(live.f, "[qrxboot] mem %s+%02" PRIx64 "-> %016" PRIx64 ":", key, o, w);
+                            for (int b = 0; b < 64; b++) fprintf(live.f, " %02x", c0->ram[w + b]);
+                            fprintf(live.f, "\n");
+                        }
                     }
                 }
                 if (sp < 0x100000 || sp + 8 > c0->ram_size) continue;
