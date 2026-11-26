@@ -394,13 +394,12 @@ static _Unwind_Reason_Code qrx_bt_frame(struct _Unwind_Context *c, void *arg)
     qrx_bt_hex("QRXBT frame ", (uintptr_t)_Unwind_GetIP(c));
     return ++*n < 40 ? _URC_NO_REASON : _URC_END_OF_STACK;
 }
+static int qrx_bt_unwind;
 static void qrx_bt_handler(int sig)
 {
     uintptr_t anchor = (uintptr_t)&qrx_bt_anchor;
     qrx_bt_hex("QRXBT signal ", (uintptr_t)sig);
     qrx_bt_hex("QRXBT anchor ", anchor);
-    int n = 0;
-    _Unwind_Backtrace(qrx_bt_frame, &n);
     /* the raw scan: return addresses within 512 MB of the anchor (the program's .text) */
     struct Task *me = FindTask(NULL);
     uintptr_t *p = (uintptr_t *)__builtin_frame_address(0);
@@ -413,13 +412,21 @@ static void qrx_bt_handler(int sig)
             shown++;
         }
     }
+    /* the unwinder only with QRX_BACKTRACE=2: in a pthread thread it can reach C library parts that
+     * are not set up there (the program then ends before the dump is out) */
+    if (qrx_bt_unwind) {
+        int n = 0;
+        _Unwind_Backtrace(qrx_bt_frame, &n);
+    }
     qrx_bt_puts("QRXBT end\n");
     signal(sig, SIG_DFL);
     raise(sig);
 }
 __attribute__((constructor)) static void qrx_bt_init(void)
 {
-    if (!getenv("QRX_BACKTRACE")) return;
+    const char *e = getenv("QRX_BACKTRACE");
+    if (!e) return;
+    qrx_bt_unwind = e[0] == '2';
     signal(SIGABRT, qrx_bt_handler);
     signal(SIGSEGV, qrx_bt_handler);
     signal(SIGBUS, qrx_bt_handler);
