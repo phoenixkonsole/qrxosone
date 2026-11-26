@@ -83,6 +83,14 @@ struct qec64_cpu {
     void (*on_wake)(qec64_cpu *self);
 };
 #define QEC64_CODE_SHIFT 8
+/* code_gen[0] is the generation. After it (in uint32 units): at QEC64_GEN_HEAD a 64-bit count of the
+ * granules written, at QEC64_GEN_RING a ring of the last QEC64_GEN_RING_N of them, each entry
+ * (count + 1) << 32 | granule, so a reader can tell an entry not yet written. */
+#define QEC64_GEN_HEAD 2
+#define QEC64_GEN_RINGGENS 4      /* 64-bit: the generations that came with ring entries; a bump without
+                                   * them (a program written into RAM directly, then code_gen++) drops all */
+#define QEC64_GEN_RING 16
+#define QEC64_GEN_RING_N 4096u
 
 /* QRX_EC64_JIT_VERIFY=1 (qrx68100ec64_jit.c): the interpreter's RAM writes with their old contents,
  * so a block can run in both and the two results be compared. Per thread; NULL is off. Device

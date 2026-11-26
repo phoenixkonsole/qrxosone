@@ -93,8 +93,15 @@ static void undo_note(qec64_cpu *c, uint64_t a, unsigned n)
 /* A write into RAM the JIT translated: those translations are stale now. */
 static void code_written(qec64_cpu *c, uint64_t a, unsigned n)
 {
-    for (uint64_t g = a >> QEC64_CODE_SHIFT; g <= (a + n - 1) >> QEC64_CODE_SHIFT; g++)
+    for (uint64_t g = a >> QEC64_CODE_SHIFT; g <= (a + n - 1) >> QEC64_CODE_SHIFT; g++) {
         __atomic_store_n(&c->code_map[g], 0, __ATOMIC_RELAXED);
+        /* the granule into the ring (QEC64_GEN_RING): the JIT drops only the blocks there */
+        uint64_t *head = (uint64_t *)(void *)(c->code_gen + QEC64_GEN_HEAD);
+        uint64_t *ring = (uint64_t *)(void *)(c->code_gen + QEC64_GEN_RING);
+        uint64_t t = __atomic_fetch_add(head, 1, __ATOMIC_SEQ_CST);
+        __atomic_store_n(&ring[t & (QEC64_GEN_RING_N - 1)], (uint64_t)(uint32_t)(t + 1) << 32 | (uint32_t)g, __ATOMIC_RELEASE);
+    }
+    __atomic_fetch_add((uint64_t *)(void *)(c->code_gen + QEC64_GEN_RINGGENS), 1, __ATOMIC_SEQ_CST);
     __atomic_fetch_add(c->code_gen, 1, __ATOMIC_SEQ_CST);
 }
 /* QRX_EC64_WATCH=<hex address>: every write that touches the 8 bytes there is logged (pc, size,

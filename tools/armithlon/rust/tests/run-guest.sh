@@ -3,7 +3,7 @@
 # (qrxboot, two EC64 cores) and prints what it wrote. Usage: run-guest.sh <program> [seconds]
 # QRX_MEM_MB: guest memory (512), QRX_IMG_MB: system disk size (32), QRX_CMD: the command to run
 # instead of C:T (the program, e.g. one copied in with QRX_TREES).
-# QRX_LIVE: a file that follows the console while the guest runs (qrxboot QRXBOOT_LIVE).
+# QRX_CORES: EC64 cores (2). QRX_LIVE: a file that follows the console while the guest runs (qrxboot QRXBOOT_LIVE).
 # QRX_AROS64: the AROS 64 build (bin/native-m68k64), QRXBOOT: the qrxboot binary.
 B=${QRX_AROS64:-/opt/qrx-os-one/aros64/build-qrx/bin/native-m68k64}; A=$B/AROS; CORE=$B/gen/rom/boot/core.elf
 QRXBOOT=${QRXBOOT:-/opt/qrx-os-one/armx86/build/qrxboot}
@@ -25,7 +25,7 @@ for f in ${QRX_FILES:-}; do cp "$f" $SYS/T/; done
 # QRX_TREES: more directories, "source:SYS-relative destination" pairs (e.g. dist/bin:Firefox, fonts:Fonts/TrueType)
 for t in ${QRX_TREES:-}; do mkdir -p "$SYS/${t#*:}"; cp -r "${t%%:*}/." "$SYS/${t#*:}/"; done
 python3 -I $BOOT/mkffsimg.py $SYS $W/t.img ${QRX_IMG_MB:-32} QRXSYS >/dev/null
-QRXBOOT_LIVE=${QRX_LIVE:-} QRXBOOT_DISK=$W/t.img QRXBOOT_CMDLINE=econsole-startup QRXBOOT_INPUT="${PRE}${QRX_CMD:-C:T} ${QRX_ARGS:-}\nshutdown\n" $QRXBOOT $CORE ${2:-60} 2 ${QRX_MEM_MB:-512} \
+QRXBOOT_LIVE=${QRX_LIVE:-} QRXBOOT_DISK=$W/t.img QRXBOOT_CMDLINE=econsole-startup QRXBOOT_INPUT="${PRE}${QRX_CMD:-C:T} ${QRX_ARGS:-}\nshutdown\n" $QRXBOOT $CORE ${2:-60} ${QRX_CORES:-2} ${QRX_MEM_MB:-512} \
   $A/Libs/utility.library $A/Libs/aros.library $A/boot/native/Devs/battclock.resource $A/boot/native/Devs/timer.device \
   $A/boot/native/Libs/expansion.library $A/Devs/bootloader.resource $A/Libs/dos.library $A/Devs/lddemon.resource \
   $A/L/econsole-handler $A/Devs/FileSystem.resource $A/L/afs-handler $A/Devs/qrxdisk.device $A/Devs/shell.resource \

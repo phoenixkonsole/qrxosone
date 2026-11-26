@@ -31,6 +31,16 @@ typedef struct {
     uint8_t *p, *end;
     bool bad;
 } X64;
+/* The jump cache: pc -> lifted block body. The ret of a block's exit to a computed pc (RTS, JMP (An),
+ * the translator's "pc written" exit, ret_index) looks the next block up there and jumps straight
+ * into it when the budget allows and no gate is set, as a chained exit does; else it returns to the
+ * dispatcher, which fills the cache as it enters blocks. */
+typedef struct { uint64_t pc; uint8_t *x; } X64JumpCache;
+typedef struct {
+    long ret_index;          /* the AArch64 word of that ret, or -1 */
+    X64JumpCache *jc;        /* NULL: no lookup */
+    unsigned bits, off_pc, off_gate;
+} X64Lookup;
 
 static void xb(X64 *x, unsigned v) { if (x->p < x->end) *x->p++ = (uint8_t)v; else x->bad = true; }
 static void x32(X64 *x, uint32_t v) { for (int i = 0; i < 4; i++) xb(x, (v >> (8 * i)) & 0xFF); }
@@ -224,17 +234,21 @@ static int x64_after_flags(X64 *x, const uint32_t *a, unsigned n, unsigned i, co
 
 /* Lifts the AArch64 words [a, a + n) into x86 code at *xp (up to xend). xmap gets the x86 offset
  * (from xbase) of each word. Returns false for anything not known; *xp is then unchanged. */
-static bool x64_lift(const uint32_t *a, unsigned n, uint8_t **xp, uint8_t *xend, uint8_t *xbase, uint32_t *xmap)
+static bool x64_lift(const uint32_t *a, unsigned n, uint8_t **xp, uint8_t *xend, uint8_t *xbase, uint32_t *xmap, const X64Lookup *lk)
 {
-    static __thread uint8_t *live, *target;
-    static __thread unsigned cap;
-    static __thread struct { uint8_t *site; long to; } *fix;
-    if (n > cap) {
-        free(live); free(target); free(fix);
-        cap = n + 4096;
-        live = malloc(cap); target = malloc(cap); fix = malloc(cap * sizeof *fix);
-        if (!live || !target || !fix) { cap = 0; return false; }
+    typedef struct { uint8_t *site; long to; } Fix;
+    static __thread uint8_t *tls_live, *tls_target;
+    static __thread unsigned tls_cap;
+    static __thread Fix *tls_fix;
+    if (n > tls_cap) {
+        free(tls_live); free(tls_target); free(tls_fix);
+        tls_cap = n + 4096;
+        tls_live = malloc(tls_cap); tls_target = malloc(tls_cap); tls_fix = malloc(tls_cap * sizeof *tls_fix);
+        if (!tls_live || !tls_target || !tls_fix) { tls_cap = 0; return false; }
     }
+    /* plain locals from here: thread-local accesses in the loops cost a call each in PIC code */
+    uint8_t *live = tls_live, *target = tls_target;
+    Fix *fix = tls_fix;
     memset(target, 0, n);
     for (unsigned i = 0; i < n; i++) {
         long to = x64_target(a[i], i);
@@ -280,6 +294,28 @@ static bool x64_lift(const uint32_t *a, unsigned n, uint8_t **xp, uint8_t *xend,
             w == 0xA9446BF9u || w == 0xA94363F7u || w == 0xA9425BF5u || w == 0xA94153F3u || w == 0xA8C57BFDu)
             continue;                                         /* the other saves and restores */
         if (w == 0xD65F03C0u) {                               /* ret: x0 is the result */
+            uint8_t *miss[4];
+            unsigned nmiss = 0;
+            if (lk && lk->jc && (long)i == lk->ret_index) {
+                mov_rr64(x, HR15, HRDI);                          /* RDONE = what the block has done */
+                frame_ld(x, HRAX, 25);                            /* RLIMIT */
+                alu_rr(x, true, 0x39, HR15, HRAX);                /* cmp r15, rax */
+                miss[nmiss++] = jcc32(x, 3);                      /* jae: budget used up */
+                op_rm(x, true, 0x8B, HRAX, HRBX, -1, (int32_t)lk->off_gate, false, 0);
+                alu_rr(x, true, 0x85, HRAX, HRAX);
+                miss[nmiss++] = jcc32(x, 5);                      /* jnz: the global gate */
+                op_rm(x, true, 0x8B, HRAX, HRBX, -1, (int32_t)lk->off_pc, false, 0);   /* the next pc */
+                mov_rr64(x, HRCX, HRAX);
+                sh_i(x, 5, HRCX, 1, true);
+                alu_ri(x, false, 4, HRCX, (int32_t)((1u << lk->bits) - 1));
+                sh_i(x, 4, HRCX, 4, true);                        /* 16 bytes an entry */
+                mov_ri64(x, HRDX, (uint64_t)(uintptr_t)lk->jc);
+                alu_rr(x, true, 0x01, HRDX, HRCX);
+                op_rm(x, true, 0x3B, HRAX, HRDX, -1, 0, false, 0);   /* cmp rax, [rdx] */
+                miss[nmiss++] = jcc32(x, 5);
+                op_rm(x, false, 0xFF, 4, HRDX, -1, 8, false, 0);    /* jmp [rdx + 8] */
+                for (unsigned k = 0; k < nmiss; k++) { int32_t rel = (int32_t)(x->p - (miss[k] + 4)); memcpy(miss[k], &rel, 4); }
+            }
             mov_rr64(x, HRAX, HRDI);
             alu_ri(x, true, 0, HRSP, (int32_t)X64_FRAME);
             static const unsigned pops[6] = { HR15, HR14, HR13, HR12, HRBP, HRBX };
