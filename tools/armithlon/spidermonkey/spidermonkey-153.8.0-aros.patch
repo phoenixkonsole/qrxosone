@@ -5297,6 +5297,24 @@
      mPid = static_cast<int32_t>(newPid);
    } else {
      return NS_ERROR_FAILURE;
+--- a/xpcom/threads/nsThread.cpp
++++ b/xpcom/threads/nsThread.cpp
+@@ -620,6 +620,15 @@
+         new ThreadInitData{this, nsCString(aName)});
+ 
+     // ThreadFunc is responsible for setting mThread
++#ifdef __AROS__
++    // QRX OS One 64: the m68k64 code passes every argument on the stack in 8-byte slots and does its
++    // floating point in software, so frames are much larger than on x86-64, and AROS has no guard
++    // pages: a 256 KB stack (DEFAULT_STACK_SIZE) overflowed silently in WebRender's Renderer thread
++    // (a return address became the text "BLENDING"). 0 would inherit the creating task's size.
++    if (mStackSize < 2 * 1024 * 1024) {
++      mStackSize = 2 * 1024 * 1024;
++    }
++#endif
+     if (!(thread = PR_CreateThread(PR_USER_THREAD, ThreadFunc, initData.get(),
+                                    PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD,
+                                    PR_JOINABLE_THREAD, mStackSize))) {
 --- /dev/null
 +++ b/config/aros-dso-closure.py
 @@ -0,0 +1,35 @@
