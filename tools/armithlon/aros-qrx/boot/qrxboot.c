@@ -155,6 +155,26 @@ static void *live_thread(void *arg)
             for (const char *q = at; (q = strstr(q, "SP=")) != NULL && q < live.buf + used; q += 3) {
                 uint64_t sp = strtoull(q + 3, NULL, 16);
                 qec64_cpu *c0 = qec64_machine_core(live.m, 0);
+                /* the raw memory at SP and at A0-A6 of the dump (the line above SP=): packets, handles */
+                {
+                    const char *ln = q;
+                    while (ln > at && ln[-1] != '\n') ln--;
+                    const char *pl = ln > at ? ln - 1 : ln;
+                    while (pl > at && pl[-1] != '\n') pl--;
+                    char regs[] = "A0=A1=A2=A3=A4=A5=A6=SP=";
+                    for (int r = 0; r < 8; r++) {
+                        char key[4] = { regs[r * 3], regs[r * 3 + 1], '=', 0 };
+                        const char *k = strstr(pl, key);
+                        if (!k || k > q + 3) continue;
+                        uint64_t v = strtoull(k + 3, NULL, 16);
+                        if (v < 0x1000 || v + 128 > c0->ram_size) continue;
+                        for (uint64_t o = 0; o < 128; o += 16) {
+                            fprintf(live.f, "[qrxboot] mem %s+%02" PRIx64 " %016" PRIx64 ":", key, o, v + o);
+                            for (int b = 0; b < 16; b++) fprintf(live.f, " %02x", c0->ram[v + o + b]);
+                            fprintf(live.f, "\n");
+                        }
+                    }
+                }
                 if (sp < 0x100000 || sp + 8 > c0->ram_size) continue;
                 fprintf(live.f, "[qrxboot] alert stack at %016" PRIx64 "\n", sp);
                 unsigned shown = 0;
