@@ -16,7 +16,14 @@ cp $AROSSRC/workbench/fonts/truetype/bitstream/*.ttf $AROSSRC/workbench/fonts/tr
 # the browser packed as shipped (package-browser.py: omni.ja, browser/omni.ja, the firefox program)
 python3 -I "$HERE/../package-browser.py" "$OBJ/dist/bin" $T/ff
 URL="${QRX_URL:-file:///SYS/Web/qrxrocks/index.html}"
-export QRX_TREES="$T/ff:Firefox $T/fonts:Fonts/TrueType $WEB:Web/qrxrocks"
+# the profile starts with prefs for a single-process browser: extensions in this process too (their
+# background pages otherwise wait for an extension process that never comes, and shutdown hangs on
+# them until nsTerminator crashes Firefox, before the shell can Type the PNG)
+mkdir -p $T/profile
+cat > $T/profile/user.js <<'EOP'
+user_pref("extensions.webextensions.remote", false);
+EOP
+export QRX_TREES="$T/ff:Firefox $T/fonts:Fonts/TrueType $WEB:Web/qrxrocks $T/profile:T/profile"
 # the disk image lives in guest memory; the guest boots with at most 2048 MB (qrxboot)
 export QRX_IMG_MB=${QRX_IMG_MB:-600} QRX_MEM_MB=${QRX_MEM_MB:-2048}
 # MOZ_FORCE_DISABLE_E10S: one process; AROS cannot start Gecko's content processes (fork, shared
