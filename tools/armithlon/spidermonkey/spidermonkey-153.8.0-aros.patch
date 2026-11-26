@@ -5262,6 +5262,201 @@
  #else
  #  error "Unknown platform, need scrollbar implementation."
  #endif
+--- a/widget/aros/moz.build
++++ b/widget/aros/moz.build
+@@ -14,6 +14,7 @@
+ 
+ SOURCES += [
+     "aros_appshell_glue.c",
++    "aros_window_glue.c",
+     "GfxInfo.cpp",
+     "MediaKeysEventSourceFactory.cpp",
+     "nsAppShell.cpp",
+--- a/widget/headless/HeadlessCompositorWidget.cpp
++++ b/widget/headless/HeadlessCompositorWidget.cpp
+@@ -5,6 +5,11 @@
+ #include "mozilla/widget/PlatformWidgetTypes.h"
+ #include "HeadlessCompositorWidget.h"
+ #include "VsyncDispatcher.h"
++#ifdef MOZ_WIDGET_AROS
++#  include "HeadlessWidget.h"
++#  include "aros_window_glue.h"
++#  include "mozilla/gfx/2D.h"
++#endif
+ 
+ namespace mozilla {
+ namespace widget {
+@@ -26,6 +31,36 @@
+ 
+ nsIWidget* HeadlessCompositorWidget::RealWidget() { return mWidget; }
+ 
++#ifdef MOZ_WIDGET_AROS
++already_AddRefed<gfx::DrawTarget>
++HeadlessCompositorWidget::StartRemoteDrawingInRegion(
++    const LayoutDeviceIntRegion& aInvalidRegion) {
++  if (!mWidget || !mWidget->QrxWindow()) return nullptr;
++  LayoutDeviceIntSize size = GetClientSize();
++  if (size.width <= 0 || size.height <= 0) return nullptr;
++  if (size != mPixelsSize) {
++    mPixels = MakeUnique<uint8_t[]>(size_t(size.width) * size.height * 4);
++    mPixelsSize = size;
++  }
++  // A8R8G8B8 in host order: A, R, G, B in memory on big endian, as RECTFMT_ARGB
++  return gfx::Factory::CreateDrawTargetForData(
++      gfx::BackendType::SKIA, mPixels.get(), size.ToUnknownSize(), size.width * 4,
++      gfx::SurfaceFormat::A8R8G8B8_UINT32);
++}
++
++void HeadlessCompositorWidget::EndRemoteDrawingInRegion(
++    gfx::DrawTarget* aDrawTarget, const LayoutDeviceIntRegion& aInvalidRegion) {
++  if (!mWidget || !mWidget->QrxWindow() || !mPixels) return;
++  for (auto iter = aInvalidRegion.RectIter(); !iter.Done(); iter.Next()) {
++    const LayoutDeviceIntRect& r = iter.Get();
++    LayoutDeviceIntRect c = r.Intersect(LayoutDeviceIntRect(LayoutDeviceIntPoint(), mPixelsSize));
++    if (c.IsEmpty()) continue;
++    qrx_win_blit(mWidget->QrxWindow(), mPixels.get(), mPixelsSize.width * 4, c.x, c.y, c.width,
++                 c.height);
++  }
++}
++#endif
++
+ void HeadlessCompositorWidget::NotifyClientSizeChanged(
+     const LayoutDeviceIntSize& aClientSize) {
+   auto size = mClientSize.Lock();
+--- a/widget/headless/HeadlessCompositorWidget.h
++++ b/widget/headless/HeadlessCompositorWidget.h
+@@ -34,6 +34,15 @@
+ 
+   void ObserveVsync(VsyncObserver* aObserver) override;
+ 
++#ifdef MOZ_WIDGET_AROS
++  // QRX OS One 64: SWGL draws into mPixels, each frame then goes into the widget's Intuition window
++  already_AddRefed<gfx::DrawTarget> StartRemoteDrawingInRegion(
++      const LayoutDeviceIntRegion& aInvalidRegion) override;
++  void EndRemoteDrawingInRegion(
++      gfx::DrawTarget* aDrawTarget,
++      const LayoutDeviceIntRegion& aInvalidRegion) override;
++#endif
++
+   // CompositorWidgetDelegate Overrides
+ 
+   HeadlessCompositorWidget* AsHeadlessCompositorWidget() override {
+@@ -42,6 +51,10 @@
+ 
+  private:
+   HeadlessWidget* mWidget;
++#ifdef MOZ_WIDGET_AROS
++  UniquePtr<uint8_t[]> mPixels;
++  LayoutDeviceIntSize mPixelsSize;
++#endif
+ 
+   // See GtkCompositorWidget for the justification for this mutex.
+   DataMutex<LayoutDeviceIntSize> mClientSize;
+--- a/widget/headless/HeadlessWidget.cpp
++++ b/widget/headless/HeadlessWidget.cpp
+@@ -3,6 +3,10 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ #include "InputData.h"
+ #include "HeadlessWidget.h"
++#ifdef MOZ_WIDGET_AROS
++#  include "gfxPlatform.h"
++#  include "aros_window_glue.h"
++#endif
+ #include "ErrorList.h"
+ #include "HeadlessCompositorWidget.h"
+ #include "BasicEvents.h"
+@@ -96,6 +100,12 @@
+   }
+   LOG(("HeadlessWidget::Destroy [%p]\n", (void*)this));
+   mDestroyed = true;
++#ifdef MOZ_WIDGET_AROS
++  if (mQrxWin) {
++    qrx_win_close(mQrxWin);
++    mQrxWin = nullptr;
++  }
++#endif
+ 
+   if (sActiveWindows) {
+     int32_t index = sActiveWindows->IndexOf(this);
+@@ -160,8 +170,27 @@
+   if (mWidgetListener) mWidgetListener->WindowActivated();
+ }
+ 
++#ifdef MOZ_WIDGET_AROS
++nsresult HeadlessWidget::SetTitle(const nsAString& aTitle) {
++  // Intuition titles are 8-bit: Latin-1, other characters as '?'
++  mQrxTitle.Truncate();
++  for (const char16_t* c = aTitle.BeginReading(); c != aTitle.EndReading(); ++c) {
++    mQrxTitle.Append(*c < 256 ? char(*c) : '?');
++  }
++  if (mQrxWin) qrx_win_title(mQrxWin, mQrxTitle.get());
++  return NS_OK;
++}
++#endif
++
+ void HeadlessWidget::Show(bool aState) {
+   mVisible = aState;
++#ifdef MOZ_WIDGET_AROS
++  if (aState && !mQrxWin && !gfxPlatform::IsHeadless() &&
++      (mWindowType == WindowType::TopLevel || mWindowType == WindowType::Dialog)) {
++    mQrxWin = qrx_win_open(mBounds.x, mBounds.y, mBounds.width, mBounds.height,
++                           mQrxTitle.IsEmpty() ? "Firefox" : mQrxTitle.get());
++  }
++#endif
+ 
+   LOG(("HeadlessWidget::Show [%p] state %d\n", (void*)this, aState));
+ 
+@@ -258,6 +287,9 @@
+                                     bool aRepaint) {
+   ConstrainSize(&aWidth, &aHeight);
+   mBounds.SizeTo(LayoutDeviceIntSize(aWidth, aHeight));
++#ifdef MOZ_WIDGET_AROS
++  if (mQrxWin) qrx_win_size(mQrxWin, aWidth, aHeight);
++#endif
+ 
+   if (mCompositorWidget) {
+     mCompositorWidget->NotifyClientSizeChanged(mBounds.Size());
+--- a/widget/headless/HeadlessWidget.h
++++ b/widget/headless/HeadlessWidget.h
+@@ -32,6 +32,10 @@
+ #else
+ #  define MOZ_HEADLESS_SCROLL_MULTIPLIER -1
+ #  define MOZ_HEADLESS_SCROLL_DELTA_MODE -1
++#endif
++
++#ifdef MOZ_WIDGET_AROS
++struct qrx_win;  // widget/aros/aros_window_glue.h
+ #endif
+ 
+ namespace mozilla {
+@@ -72,10 +76,16 @@
+   void Invalidate(const LayoutDeviceIntRect& aRect) override {
+     // TODO: see if we need to do anything here.
+   }
++#ifdef MOZ_WIDGET_AROS
++  // QRX OS One 64: a top-level widget is an Intuition window unless Firefox runs headless
++  nsresult SetTitle(const nsAString& title) override;
++  ::qrx_win* QrxWindow() const { return mQrxWin; }
++#else
+   nsresult SetTitle(const nsAString& title) override {
+     // Headless widgets have no title, so just ignore it.
+     return NS_OK;
+   }
++#endif
+   LayoutDeviceIntPoint WidgetToScreenOffset() override;
+   void SetInputContext(const InputContext& aContext,
+                        const InputContextAction& aAction) override {
+@@ -133,6 +143,10 @@
+   bool mVisible;
+   bool mDestroyed;
+   bool mAlwaysOnTop;
++#ifdef MOZ_WIDGET_AROS
++  ::qrx_win* mQrxWin = nullptr;
++  nsCString mQrxTitle;
++#endif
+   HeadlessCompositorWidget* mCompositorWidget;
+   nsSizeMode mSizeMode;
+   // The size mode before entering fullscreen mode.
 --- a/widget/moz.build
 +++ b/widget/moz.build
 @@ -53,7 +53,7 @@
@@ -8120,6 +8315,155 @@
 +
 +#endif
 --- /dev/null
++++ b/widget/aros/aros_window_glue.c
+@@ -0,0 +1,117 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++/*
++ * QRX OS One 64 (AROS): the Intuition side of Gecko's top-level windows. HeadlessWidget opens one of
++ * these for a top-level widget when Firefox is not headless; HeadlessCompositorWidget gives SWGL a
++ * pixel buffer and copies each finished frame here with cybergraphics' WritePixelArray. A window's
++ * semaphore keeps the compositor's copy and the main thread's close apart.
++ */
++#include <proto/exec.h>
++#include <proto/intuition.h>
++#include <proto/graphics.h>
++#include <proto/cybergraphics.h>
++#include <exec/memory.h>
++#include <exec/semaphores.h>
++#include <intuition/intuition.h>
++#include <intuition/screens.h>
++#include <cybergraphx/cybergraphics.h>
++#include <string.h>
++#include "aros_window_glue.h"
++
++struct IntuitionBase *IntuitionBase;
++struct GfxBase *GfxBase;
++struct Library *CyberGfxBase;
++
++struct qrx_win {
++    struct Window *w;
++    struct SignalSemaphore lock;
++    char title[128];
++};
++
++static int open_libs(void)
++{
++    if (!IntuitionBase) IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 39);
++    if (!GfxBase) GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 39);
++    if (!CyberGfxBase) CyberGfxBase = OpenLibrary("cybergraphics.library", 40);
++    return IntuitionBase && GfxBase && CyberGfxBase;
++}
++
++void qrx_win_screen_size(int *w, int *h)
++{
++    *w = *h = 0;
++    if (!open_libs()) return;
++    struct Screen *s = LockPubScreen(NULL);
++    if (!s) return;
++    *w = s->Width;
++    *h = s->Height;
++    UnlockPubScreen(NULL, s);
++}
++
++qrx_win *qrx_win_open(int x, int y, int w, int h, const char *title)
++{
++    if (!open_libs()) return NULL;
++    qrx_win *q = AllocVec(sizeof *q, MEMF_ANY | MEMF_CLEAR);
++    if (!q) return NULL;
++    InitSemaphore(&q->lock);
++    strncpy(q->title, title ? title : "", sizeof q->title - 1);
++    struct Screen *s = LockPubScreen(NULL);
++    if (!s) { FreeVec(q); return NULL; }
++    if (x < 0) x = 0;
++    if (y < s->BarHeight + 1) y = s->BarHeight + 1;
++    q->w = OpenWindowTags(NULL,
++                          WA_Left, x, WA_Top, y, WA_InnerWidth, w, WA_InnerHeight, h,
++                          WA_Title, (IPTR)q->title, WA_PubScreen, (IPTR)s,
++                          WA_DragBar, TRUE, WA_DepthGadget, TRUE, WA_CloseGadget, TRUE, WA_SizeGadget, TRUE,
++                          WA_SmartRefresh, TRUE, WA_Activate, TRUE, WA_NoCareRefresh, TRUE,
++                          WA_MinWidth, 100, WA_MinHeight, 60, WA_MaxWidth, -1, WA_MaxHeight, -1,
++                          WA_IDCMP, 0, TAG_DONE);
++    UnlockPubScreen(NULL, s);
++    if (!q->w) { FreeVec(q); return NULL; }
++    return q;
++}
++
++void qrx_win_close(qrx_win *q)
++{
++    if (!q) return;
++    ObtainSemaphore(&q->lock);
++    if (q->w) CloseWindow(q->w);
++    q->w = NULL;
++    ReleaseSemaphore(&q->lock);
++    FreeVec(q);
++}
++
++void qrx_win_title(qrx_win *q, const char *title)
++{
++    if (!q || !q->w) return;
++    ObtainSemaphore(&q->lock);
++    strncpy(q->title, title ? title : "", sizeof q->title - 1);
++    SetWindowTitles(q->w, q->title, (CONST_STRPTR)~0);
++    ReleaseSemaphore(&q->lock);
++}
++
++void qrx_win_size(qrx_win *q, int w, int h)
++{
++    if (!q || !q->w) return;
++    ObtainSemaphore(&q->lock);
++    struct Window *win = q->w;
++    int ow = win->Width - win->BorderLeft - win->BorderRight, oh = win->Height - win->BorderTop - win->BorderBottom;
++    if (ow != w || oh != h) SizeWindow(win, w - ow, h - oh);
++    ReleaseSemaphore(&q->lock);
++}
++
++void qrx_win_blit(qrx_win *q, const void *pixels, int stride, int x, int y, int w, int h)
++{
++    if (!q) return;
++    ObtainSemaphore(&q->lock);
++    struct Window *win = q->w;
++    if (win && w > 0 && h > 0) {
++        int iw = win->Width - win->BorderLeft - win->BorderRight, ih = win->Height - win->BorderTop - win->BorderBottom;
++        if (x + w > iw) w = iw - x;
++        if (y + h > ih) h = ih - y;
++        if (w > 0 && h > 0)
++            WritePixelArray((APTR)pixels, x, y, stride, win->RPort, win->BorderLeft + x, win->BorderTop + y, w, h, RECTFMT_ARGB);
++    }
++    ReleaseSemaphore(&q->lock);
++}
+--- /dev/null
++++ b/widget/aros/aros_window_glue.h
+@@ -0,0 +1,26 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++/* QRX OS One 64 (AROS): Intuition windows for Gecko's top-level widgets (aros_window_glue.c).
++ * Kept in C, apart from Gecko's C++, for the same reason as aros_appshell_glue.c. */
++#ifndef aros_window_glue_h
++#define aros_window_glue_h
++#ifdef __cplusplus
++extern "C" {
++#endif
++typedef struct qrx_win qrx_win;
++/* a window on the default public screen (QRX OS One's desktop): inner size w x h at x, y */
++qrx_win* qrx_win_open(int x, int y, int w, int h, const char* title);
++void qrx_win_close(qrx_win* win);
++void qrx_win_title(qrx_win* win, const char* title);
++void qrx_win_size(qrx_win* win, int w, int h);
++/* pixels: the whole buffer, 32-bit A, R, G, B in memory order (Gecko's A8R8G8B8 on big endian), stride bytes per row;
++ * the rectangle x, y, w, h of them to the same place inside the window. From any thread. */
++void qrx_win_blit(qrx_win* win, const void* pixels, int stride, int x, int y, int w, int h);
++/* the default public screen's size, 0 when there is none */
++void qrx_win_screen_size(int* w, int* h);
++#ifdef __cplusplus
++}
++#endif
++#endif
+--- /dev/null
 +++ b/widget/aros/components.conf
 @@ -0,0 +1,69 @@
 +# This Source Code Form is subject to the terms of the Mozilla Public
@@ -8191,49 +8535,16 @@
 +        'processes': ProcessSelector.ALLOW_IN_GPU_RDD_VR_SOCKET_AND_UTILITY_PROCESS,
 +    },
 +]
---- /dev/null
+--- a/widget/aros/moz.build
 +++ b/widget/aros/moz.build
-@@ -0,0 +1,40 @@
-+# This Source Code Form is subject to the terms of the Mozilla Public
-+# License, v. 2.0. If a copy of the MPL was not distributed with this
-+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
-+
-+# QRX OS One 64 (AROS): the widget backend. First stage: an Exec event loop, fixed look and feel,
-+# the windows and clipboard of the headless backend.
-+
-+with Files("**"):
-+    BUG_COMPONENT = ("Core", "Widget")
-+
-+EXPORTS.mozilla.widget += [
-+    "GfxInfo.h",
-+]
-+
-+SOURCES += [
-+    "aros_appshell_glue.c",
-+    "GfxInfo.cpp",
-+    "MediaKeysEventSourceFactory.cpp",
-+    "nsAppShell.cpp",
-+    "nsBidiKeyboard.cpp",
-+    "nsLookAndFeel.cpp",
-+    "nsNativeThemeAROS.cpp",
-+    "nsPrintSettingsAROS.cpp",
-+    "nsUserIdleServiceAROS.cpp",
-+    "nsWidgetFactory.cpp",
-+]
-+
-+include("/ipc/chromium/chromium-config.mozbuild")
-+
-+FINAL_LIBRARY = "xul"
-+LOCAL_INCLUDES += [
-+    "/toolkit/xre",
-+    "/widget",
-+    "/widget/headless",
-+    "/xpcom/components",
-+]
-+
-+XPCOM_MANIFESTS += [
-+    "components.conf",
-+]
+@@ -14,6 +14,7 @@
+ 
+ SOURCES += [
+     "aros_appshell_glue.c",
++    "aros_window_glue.c",
+     "GfxInfo.cpp",
+     "MediaKeysEventSourceFactory.cpp",
+     "nsAppShell.cpp",
 --- /dev/null
 +++ b/widget/aros/nsAppShell.cpp
 @@ -0,0 +1,51 @@
