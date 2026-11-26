@@ -520,6 +520,17 @@
  
      auto MutTiedFields() {
        return std::tie(mCreatorPid, mSize, mStride, mConsumers, mCreatorRef,
+--- a/gfx/layers/wr/WebRenderBridgeParent.cpp
++++ b/gfx/layers/wr/WebRenderBridgeParent.cpp
+@@ -622,7 +622,7 @@
+       gfx::FontType::MAC
+ #elif defined(MOZ_WIDGET_GTK)
+       gfx::FontType::FONTCONFIG
+-#elif defined(MOZ_WIDGET_ANDROID)
++#elif defined(MOZ_WIDGET_ANDROID) || defined(__AROS__)  // QRX: AROS uses the FreeType font list, as Android
+       gfx::FontType::FREETYPE
+ #else
+       gfx::FontType::UNKNOWN
 --- a/gfx/skia/moz.build
 +++ b/gfx/skia/moz.build
 @@ -544,6 +544,16 @@
