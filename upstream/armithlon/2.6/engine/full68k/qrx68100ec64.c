@@ -107,14 +107,21 @@ static void code_written(qec64_cpu *c, uint64_t a, unsigned n)
 /* QRX_EC64_WATCH=<hex address>: every write that touches the 8 bytes there is logged (pc, size,
  * value); QRX_EC64_WATCHPC=<hex pc>: every write by that instruction. For the interpreter: run
  * with QRX_EC64_JIT=0. */
-static uint64_t watch_addr = 1, watch_pc = 1;
+/* QRX_EC64_WATCHVAL=<hex, 8 digits>: every write of 4 or 8 bytes that holds this 32-bit value (in
+ * either half of an 8-byte write), to find who writes a known bad value somewhere unknown. */
+static uint64_t watch_addr = 1, watch_pc = 1, watch_val = 1;
 static void watch_check(ctx *x, uint64_t a, unsigned n, uint64_t v)
 {
     if (watch_addr == 1) {
         const char *w = getenv("QRX_EC64_WATCH"), *p = getenv("QRX_EC64_WATCHPC");   /* WATCHPC: writes by that pc */
+        const char *wv = getenv("QRX_EC64_WATCHVAL");
         watch_addr = w ? strtoull(w, NULL, 16) : 0;
         watch_pc = p ? strtoull(p, NULL, 16) : 0;
+        watch_val = wv ? strtoull(wv, NULL, 16) : 0;
     }
+    if (watch_val && n >= 4 && ((uint32_t)v == (uint32_t)watch_val || (n == 8 && (uint32_t)(v >> 32) == (uint32_t)watch_val)))
+        fprintf(stderr, "[EC64] watchval: write %u bytes at %016llx = %llx, pc %016llx\n", n, (unsigned long long)a,
+                (unsigned long long)v, (unsigned long long)x->start_pc);
     if ((watch_addr && a < watch_addr + 8 && a + n > watch_addr) || (watch_pc && x->start_pc == watch_pc))
         fprintf(stderr, "[EC64] watch: write %u bytes at %016llx = %llx, pc %016llx\n", n, (unsigned long long)a,
                 (unsigned long long)v, (unsigned long long)x->start_pc);
