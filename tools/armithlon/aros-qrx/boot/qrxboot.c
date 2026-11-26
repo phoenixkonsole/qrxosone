@@ -197,6 +197,13 @@ static void *live_thread(void *arg)
                 qec64_cpu *c = qec64_machine_core(live.m, k);
                 fprintf(live.f, "[qrxboot %us] core %u pc %016" PRIx64 " %s, %" PRIu64 " instructions, sp %016" PRIx64 "\n", ticks, k,
                         c->pc, c->supervisor ? "super" : "user", c->instructions, c->a[7]);
+                /* the code there, to find the module it belongs to (a library loaded from disk has no
+                 * fixed place): 24 bytes from pc */
+                if (c->pc + 24 <= c->ram_size) {
+                    fprintf(live.f, "[qrxboot %us] core %u code", ticks, k);
+                    for (int b = 0; b < 24; b++) fprintf(live.f, " %02x", c->ram[c->pc + b]);
+                    fprintf(live.f, "\n");
+                }
                 /* QRXBOOT_LIVE_STACK=1: the words on the stack that point into the kernel or far above it
                  * (programs), big-endian as the guest stores them */
                 static int stack = -1;
