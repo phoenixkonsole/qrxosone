@@ -444,3 +444,25 @@ pid_t __getpid_CrtBase_wrapper(void);
 static pid_t qrx_main_pid;
 __attribute__((constructor(101))) static void qrx_pid_init(void) { qrx_main_pid = __getpid_CrtBase_wrapper(); }
 pid_t getpid(void) { return qrx_main_pid ? qrx_main_pid : __getpid_CrtBase_wrapper(); }
+
+/* ---- diagnostics for ported code: text and a stack dump to the debug console (RawPutChar, so from
+ * any thread); qrx_stack_dump prints the QRX_BACKTRACE format, aros-qrx/qrxbt.py names it */
+void qrx_kputs(const char *s) { qrx_bt_puts(s); }
+void qrx_stack_dump(const char *why)
+{
+    uintptr_t anchor = (uintptr_t)&qrx_bt_anchor;
+    qrx_bt_puts("QRXBT dump "); qrx_bt_puts(why); qrx_bt_puts("\n");
+    qrx_bt_hex("QRXBT anchor ", anchor);
+    struct Task *me = FindTask(NULL);
+    uintptr_t *p = (uintptr_t *)__builtin_frame_address(0);
+    uintptr_t *top = (uintptr_t *)me->tc_SPUpper;
+    int shown = 0;
+    for (; p < top && shown < 120; p++) {
+        uintptr_t v = *p;
+        if (v + (UINT64_C(512) << 20) > anchor && v < anchor + (UINT64_C(512) << 20) && !(v & 1)) {
+            qrx_bt_hex("QRXBT stack ", v);
+            shown++;
+        }
+    }
+    qrx_bt_puts("QRXBT end\n");
+}

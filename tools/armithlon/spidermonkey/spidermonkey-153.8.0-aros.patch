@@ -1154,6 +1154,56 @@
  #include <time.h>
  #include <unistd.h>
  #include <string.h>
+--- a/netwerk/base/CaptivePortalService.cpp
++++ b/netwerk/base/CaptivePortalService.cpp
+@@ -34,14 +34,36 @@
+ 
+ static StaticRefPtr<CaptivePortalService> gCPService;
+ 
++#ifdef __AROS__
++// QRX diagnostics: where the service is made and destroyed (a use-after-free seen in the guest)
++extern "C" void qrx_kputs(const char*);
++extern "C" void qrx_stack_dump(const char*);
++static void QrxCPSLog(const char* aWhat, const void* aThis) {
++  char b[96];
++  snprintf(b, sizeof b, "QRXCPS %s %p\n", aWhat, aThis);
++  qrx_kputs(b);
++}
++#else
++static void QrxCPSLog(const char*, const void*) {}
++#endif
++
+ // static
+ already_AddRefed<nsICaptivePortalService> CaptivePortalService::GetSingleton() {
++#ifdef __AROS__
++  {
++    char b[96];
++    snprintf(b, sizeof b, "QRXCPS get %p (gCPService at %p)\n", (void*)gCPService.get(), (void*)&gCPService);
++    qrx_kputs(b);
++  }
++#endif
+   if (gCPService) {
+     return do_AddRef(gCPService);
+   }
+ 
+   gCPService = new CaptivePortalService();
++  QrxCPSLog("new", gCPService.get());
+   ClearOnShutdown(&gCPService);
++  QrxCPSLog("after ClearOnShutdown", gCPService.get());
+   return do_AddRef(gCPService);
+ }
+ 
+@@ -50,6 +72,10 @@
+ }
+ 
+ CaptivePortalService::~CaptivePortalService() {
++#ifdef __AROS__
++  QrxCPSLog("destroyed", this);
++  qrx_stack_dump("~CaptivePortalService");
++#endif
+   LOG(("CaptivePortalService::~CaptivePortalService isParentProcess:%d\n",
+        XRE_GetProcessType() == GeckoProcessType_Default));
+ }
 --- a/netwerk/base/nsNetUtil.cpp
 +++ b/netwerk/base/nsNetUtil.cpp
 @@ -102,7 +102,7 @@
