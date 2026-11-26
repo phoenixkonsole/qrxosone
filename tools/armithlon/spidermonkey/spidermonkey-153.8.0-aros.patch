@@ -17,6 +17,31 @@
  
  if CONFIG["MOZ_NO_PIE_COMPAT"]:
      GeckoProgram(CONFIG["MOZ_APP_NAME"] + "-bin", linkage=browser_linkage)
+--- a/browser/components/shell/HeadlessShell.sys.mjs
++++ b/browser/components/shell/HeadlessShell.sys.mjs
+@@ -89,13 +89,20 @@
+ 
+     let doc = windowlessBrowser.document;
+     let browser = doc.createXULElement("browser");
+-    browser.setAttribute("remote", "true");
++    // Remote only where content processes exist: a single-process build (QRX OS One 64, AROS,
++    // where MOZ_FORCE_DISABLE_E10S is set) loads the page in this process.
++    const remote = Services.appinfo.browserTabsRemoteAutostart;
++    if (remote) {
++      browser.setAttribute("remote", "true");
++    }
+     browser.setAttribute("type", "content");
+     browser.style.width = `${contentWidth}px`;
+     browser.style.minWidth = `${contentWidth}px`;
+     browser.style.height = `${contentHeight}px`;
+     browser.style.minHeight = `${contentHeight}px`;
+-    browser.setAttribute("maychangeremoteness", "true");
++    if (remote) {
++      browser.setAttribute("maychangeremoteness", "true");
++    }
+     // Suppress initial about:blank so it can't race any explicit load below.
+     browser.setAttribute("nodefaultsrc", "true");
+     doc.documentElement.appendChild(browser);
 --- a/build/autoconf/config.sub
 +++ b/build/autoconf/config.sub
 @@ -1344,7 +1344,7 @@
@@ -522,15 +547,7 @@
        return std::tie(mCreatorPid, mSize, mStride, mConsumers, mCreatorRef,
 --- a/gfx/layers/wr/WebRenderBridgeParent.cpp
 +++ b/gfx/layers/wr/WebRenderBridgeParent.cpp
-@@ -3,6 +3,7 @@
-  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
- #include "mozilla/layers/WebRenderBridgeParent.h"
-+#include "mozilla/ScopeExit.h"
- 
- #include "mozmemory.h"
- #include "CompositableHost.h"
-@@ -622,7 +623,7 @@
+@@ -622,7 +622,7 @@
        gfx::FontType::MAC
  #elif defined(MOZ_WIDGET_GTK)
        gfx::FontType::FONTCONFIG
@@ -539,22 +556,6 @@
        gfx::FontType::FREETYPE
  #else
        gfx::FontType::UNKNOWN
-@@ -660,6 +661,15 @@
- 
-   bool success = true;
-   for (const auto& cmd : aResourceUpdates) {
-+#ifdef __AROS__
-+    // QRX diagnostics: which resource update fails (SetDisplayList refused)
-+    bool qrxBefore = success;
-+    auto qrxNote = MakeScopeExit([&] {
-+      if (qrxBefore && !success) {
-+        gfxCriticalNote << "QRX UpdateResources failed at op type " << int(cmd.type());
-+      }
-+    });
-+#endif
-     switch (cmd.type()) {
-       case OpUpdateResource::TOpAddImage: {
-         const auto& op = cmd.get_OpAddImage();
 --- a/gfx/skia/moz.build
 +++ b/gfx/skia/moz.build
 @@ -544,6 +544,16 @@
