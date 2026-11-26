@@ -27,16 +27,19 @@ user_pref("extensions.webextensions.remote", false);
 user_pref("toolkit.asyncshutdown.crash_timeout", 86400000);
 EOP
 export QRX_TREES="$T/ff:Firefox $T/fonts:Fonts/TrueType $WEB:Web/qrxrocks $T/profile:T/profile"
-# the disk image lives in guest memory; the guest boots with at most 2048 MB (qrxboot)
+# The system is a host directory (QRX_SYS_HOSTFS, the guest boots from it through hostfs, host
+# service 12): long names for the profile, no disk image in guest memory, and the PNG is a host file
+# the moment Firefox writes it. QRX_SYS_IMAGE=1: the old way, an FFS image in guest memory.
+if [ -z "${QRX_SYS_IMAGE:-}" ]; then export QRX_SYS_HOSTFS=1 QRX_KEEP_SYS=$T/sys; fi
 export QRX_IMG_MB=${QRX_IMG_MB:-600} QRX_MEM_MB=${QRX_MEM_MB:-2048}
 # MOZ_FORCE_DISABLE_E10S: one process; AROS cannot start Gecko's content processes (fork, shared
 # memory handed to a child), and a build that is not MOZILLA_OFFICIAL takes this variable
 export QRX_PRE='Assign FONTS: SYS:Fonts\nStack 2000000\nSet TMPDIR /T\nSet HOME /T\nSet MOZ_FORCE_DISABLE_E10S 1\nMakeDir T:profile\n'"${QRX_EXTRA_PRE:-}"   # QRX_EXTRA_PRE: e.g. Set QRX_TEXTBASE 1
 export QRX_CMD="SYS:Firefox/firefox"
 export QRX_ARGS="--headless --profile /T/profile --screenshot /T/shot.png --window-size 1280,900 $URL\nType T:shot.png HEX"
-# the system disk comes back too: when Firefox does not end cleanly (a crash on shutdown after it
-# saved the screenshot) the shell never gets to Type, and the PNG is read from the disk instead
-export QRX_KEEP_DISK=$T/disk.img
+# with the image: the disk comes back too, for when Firefox does not end cleanly and the shell never
+# gets to Type (the PNG is then read from the disk image)
+[ -n "${QRX_SYS_IMAGE:-}" ] && export QRX_KEEP_DISK=$T/disk.img
 log=$(bash "$HERE/../../rust/tests/run-guest.sh" /dev/null "$SECS")
 echo "$log" | grep -v "^[0-9a-f]\{4,\}: " | tail -40
 # Type HEX lines: "0000: 89504e47 0d0a1a0a ...   text"
@@ -50,7 +53,10 @@ for line in sys.stdin:
 open(sys.argv[1], "wb").write(data)
 print("png bytes:", len(data), "signature ok:", data[:8] == b"\x89PNG\r\n\x1a\n")
 ' "$OUT"
-if ! head -c 8 "$OUT" | grep -q PNG && [ -f $T/disk.img ]; then
+if ! head -c 8 "$OUT" | grep -q PNG && [ -f $T/sys/T/shot.png ]; then
+  cp $T/sys/T/shot.png "$OUT"
+  python3 -I -c 'import sys; d=open(sys.argv[1],"rb").read(); print("from the host directory: png bytes:", len(d), "signature ok:", d[:8] == b"\x89PNG\r\n\x1a\n")' "$OUT"
+elif ! head -c 8 "$OUT" | grep -q PNG && [ -f $T/disk.img ]; then
   python3 -I "$HERE/../../aros-qrx/boot/ffsget.py" $T/disk.img T/shot.png "$OUT" &&
     python3 -I -c 'import sys; d=open(sys.argv[1],"rb").read(); print("from the disk: png bytes:", len(d), "signature ok:", d[:8] == b"\x89PNG\r\n\x1a\n")' "$OUT"
 fi
