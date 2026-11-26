@@ -109,7 +109,21 @@ static void code_written(qec64_cpu *c, uint64_t a, unsigned n)
  * with QRX_EC64_JIT=0. */
 /* QRX_EC64_WATCHVAL=<hex, 8 digits>: every write of 4 or 8 bytes that holds this 32-bit value (in
  * either half of an 8-byte write), to find who writes a known bad value somewhere unknown. */
-static uint64_t watch_addr = 1, watch_pc = 1, watch_val = 1;
+/* QRX_EC64_WATCHWORD=<hex, 16 digits>: after every write, whether the aligned 8 bytes it touched now
+ * hold this value; catches a value put together byte by byte (strcpy and the like). */
+static uint64_t watch_addr = 1, watch_pc = 1, watch_val = 1, watch_word = 1;
+static void watch_after(ctx *x, uint64_t a, unsigned n)
+{
+    if (watch_word == 1) { const char *e = getenv("QRX_EC64_WATCHWORD"); watch_word = e ? strtoull(e, NULL, 16) : 0; }
+    if (!watch_word || a >= x->c->ram_size) return;
+    for (uint64_t w = a & ~UINT64_C(7); w < a + n && w + 8 <= x->c->ram_size; w += 8) {
+        uint64_t v = 0;
+        for (int b = 0; b < 8; b++) v = v << 8 | x->c->ram[w + b];
+        if (v == watch_word)
+            fprintf(stderr, "[EC64] watchword: %016llx now holds it after a %u-byte write at %016llx, pc %016llx\n",
+                    (unsigned long long)w, n, (unsigned long long)a, (unsigned long long)x->start_pc);
+    }
+}
 static void watch_check(ctx *x, uint64_t a, unsigned n, uint64_t v)
 {
     if (watch_addr == 1) {
@@ -136,12 +150,18 @@ static void wr(ctx *x, uint64_t a, unsigned n, uint64_t v)
         (x->c->code_map[a >> QEC64_CODE_SHIFT] | x->c->code_map[(a + n - 1) >> QEC64_CODE_SHIFT]))
         code_written(x->c, a, n);
     switch (n) {
-    case 1: __atomic_store_n(p, (uint8_t)v, __ATOMIC_RELEASE); return;
-    case 2: if (!(a & 1)) { __atomic_store_n((uint16_t *)p, __builtin_bswap16((uint16_t)v), __ATOMIC_RELEASE); return; } break;
-    case 4: if (!(a & 3)) { __atomic_store_n((uint32_t *)p, __builtin_bswap32((uint32_t)v), __ATOMIC_RELEASE); return; } break;
-    default: if (!(a & 7)) { __atomic_store_n((uint64_t *)p, __builtin_bswap64(v), __ATOMIC_RELEASE); return; } break;
+    case 1: __atomic_store_n(p, (uint8_t)v, __ATOMIC_RELEASE); break;
+    case 2: if (!(a & 1)) { __atomic_store_n((uint16_t *)p, __builtin_bswap16((uint16_t)v), __ATOMIC_RELEASE); break; }
+            for (unsigned i = 0; i < n; i++) p[i] = (uint8_t)(v >> ((n - 1 - i) * 8));
+            break;
+    case 4: if (!(a & 3)) { __atomic_store_n((uint32_t *)p, __builtin_bswap32((uint32_t)v), __ATOMIC_RELEASE); break; }
+            for (unsigned i = 0; i < n; i++) p[i] = (uint8_t)(v >> ((n - 1 - i) * 8));
+            break;
+    default: if (!(a & 7)) { __atomic_store_n((uint64_t *)p, __builtin_bswap64(v), __ATOMIC_RELEASE); break; }
+            for (unsigned i = 0; i < n; i++) p[i] = (uint8_t)(v >> ((n - 1 - i) * 8));
+            break;
     }
-    for (unsigned i = 0; i < n; i++) p[i] = (uint8_t)(v >> ((n - 1 - i) * 8));
+    if (__builtin_expect(watch_word != 0, 0)) watch_after(x, a, n);
 }
 static uint16_t fetch16(ctx *x) { uint16_t v = (uint16_t)rd(x, x->c->pc, 2); x->c->pc = (x->c->pc + 2) & amask(x); return v; }
 static uint32_t fetch32(ctx *x) { uint32_t h = fetch16(x); return h << 16 | fetch16(x); }
