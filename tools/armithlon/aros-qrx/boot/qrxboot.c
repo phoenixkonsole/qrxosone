@@ -209,6 +209,18 @@ static void *live_thread(void *arg)
                         c->pc, c->supervisor ? "super" : "user", c->instructions, c->a[7]);
                 /* the code there, to find the module it belongs to (a library loaded from disk has no
                  * fixed place): 24 bytes from pc */
+                /* QRXBOOT_PCDUMP=<file>: the 64 KB around core 0's pc at each sample (the last one
+                 * stays), for placing code loaded from disk by comparing it with the files */
+                const char *pd = getenv("QRXBOOT_PCDUMP");
+                if (pd && k == 0 && c->pc >= 0x8000 && c->pc + 0x8000 <= c->ram_size) {
+                    FILE *df = fopen(pd, "wb");
+                    if (df) {
+                        uint64_t from = c->pc - 0x8000;
+                        fprintf(df, "QRXPCDUMP %016" PRIx64 " %016" PRIx64 "\n", from, c->pc);
+                        fwrite(c->ram + from, 1, 0x10000, df);
+                        fclose(df);
+                    }
+                }
                 if (c->pc + 24 <= c->ram_size) {
                     fprintf(live.f, "[qrxboot %us] core %u code", ticks, k);
                     for (int b = 0; b < 24; b++) fprintf(live.f, " %02x", c->ram[c->pc + b]);
