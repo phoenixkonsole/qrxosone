@@ -69,6 +69,22 @@ static void capture(const qec64_board *b)
     fprintf(stderr, "[EC64] framebuffer %u x %u written to %s\n", w, h, capture_path);
 }
 
+/* QRX_EC64_DUMP=<hex address>,<hex length>,<file>: that part of guest RAM at the end, e.g. the code
+ * around a fault's pc to find the library it belongs to (aros-qrx/qrxbt.py, a fuzzy match) */
+static void dump_ram(const qec64_board *b)
+{
+    const char *e = getenv("QRX_EC64_DUMP");
+    if (!e) return;
+    char *p;
+    unsigned long long a = strtoull(e, &p, 16), n = *p == ',' ? strtoull(p + 1, &p, 16) : 0;
+    if (*p != ',' || !n || a >= b->ram_size || n > b->ram_size - a) { fprintf(stderr, "[EC64] QRX_EC64_DUMP: bad range\n"); return; }
+    FILE *f = fopen(p + 1, "wb");
+    if (!f) return;
+    fwrite(b->ram + a, 1, (size_t)n, f);
+    fclose(f);
+    fprintf(stderr, "[EC64] RAM %llx+%llx written to %s\n", a, n, p + 1);
+}
+
 static double wall(void)
 {
     struct timespec t;
@@ -319,6 +335,7 @@ int main(int argc, char **argv)
             fprintf(stderr, "[EC64] all cores: %.1f million instructions a second\n", total / (t1 - t0) / 1e6);
         }
         capture(board);
+        dump_ram(board);
         if (disk) memcpy(disk, ram + L.disk_at, disk_size);    /* the disk keeps what the system wrote */
         qec64_machine_free(m);
         munmap(ram, ram_size);
