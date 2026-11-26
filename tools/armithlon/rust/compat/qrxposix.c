@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdint.h>
@@ -465,4 +466,74 @@ void qrx_stack_dump(const char *why)
         }
     }
     qrx_bt_puts("QRXBT end\n");
+}
+
+/* realpath: AROS's opens "." to come back to the working directory and resolves by chdir/getcwd,
+ * which fails for paths such as /T/profile (Gecko's --profile). Here it is done on the string: the
+ * path made absolute with getcwd, then ".", ".." and repeated slashes taken out, and every prefix
+ * checked with stat, so a missing component is ENOENT and a file in the middle ENOTDIR as POSIX
+ * asks. AROS file systems have no symbolic links for Unix programs to follow, so none are resolved. */
+char *realpath(const char *path, char *resolved)
+{
+    char tmp[PATH_MAX], out[PATH_MAX];
+    if (!path) { errno = EINVAL; return NULL; }
+    if (!*path) { errno = ENOENT; return NULL; }
+    size_t n = 0;
+    if (path[0] != '/') {
+        if (!getcwd(tmp, sizeof tmp)) return NULL;
+        n = strlen(tmp);
+    }
+    size_t pl = strlen(path);
+    if (n + 1 + pl + 1 > sizeof tmp) { errno = ENAMETOOLONG; return NULL; }
+    if (n) tmp[n++] = '/';
+    memcpy(tmp + n, path, pl + 1);
+    size_t o = 0;
+    const char *p = tmp;
+    while (*p) {
+        while (*p == '/') p++;
+        if (!*p) break;
+        const char *e = p;
+        while (*e && *e != '/') e++;
+        size_t l = (size_t)(e - p);
+        if (l == 1 && p[0] == '.') { p = e; continue; }
+        if (l == 2 && p[0] == '.' && p[1] == '.') {
+            while (o > 0 && out[o - 1] != '/') o--;
+            if (o > 0) o--;
+            p = e;
+            continue;
+        }
+        if (o + 1 + l + 1 > sizeof out) { errno = ENAMETOOLONG; return NULL; }
+        out[o++] = '/';
+        memcpy(out + o, p, l);
+        o += l;
+        out[o] = 0;
+        struct stat st;
+        if (stat(out, &st) != 0) return NULL;          /* errno from stat: ENOENT and so on */
+        if (*e && !S_ISDIR(st.st_mode)) { errno = ENOTDIR; return NULL; }
+        p = e;
+    }
+    if (!o) out[o++] = '/';
+    out[o] = 0;
+    if (!resolved) {
+        resolved = malloc(o + 1);
+        if (!resolved) { errno = ENOMEM; return NULL; }
+    }
+    memcpy(resolved, out, o + 1);
+    return resolved;
+}
+
+/* rename: AROS's Rename() does not replace an existing target (ERROR_OBJECT_EXISTS), POSIX's does,
+ * and programs rely on it to replace a file by a finished temporary copy. Here an existing target
+ * that is not a directory is deleted and the rename tried again. Not atomic as on Unix: between
+ * the two steps the target is missing. */
+int __rename_CrtBase_wrapper(const char *, const char *);
+int rename(const char *from, const char *to)
+{
+    if (__rename_CrtBase_wrapper(from, to) == 0) return 0;
+    int e = errno;
+    struct stat sf, st;
+    if (stat(from, &sf) != 0 || stat(to, &st) != 0 || S_ISDIR(st.st_mode)) { errno = e; return -1; }
+    if (S_ISDIR(sf.st_mode)) { errno = ENOTDIR; return -1; }
+    if (unlink(to) != 0) return -1;
+    return __rename_CrtBase_wrapper(from, to);
 }
