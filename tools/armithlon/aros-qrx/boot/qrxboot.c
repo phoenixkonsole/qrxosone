@@ -13,7 +13,9 @@
 #include "qrx68100ec64.h"
 #include "qrx_ec64_board.h"
 #include <inttypes.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -134,6 +136,23 @@ static uint64_t load_elf(const char *path, uint64_t next, uint64_t *start)
     return kernel_end;
 }
 
+/* QRXBOOT_LIVE=<file>: a thread copies the console to <file> as it grows (once a second), so a run
+   that is cut off from outside still shows how far the guest got */
+static struct { qec64_machine *m; const char *buf; FILE *f; volatile int stop; } live;
+static void *live_thread(void *arg)
+{
+    (void)arg;
+    size_t done = 0;
+    for (;;) {
+        int last = live.stop;
+        size_t used = qec64_machine_console_used(live.m);
+        if (used > done) { fwrite(live.buf + done, 1, used - done, live.f); fflush(live.f); done = used; }
+        if (last) return NULL;
+        sleep(1);
+    }
+}
+
+
 #define END_POWEROFF 0x100
 #define MAX_BOOTS 4
 
@@ -194,7 +213,14 @@ static long long boot(int argc, char **argv, double seconds, unsigned cores, con
     unsigned who = 0;
     qec64_machine_console(m, out, sizeof out - 1);
     if (input) qec64_machine_console_input(m, input, strlen(input));
+    pthread_t lt;
+    int have_live = 0;
+    if (getenv("QRXBOOT_LIVE") && (live.f = fopen(getenv("QRXBOOT_LIVE"), "w"))) {
+        live.m = m; live.buf = out;
+        have_live = pthread_create(&lt, NULL, live_thread, NULL) == 0;
+    }
     enum qec64_status st = qec64_machine_run(m, STUB, STUB_SP, seconds, &who);
+    if (have_live) { live.stop = 1; pthread_join(lt, NULL); fclose(live.f); }
     size_t used = qec64_machine_console_used(m);
     out[used] = 0;
     qec64_cpu *ender = qec64_machine_core(m, who);
