@@ -17,11 +17,14 @@ cp $AROSSRC/workbench/fonts/truetype/bitstream/*.ttf $AROSSRC/workbench/fonts/tr
 python3 -I "$HERE/../package-browser.py" "$OBJ/dist/bin" $T/ff
 URL="${QRX_URL:-file:///SYS/Web/qrxrocks/index.html}"
 # the profile starts with prefs for a single-process browser: extensions in this process too (their
-# background pages otherwise wait for an extension process that never comes, and shutdown hangs on
-# them until nsTerminator crashes Firefox, before the shell can Type the PNG)
+# background pages otherwise wait for an extension process that never comes). A built-in one
+# (addons-search-detection) still never finishes starting, and shutdown waits for it: without a
+# crash timeout Firefox waits instead of crashing (a crash reboots the guest before afs.handler has
+# written the PNG from its cache), the run ends at its time limit and the PNG comes from the disk.
 mkdir -p $T/profile
 cat > $T/profile/user.js <<'EOP'
 user_pref("extensions.webextensions.remote", false);
+user_pref("toolkit.asyncshutdown.crash_timeout", 86400000);
 EOP
 export QRX_TREES="$T/ff:Firefox $T/fonts:Fonts/TrueType $WEB:Web/qrxrocks $T/profile:T/profile"
 # the disk image lives in guest memory; the guest boots with at most 2048 MB (qrxboot)
