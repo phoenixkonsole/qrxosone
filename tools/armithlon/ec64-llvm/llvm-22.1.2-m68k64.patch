@@ -971,7 +971,22 @@
      report_fatal_error("M68k64 interrupts may not be called directly");
  
    auto Attr = MF.getFunction().getFnAttribute("disable-tail-calls");
-@@ -951,6 +970,8 @@
+@@ -856,9 +875,13 @@
+   if (M68k64::isCalleePop(CallConv, IsVarArg,
+                         DAG.getTarget().Options.GuaranteedTailCallOpt)) {
+     NumBytesForCalleeToPop = NumBytes; // Callee pops everything
+-  } else if (!canGuaranteeTCO(CallConv) && SR == StackStructReturn) {
++  } else if (!canGuaranteeTCO(CallConv) && SR == StackStructReturn && !ArgLocs.empty() &&
++             ArgLocs[0].isMemLoc()) {
+     // If this is a call to a struct-return function, the callee
+     // pops the hidden struct pointer, so we have to push it back.
++    // QRX: only when that pointer really went on the stack. The fast calling convention passes it
++    // in a register; popping then took 4 bytes of the caller's frame, and the return address moved
++    // there overwrote a result buffer at the caller's sp (Gecko, nsDNSService::GetXPCOMSingleton).
+     NumBytesForCalleeToPop = 4;
+   } else {
+     NumBytesForCalleeToPop = 0; // Callee pops nothing.
+@@ -951,6 +974,8 @@
        const TargetRegisterClass *RC;
        if (RegVT == MVT::i32)
          RC = &M68k64::XR32RegClass;
@@ -980,10 +995,21 @@
        else
          llvm_unreachable("Unknown argument type!");
  
-@@ -1112,6 +1133,33 @@
+@@ -1049,7 +1074,8 @@
+   } else {
+     MMFI->setBytesToPopOnReturn(0); // Callee pops nothing.
+     // If this is an sret function, the return should pop the hidden pointer.
+-    if (!canGuaranteeTCO(CCID) && argsAreStructReturn(Ins) == StackStructReturn)
++    if (!canGuaranteeTCO(CCID) && argsAreStructReturn(Ins) == StackStructReturn &&
++        !ArgLocs.empty() && ArgLocs[0].isMemLoc())   // QRX: not when it came in a register (fastcc)
+       MMFI->setBytesToPopOnReturn(4);
+   }
+ 
+@@ -1111,6 +1137,33 @@
+         ValToCopy = DAG.getNode(ISD::ANY_EXTEND, DL, VA.getLocVT(), ValToCopy);
      } else if (VA.getLocInfo() == CCValAssign::BCvt)
        ValToCopy = DAG.getBitcast(VA.getLocVT(), ValToCopy);
- 
++
 +    // QRX: a single 64-bit result goes in D0 and in A0. Pointers belong in A0 and integers in
 +    // D0, but C code (AROS's OOP methods, library vectors, function pointer casts) calls a
 +    // function through a prototype with the other kind of result; on x86-64 both are RAX and the
@@ -1010,11 +1036,10 @@
 +      RetOps.push_back(DAG.getRegister(Other, MVT::i64));
 +      continue;
 +    }
-+
+ 
      Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), ValToCopy, Glue);
      Glue = Chain.getValue(1);
-     RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
-@@ -1154,7 +1202,7 @@
+@@ -1154,7 +1207,7 @@
  
      // ??? How will this work if CC does not use registers for args passing?
      // ??? What if I return multiple structs?
@@ -1023,7 +1048,7 @@
      Chain = DAG.getCopyToReg(Chain, DL, RetValReg, Val, Glue);
      Glue = Chain.getValue(1);
  
-@@ -1343,8 +1391,8 @@
+@@ -1343,8 +1396,8 @@
          switch (Reg) {
          default:
            break;
@@ -1034,7 +1059,7 @@
            if (++NumInRegs == MaxInRegs)
              return false;
            break;
-@@ -1417,6 +1465,10 @@
+@@ -1417,6 +1470,10 @@
      return LowerVASTART(Op, DAG);
    case ISD::DYNAMIC_STACKALLOC:
      return LowerDYNAMIC_STACKALLOC(Op, DAG);
@@ -1045,7 +1070,7 @@
    case ISD::SHL_PARTS:
      return LowerShiftLeftParts(Op, DAG);
    case ISD::SRA_PARTS:
-@@ -1448,10 +1500,10 @@
+@@ -1448,10 +1505,10 @@
  SDValue M68k64TargetLowering::getTLSGetAddr(GlobalAddressSDNode *GA,
                                            SelectionDAG &DAG,
                                            unsigned TargetFlags) const {
@@ -1058,7 +1083,7 @@
  
    PointerType *PtrTy = PointerType::get(*DAG.getContext(), 0);
  
-@@ -1476,22 +1528,22 @@
+@@ -1476,22 +1533,22 @@
    SDValue TGA =
        DAG.getTargetGlobalAddress(GA->getGlobal(), GA, GA->getValueType(0),
                                   GA->getOffset(), M68k64II::MO_TLSLD);
@@ -1086,7 +1111,7 @@
  }
  
  SDValue M68k64TargetLowering::LowerTLSLocalExec(GlobalAddressSDNode *GA,
-@@ -1500,7 +1552,7 @@
+@@ -1500,7 +1557,7 @@
    SDValue TGA =
        DAG.getTargetGlobalAddress(GA->getGlobal(), GA, GA->getValueType(0),
                                   GA->getOffset(), M68k64II::MO_TLSLE);
@@ -1095,7 +1120,7 @@
  }
  
  SDValue M68k64TargetLowering::LowerGlobalTLSAddress(SDValue Op,
-@@ -1508,6 +1560,9 @@
+@@ -1508,6 +1565,9 @@
    assert(Subtarget.isTargetELF());
  
    auto *GA = cast<GlobalAddressSDNode>(Op);
@@ -1105,7 +1130,7 @@
    TLSModel::Model AccessModel = DAG.getTarget().getTLSModel(GA->getGlobal());
  
    switch (AccessModel) {
-@@ -1658,6 +1713,18 @@
+@@ -1658,6 +1718,18 @@
    // that doing a bittest on the i32 value is ok.
    if (Src.getValueType() == MVT::i8 || Src.getValueType() == MVT::i16)
      Src = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i32, Src);
@@ -1124,7 +1149,7 @@
  
    // If the operand types disagree, extend the shift amount to match.  Since
    // BTST ignores high bits (like shifts) we can use anyextend.
-@@ -3019,6 +3086,8 @@
+@@ -3019,6 +3091,8 @@
          return std::make_pair(0U, &M68k64::DR16RegClass);
        case MVT::i32:
          return std::make_pair(0U, &M68k64::DR32RegClass);
@@ -1133,7 +1158,7 @@
        default:
          break;
        }
-@@ -3029,6 +3098,8 @@
+@@ -3029,6 +3103,8 @@
          return std::make_pair(0U, &M68k64::AR16RegClass);
        case MVT::i32:
          return std::make_pair(0U, &M68k64::AR32RegClass);
@@ -1142,7 +1167,7 @@
        default:
          break;
        }
-@@ -3038,13 +3109,27 @@
+@@ -3038,13 +3114,27 @@
      }
    }
  
@@ -1172,7 +1197,7 @@
  }
  
  // Return true if it is OK for this CMOV pseudo-opcode to be cascaded
-@@ -3376,6 +3461,33 @@
+@@ -3376,6 +3466,33 @@
  // bytes in one go. Touching the stack at 4K increments is necessary to ensure
  // that the guard pages used by the OS virtual memory manager are allocated in
  // correct sequence.
@@ -1206,7 +1231,7 @@
  SDValue M68k64TargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
                                                      SelectionDAG &DAG) const {
    MachineFunction &MF = DAG.getMachineFunction();
-@@ -3443,8 +3555,8 @@
+@@ -3443,8 +3560,8 @@
  
    SDValue Zero = DAG.getConstant(0, DL, VT);
    SDValue One = DAG.getConstant(1, DL, VT);
@@ -1217,7 +1242,7 @@
    SDValue ShamtMinusRegisterSize =
        DAG.getNode(ISD::ADD, DL, VT, Shamt, MinusRegisterSize);
    SDValue RegisterSizeMinus1Shamt =
-@@ -3495,8 +3607,8 @@
+@@ -3495,8 +3612,8 @@
  
    SDValue Zero = DAG.getConstant(0, DL, VT);
    SDValue One = DAG.getConstant(1, DL, VT);
@@ -1228,7 +1253,7 @@
    SDValue ShamtMinusRegisterSize =
        DAG.getNode(ISD::ADD, DL, VT, Shamt, MinusRegisterSize);
    SDValue RegisterSizeMinus1Shamt =
-@@ -3534,7 +3646,7 @@
+@@ -3534,7 +3651,7 @@
  // When legalizing carry, we create carries via add X, -1
  // If that comes from an actual carry, via setcc, we use the
  // carry directly.
@@ -1237,7 +1262,7 @@
    if (CCR.getOpcode() == M68k64ISD::ADD) {
      if (isAllOnesConstant(CCR.getOperand(1))) {
        SDValue Carry = CCR.getOperand(0);
-@@ -3547,8 +3659,15 @@
+@@ -3547,8 +3664,15 @@
          Carry = Carry.getOperand(0);
        if (Carry.getOpcode() == M68k64ISD::SETCC ||
            Carry.getOpcode() == M68k64ISD::SETCC_CARRY) {
@@ -1255,7 +1280,7 @@
        }
      }
    }
-@@ -3601,7 +3720,7 @@
+@@ -3601,7 +3725,7 @@
  }
  
  static SDValue combineSUBX(SDNode *N, SelectionDAG &DAG) {
@@ -1264,7 +1289,7 @@
      MVT VT = N->getSimpleValueType(0);
      SDVTList VTs = DAG.getVTList(VT, MVT::i32);
      return DAG.getNode(M68k64ISD::SUBX, SDLoc(N), VTs, N->getOperand(0),
-@@ -3614,7 +3733,7 @@
+@@ -3614,7 +3738,7 @@
  // Optimize RES, CCR = M68k64ISD::ADDX LHS, RHS, CCR
  static SDValue combineADDX(SDNode *N, SelectionDAG &DAG,
                             TargetLowering::DAGCombinerInfo &DCI) {
