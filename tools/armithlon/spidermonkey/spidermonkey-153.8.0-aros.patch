@@ -5351,7 +5351,7 @@
 +    mPixels = MakeUnique<uint8_t[]>(size_t(size.width) * size.height * 4);
 +    mPixelsSize = size;
 +  }
-+  // A8R8G8B8 in host order: A, R, G, B in memory on big endian, as RECTFMT_ARGB
++  // SWGL writes B, G, R, A in memory (the window glue copies it as RECTFMT_BGRA32)
 +  return gfx::Factory::CreateDrawTargetForData(
 +      gfx::BackendType::SKIA, mPixels.get(), size.ToUnknownSize(), size.width * 4,
 +      gfx::SurfaceFormat::A8R8G8B8_UINT32);
@@ -8485,7 +8485,7 @@
 +        if (x + w > iw) w = iw - x;
 +        if (y + h > ih) h = ih - y;
 +        if (w > 0 && h > 0)
-+            WritePixelArray((APTR)pixels, x, y, stride, win->RPort, win->BorderLeft + x, win->BorderTop + y, w, h, RECTFMT_ARGB);
++            WritePixelArray((APTR)pixels, x, y, stride, win->RPort, win->BorderLeft + x, win->BorderTop + y, w, h, RECTFMT_BGRA32);
 +    }
 +    ReleaseSemaphore(&q->lock);
 +}
@@ -8509,7 +8509,7 @@
 +void qrx_win_close(qrx_win* win);
 +void qrx_win_title(qrx_win* win, const char* title);
 +void qrx_win_size(qrx_win* win, int w, int h);
-+/* pixels: the whole buffer, 32-bit A, R, G, B in memory order (Gecko's A8R8G8B8 on big endian), stride bytes per row;
++/* pixels: the whole buffer, 32-bit B, G, R, A in memory order (what SWGL writes), stride bytes per row;
 + * the rectangle x, y, w, h of them to the same place inside the window. From any thread. */
 +void qrx_win_blit(qrx_win* win, const void* pixels, int stride, int x, int y, int w, int h);
 +/* the default public screen's size, 0 when there is none */
