@@ -34,6 +34,9 @@ pref("extensions.webextensions.remote", false);
 // Glean's upload thread: no network for telemetry; a negative port makes FOG treat every upload as
 // done without one (its upload thread crashed on QRX OS One 64)
 pref("telemetry.fog.test.localhost_port", -1);
+// a built-in extension never finishes starting without an extension process, and shutdown waits for
+// it; after the default 60 s AsyncShutdown would crash the browser (and with it the guest)
+pref("toolkit.asyncshutdown.crash_timeout", 86400000);
 pref("browser.shell.checkDefaultBrowser", false);
 pref("browser.startup.homepage_override.mstone", "ignore");
 pref("startup.homepage_welcome_url", "");

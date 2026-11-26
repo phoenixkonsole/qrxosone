@@ -39,6 +39,8 @@ if [ "$(conf system)" = 64 ] && [ -x /qrx/bin/armithlon64 ] && [ -s $K/core.elf 
     [ "$ram" -ge 256 ] 2>/dev/null || ram=256
     case $cores in 1) export QRX_EC64_CPUS=3 rest=0-2 ;; 2) export QRX_EC64_CPUS=3,2 rest=0-1 ;;
                    *) export QRX_EC64_CPUS=3,2,1,0 rest=0 ;; esac
+    # the App Store installs 64-bit apps into the system's own directory: APPS: is SYS:Apps there
+    [ -e $SYS64/AROS.boot ] && export QRX_APPS_DIR=$SYS64/Apps && mkdir -p $SYS64/Apps
     set --
     while read -r m; do [ -n "$m" ] && set -- "$@" "$K/$m"; done < $K/modules.txt
     cd /qrx

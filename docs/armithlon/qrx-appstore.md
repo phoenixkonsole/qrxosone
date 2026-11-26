@@ -30,8 +30,7 @@ Dieselbe Quelle läuft als m68k64-Programm, gebaut mit dem m68k64-Clang. `build-
 
 Der Katalog hat eine 14. Spalte `arch`: `m68k` für QRX OS One (die Vorgabe, wenn sie fehlt) und `m68k64` für
 QRX OS One 64. Jede Fassung der App zeigt nur Apps, die ihr System auch starten kann. Blender ist ein 32-Bit-Programm,
-im 64-Bit-Store erscheint es deshalb nicht. Im Moment gibt es noch keine 64-Bit-App im Katalog, der 64-Bit-Store zeigt
-also „Nothing here yet.“.
+im 64-Bit-Store erscheint es deshalb nicht. Die erste 64-Bit-App im Katalog ist Firefox (siehe unten).
 
 Geprüft (x86-64-Engine `qrx_ec64_run`, 2 Kerne, mit dem 64-Bit-Desktop): Das Fenster öffnet sich auf dem Desktop, der
 Katalog kommt über den Host-Dienst. Mit einem Testkatalog aus einem 32- und einem 64-Bit-Eintrag zeigt die 64-Bit-App
@@ -40,9 +39,9 @@ nur den 64-Bit-Eintrag und die 32-Bit-App nur Blender.
 Grenzen:
 
 - Das 64-Bit-System hat keine Antialias-Schriften (keine `Fonts`, keine `freetype2.library`). Die App schreibt in `topaz`.
-- Die EC64-Engine bietet keinen Host-Ordner als Laufwerk an. Installiert wird auf dem Pi nach `/data/Apps`, aber im
-  64-Bit-System gibt es kein `APPS:`, OPEN findet die App also nicht. Dafür braucht die EC64-Engine erst eine
-  HostFS-Freigabe wie die 32-Bit-Engine.
+- Installiert wird nur, wenn das 64-Bit-System per hostfs aus einem Host-Ordner startet (auf dem Pi `/data/qrx64`
+  mit `AROS.boot`, Kernelmodul `qrxsys`). Dann setzt `/qrx/session` `QRX_APPS_DIR=/data/qrx64/Apps`, und die
+  Startup-Sequence weist `APPS:` auf `SYS:Apps`. Mit dem alten Image `QRXOS64.img` gibt es kein `APPS:`.
 
 ## Sicherheit
 

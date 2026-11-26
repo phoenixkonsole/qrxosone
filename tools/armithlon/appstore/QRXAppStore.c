@@ -615,12 +615,13 @@ static void open_app(App *a)
     snprintf(cmd, sizeof cmd, "%s", a->launch[0] ? a->launch : a->id);
     /* a launcher script (Blender sets up Python's paths) or the program itself, in its folder */
     BPTR old = CurrentDir(dir);
-    /* a program starts with the hunk header 0x3F3; anything else is a script for Execute (the s bit
-     * does not survive the archive on the host's file system) */
+    /* a program starts with the hunk header 0x3F3 (QRX OS One) or is an ELF file (QRX OS One 64);
+     * anything else is a script for Execute (the s bit does not survive the archive on the host's
+     * file system) */
     BPTR test = Open((STRPTR)cmd, MODE_OLDFILE);
     if (test) {
         ULONG magic = 0;
-        int script = Read(test, &magic, 4) != 4 || magic != 0x000003F3UL;
+        int script = Read(test, &magic, 4) != 4 || (magic != 0x000003F3UL && magic != 0x7F454C46UL);
         Close(test);
         char line[240];
         snprintf(line, sizeof line, script ? "Execute APPS:%s/%s" : "APPS:%s/%s", a->id, cmd);

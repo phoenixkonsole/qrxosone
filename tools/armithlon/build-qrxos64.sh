@@ -27,8 +27,11 @@ cp "$BIN/native-m68k64/gen/rom/boot/core.elf" "$K/"
 for m in Libs/utility.library Libs/aros.library boot/native/Devs/battclock.resource \
          boot/native/Devs/timer.device boot/native/Libs/expansion.library Devs/bootloader.resource \
          Libs/dos.library Devs/lddemon.resource L/econsole-handler Devs/FileSystem.resource \
-         L/afs-handler Devs/qrxdisk.device Devs/shell.resource Devs/shellcommands.resource \
+         L/afs-handler L/qrxsys-handler Devs/qrxdisk.device Devs/shell.resource Devs/shellcommands.resource \
          Devs/dosboot.resource; do
+    # qrxsys: the file system on a host directory (aros-qrx/qrxhostfs, host service 12); with it the
+    # system boots from System64 itself (--hostfs) instead of QRXOS64.img
+    [ "$m" = L/qrxsys-handler ] && [ ! -f "$A/$m" ] && { echo "not built, left out: $m"; continue; }
     cp "$A/$m" "$K/"
     basename "$m" >> "$K/modules.txt"
 done
@@ -50,7 +53,7 @@ if [ -x "$NETD" ]; then cp "$NETD" "$APP/MacOS/qrxnetd"; else echo "qrxnetd not 
 
 T="$BU/System64"
 rm -rf "$T"
-mkdir -p "$T/C" "$T/Libs" "$T/S" "$T/X86"
+mkdir -p "$T/C" "$T/Libs" "$T/S" "$T/X86" "$T/Apps" "$T/Home"
 echo m68k64 > "$T/AROS.boot"
 cp "$A"/C/* "$T/C/"
 for l in crt stdlib m locale iffparse uuid gadtools workbench diskfont asl z1; do
@@ -87,6 +90,10 @@ Assign >NIL: DEVS: SYS:Devs
 If EXISTS DEVS:DOSDrivers/PIPE
   Mount >NIL: DEVS:DOSDrivers/PIPE
 EndIf
+; the App Store installs into SYS:Apps (on the Pi /data/qrx64/Apps, the system's host directory)
+If EXISTS SYS:Apps
+  Assign >NIL: APPS: SYS:Apps
+EndIf
 Echo "QRX OS One 64 - 64-bit SMP AROS on the 68100EC64"
 If EXISTS C:QRXHostSocket
   Run >NIL: C:QRXHostSocket
@@ -113,14 +120,21 @@ python3 -I "$REPO/tools/armithlon/aros-qrx/boot/mkffsimg.py" "$T" "$BU/QRXOS64.i
 cat > "$APP/MacOS/launch64" <<'EOF'
 #!/bin/sh
 # QRX OS One 64: 64-bit AROS on the dual 68100EC64, in a Mac window. The system disk is
-# QRXOS64.img next to the app (made from System64 with mkffsimg.py); changes are written back.
+# the directory System64 next to the app, through hostfs (qrxsys in modules.txt), when it has
+# AROS.boot and the kernel has qrxsys; else QRXOS64.img (made from System64 with mkffsimg.py),
+# changes are written back.
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 K="$HERE/../Resources/qrx64"
 ROOT="$HERE/../../.."
+if [ -e "$ROOT/System64/AROS.boot" ] && grep -q '^qrxsys-handler$' "$K/modules.txt"; then
+    SYSDISK="--hostfs $ROOT/System64"
+else
+    SYSDISK="--disk $ROOT/QRXOS64.img --disk-write"
+fi
 set --
 while read -r m; do set -- "$@" "$K/$m"; done < "$K/modules.txt"
 exec "$HERE/qrx64-engine" --window --cores "${QRX64_CORES:-2}" --ram "${QRX64_RAM:-2048}" \
-    --disk "$ROOT/QRXOS64.img" --disk-write --cmdline econsole-startup \
+    $SYSDISK --cmdline econsole-startup \
     "$K/core.elf" "$@" >>"$ROOT/qrxos64.log" 2>&1
 EOF
 chmod +x "$APP/MacOS/launch64"

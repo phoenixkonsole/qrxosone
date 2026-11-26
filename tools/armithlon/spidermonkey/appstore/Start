@@ -1,0 +1,32 @@
+; Firefox 153.8.0 for QRX OS One 64, from the QRX App Store (APPS:firefox)
+; Gecko in one process, software rendering, in a window on the desktop.
+Stack 2000000
+; PIPE: for Gecko's pipes
+If NOT EXISTS PIPE:
+  If EXISTS DEVS:DOSDrivers/PIPE
+    Mount >NIL: DEVS:DOSDrivers/PIPE
+  EndIf
+EndIf
+; the fonts come with the app; Gecko reads FONTS:TrueType
+Assign >NIL: FONTS: EXISTS
+If WARN
+  Assign >NIL: FONTS: APPS:firefox/Fonts
+Else
+  If NOT EXISTS FONTS:TrueType/VeraSans.ttf
+    Assign >NIL: FONTS: APPS:firefox/Fonts ADD
+  EndIf
+EndIf
+; the profile lives outside the app's folder, so an update keeps it
+If NOT EXISTS SYS:Home/Firefox
+  MakeDir >NIL: SYS:Home
+  MakeDir >NIL: SYS:Home/Firefox
+EndIf
+If NOT EXISTS T:
+  MakeDir >NIL: SYS:T
+  Assign >NIL: T: SYS:T
+EndIf
+Set TMPDIR /T
+Set HOME /SYS/Home
+; AROS cannot start Gecko's content processes (fork, shared memory handed to a child)
+Set MOZ_FORCE_DISABLE_E10S 1
+APPS:firefox/firefox --profile /SYS/Home/Firefox --width 1000 --height 680 file:///APPS/firefox/start.html
