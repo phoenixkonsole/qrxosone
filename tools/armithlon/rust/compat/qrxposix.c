@@ -369,3 +369,48 @@ int sigaction(int sig, const struct sigaction *act, struct sigaction *old)
     qrx_actions[sig] = *act;
     return 0;
 }
+
+/* ---- QRX_BACKTRACE: a stack dump when the program dies on a signal (diagnostics)
+ * With the variable QRX_BACKTRACE set (AROS: Set QRX_BACKTRACE 1), SIGABRT, SIGSEGV, SIGBUS, SIGILL and
+ * SIGFPE first print the address of qrx_bt_anchor (the program's load base follows from its symbol
+ * value), the frames _Unwind_Backtrace finds, and the words on the stack that point near the code
+ * (the unwinder stops at frames without unwind information, such as AROS's libraries). */
+#include <unwind.h>
+void qrx_bt_anchor(void) {}
+static _Unwind_Reason_Code qrx_bt_frame(struct _Unwind_Context *c, void *arg)
+{
+    int *n = arg;
+    fprintf(stderr, "QRXBT frame %d %p\n", *n, (void *)_Unwind_GetIP(c));
+    return ++*n < 40 ? _URC_NO_REASON : _URC_END_OF_STACK;
+}
+static void qrx_bt_handler(int sig)
+{
+    uintptr_t anchor = (uintptr_t)&qrx_bt_anchor;
+    fprintf(stderr, "QRXBT signal %d anchor %p\n", sig, (void *)anchor);
+    int n = 0;
+    _Unwind_Backtrace(qrx_bt_frame, &n);
+    /* the raw scan: return addresses within 512 MB of the anchor (the program's .text) */
+    struct Task *me = FindTask(NULL);
+    uintptr_t *p = (uintptr_t *)__builtin_frame_address(0);
+    uintptr_t *top = (uintptr_t *)me->tc_SPUpper;
+    int shown = 0;
+    for (; p < top && shown < 160; p++) {
+        uintptr_t v = *p;
+        if (v + (UINT64_C(512) << 20) > anchor && v < anchor + (UINT64_C(512) << 20) && !(v & 1)) {
+            fprintf(stderr, "QRXBT stack %p\n", (void *)v);
+            shown++;
+        }
+    }
+    fflush(stderr);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+__attribute__((constructor)) static void qrx_bt_init(void)
+{
+    if (!getenv("QRX_BACKTRACE")) return;
+    signal(SIGABRT, qrx_bt_handler);
+    signal(SIGSEGV, qrx_bt_handler);
+    signal(SIGBUS, qrx_bt_handler);
+    signal(SIGILL, qrx_bt_handler);
+    signal(SIGFPE, qrx_bt_handler);
+}
