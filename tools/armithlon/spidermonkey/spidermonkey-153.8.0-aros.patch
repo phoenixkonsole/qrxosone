@@ -729,6 +729,32 @@
      }
      gfx::DataSourceSurface::MappedSurface map = {nullptr, 0};
      if (!mSurface || !mSurface->Map(gfx::DataSourceSurface::READ_WRITE, &map)) {
+--- a/gfx/webrender_bindings/RenderTextureHostSWGL.cpp
++++ b/gfx/webrender_bindings/RenderTextureHostSWGL.cpp
+@@ -36,6 +36,11 @@
+     switch (format) {
+       case gfx::SurfaceFormat::B8G8R8A8:
+       case gfx::SurfaceFormat::B8G8R8X8:
++#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++      // QRX: big endian, SWGL's BGRA8 is A8R8G8B8 in memory (see WebRenderTypes.h)
++      case gfx::SurfaceFormat::A8R8G8B8:
++      case gfx::SurfaceFormat::X8R8G8B8:
++#endif
+         MOZ_ASSERT(colorDepth == gfx::ColorDepth::COLOR_8);
+         internalFormat = LOCAL_GL_RGBA8;
+         break;
+@@ -193,6 +198,11 @@
+     }
+     case gfx::SurfaceFormat::B8G8R8A8:
+     case gfx::SurfaceFormat::B8G8R8X8:
++#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    // QRX: big endian, SWGL's BGRA8 is A8R8G8B8 in memory (see WebRenderTypes.h)
++    case gfx::SurfaceFormat::A8R8G8B8:
++    case gfx::SurfaceFormat::X8R8G8B8:
++#endif
+       break;
+     default:
+       gfxCriticalNote << "Unhandled external image format: " << GetFormat();
 --- a/gfx/webrender_bindings/WebRenderTypes.h
 +++ b/gfx/webrender_bindings/WebRenderTypes.h
 @@ -6,6 +6,7 @@
