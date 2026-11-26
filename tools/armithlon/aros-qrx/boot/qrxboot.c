@@ -215,7 +215,8 @@ static long long boot(int argc, char **argv, double seconds, unsigned cores, con
     if (input) qec64_machine_console_input(m, input, strlen(input));
     pthread_t lt;
     int have_live = 0;
-    if (getenv("QRXBOOT_LIVE") && (live.f = fopen(getenv("QRXBOOT_LIVE"), "w"))) {
+    static int live_boots;          /* a warm reboot boots again: the file then grows on */
+    if (getenv("QRXBOOT_LIVE") && (live.f = fopen(getenv("QRXBOOT_LIVE"), live_boots++ ? "a" : "w"))) {
         live.m = m; live.buf = out;
         have_live = pthread_create(&lt, NULL, live_thread, NULL) == 0;
     }
