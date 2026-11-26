@@ -147,7 +147,29 @@ static void *live_thread(void *arg)
     for (;;) {
         int last = live.stop;
         size_t used = qec64_machine_console_used(live.m);
-        if (used > done) { fwrite(live.buf + done, 1, used - done, live.f); fflush(live.f); done = used; }
+        if (used > done) {
+            fwrite(live.buf + done, 1, used - done, live.f);
+            /* an AROS alert: its register dump has "SP=<hex>"; the words on that stack that point into
+             * code (above the kernel), read now while the task's memory is as it was */
+            const char *at = live.buf + done;
+            for (const char *q = at; (q = strstr(q, "SP=")) != NULL && q < live.buf + used; q += 3) {
+                uint64_t sp = strtoull(q + 3, NULL, 16);
+                qec64_cpu *c0 = qec64_machine_core(live.m, 0);
+                if (sp < 0x100000 || sp + 8 > c0->ram_size) continue;
+                fprintf(live.f, "[qrxboot] alert stack at %016" PRIx64 "\n", sp);
+                unsigned shown = 0;
+                for (uint64_t a = sp; a + 8 <= c0->ram_size && a < sp + 262144 && shown < 600; a += 2) {
+                    uint64_t v = 0;
+                    for (int b = 0; b < 8; b++) v = v << 8 | c0->ram[a + b];
+                    if (v >= 0x100000 && v < c0->ram_size && !(v & 1) && a % 8 == (sp % 8)) {
+                        fprintf(live.f, "[qrxboot]   alert stack +%05" PRIx64 " %016" PRIx64 "\n", a - sp, v);
+                        shown++;
+                    }
+                }
+            }
+            fflush(live.f);
+            done = used;
+        }
         if (last) return NULL;
         /* once a minute where the cores are (read while they run: a sample, not exact) */
         if (++ticks % 60 == 0) {
