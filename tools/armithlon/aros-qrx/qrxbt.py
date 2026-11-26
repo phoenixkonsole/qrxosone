@@ -25,11 +25,12 @@ anchor = dict((n, v) for v, n in syms).get('qrx_bt_anchor')
 if anchor is None:
     sys.exit('qrx_bt_anchor is not in the program (libqrxaroscompat without QRX_BACKTRACE)')
 text = open(log, errors='replace').read()
-m = re.search(r'QRXBT signal (\d+) anchor (0x)?([0-9a-fA-F]+)', text)
+m = re.search(r'QRXBT anchor (0x)?([0-9a-fA-F]+)', text)
 if not m:
     sys.exit('no QRXBT dump in the log')
-base = int(m.group(3), 16) - anchor
-print(f'signal {m.group(1)}, .text at {base:#x} ({text_size:#x} bytes)')
+base = int(m.group(2), 16) - anchor
+sg = re.search(r'QRXBT signal (?:0x)?([0-9a-fA-F]+)', text)
+print(f'signal {int(sg.group(1), 16) if sg else "?"}, .text at {base:#x} ({text_size:#x} bytes)')
 names = []
 for kind, a in re.findall(r'QRXBT (frame \d+|stack) (?:0x)?([0-9a-fA-F]+)', text):
     off = int(a, 16) - base

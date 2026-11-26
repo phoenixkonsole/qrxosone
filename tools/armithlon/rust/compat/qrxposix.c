@@ -377,16 +377,28 @@ int sigaction(int sig, const struct sigaction *act, struct sigaction *old)
  * (the unwinder stops at frames without unwind information, such as AROS's libraries). */
 #include <unwind.h>
 void qrx_bt_anchor(void) {}
+/* the dump goes out through exec's RawPutChar (the debug console, like the kernel's messages): the
+ * signal can come in a pthread thread, where the C library's stdio is not set up */
+static void qrx_bt_puts(const char *s) { while (*s) RawPutChar((UBYTE)*s++); }
+static void qrx_bt_hex(const char *label, uintptr_t v)
+{
+    char b[20];
+    qrx_bt_puts(label);
+    for (int i = 0; i < 16; i++) b[i] = "0123456789abcdef"[(v >> (60 - 4 * i)) & 15];
+    b[16] = '\n'; b[17] = 0;
+    qrx_bt_puts(b);
+}
 static _Unwind_Reason_Code qrx_bt_frame(struct _Unwind_Context *c, void *arg)
 {
     int *n = arg;
-    fprintf(stderr, "QRXBT frame %d %p\n", *n, (void *)_Unwind_GetIP(c));
+    qrx_bt_hex("QRXBT frame ", (uintptr_t)_Unwind_GetIP(c));
     return ++*n < 40 ? _URC_NO_REASON : _URC_END_OF_STACK;
 }
 static void qrx_bt_handler(int sig)
 {
     uintptr_t anchor = (uintptr_t)&qrx_bt_anchor;
-    fprintf(stderr, "QRXBT signal %d anchor %p\n", sig, (void *)anchor);
+    qrx_bt_hex("QRXBT signal ", (uintptr_t)sig);
+    qrx_bt_hex("QRXBT anchor ", anchor);
     int n = 0;
     _Unwind_Backtrace(qrx_bt_frame, &n);
     /* the raw scan: return addresses within 512 MB of the anchor (the program's .text) */
@@ -394,14 +406,14 @@ static void qrx_bt_handler(int sig)
     uintptr_t *p = (uintptr_t *)__builtin_frame_address(0);
     uintptr_t *top = (uintptr_t *)me->tc_SPUpper;
     int shown = 0;
-    for (; p < top && shown < 160; p++) {
+    for (; p < top && shown < 200; p++) {
         uintptr_t v = *p;
         if (v + (UINT64_C(512) << 20) > anchor && v < anchor + (UINT64_C(512) << 20) && !(v & 1)) {
-            fprintf(stderr, "QRXBT stack %p\n", (void *)v);
+            qrx_bt_hex("QRXBT stack ", v);
             shown++;
         }
     }
-    fflush(stderr);
+    qrx_bt_puts("QRXBT end\n");
     signal(sig, SIG_DFL);
     raise(sig);
 }
