@@ -9,7 +9,7 @@ B=${QRX_AROS64:-/opt/qrx-os-one/aros64/build-qrx/bin/native-m68k64}; A=$B/AROS; 
 QRXBOOT=${QRXBOOT:-/opt/qrx-os-one/armx86/build/qrxboot}
 BOOT="$(cd "$(dirname "$0")/../../aros-qrx/boot" && pwd)"
 export PATH="${QRX_AROS64_TOOLS:-$B/../linux-x86_64/tools}:$PATH"
-W=$(mktemp -d); trap 'rm -rf "$W"' EXIT; SYS=$W/sys; mkdir -p $SYS/C $SYS/Libs $SYS/S $SYS/T; echo m68k64 > $SYS/AROS.boot
+W=$(mktemp -d); trap 'rm -rf "$W"' EXIT; trap 'exit 143' TERM INT; SYS=$W/sys; mkdir -p $SYS/C $SYS/Libs $SYS/S $SYS/T; echo m68k64 > $SYS/AROS.boot
 cp $A/Libs/crt.library $A/Libs/stdlib.library $A/Libs/m.library $A/Libs/locale.library $A/Libs/iffparse.library \
    $A/Libs/uuid.library $SYS/Libs/
 [ -f $A/Libs/z1.library ] && cp $A/Libs/z1.library $SYS/Libs/

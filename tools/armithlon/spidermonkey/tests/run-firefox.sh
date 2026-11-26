@@ -10,7 +10,7 @@ set -e
 OBJ="$1"; WEB="$2"; OUT="$3"; SECS="${4:-7200}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 AROSSRC=${QRX_AROS_SRC:-/opt/qrx-os-one/aros64/src}
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; trap 'exit 143' TERM INT
 mkdir -p $T/fonts
 cp $AROSSRC/workbench/fonts/truetype/bitstream/*.ttf $AROSSRC/workbench/fonts/truetype/opensans/*.ttf $T/fonts/
 # the browser packed as shipped (package-browser.py: omni.ja, browser/omni.ja, the firefox program)
