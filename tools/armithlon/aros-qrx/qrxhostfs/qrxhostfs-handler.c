@@ -320,7 +320,10 @@ static LONG hostfs_run(struct ExecBase *sysBase)
                 QUAD size = (QUAD)rd64(rec + 8);
                 if (dp->dp_Arg3 == OFFSET_CURRENT) to += old;
                 else if (dp->dp_Arg3 == OFFSET_END) to += size;
-                if (to < 0 || to > size) { r1 = -1; r2 = ERROR_SEEK_ERROR; break; }
+                /* past the end is allowed, as on Unix: C programs (SQLite) seek there and write, and
+                 * the host fills the gap with zeros */
+                (void)size;
+                if (to < 0) { r1 = -1; r2 = ERROR_SEEK_ERROR; break; }
                 f->pos = (UQUAD)to;
                 r1 = (SIPTR)old;
                 break;

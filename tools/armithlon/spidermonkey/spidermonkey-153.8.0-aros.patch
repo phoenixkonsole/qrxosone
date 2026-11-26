@@ -5401,7 +5401,7 @@
  
    if (sActiveWindows) {
      int32_t index = sActiveWindows->IndexOf(this);
-@@ -160,8 +170,27 @@
+@@ -160,8 +170,32 @@
    if (mWidgetListener) mWidgetListener->WindowActivated();
  }
  
@@ -5410,7 +5410,12 @@
 +  // Intuition titles are 8-bit: Latin-1, other characters as '?'
 +  mQrxTitle.Truncate();
 +  for (const char16_t* c = aTitle.BeginReading(); c != aTitle.EndReading(); ++c) {
-+    mQrxTitle.Append(*c < 256 ? char(*c) : '?');
++    char16_t ch = *c;
++    if (ch == 0x2013 || ch == 0x2014 || ch == 0x2012 || ch == 0x2212) ch = '-';
++    else if (ch == 0x2018 || ch == 0x2019) ch = '\'';
++    else if (ch == 0x201C || ch == 0x201D) ch = '"';
++    else if (ch == 0x2026) { mQrxTitle.AppendLiteral("..."); continue; }
++    mQrxTitle.Append(ch < 256 ? char(ch) : '?');
 +  }
 +  if (mQrxWin) qrx_win_title(mQrxWin, mQrxTitle.get());
 +  return NS_OK;
@@ -5429,7 +5434,7 @@
  
    LOG(("HeadlessWidget::Show [%p] state %d\n", (void*)this, aState));
  
-@@ -258,6 +287,9 @@
+@@ -258,6 +292,9 @@
                                      bool aRepaint) {
    ConstrainSize(&aWidth, &aHeight);
    mBounds.SizeTo(LayoutDeviceIntSize(aWidth, aHeight));

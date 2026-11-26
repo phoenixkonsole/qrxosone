@@ -31,6 +31,9 @@ pref("browser.opaqueResponseBlocking.javascriptValidator", false);
 pref("media.utility-process.enabled", false);
 pref("dom.ipc.processPrelaunch.enabled", false);
 pref("extensions.webextensions.remote", false);
+// Glean's upload thread: no network for telemetry; a negative port makes FOG treat every upload as
+// done without one (its upload thread crashed on QRX OS One 64)
+pref("telemetry.fog.test.localhost_port", -1);
 pref("browser.shell.checkDefaultBrowser", false);
 pref("browser.startup.homepage_override.mstone", "ignore");
 pref("startup.homepage_welcome_url", "");
