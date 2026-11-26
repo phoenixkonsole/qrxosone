@@ -5108,6 +5108,33 @@
  ))]
  type IovLen = c_int;
  
+--- a/toolkit/components/glean/xpcom/FOG.cpp
++++ b/toolkit/components/glean/xpcom/FOG.cpp
+@@ -111,7 +111,9 @@
+             glean::fog::inits_during_shutdown.Add(1);
+             // It's enough to call init before shutting down.
+             // We don't need to (and can't) wait for it to complete.
++#ifndef __AROS__
+             glean::impl::fog_init(&VoidCString(), &VoidCString(), false);
++#endif
+           }
+           gFOG->Shutdown();
+           gFOG = nullptr;
+@@ -155,6 +157,14 @@
+       },
+       ShutdownPhase::AppShutdownConfirmed);
+ 
++#ifdef __AROS__
++  // QRX OS One 64: no Glean. Its upload thread freed a header map whose heap block had been
++  // overwritten (a crash in crt.library's free); telemetry is off in this build anyway. Metrics
++  // recorded before an init stay in Glean's bounded pre-init queue.
++  if ((true)) {
++    return NS_OK;
++  }
++#endif
+   nsresult rv = glean::impl::fog_init(&aDataPathOverride, &aAppIdOverride,
+                                       aDisableInternalPings);
+   NS_ENSURE_SUCCESS(rv, rv);
 --- a/toolkit/components/ml/backends/llama/moz.build
 +++ b/toolkit/components/ml/backends/llama/moz.build
 @@ -2,7 +2,7 @@
