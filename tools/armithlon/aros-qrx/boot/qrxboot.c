@@ -138,16 +138,26 @@ static uint64_t load_elf(const char *path, uint64_t next, uint64_t *start)
 
 /* QRXBOOT_LIVE=<file>: a thread copies the console to <file> as it grows (once a second), so a run
    that is cut off from outside still shows how far the guest got */
-static struct { qec64_machine *m; const char *buf; FILE *f; volatile int stop; } live;
+static struct { qec64_machine *m; const char *buf; FILE *f; unsigned cores; volatile int stop; } live;
 static void *live_thread(void *arg)
 {
     (void)arg;
     size_t done = 0;
+    unsigned ticks = 0;
     for (;;) {
         int last = live.stop;
         size_t used = qec64_machine_console_used(live.m);
         if (used > done) { fwrite(live.buf + done, 1, used - done, live.f); fflush(live.f); done = used; }
         if (last) return NULL;
+        /* once a minute where the cores are (read while they run: a sample, not exact) */
+        if (++ticks % 60 == 0) {
+            for (unsigned k = 0; k < live.cores; k++) {
+                qec64_cpu *c = qec64_machine_core(live.m, k);
+                fprintf(live.f, "[qrxboot %us] core %u pc %016" PRIx64 " %s, %" PRIu64 " instructions\n", ticks, k,
+                        c->pc, c->supervisor ? "super" : "user", c->instructions);
+            }
+            fflush(live.f);
+        }
         sleep(1);
     }
 }
@@ -217,7 +227,7 @@ static long long boot(int argc, char **argv, double seconds, unsigned cores, con
     int have_live = 0;
     static int live_boots;          /* a warm reboot boots again: the file then grows on */
     if (getenv("QRXBOOT_LIVE") && (live.f = fopen(getenv("QRXBOOT_LIVE"), live_boots++ ? "a" : "w"))) {
-        live.m = m; live.buf = out;
+        live.m = m; live.buf = out; live.cores = cores;
         have_live = pthread_create(&lt, NULL, live_thread, NULL) == 0;
     }
     enum qec64_status st = qec64_machine_run(m, STUB, STUB_SP, seconds, &who);

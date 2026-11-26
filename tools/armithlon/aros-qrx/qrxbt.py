@@ -32,7 +32,10 @@ base = int(m.group(2), 16) - anchor
 sg = re.search(r'QRXBT signal (?:0x)?([0-9a-fA-F]+)', text)
 print(f'signal {int(sg.group(1), 16) if sg else "?"}, .text at {base:#x} ({text_size:#x} bytes)')
 names = []
-for kind, a in re.findall(r'QRXBT (frame \d+|stack) (?:0x)?([0-9a-fA-F]+)', text):
+found = re.findall(r'QRXBT (frame \d+|stack) (?:0x)?([0-9a-fA-F]+)', text)
+# qrxboot's minute samples (QRXBOOT_LIVE): where the cores were
+found += [('pc ' + t + ' c' + k, a) for t, k, a in re.findall(r'\[qrxboot (\d+)s\] core (\d+) pc ([0-9a-fA-F]+)', text)]
+for kind, a in found:
     off = int(a, 16) - base
     if not 0 <= off < text_size:
         continue
@@ -44,4 +47,4 @@ import os, shutil
 filt = llvm + '/llvm-cxxfilt' if os.path.exists(llvm + '/llvm-cxxfilt') else shutil.which('c++filt') or 'cat'
 dem = subprocess.run([filt], input='\n'.join(n[2] for n in names), capture_output=True, text=True).stdout.splitlines()
 for (kind, off, name, d), dn in zip(names, dem):
-    print(f'{kind:9} +{off:#010x}  {dn[:160]} +{d:#x}')
+    print(f'{kind:12} +{off:#010x}  {dn[:160]} +{d:#x}')

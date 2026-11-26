@@ -427,6 +427,7 @@ __attribute__((constructor)) static void qrx_bt_init(void)
     const char *e = getenv("QRX_BACKTRACE");
     if (!e) return;
     qrx_bt_unwind = e[0] == '2';
+    qrx_bt_hex("QRXBT anchor ", (uintptr_t)&qrx_bt_anchor);   /* the load base, for a PC sample */
     signal(SIGABRT, qrx_bt_handler);
     signal(SIGSEGV, qrx_bt_handler);
     signal(SIGBUS, qrx_bt_handler);
