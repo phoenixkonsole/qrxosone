@@ -389,7 +389,7 @@ if(QRX_ENABLE_MUSASHI)
     target_link_libraries(qrx_ec64 PUBLIC ${QRX_LINUX_GL_LIBS})
   endif()
   target_compile_options(qrx_ec64 PRIVATE -Wall -Wextra)
-  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")   # the long-mode JIT exists only there
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64|x86_64|AMD64")   # the long-mode JIT: AArch64, and x86-64 lifted from it
     add_executable(qrx_ec64_jit_tests tests/ec64_jit_tests.c)
     target_link_libraries(qrx_ec64_jit_tests PRIVATE qrx_ec64)
     add_test(NAME ec64_jit_against_interpreter COMMAND qrx_ec64_jit_tests 3000)

@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 bool qec64_jit_map_new(uint64_t ram_size, uint8_t **code_map, uint32_t **code_gen)
 {
@@ -41,7 +42,7 @@ static enum qec64_status run_interpreter(qec64_cpu *c, uint64_t max)
     return qec64_run(c, max);
 }
 
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(__x86_64__)
 #include <sys/mman.h>
 #include "qrx_perfmap.h"
 #include <pthread.h>
@@ -50,6 +51,12 @@ static enum qec64_status run_interpreter(qec64_cpu *c, uint64_t max)
 #endif
 
 #define CODE_BYTES (32u * 1024u * 1024u)
+#if defined(__x86_64__)
+/* x86-64: the AArch64 code is lifted (qrx68100ec64_jit_x64.h); its x86 code takes several times the room */
+#include "qrx68100ec64_jit_x64.h"
+#define X64_CODE_BYTES (256u * 1024u * 1024u)
+#define X64_ROOM (8u * 1024u * 1024u)
+#endif
 #define HASH_BITS 16u
 #define MAX_INSNS 48u
 /* For tests: fewer instructions per block (1 steps instruction by instruction). */
@@ -74,6 +81,9 @@ typedef struct Block {
     unsigned count;          /* instructions, when all of them run */
     uint32_t *code;          /* NULL: the first instruction is not translated */
     struct Block *next;
+#if defined(__x86_64__)
+    uint8_t *xcode, *xbody;  /* the lifted code: where code and body are in it */
+#endif
 } Block;
 
 typedef struct {
@@ -87,6 +97,13 @@ typedef struct {
     uint64_t last_exit_pc;   /* that pc: only a block there may be chained in */
     uint32_t *single;        /* with QRX_EC64_JIT_STATS: interpreted instructions by prefix and opcode */
     bool ord;                /* this cache's code orders its accesses (LDAR/STLR) */
+#if defined(__x86_64__)
+    uint8_t *xbuf, *xpos, *xend;
+    uint32_t *xmap;          /* per AArch64 word in buf: its x86 code's offset in xbuf */
+    uint64_t lift_failed;    /* blocks the lifter did not know an instruction of */
+    uint64_t room_flushes, xbytes;   /* flushes for want of room (either buffer), x86 bytes written */
+    uint64_t translate_ns;   /* with QRX_EC64_JIT_STATS: time spent translating */
+#endif
 } Jit;
 /* A core's two code caches, plain and ordered (see core_wake in qrx68100ec64_machine.c); cur is
  * the one in use, 2 before the first block. */
@@ -1201,6 +1218,9 @@ static void jit_flush(Jit *j)
     j->last_exit = NULL;
     j->flushes++;
     j->pos = j->buf;
+#if defined(__x86_64__)
+    j->xpos = j->xbuf;
+#endif
     memset(j->hash, 0, sizeof j->hash);
     j->nblocks = 0;
 }
@@ -1212,8 +1232,22 @@ static Jit *jit_new(qec64_cpu *c, bool ord)
 #if defined(__APPLE__)
     flags |= MAP_JIT;
 #endif
+#if defined(__x86_64__)
+    /* the AArch64 code is only read by the lifter; the x86 code runs */
+    void *m = mmap(NULL, CODE_BYTES, PROT_READ | PROT_WRITE, flags, -1, 0);
+    if (m == MAP_FAILED) { free(j); return NULL; }
+    void *xm = mmap(NULL, X64_CODE_BYTES, PROT_READ | PROT_WRITE | PROT_EXEC, flags, -1, 0);
+    void *xmap = mmap(NULL, CODE_BYTES, PROT_READ | PROT_WRITE, flags, -1, 0);
+    if (xm == MAP_FAILED || xmap == MAP_FAILED) {
+        if (xm != MAP_FAILED) munmap(xm, X64_CODE_BYTES);
+        if (xmap != MAP_FAILED) munmap(xmap, CODE_BYTES);
+        munmap(m, CODE_BYTES); free(j); return NULL;
+    }
+    j->xbuf = xm; j->xend = j->xbuf + X64_CODE_BYTES; j->xmap = xmap;
+#else
     void *m = mmap(NULL, CODE_BYTES, PROT_READ | PROT_WRITE | PROT_EXEC, flags, -1, 0);
     if (m == MAP_FAILED) { free(j); return NULL; }
+#endif
     j->buf = m; j->end = j->buf + CODE_BYTES / 4 - 4096;
     j->maxblocks = 1u << 18;
     j->blocks = calloc(j->maxblocks, sizeof(Block));
@@ -1246,6 +1280,12 @@ static void jit_free_one(qec64_cpu *c, Jit *j)
     if (getenv("QRX_EC64_JIT_STATS"))
         fprintf(stderr, "[EC64 JIT] core %u %s: %llu blocks translated, %llu entered, %llu chained, %llu single instructions in the interpreter, %llu flushes\n",
                 c->core_id, j->ord ? "ordered" : "plain", (unsigned long long)j->translated, (unsigned long long)j->entered, (unsigned long long)j->chained, (unsigned long long)j->interpreted, (unsigned long long)j->flushes);
+#if defined(__x86_64__)
+    if (getenv("QRX_EC64_JIT_STATS"))
+        fprintf(stderr, "[EC64 JIT] core %u %s: %llu blocks not lifted to x86-64, %llu flushes for room, %llu x86 bytes, %.3f s translating\n", c->core_id,
+                j->ord ? "ordered" : "plain", (unsigned long long)j->lift_failed, (unsigned long long)j->room_flushes, (unsigned long long)j->xbytes,
+                (double)j->translate_ns / 1e9);
+#endif
     if (j->single) {
         for (int k = 0; k < 12; k++) {
             unsigned best = 0;
@@ -1257,6 +1297,10 @@ static void jit_free_one(qec64_cpu *c, Jit *j)
         free(j->single);
     }
     munmap(j->buf, CODE_BYTES);
+#if defined(__x86_64__)
+    munmap(j->xbuf, X64_CODE_BYTES);
+    munmap(j->xmap, CODE_BYTES);
+#endif
     free(j->blocks);
     free(j);
 }
@@ -1294,7 +1338,11 @@ static void exit_to(T *t, uint64_t target)
 }
 static Block *translate(qec64_cpu *c, Jit *j, uint64_t pc)
 {
+#if defined(__x86_64__)
+    if (j->nblocks >= j->maxblocks || j->end - j->pos < 65536 || (size_t)(j->xend - j->xpos) < X64_ROOM) { j->room_flushes++; jit_flush(j); }
+#else
     if (j->nblocks >= j->maxblocks || j->end - j->pos < 65536) jit_flush(j);
+#endif
     static __thread T t;
     memset(&t, 0, offsetof(T, stub));
     t.c = c; t.j = j; t.p = j->pos; t.pc = pc; t.nstub = 0;
@@ -1337,6 +1385,20 @@ static Block *translate(qec64_cpu *c, Jit *j, uint64_t pc)
             add_i(&t, 0, RDONE, t.stub[i].done);
             epilogue(&t);
         }
+#if defined(__x86_64__)
+        if (!t.bad) {
+            uint8_t *xstart = j->xpos;
+            if (x64_lift(code, (unsigned)(t.p - code), &j->xpos, j->xend, j->xbuf, j->xmap + (code - j->buf))) {
+                b->xcode = j->xbuf + j->xmap[code - j->buf];
+                b->xbody = j->xbuf + j->xmap[body - j->buf];
+                j->xbytes += (uint64_t)(j->xpos - xstart);
+                qrx_perfmap(xstart, (size_t)(j->xpos - xstart), "ec64_%016llx", (unsigned long long)pc);
+            } else {                               /* an instruction the lifter does not know */
+                t.bad = true;
+                j->lift_failed++;
+            }
+        }
+#endif
         if (t.bad) { b->code = NULL; t.p = code; }
         else {
             b->code = code;
@@ -1352,7 +1414,9 @@ static Block *translate(qec64_cpu *c, Jit *j, uint64_t pc)
 #else
     __builtin___clear_cache((char *)code, (char *)t.p);
 #endif
+#if !defined(__x86_64__)
     if (b->code) qrx_perfmap(code, (size_t)((char *)t.p - (char *)code), "ec64_%016llx", (unsigned long long)pc);
+#endif
     j->pos = t.p;
     b->next = j->hash[hash_pc(pc)];
     j->hash[hash_pc(pc)] = b;
@@ -1430,7 +1494,11 @@ static int verify_block(qec64_cpu *c, Block *b, uint64_t *n, enum qec64_status *
     for (unsigned i = nw; i-- > 0;) memcpy(c->ram + log[i].addr, log[i].old, log[i].n);
     *c = s0;
     Jit *j = jit_cur(c);
+#if defined(__x86_64__)
+    uint64_t done = ((uint64_t (*)(qec64_cpu *, uint64_t))(void *)b->xcode)(c, 0);
+#else
     uint64_t done = ((uint64_t (*)(qec64_cpu *, uint64_t))(void *)b->code)(c, 0);
+#endif
     j->last_exit = NULL;
     c->instructions += done;
     if (done < b->count) {                       /* left early: the interpreter finishes the block */
@@ -1514,11 +1582,28 @@ enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
         if (site && j->last_exit_pc != pc) site = NULL;
         if (!b) {
             uint64_t fl = j->flushes;
+#if defined(__x86_64__)
+            struct timespec t0, t1;
+            static int timing = -1;
+            if (timing < 0) timing = getenv("QRX_EC64_JIT_STATS") != NULL;
+            if (timing) clock_gettime(CLOCK_MONOTONIC, &t0);
             b = translate(c, j, pc);
+            if (timing) { clock_gettime(CLOCK_MONOTONIC, &t1); j->translate_ns += (uint64_t)((t1.tv_sec - t0.tv_sec) * 1000000000LL + (t1.tv_nsec - t0.tv_nsec)); }
+#else
+            b = translate(c, j, pc);
+#endif
             if (fl != j->flushes) site = NULL;
         }
         if (verify_on()) site = NULL;                    /* each block on its own */
         if (site && b->code && !(jit_off() & 0x800) && !c->gate) {   /* chain the exit that brought us here */
+#if defined(__x86_64__)
+            uint8_t *xs = j->xbuf + j->xmap[site - j->buf];          /* the lifted B: jmp rel32 */
+            if (*xs == 0xE9) {
+                int32_t rel = (int32_t)(b->xbody - (xs + 5));
+                memcpy(xs + 1, &rel, 4);
+                j->chained++;
+            }
+#else
             int64_t dist = b->body - site;
 #if defined(__APPLE__)
             pthread_jit_write_protect_np(0);
@@ -1531,6 +1616,7 @@ enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
             __builtin___clear_cache((char *)site, (char *)(site + 1));
 #endif
             j->chained++;
+#endif
         }
         if (!b->code || b->count > left) {
             j->interpreted++;
@@ -1559,7 +1645,11 @@ enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
          * idle waits until this one has looked at the active mask (core_wake). */
         uint64_t room = c->num_cores > 1 && left > CHAIN_RUN ? CHAIN_RUN : left;
         uint64_t limit = room > MAX_INSNS ? room - MAX_INSNS : 0;
+#if defined(__x86_64__)
+        uint64_t done = ((uint64_t (*)(qec64_cpu *, uint64_t))(void *)b->xcode)(c, limit);
+#else
         uint64_t done = ((uint64_t (*)(qec64_cpu *, uint64_t))(void *)b->code)(c, limit);
+#endif
         j->last_exit_pc = c->pc;
         c->instructions += done;
         left = done >= left ? 0 : left - done;
