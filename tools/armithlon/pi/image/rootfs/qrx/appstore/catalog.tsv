@@ -8,4 +8,7 @@
 #
 # Blender 2.79b: tools/blender/package-appstore.sh (reproducible), attached to the GitHub release
 # appstore-blender-2.79b-1; until that release exists the download fails and nothing is installed.
+# Firefox 153.8.0 for QRX OS One 64: tools/armithlon/spidermonkey/package-appstore.sh (reproducible),
+# attached to the GitHub release appstore-firefox-153.8.0-1.
+firefox	Firefox	Mozilla's browser, natively on QRX OS One 64 (preview)	Work	153.8.0	91745104	546379234	89dbee4462726ecd24dc204ffc81098df37f62d1727c5342aeb8fb72f276f1eb	https://github.com/phoenixkonsole/qrxosone/releases/download/appstore-firefox-153.8.0-1/firefox-153.8.0-qrx64-1.tar.xz	Start	Mozilla, port by QRX	MPL-2.0	Firefox 153.8.0 built from Mozilla's source for 64-bit AROS on the 68100EC64: Gecko in one process, WebRender in software, in a window on the desktop. Preview: the window takes no mouse or keyboard input yet. Not an official Mozilla build.	m68k64
 blender	Blender	3D modelling, animation and rendering	Create	2.79b	10972976	40797068	2b3748cb948e82c727d2b36aeff2fd9ca3e7733dd24a63597dd635ba82f6e1c5	https://github.com/phoenixkonsole/qrxosone/releases/download/appstore-blender-2.79b-1/blender-2.79b-qrx-1.tar.xz	Start	Blender Foundation, port by QRX	GPL-2.0	Blender 2.79b with Python 3.5 for QRX OS One: modelling, sculpting, animation, rendering and Python scripting, built for the 68100.

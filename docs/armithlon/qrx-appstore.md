@@ -84,6 +84,36 @@ setzt 8 MB Stack und wechselt nach `APPS:blender`, wo Blender seine Skripte such
 fehlenden Hunk-Kopf (`0x3F3`) und startet es mit `Execute`. Das s-Bit übersteht das Entpacken auf dem Dateisystem des
 Pi nicht.
 
+## Firefox im Store (QRX OS One 64)
+
+Die erste 64-Bit-App, `arch` = `m68k64`, nur im 64-Bit-Store sichtbar:
+
+| | |
+|---|---|
+| Datei | `firefox-153.8.0-qrx64-1.tar.xz`, 91.745.104 Bytes, installiert 546,4 MB |
+| SHA-256 | `89dbee4462726ecd24dc204ffc81098df37f62d1727c5342aeb8fb72f276f1eb` |
+| Adresse | `https://github.com/phoenixkonsole/qrxosone/releases/download/appstore-firefox-153.8.0-1/firefox-153.8.0-qrx64-1.tar.xz` |
+| Inhalt | `firefox/`: Programm `firefox` (ELF, libxul gelinkt, ohne Debug-Abschnitte), `omni.ja`, `browser/omni.ja` (mit den AROS-Prefs `qrx-aros.js`), `Fonts/TrueType` (Bitstream Vera, Open Sans), Startskript `Start`, `start.html`, `NOTICE` |
+
+`Start` setzt 2 MB Stack, mountet `PIPE:`, weist `FONTS:` auf die mitgelieferten Schriften (oder hängt sie an ein
+vorhandenes `FONTS:` an), legt das Profil in `SYS:Home/Firefox` an (außerhalb des App-Ordners, ein Update behält es),
+setzt `TMPDIR`, `HOME` und `MOZ_FORCE_DISABLE_E10S` und öffnet Firefox mit 1000×680 im Fenster auf dem Desktop.
+
+Voraussetzungen: QRX OS One 64 startet per hostfs aus einem Host-Ordner (Profil und Omni-Archive brauchen lange
+Dateinamen), 2 GB Gast-RAM.
+
+Neu bauen (Linux, mit dem Gecko-Bau aus `tools/armithlon/spidermonkey`):
+
+```
+tools/armithlon/spidermonkey/package-appstore.sh OBJ-BROWSER OUT 1   # reproduzierbar, xz -9 single-threaded
+tools/armithlon/appstore/add-to-catalog.sh OUT/firefox-153.8.0-qrx64-1.tar.xz firefox Firefox ...   # + Spalte m68k64
+```
+
+**Noch zu tun (von Hand):** Release mit dem Tag `appstore-firefox-153.8.0-1` anlegen und genau diese Datei anhängen.
+
+Stand: **Vorschau.** Das Fenster nimmt noch keine Maus- und Tastatureingaben an, lässt sich nicht in der Größe ändern
+und nicht schließen. Kein offizieller Mozilla-Build; „Firefox“ ist eine Marke der Mozilla Foundation.
+
 ## Tests (Stand 2026-11-24)
 
 Getestet auf der nativen x86-Engine (`qrx68100_full_run`) mit dem QRX-Systembaum, ein Testarchiv von 3 MB über einen gedrosselten lokalen Spiegel:
