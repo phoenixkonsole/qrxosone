@@ -25,6 +25,12 @@ pref("media.rdd-process.enabled", false);
 pref("layers.gpu-process.enabled", false);
 pref("layers.acceleration.disabled", true);
 pref("gfx.webrender.software", true);
+// no helper processes either: the JS validator of Opaque Response Blocking and media decoding run in
+// utility processes, and the web extensions in an extension process; AROS has none of them
+pref("browser.opaqueResponseBlocking.javascriptValidator", false);
+pref("media.utility-process.enabled", false);
+pref("dom.ipc.processPrelaunch.enabled", false);
+pref("extensions.webextensions.remote", false);
 pref("browser.shell.checkDefaultBrowser", false);
 pref("browser.startup.homepage_override.mstone", "ignore");
 pref("startup.homepage_welcome_url", "");
