@@ -433,3 +433,13 @@ __attribute__((constructor)) static void qrx_bt_init(void)
     signal(SIGILL, qrx_bt_handler);
     signal(SIGFPE, qrx_bt_handler);
 }
+
+/* ---- getpid: one process ID for all threads of the program
+ * AROS's getpid is the ETask's unique ID of the calling task, and each pthread thread is a task of
+ * its own, so every thread saw another "process" (Gecko's IPC compares the process of an endpoint's
+ * creator with the binding thread's and stopped with MOZ_CRASH in Endpoint.h). The ID of the main
+ * task is taken at startup, before any thread is started. */
+pid_t __getpid_CrtBase_wrapper(void);
+static pid_t qrx_main_pid;
+__attribute__((constructor(101))) static void qrx_pid_init(void) { qrx_main_pid = __getpid_CrtBase_wrapper(); }
+pid_t getpid(void) { return qrx_main_pid ? qrx_main_pid : __getpid_CrtBase_wrapper(); }
