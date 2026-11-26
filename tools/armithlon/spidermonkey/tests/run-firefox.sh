@@ -24,6 +24,9 @@ export QRX_IMG_MB=${QRX_IMG_MB:-600} QRX_MEM_MB=${QRX_MEM_MB:-2048}
 export QRX_PRE='Assign FONTS: SYS:Fonts\nStack 2000000\nSet TMPDIR /T\nSet HOME /T\nSet MOZ_FORCE_DISABLE_E10S 1\nMakeDir T:profile\n'"${QRX_EXTRA_PRE:-}"   # QRX_EXTRA_PRE: e.g. Set QRX_TEXTBASE 1
 export QRX_CMD="SYS:Firefox/firefox"
 export QRX_ARGS="--headless --profile /T/profile --screenshot /T/shot.png --window-size 1280,900 $URL\nType T:shot.png HEX"
+# the system disk comes back too: when Firefox does not end cleanly (a crash on shutdown after it
+# saved the screenshot) the shell never gets to Type, and the PNG is read from the disk instead
+export QRX_KEEP_DISK=$T/disk.img
 log=$(bash "$HERE/../../rust/tests/run-guest.sh" /dev/null "$SECS")
 echo "$log" | grep -v "^[0-9a-f]\{4,\}: " | tail -40
 # Type HEX lines: "0000: 89504e47 0d0a1a0a ...   text"
@@ -37,4 +40,8 @@ for line in sys.stdin:
 open(sys.argv[1], "wb").write(data)
 print("png bytes:", len(data), "signature ok:", data[:8] == b"\x89PNG\r\n\x1a\n")
 ' "$OUT"
+if ! head -c 8 "$OUT" | grep -q PNG && [ -f $T/disk.img ]; then
+  python3 -I "$HERE/../../aros-qrx/boot/ffsget.py" $T/disk.img T/shot.png "$OUT" &&
+    python3 -I -c 'import sys; d=open(sys.argv[1],"rb").read(); print("from the disk: png bytes:", len(d), "signature ok:", d[:8] == b"\x89PNG\r\n\x1a\n")' "$OUT"
+fi
 rm -rf $T
