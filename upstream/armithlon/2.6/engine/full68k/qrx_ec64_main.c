@@ -5,6 +5,10 @@
  *     --ram MB         guest RAM (default 512)
  *     --disk IMAGE     a disk image for qrxdisk.device (an FFS image from mkffsimg.py)
  *     --disk-write     write the disk back to the file at the end
+ *     --hostfs DIR     share the host directory DIR (host service 12, qrx_ec64_hostfs.h): with the
+ *                      qrxsys kickstart module the system boots from it as QRXSYS: (no --disk needed);
+ *                      L:qrxhostfs-handler mounts it as HOST: otherwise
+ *     --hostfs-ro      the shared directory read-only
  *     --cmdline TEXT   the kernel command line (default "econsole")
  *     --window         a window (Cocoa on the Mac, SDL2 on Linux): the console, and the board's
  *                      framebuffer once it is on
@@ -24,6 +28,7 @@
 #include "qrx68100ec64.h"
 #include "qrx_ec64_boot.h"
 #include "qrx_ec64_board.h"
+#include "qrx_ec64_hostfs.h"
 #if defined(__APPLE__) || defined(QRX_SDL_FRONTEND)
 #define QEC64_WINDOW 1
 #include "../macos/qrx_ec64_window.h"
@@ -188,7 +193,8 @@ int main(int argc, char **argv)
     char cmdline[400] = "econsole", *input = NULL;
     const char *wav_path = NULL, *views[4];
     int n_views = 0;
-    int disk_write = 0;
+    int disk_write = 0, hostfs_ro = 0;
+    const char *hostfs_dir = NULL;
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -196,6 +202,8 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--ram") && i + 1 < argc) ram_mb = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(a, "--disk") && i + 1 < argc) disk_path = argv[++i];
         else if (!strcmp(a, "--disk-write")) disk_write = 1;
+        else if (!strcmp(a, "--hostfs") && i + 1 < argc) hostfs_dir = argv[++i];
+        else if (!strcmp(a, "--hostfs-ro")) hostfs_ro = 1;
         else if (!strcmp(a, "--cmdline") && i + 1 < argc) snprintf(cmdline, sizeof cmdline, "%s", argv[++i]);
         else if (!strcmp(a, "--window")) use_window = 1;
         else if (!strcmp(a, "--stdin")) use_stdin = 1;
@@ -211,13 +219,17 @@ int main(int argc, char **argv)
         else if (nmodules < MAX_MODULES) modules[nmodules++] = a;
     }
     if (!kernel || cores < 1 || cores > QEC64_MAX_CORES || ram_mb < 64) {
-        fprintf(stderr, "usage: %s [--cores N] [--ram MB] [--disk IMAGE [--disk-write]] [--cmdline TEXT] [--window | --stdin]\n"
+        fprintf(stderr, "usage: %s [--cores N] [--ram MB] [--disk IMAGE [--disk-write]] [--hostfs DIR [--hostfs-ro]] [--cmdline TEXT] [--window | --stdin]\n"
                         "       [--input TEXT] [--seconds S] [--map FILE] [--stats] core.elf [module...]\n", argv[0]);
         return 2;
     }
 #ifndef QEC64_WINDOW
     if (use_window) { fprintf(stderr, "--window needs macOS or a build with SDL2\n"); return 2; }
 #endif
+    if (hostfs_dir && !qrx_ec64_hostfs_mount(hostfs_dir, hostfs_ro)) {
+        fprintf(stderr, "%s: not a directory\n", hostfs_dir);
+        return 2;
+    }
     uint8_t *disk = NULL;
     if (disk_path) {
         disk = read_file(disk_path, &disk_size);
