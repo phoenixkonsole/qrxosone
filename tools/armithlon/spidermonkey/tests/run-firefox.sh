@@ -19,7 +19,9 @@ URL="${QRX_URL:-file:///SYS/Web/qrxrocks/index.html}"
 export QRX_TREES="$T/ff:Firefox $T/fonts:Fonts/TrueType $WEB:Web/qrxrocks"
 # the disk image lives in guest memory; the guest boots with at most 2048 MB (qrxboot)
 export QRX_IMG_MB=${QRX_IMG_MB:-600} QRX_MEM_MB=${QRX_MEM_MB:-2048}
-export QRX_PRE='Assign FONTS: SYS:Fonts\nStack 2000000\nSet TMPDIR /T\nSet HOME /T\nMakeDir T:profile\n'"${QRX_EXTRA_PRE:-}"   # QRX_EXTRA_PRE: e.g. Set QRX_TEXTBASE 1
+# MOZ_FORCE_DISABLE_E10S: one process; AROS cannot start Gecko's content processes (fork, shared
+# memory handed to a child), and a build that is not MOZILLA_OFFICIAL takes this variable
+export QRX_PRE='Assign FONTS: SYS:Fonts\nStack 2000000\nSet TMPDIR /T\nSet HOME /T\nSet MOZ_FORCE_DISABLE_E10S 1\nMakeDir T:profile\n'"${QRX_EXTRA_PRE:-}"   # QRX_EXTRA_PRE: e.g. Set QRX_TEXTBASE 1
 export QRX_CMD="SYS:Firefox/firefox"
 export QRX_ARGS="--headless --profile /T/profile --screenshot /T/shot.png --window-size 1280,900 $URL\nType T:shot.png HEX"
 log=$(bash "$HERE/../../rust/tests/run-guest.sh" /dev/null "$SECS")
