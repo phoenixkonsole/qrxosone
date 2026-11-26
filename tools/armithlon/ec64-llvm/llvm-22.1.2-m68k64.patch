@@ -191,7 +191,7 @@
  ]>;
  
  /// M68k64 fastcc return convention.
-@@ -36,11 +37,12 @@
+@@ -36,16 +37,20 @@
  /// split among 16 1-byte values or used for a single 16-byte value.
  /// TODO: Verify its functionality and write tests
  def RetCC_M68k64_Fast : CallingConv<[
@@ -206,7 +206,16 @@
  ]>;
  
  /// This is the root return-value convention for the M68k64 backend.
-@@ -57,23 +59,22 @@
++/// QRX: the fast convention (which LLVM gives internal functions by itself) is the C one on m68k64.
++/// Its register assignment (arguments in D0/D1/A0/A1, results in D0/D1/A0/A1) was not verified
++/// upstream and broke Gecko twice: a struct return through a register that still popped the stack,
++/// and calls through dyn trait objects into WebRender that landed in data.
+ def RetCC_M68k64 : CallingConv<[
+-  CCIfCC<"CallingConv::Fast", CCDelegateTo<RetCC_M68k64_Fast>>,
+   CCDelegateTo<RetCC_M68k64_C>
+ ]>;
+ 
+@@ -57,23 +62,22 @@
  /// values are spilled on the stack.
  def CC_M68k64_Common : CallingConv<[
    /// Handles byval parameters.
@@ -236,7 +245,7 @@
  
    /// Otherwise, same as everything else.
    CCDelegateTo<CC_M68k64_Common>
-@@ -81,13 +82,13 @@
+@@ -81,13 +85,13 @@
  
  def CC_M68k64_C : CallingConv<[
    /// Promote i1/i8/i16 arguments to i32.
@@ -253,7 +262,17 @@
  
    // TODO: Support for 'sret'
  
-@@ -109,6 +110,6 @@
+@@ -97,8 +101,7 @@
+ 
+ /// This is the root argument convention for the M68k64 backend.
+ def CC_M68k64 : CallingConv<[
+-  CCIfCC<"CallingConv::Fast", CCDelegateTo<CC_M68k64_Fast>>,
+-  CCDelegateTo<CC_M68k64_C>
++  CCDelegateTo<CC_M68k64_C>      // QRX: also for CallingConv::Fast (see RetCC_M68k64)
+ ]>;
+ 
+ //===----------------------------------------------------------------------===//
+@@ -109,6 +112,6 @@
  
  // A5 - BP
  // A6 - FP
