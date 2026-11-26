@@ -522,7 +522,15 @@
        return std::tie(mCreatorPid, mSize, mStride, mConsumers, mCreatorRef,
 --- a/gfx/layers/wr/WebRenderBridgeParent.cpp
 +++ b/gfx/layers/wr/WebRenderBridgeParent.cpp
-@@ -622,7 +622,7 @@
+@@ -3,6 +3,7 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/layers/WebRenderBridgeParent.h"
++#include "mozilla/ScopeExit.h"
+ 
+ #include "mozmemory.h"
+ #include "CompositableHost.h"
+@@ -622,7 +623,7 @@
        gfx::FontType::MAC
  #elif defined(MOZ_WIDGET_GTK)
        gfx::FontType::FONTCONFIG
@@ -531,6 +539,22 @@
        gfx::FontType::FREETYPE
  #else
        gfx::FontType::UNKNOWN
+@@ -660,6 +661,15 @@
+ 
+   bool success = true;
+   for (const auto& cmd : aResourceUpdates) {
++#ifdef __AROS__
++    // QRX diagnostics: which resource update fails (SetDisplayList refused)
++    bool qrxBefore = success;
++    auto qrxNote = MakeScopeExit([&] {
++      if (qrxBefore && !success) {
++        gfxCriticalNote << "QRX UpdateResources failed at op type " << int(cmd.type());
++      }
++    });
++#endif
+     switch (cmd.type()) {
+       case OpUpdateResource::TOpAddImage: {
+         const auto& op = cmd.get_OpAddImage();
 --- a/gfx/skia/moz.build
 +++ b/gfx/skia/moz.build
 @@ -544,6 +544,16 @@
@@ -683,6 +707,63 @@
      CXXFLAGS += CONFIG["CAIRO_FT_CFLAGS"]
  
  if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
+--- a/gfx/webrender_bindings/RenderCompositorSWGL.cpp
++++ b/gfx/webrender_bindings/RenderCompositorSWGL.cpp
+@@ -88,8 +88,8 @@
+   int32_t stride = 0;
+   gfx::SurfaceFormat format = gfx::SurfaceFormat::UNKNOWN;
+   if (!mSurface && mDT->LockBits(&data, &size, &stride, &format) &&
+-      (format != gfx::SurfaceFormat::B8G8R8A8 &&
+-       format != gfx::SurfaceFormat::B8G8R8X8)) {
++      (format != gfx::SurfaceFormat::A8R8G8B8_UINT32 &&     // QRX: B8G8R8A8 on little endian,
++       format != gfx::SurfaceFormat::X8R8G8B8_UINT32)) {    // what SWGL's BGRA8 is on big endian
+     // We tried to lock the DT and it succeeded, but the size or format
+     // of the data is not compatible, so just release it and fall back below...
+     mDT->ReleaseBits(data);
+@@ -123,7 +123,7 @@
+     size = bounds.Size().ToUnknownSize();
+     if (!mSurface || mSurface->GetSize() != size) {
+       mSurface = gfx::Factory::CreateDataSourceSurface(
+-          size, gfx::SurfaceFormat::B8G8R8A8);
++          size, gfx::SurfaceFormat::A8R8G8B8_UINT32);   // QRX: SWGL's BGRA8 on either endianness
+     }
+     gfx::DataSourceSurface::MappedSurface map = {nullptr, 0};
+     if (!mSurface || !mSurface->Map(gfx::DataSourceSurface::READ_WRITE, &map)) {
+--- a/gfx/webrender_bindings/WebRenderTypes.h
++++ b/gfx/webrender_bindings/WebRenderTypes.h
+@@ -6,6 +6,7 @@
+ #define GFX_WEBRENDERTYPES_H
+ 
+ #include "ImageTypes.h"
++#include <bit>
+ #include "mozilla/webrender/webrender_ffi.h"
+ #include "mozilla/Maybe.h"
+ #include "mozilla/gfx/Matrix.h"
+@@ -85,6 +86,15 @@
+       // have it yet (cf. issue #732).
+     case gfx::SurfaceFormat::B8G8R8A8:
+       return Some(wr::ImageFormat::BGRA8);
++    case gfx::SurfaceFormat::A8R8G8B8:
++    case gfx::SurfaceFormat::X8R8G8B8:
++      // QRX: big endian (68k). WebRender and SWGL handle BGRA8 as packed 32-bit pixels 0xAARRGGBB in
++      // the host's byte order, which on a big-endian host is A8R8G8B8 in memory: Gecko's OS_RGBA there
++      // (A8R8G8B8_UINT32). On little endian these two formats are not that and stay unsupported.
++      if constexpr (std::endian::native == std::endian::big) {
++        return Some(wr::ImageFormat::BGRA8);
++      }
++      return Nothing();
+     case gfx::SurfaceFormat::A8:
+       return Some(wr::ImageFormat::R8);
+     case gfx::SurfaceFormat::A16:
+@@ -109,7 +119,7 @@
+     case ImageFormat::RGBA8:
+       return gfx::SurfaceFormat::R8G8B8A8;
+     case ImageFormat::BGRA8:
+-      return gfx::SurfaceFormat::B8G8R8A8;
++      return gfx::SurfaceFormat::A8R8G8B8_UINT32;   // QRX: B8G8R8A8 on little endian (see above)
+     case ImageFormat::R8:
+       return gfx::SurfaceFormat::A8;
+     case ImageFormat::R16:
 --- a/gfx/webrender_bindings/moz.build
 +++ b/gfx/webrender_bindings/moz.build
 @@ -105,7 +105,7 @@
@@ -5111,6 +5192,38 @@
      UNIFIED_SOURCES += [
          "unix/nsGNOMERegistry.cpp",
          "unix/nsMIMEInfoUnix.cpp",
+--- a/widget/InProcessCompositorWidget.cpp
++++ b/widget/InProcessCompositorWidget.cpp
+@@ -7,6 +7,11 @@
+ #include "mozilla/VsyncDispatcher.h"
+ #include "mozilla/layers/NativeLayer.h"
+ #include "nsIWidget.h"
++#ifdef __AROS__
++#  include "mozilla/widget/PlatformWidgetTypes.h"
++#  include "HeadlessCompositorWidget.h"
++#  include "HeadlessWidget.h"
++#endif
+ 
+ namespace mozilla {
+ namespace widget {
+@@ -27,6 +32,17 @@
+   // do it after the static_cast.
+   nsIWidget* widget = static_cast<nsIWidget*>(aWidget);
+   MOZ_RELEASE_ASSERT(widget);
++#ifdef __AROS__
++  // QRX: --headless draws into the headless widget's own compositor widget (as GTK does), the
++  // generic one asks HeadlessWidget for a draw target it does not have ("RenderCompositorSWGL
++  // failed mapping default framebuffer, no dt")
++  if (aInitData.type() ==
++      CompositorWidgetInitData::THeadlessCompositorWidgetInitData) {
++    return new HeadlessCompositorWidget(
++        aInitData.get_HeadlessCompositorWidgetInitData(), aOptions,
++        static_cast<HeadlessWidget*>(aWidget));
++  }
++#endif
+   return new InProcessCompositorWidget(aOptions, widget);
+ }
+ #endif
 --- a/widget/Theme.cpp
 +++ b/widget/Theme.cpp
 @@ -1503,6 +1503,8 @@
