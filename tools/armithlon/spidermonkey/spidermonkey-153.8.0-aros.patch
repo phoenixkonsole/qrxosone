@@ -1090,6 +1090,22 @@
    MOZ_ReportCrash(aReason, aFilename, aLine);
  #endif
    MOZ_CRASH_ANNOTATE(aReason);
+--- a/mfbt/RandomNum.cpp
++++ b/mfbt/RandomNum.cpp
+@@ -29,6 +29,13 @@
+     defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || \
+     defined(__wasi__)
+ #  define USE_ARC4RANDOM
++#endif
++
++#if defined(__AROS__)
++// QRX OS One 64: no /dev/urandom; libqrxaroscompat's arc4random_buf takes the host's getentropy()
++// through the board and stops the program if that is not there (no weak fallback)
++#  define USE_ARC4RANDOM
++extern "C" void arc4random_buf(void*, size_t);
+ #endif
+ 
+ #if defined(__linux__)
 --- a/mfbt/double-conversion/double-conversion/utils.h
 +++ b/mfbt/double-conversion/double-conversion/utils.h
 @@ -153,7 +153,8 @@
@@ -1441,6 +1457,40 @@
          'defines': [
            'NSS_USE_64',
          ],
+--- a/security/nss/lib/freebl/unix_rand.c
++++ b/security/nss/lib/freebl/unix_rand.c
+@@ -772,6 +772,26 @@
+     return S_ISREG(stat_buf.st_mode) ? PR_TRUE : PR_FALSE;
+ }
+ 
++#if defined(AROS)
++/* QRX OS One 64: no /dev/urandom. getentropy() of libqrxaroscompat gives the host's random bytes
++ * through the board (at most 256 bytes a call, as on the BSDs). */
++int getentropy(void *buf, size_t n);
++size_t
++RNG_SystemRNG(void *dest, size_t maxLen)
++{
++    unsigned char *buffer = dest;
++    size_t done = 0;
++    while (done < maxLen) {
++        size_t n = maxLen - done > 256 ? 256 : maxLen - done;
++        if (getentropy(buffer + done, n) != 0) {
++            PORT_SetError(SEC_ERROR_NEED_RANDOM);
++            return 0;
++        }
++        done += n;
++    }
++    return done;
++}
++#else
+ size_t
+ RNG_SystemRNG(void *dest, size_t maxLen)
+ {
+@@ -809,3 +829,4 @@
+     }
+     return fileBytes;
+ }
++#endif /* AROS */
 --- a/security/nss/lib/freebl/unix_urandom.c
 +++ b/security/nss/lib/freebl/unix_urandom.c
 @@ -4,6 +4,9 @@
