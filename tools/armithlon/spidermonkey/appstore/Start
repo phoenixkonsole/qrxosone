@@ -21,8 +21,12 @@ If NOT EXISTS SYS:Home/Firefox
   MakeDir >NIL: SYS:Home
   MakeDir >NIL: SYS:Home/Firefox
 EndIf
-If NOT EXISTS T:
-  MakeDir >NIL: SYS:T
+; T: for Gecko's temporary files (TMPDIR /T); EXISTS T: on an unassigned T: would ask for a volume
+Assign >NIL: T: EXISTS
+If WARN
+  If NOT EXISTS SYS:T
+    MakeDir >NIL: SYS:T
+  EndIf
   Assign >NIL: T: SYS:T
 EndIf
 Set TMPDIR /T

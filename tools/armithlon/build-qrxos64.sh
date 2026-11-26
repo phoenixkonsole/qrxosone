@@ -53,7 +53,7 @@ if [ -x "$NETD" ]; then cp "$NETD" "$APP/MacOS/qrxnetd"; else echo "qrxnetd not 
 
 T="$BU/System64"
 rm -rf "$T"
-mkdir -p "$T/C" "$T/Libs" "$T/S" "$T/X86" "$T/Apps" "$T/Home"
+mkdir -p "$T/C" "$T/Libs" "$T/S" "$T/X86" "$T/Apps" "$T/Home" "$T/T"
 echo m68k64 > "$T/AROS.boot"
 cp "$A"/C/* "$T/C/"
 for l in crt stdlib m locale iffparse uuid gadtools workbench diskfont asl z1; do
@@ -87,6 +87,7 @@ cat > "$T/S/Startup-Sequence" <<'EOF'
 SetClock LOAD
 Assign >NIL: L: SYS:L
 Assign >NIL: DEVS: SYS:Devs
+Assign >NIL: T: SYS:T
 If EXISTS DEVS:DOSDrivers/PIPE
   Mount >NIL: DEVS:DOSDrivers/PIPE
 EndIf
