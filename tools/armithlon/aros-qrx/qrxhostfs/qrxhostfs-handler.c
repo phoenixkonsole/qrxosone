@@ -6,13 +6,15 @@
  * 64-bit sizes, and its page cache is the only cache (a crash of the guest loses nothing written).
  *
  * Mounted from a DOSDriver (DEVS:DOSDrivers/HOST: Handler = L:qrxhostfs-handler), or as the boot
- * volume (qrxhostfs.resource adds a boot node with this handler's segment). The volume's name is the
- * DOSDriver's Startup string, else "Host".
+ * volume: the same source built as a kickstart module (module/, -DQRXHOSTFS_MODULE) registers DosType
+ * QHF\1 in FileSystem.resource, and qrxdisk.device adds the boot node HFS0: for it when the host shares
+ * a directory (the board's feature bit). The volume's name is the DOSDriver's Startup string, else
+ * "Host"; the boot volume is QRXSYS.
  *
  * A lock (struct HLock) and an open file (struct HFile) each hold their object's path relative to the
  * share ("" is the share itself, components separated by '/'). Names in packets are resolved against
- * a lock's path the AmigaDOS way: "VOL:" or ":" starts at the root, each leading '/' goes up one
- * directory, "a//b" is a/../b. ExNext's position is the entry's index in fib_DiskKey.
+ * a lock's path the AmigaDOS way: a "DEV:" part is dropped (dos.library passes the matching lock),
+ * each leading '/' goes up one directory, "a//b" is a/../b. ExNext's position is the entry's index in fib_DiskKey.
  */
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -76,9 +78,11 @@ static void up(char *path) { char *s = strrchr(path, '/'); if (s) *s = 0; else p
 /* base (a path) and an AmigaDOS name into out; FALSE: above the root, or too long */
 static BOOL resolve(const char *base, const char *name, char *out)
 {
+    /* "DEV:" is dropped; dos.library has already made the lock the one the name is relative to
+     * (0 for a volume or device name, the assign's directory for an assign), as afs does */
     const char *colon = strchr(name, ':');
-    if (colon) { out[0] = 0; name = colon + 1; }
-    else strcpy(out, base);
+    if (colon) name = colon + 1;
+    strcpy(out, base);
     while (*name) {
         if (*name == '/') {                       /* a leading or doubled '/': the parent */
             if (!out[0]) return FALSE;
@@ -179,9 +183,8 @@ static void free_file(struct HFile *f)
     FreeVec(f);
 }
 
-__startup static AROS_PROCH(qrxhostfs_main, argstr, argsize, sysBase)
+static LONG hostfs_run(struct ExecBase *sysBase)
 {
-    AROS_PROCFUNC_INIT
     SysBase = sysBase;
     struct Process *me = (struct Process *)FindTask(NULL);
     struct DosPacket *dp;
@@ -193,7 +196,9 @@ __startup static AROS_PROCH(qrxhostfs_main, argstr, argsize, sysBase)
     if (!DOSBase) { dp->dp_Res1 = DOSFALSE; dp->dp_Res2 = ERROR_NO_FREE_STORE; ReplyMsg(dp->dp_Link); return RETURN_FAIL; }
     /* the startup packet: dp_Arg1 the Startup string, dp_Arg3 the DeviceNode */
     {
-        const char *s = dp->dp_Arg1 ? AROS_BSTR_ADDR(dp->dp_Arg1) : NULL;
+        struct DeviceNode *dn0 = BADDR(dp->dp_Arg3);
+        BOOL boot = dn0 && dn0->dn_Name && same_name(AROS_BSTR_ADDR(dn0->dn_Name), "HFS0");
+        const char *s = !boot && dp->dp_Arg1 ? AROS_BSTR_ADDR(dp->dp_Arg1) : NULL;
         if (s && *s == '"') s++;              /* Startup = "Name" */
         if (s && *s) {
             size_t n = 0;
@@ -202,6 +207,9 @@ __startup static AROS_PROCH(qrxhostfs_main, argstr, argsize, sysBase)
         }
         struct DeviceNode *dn = BADDR(dp->dp_Arg3);
         if (dn) dn->dn_Task = port;
+        /* the boot volume (qrxdisk.device's boot node HFS0:, no Startup string but a
+         * FileSysStartupMsg in dp_Arg1): the system's volume name */
+        if (dn && dn->dn_Name && same_name(AROS_BSTR_ADDR(dn->dn_Name), "HFS0")) strcpy(volname, "QRXSYS");
     }
     if (host(HFS_STAT, "", rec, sizeof rec, 0, 0)) { ReplyPkt(dp, DOSFALSE, ERROR_NO_DISK); return RETURN_FAIL; }
     volume = MakeDosEntry((STRPTR)volname, DLT_VOLUME);
@@ -390,5 +398,20 @@ __startup static AROS_PROCH(qrxhostfs_main, argstr, argsize, sysBase)
         }
     }
     return RETURN_OK;
+}
+
+#ifdef QRXHOSTFS_MODULE
+/* the kickstart module's handler (qrxhostfs.conf: handler_func, DosType QHF\1 in FileSystem.resource) */
+LONG QRXHostFS_work(struct ExecBase *sysBase)
+{
+    return hostfs_run(sysBase);
+}
+#else
+/* L:qrxhostfs-handler, started by a DOSDriver */
+__startup static AROS_PROCH(qrxhostfs_main, argstr, argsize, sysBase)
+{
+    AROS_PROCFUNC_INIT
+    return hostfs_run(sysBase);
     AROS_PROCFUNC_EXIT
 }
+#endif

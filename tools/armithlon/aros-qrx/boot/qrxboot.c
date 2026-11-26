@@ -360,7 +360,7 @@ int main(int argc, char **argv)
         }
         *o = 0;
     }
-    if (getenv("QRXBOOT_DISK")) {
+    if (getenv("QRXBOOT_DISK") && *getenv("QRXBOOT_DISK")) {
         FILE *f = fopen(getenv("QRXBOOT_DISK"), "rb");
         if (!f) { perror(getenv("QRXBOOT_DISK")); return 2; }
         fseek(f, 0, SEEK_END);

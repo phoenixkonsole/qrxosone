@@ -32,14 +32,26 @@ cp "$1" $SYS/C/T; chmod +x $SYS/C/T
 for f in ${QRX_FILES:-}; do cp "$f" $SYS/T/; done
 # QRX_TREES: more directories, "source:SYS-relative destination" pairs (e.g. dist/bin:Firefox, fonts:Fonts/TrueType)
 for t in ${QRX_TREES:-}; do mkdir -p "$SYS/${t#*:}"; cp -r "${t%%:*}/." "$SYS/${t#*:}/"; done
-python3 -I $BOOT/mkffsimg.py $SYS $W/t.img ${QRX_IMG_MB:-32} QRXSYS >/dev/null
+# QRX_SYS_HOSTFS=1: no disk image; the system directory itself is the host's share and the guest
+# boots from it (HFS0:, volume QRXSYS: qrxdisk.device's boot node, the qrxsys kickstart module, host
+# service 12). QRX_KEEP_SYS=<dir>: that directory as the guest left it, moved there at the end.
+DISKARG=
+if [ -n "${QRX_SYS_HOSTFS:-}" ]; then
+  export QRXBOOT_HOSTFS="$SYS"
+  unset QRXBOOT_HOSTFS_RO
+else
+  python3 -I $BOOT/mkffsimg.py $SYS $W/t.img ${QRX_IMG_MB:-32} QRXSYS >/dev/null
+  DISKARG=$W/t.img
+fi
 # QRX_KEEP_DISK=<file>: the system disk as the guest left it (qrxboot writes it back), e.g. for
 # aros-qrx/boot/ffsget.py to read a file the program wrote
-[ -n "${QRX_KEEP_DISK:-}" ] && export QRXBOOT_DISK_WRITE=1
-QRXBOOT_LIVE=${QRX_LIVE:-} QRXBOOT_DISK=$W/t.img QRXBOOT_CMDLINE=econsole-startup QRXBOOT_INPUT="${PRE}${QRX_CMD:-C:T} ${QRX_ARGS:-}\nshutdown\n" $QRXBOOT $CORE ${2:-60} ${QRX_CORES:-2} ${QRX_MEM_MB:-512} \
+[ -n "${QRX_KEEP_DISK:-}" ] && [ -n "$DISKARG" ] && export QRXBOOT_DISK_WRITE=1
+QRXBOOT_LIVE=${QRX_LIVE:-} QRXBOOT_DISK=$DISKARG QRXBOOT_CMDLINE=econsole-startup QRXBOOT_INPUT="${PRE}${QRX_CMD:-C:T} ${QRX_ARGS:-}\nshutdown\n" $QRXBOOT $CORE ${2:-60} ${QRX_CORES:-2} ${QRX_MEM_MB:-512} \
   $A/Libs/utility.library $A/Libs/aros.library $A/boot/native/Devs/battclock.resource $A/boot/native/Devs/timer.device \
   $A/boot/native/Libs/expansion.library $A/Devs/bootloader.resource $A/Libs/dos.library $A/Devs/lddemon.resource \
-  $A/L/econsole-handler $A/Devs/FileSystem.resource $A/L/afs-handler $A/Devs/qrxdisk.device $A/Devs/shell.resource \
+  $A/L/econsole-handler $A/Devs/FileSystem.resource $A/L/afs-handler $A/L/qrxsys-handler $A/Devs/qrxdisk.device $A/Devs/shell.resource \
   $A/Devs/shellcommands.resource $A/Devs/dosboot.resource > $W/out.txt 2>&1
 sed -n "\\|1> ${QRX_CMD:-C:T}|,\\|1> shutdown|p" $W/out.txt | sed '1d;$d'; grep -E "Software Failure" $W/out.txt | head -1
-[ -n "$KEEP" ] && cp $W/out.txt $KEEP; [ -n "${QRX_KEEP_DISK:-}" ] && mv $W/t.img "$QRX_KEEP_DISK"; rm -rf $W
+[ -n "$KEEP" ] && cp $W/out.txt $KEEP; [ -n "${QRX_KEEP_DISK:-}" ] && [ -f $W/t.img ] && mv $W/t.img "$QRX_KEEP_DISK"
+[ -n "${QRX_KEEP_SYS:-}" ] && rm -rf "$QRX_KEEP_SYS" && mv $SYS "$QRX_KEEP_SYS"
+rm -rf $W

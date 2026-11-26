@@ -99,6 +99,12 @@ mk workbench-fs-qrxpipe
 mkdir -p "$SRC/workbench/fs/qrxhostfs"
 cp "$HERE/qrxhostfs/mmakefile.src" "$HERE/qrxhostfs/qrxhostfs-handler.c" "$SRC/workbench/fs/qrxhostfs/"
 mk workbench-fs-qrxhostfs
+# the same handler as the kickstart module qrxsys (DosType QHF\1): the system boots from a host
+# directory when the board shares one (qrxdisk.device's boot node HFS0:)
+mkdir -p "$SRC/arch/m68k64-native/qrx/qrxhostfs"
+cp "$HERE/qrxhostfs/module/mmakefile.src" "$HERE/qrxhostfs/module/qrxsys.conf" "$HERE/qrxhostfs/qrxhostfs-handler.c" \
+   "$SRC/arch/m68k64-native/qrx/qrxhostfs/"
+mk kernel-fs-qrxhostfs
 if [[ "${QRX_BUILD_PTHREAD:-0}" == 1 ]]; then
   mk pthread-includes-copy linklibs-pthread
   # the builtins again, now with the SDK: emutls.c (thread_local) needs the pthread headers

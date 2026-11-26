@@ -1,0 +1,13 @@
+include $(SRCDIR)/config/aros.cfg
+
+# QRX OS One 64's system on a host directory: qrxhostfs-handler.c as the kickstart module qrxsys (DosType
+# QHF\1); build-linux.sh copies it with this file to arch/m68k64-native/qrx/qrxhostfs.
+
+USER_CPPFLAGS := -DQRXHOSTFS_MODULE
+USER_LDFLAGS := -noclibs
+
+%build_module mmake=kernel-fs-qrxhostfs \
+    modname=qrxsys modtype=handler \
+    files="qrxhostfs-handler" uselibs="stdc.static"
+
+%common

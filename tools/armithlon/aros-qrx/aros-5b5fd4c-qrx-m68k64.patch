@@ -6967,10 +6967,10 @@ index 00000000..0533704e
 +##end cdefprivate
 diff --git a/arch/m68k64-native/qrx/qrxdisk/qrxdisk_device.c b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_device.c
 new file mode 100644
-index 00000000..e20a5f6e
+index 00000000..f9d70911
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_device.c
-@@ -0,0 +1,413 @@
+@@ -0,0 +1,463 @@
 +/*
 +    Copyright (C) 2026, The AROS Development Team. All rights reserved.
 +
@@ -6978,7 +6978,9 @@ index 00000000..e20a5f6e
 +
 +    The boot loader puts a disk image (512-byte blocks) at the top of RAM, outside the memory it
 +    gives to exec, and names it on the kernel command line as qrxdisk=<address>,<size> in hex.
-+    Unit 0 reads and writes it. Unit 1 is the logged-in user's home volume, an image on the Mac
++    Unit 0 reads and writes it. When the host shares a directory instead (or as well), the device
++    adds the boot node HFS0: for it, served by the qrxsys kickstart module (qrxhostfs-handler), and
++    the system boots from there; see add_hostfs_bootnode(). Unit 1 is the logged-in user's home volume, an image on the Mac
 +    encrypted with AES-256-XTS; the engine's vault service (host call service 9) decrypts and
 +    encrypts every sector, and the keys never come into guest memory. QRXDesktop logs in and
 +    mounts it as HOME:. At init the device adds a boot node DH0: for it, with the
@@ -7113,12 +7115,60 @@ index 00000000..e20a5f6e
 +    CloseLibrary(ExpansionBase);
 +}
 +
++/* The system on a host directory: when the board shares one (host service 12, feature bit), the
++ * boot node HFS0: with DosType QHF\1, the kickstart module qrxsys (qrxhostfs-handler), ahead of DH0:.
++ * The handler names that volume QRXSYS; it needs no device, the unit here is never opened. */
++#define EC64_FEATURES       0xFFFFFFFF00000408UL
++#define EC64_FEATURE_HOSTFS 4
++#define QRXHOSTFS_DOSTYPE   0x51484601  /* QHF\1 */
++static void add_hostfs_bootnode(void)
++{
++    struct Library *ExpansionBase;
++    IPTR *pp;
++    struct DosEnvec *de;
++    struct DeviceNode *dn;
++
++    if (!(*(volatile ULONG *)EC64_FEATURES & EC64_FEATURE_HOSTFS))
++        return;
++    if (!(ExpansionBase = OpenLibrary("expansion.library", 0)))
++        return;
++    pp = AllocMem(sizeof(IPTR) * 4 + sizeof(struct DosEnvec), MEMF_PUBLIC | MEMF_CLEAR);
++    if (pp)
++    {
++        pp[0] = (IPTR)"HFS0";
++        pp[1] = (IPTR)"qrxdisk.device";
++        pp[2] = 2;          /* a unit nobody opens */
++        pp[3] = 0;
++        de = (struct DosEnvec *)&pp[4];
++        de->de_TableSize = DE_BOOTBLOCKS;
++        de->de_SizeBlock = BLOCK_SIZE / 4;
++        de->de_Surfaces = 1;
++        de->de_SectorPerBlock = 1;
++        de->de_BlocksPerTrack = 1;
++        de->de_LowCyl = 0;
++        de->de_HighCyl = 0;
++        de->de_BufMemType = MEMF_PUBLIC;
++        de->de_MaxTransfer = 0x01000000;
++        de->de_Mask = (IPTR)~0;
++        de->de_BootPri = 5;         /* before DH0: */
++        de->de_DosType = QRXHOSTFS_DOSTYPE;
++        dn = MakeDosNode(pp);
++        if (dn)
++        {
++            AddBootNode(5, ADNF_STARTPROC, dn, NULL);
++            D(bug("[qrxdisk] boot node HFS0: for the host's directory\n"));
++        }
++    }
++    CloseLibrary(ExpansionBase);
++}
++
 +static int GM_UNIQUENAME(Init)(LIBBASETYPEPTR base)
 +{
 +    APTR BootLoaderBase = OpenResource("bootloader.resource");
 +    struct List *args;
 +    struct Node *node;
 +
++    add_hostfs_bootnode();
 +    if (!BootLoaderBase || !(args = GetBootInfo(BL_Args)))
 +        return TRUE;
 +
