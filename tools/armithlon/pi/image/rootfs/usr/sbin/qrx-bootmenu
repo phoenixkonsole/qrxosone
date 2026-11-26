@@ -1,0 +1,27 @@
+#!/bin/sh
+# QRX ARMithlon Pi 4: the boot menu. Once per boot, before QRX OS One starts (/qrx/session calls
+# it); writes the mode chosen to /run/qrx-mode: "armithlon" or "dev".
+#   /boot/qrx.txt  mode=armithlon|dev  the default (Enter, or nothing pressed)
+#                  menu=3              seconds the menu waits (0: no menu, the default at once)
+# On the screen (tty1): 1 or A = ARMithlon, 2 or D = developer mode (sshd, a shell, see qrx-dev).
+# The FAT boot partition can be edited on any computer, so a Pi without keyboard is switched by
+# writing mode=dev there.
+export PATH=/usr/sbin:/usr/bin
+conf() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([0-9A-Za-z]*\).*/\1/p" /boot/qrx.txt 2>/dev/null | tail -1; }
+[ -s /run/qrx-mode ] && exit 0
+mode=$(conf mode); case "$mode" in dev|armithlon) ;; *) mode=armithlon ;; esac
+wait_s=$(conf menu); [ "$wait_s" -ge 0 ] 2>/dev/null || wait_s=3
+TTY=/dev/tty1
+if [ "$wait_s" -gt 0 ] && [ -c $TTY ]; then
+    {
+        printf '\033[2J\033[H\n  QRX ARMithlon\n\n'
+        printf '    1  ARMithlon (QRX OS One)%s\n' "$([ $mode = armithlon ] && echo '   <')"
+        printf '    2  Developer mode (SSH)%s\n\n' "$([ $mode = dev ] && echo '     <')"
+        printf '  %s s, then the one marked. Default: mode= in qrx.txt on the boot partition.\n' "$wait_s"
+    } > $TTY
+    key=
+    read -r -s -n 1 -t "$wait_s" key < $TTY 2>/dev/null
+    case "$key" in 1|a|A) mode=armithlon ;; 2|d|D) mode=dev ;; esac
+    printf '\033[2J\033[H' > $TTY
+fi
+echo "$mode" > /run/qrx-mode

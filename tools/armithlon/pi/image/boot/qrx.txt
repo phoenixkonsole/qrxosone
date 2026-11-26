@@ -5,5 +5,11 @@
 #   cores64=2    its cores, 1 to 4
 #   ram64=1024   its RAM in MB (default: half the Pi's memory, at most 2048)
 #   boot_wait=15 seconds until a 32-bit boot that did not reach its system disk is started again
+# The boot menu (on the screen, 1 or 2) and what it starts without a key:
+#   mode=armithlon  QRX OS One;  mode=dev  developer mode: SSH (keys only, from authorized_keys
+#                   next to this file), a shell on the screen, QRX OS One with qrx-start
+#   menu=3          seconds the menu waits; 0 starts the mode at once
 system=32
 cores64=2
+mode=armithlon
+menu=3

@@ -178,6 +178,52 @@ Keine Distribution, sondern ein eigener Kernel und genau die Programme, die das 
 - Auf tty2 (Strg+Alt+F2) wartet eine Root-Shell für Notfälle. Wer physisch an den Pi kommt,
   hat damit Root.
 
+## Bootmenü und Developer-Modus (SSH vom ODROID oder Mac)
+
+Nach dem Einschalten zeigt der Pi drei Sekunden lang ein Menü (`qrx-bootmenu`):
+
+    1  ARMithlon (QRX OS One)
+    2  Developer mode (SSH)
+
+Ohne Taste startet, was `mode=` in `qrx.txt` auf der Boot-Partition sagt (`armithlon`, so
+ausgeliefert, oder `dev`); `menu=0` lässt das Menü weg. Ein Pi ohne Tastatur wird also umgestellt,
+indem man auf einem anderen Rechner `mode=dev` in `QRXBOOT/qrx.txt` schreibt. Aus dem laufenden
+Pi: `qrx-mode dev|armithlon`, aus QRX OS One über den Einstellungsdienst `netctl mode dev`
+(startet neu).
+
+Der Developer-Modus (`qrx-dev`) startet statt QRX OS One:
+
+- **SSH** (dropbear, Port 22) nur mit Schlüsseln, Passwörter sind ganz abgeschaltet. Die
+  öffentlichen Schlüssel stehen in `authorized_keys` auf der Boot-Partition (eine Zeile je
+  Rechner) und werden bei jedem Start nach `/root/.ssh/authorized_keys` übernommen; der
+  Host-Schlüssel entsteht beim ersten Start in `/etc/dropbear` und bleibt.
+- **Name im Netz:** Der Pi meldet beim DHCP seinen Namen (`qrx-armithlon`, `/etc/hostname`);
+  Router mit lokalem DNS lösen ihn auf (FRITZ!Box: `qrx-armithlon.fritz.box`). Die Adressen
+  stehen außerdem auf dem Bildschirm.
+- **Werkzeuge:** scp/sftp (OpenSSHs `sftp-server`), `rsync`, `gdbserver`.
+- **Eine Shell auf dem Bildschirm**; `qrx-start` startet QRX OS One von dort einmal wie die
+  Appliance und kehrt danach zur Shell zurück (statt abzuschalten).
+
+Einrichten auf dem ODROID oder Mac (einmal):
+
+    ssh-keygen -t ed25519                 # falls noch kein Schlüssel da ist
+    cat ~/.ssh/id_ed25519.pub >> /Volumes/QRXBOOT/authorized_keys   # Karte im Kartenleser
+                                          # (Linux: der Einhängepunkt von QRXBOOT)
+    # mode=dev in QRXBOOT/qrx.txt, oder beim Start 2 drücken
+    ssh root@qrx-armithlon.fritz.box      # bzw. die Adresse vom Bildschirm
+
+Danach kann Claude Code auf dem ODROID oder Mac den Pi über diese Verbindung steuern: bauen auf
+dem ODROID (AArch64 wie der Pi), übertragen und starten, z. B.
+
+    rsync -a build/qrx68100_full_run root@qrx-armithlon:/qrx/bin/armithlon
+    ssh root@qrx-armithlon qrx-start
+    ssh root@qrx-armithlon cat /run/armithlon.log
+
+Stand: Die Skripte sind mit der BusyBox 1.36.1 des Images geprüft (Menü mit und ohne Taste,
+`menu=0`, `qrx-mode`, Schlüsselübernahme ohne Doppelte, Bildschirmtext; dropbear und `ip` dabei
+nur als Platzhalter). Ein Image mit den neuen Paketen ist noch nicht gebaut und auf einem Pi
+noch nicht gestartet.
+
 ## WLAN und Bluetooth aus QRX OS One
 
 - Im Home-Menü des Desktops: **„Wi-Fi & BT“** (`C:QRXWireless`), und in den Einstellungen

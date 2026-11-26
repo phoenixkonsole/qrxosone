@@ -27,6 +27,9 @@ PROGRAMS = [
     'usr/sbin/wpa_supplicant', 'usr/sbin/wpa_cli', 'usr/bin/wpa_passphrase', 'usr/sbin/iw',
     'usr/bin/dbus-daemon', 'usr/libexec/bluetooth/bluetoothd', 'usr/bin/bluetoothctl', 'usr/bin/btmgmt',
     'usr/sbin/resize2fs', 'usr/sbin/e2fsck',          # first start: the root fills the card
+    # developer mode (qrx-dev): SSH with keys, scp/sftp, rsync, remote debugging
+    'usr/sbin/dropbear', 'usr/bin/dropbearkey', 'usr/lib/openssh/sftp-server', 'usr/lib/sftp-server',
+    'usr/bin/rsync', 'usr/bin/gdbserver',
 ]
 # loaded with dlopen: glvnd's EGL loads Mesa's EGL (libEGL_mesa), which loads the gallium driver.
 # The engine itself links EGL, glvnd's libOpenGL (no GLX, so no X11) and ALSA directly; no SDL.
@@ -126,7 +129,8 @@ def main():
     shutil.copytree(BUNDLE / 'SystemFull', q / 'System', symlinks=True)
     # the appliance's own files: init scripts, settings service, configuration
     shutil.copytree(HERE / 'rootfs', OUT, symlinks=True, dirs_exist_ok=True)
-    for f in ('etc/init.d/rcS', 'etc/init.d/rcK', 'qrx/session', 'usr/share/udhcpc/default.script', 'qrx/netctl', 'qrx/appstore/store', 'usr/sbin/qrx-grow'):
+    for f in ('etc/init.d/rcS', 'etc/init.d/rcK', 'qrx/session', 'usr/share/udhcpc/default.script', 'qrx/netctl', 'qrx/appstore/store', 'usr/sbin/qrx-grow',
+              'usr/sbin/qrx-bootmenu', 'usr/sbin/qrx-dev', 'usr/sbin/qrx-mode', 'usr/sbin/qrx-start'):
         p = OUT / f
         if p.exists(): p.chmod(p.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     for d in ('dev', 'proc', 'sys', 'run', 'tmp', 'var/lib/bluetooth', 'data', 'root', 'mnt', 'boot'):

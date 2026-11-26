@@ -1,0 +1,46 @@
+#!/bin/sh
+# QRX ARMithlon Pi 4: developer mode. The Pi on the network for another computer (an ODROID, a
+# Mac) to log in with SSH and build, copy, start and debug ARMithlon on it, also from Claude Code
+# running there ("ssh root@qrx-armithlon ...").
+#   sshd    dropbear on port 22, keys only (no passwords at all): /boot/authorized_keys (the FAT
+#           partition: copy the other computer's ~/.ssh/id_ed25519.pub there with a card reader)
+#           and /root/.ssh/authorized_keys; host keys are made once in /etc/dropbear
+#   name    the Pi asks the router's DHCP for its hostname (/etc/hostname, qrx-armithlon), so a
+#           router with local DNS (e.g. a FRITZ!Box: qrx-armithlon.fritz.box) finds it by name
+#   tools   scp/sftp (OpenSSH's sftp-server), rsync, gdbserver
+#   qrx-start      starts QRX OS One once from here (as the appliance would), back here after it
+#   qrx-mode dev|armithlon   the default mode at the next boot (mode= in /boot/qrx.txt)
+# Called by /qrx/session in developer mode: starts sshd, shows the addresses on the screen and
+# gives a shell there; init starts it again when the shell ends.
+export PATH=/usr/sbin:/usr/bin HOME=/root
+TTY=/dev/tty1
+mkdir -p /root/.ssh /etc/dropbear
+chmod 700 /root /root/.ssh
+# keys from the boot partition, added once each
+if [ -s /boot/authorized_keys ]; then
+    touch /root/.ssh/authorized_keys
+    tr -d '\r' < /boot/authorized_keys | while IFS= read -r k; do
+        [ -n "$k" ] && ! grep -qxF "$k" /root/.ssh/authorized_keys && echo "$k" >> /root/.ssh/authorized_keys
+    done
+fi
+[ -f /root/.ssh/authorized_keys ] && chmod 600 /root/.ssh/authorized_keys
+[ -s /etc/dropbear/dropbear_ed25519_host_key ] || dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key >/dev/null 2>&1
+# -s: no password logins, -E: messages to stderr (the log)
+if ! [ -s /run/dropbear.pid ] || ! kill -0 "$(cat /run/dropbear.pid)" 2>/dev/null; then
+    dropbear -s -E -P /run/dropbear.pid -r /etc/dropbear/dropbear_ed25519_host_key 2>>/run/dropbear.log
+fi
+# DHCP runs in the background (rcS): up to 10 s for an address to show
+n=0
+while [ $n -lt 20 ] && ! ip -4 -o addr show 2>/dev/null | awk '$2 != "lo"' | grep -q inet; do sleep 0.5; n=$((n + 1)); done
+keys=$(grep -c . /root/.ssh/authorized_keys 2>/dev/null || echo 0)
+fp=$(dropbearkey -y -f /etc/dropbear/dropbear_ed25519_host_key 2>/dev/null | sed -n 's/^Fingerprint: //p')
+{
+    printf '\033[2J\033[H\n  QRX ARMithlon: developer mode\n\n'
+    printf '  ssh root@%s' "$(hostname)"
+    ip -4 -o addr show 2>/dev/null | awk '$2 != "lo" {sub("/.*", "", $4); printf "   or   ssh root@%s (%s)", $4, $2}'
+    printf '\n\n  host key %s\n' "${fp:-?}"
+    if [ "$keys" -gt 0 ]; then printf '  %s key(s) may log in\n' "$keys"
+    else printf '  no key may log in yet: put the other computer'"'"'s public key into\n  authorized_keys on the boot partition (QRXBOOT) and start again\n'; fi
+    printf '\n  qrx-start: QRX OS One once    qrx-mode armithlon: the appliance at the next boot\n\n'
+} > $TTY
+exec setsid cttyhack /bin/sh -l < $TTY > $TTY 2>&1

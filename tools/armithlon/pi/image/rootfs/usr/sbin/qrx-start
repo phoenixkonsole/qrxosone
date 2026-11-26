@@ -1,0 +1,4 @@
+#!/bin/sh
+# qrx-start: QRX OS One once, from developer mode (the same start as the appliance's, /qrx/session);
+# when it ends, back to the shell instead of powering off.
+QRX_NO_POWEROFF=1 QRX_MODE=armithlon exec /qrx/session

@@ -20,6 +20,14 @@ elif grep -q vc4hdmi0 /proc/asound/cards 2>/dev/null; then export ALSA_CARD=vc4h
 else export ALSA_CARD=Headphones; fi
 
 conf() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([0-9A-Za-z]*\).*/\1/p" /boot/qrx.txt 2>/dev/null | tail -1; }
+# The boot menu (qrx-bootmenu, once per boot): ARMithlon, or developer mode (qrx-dev: sshd and a
+# shell on the screen instead of QRX OS One). qrx-start sets QRX_MODE to start QRX OS One from there.
+mode=${QRX_MODE:-}
+if [ -z "$mode" ]; then
+    /usr/sbin/qrx-bootmenu
+    mode=$(cat /run/qrx-mode 2>/dev/null)
+fi
+if [ "$mode" = dev ]; then exec /usr/sbin/qrx-dev; fi
 K=/boot/qrx64
 if [ "$(conf system)" = 64 ] && [ -x /qrx/bin/armithlon64 ] && [ -s $K/core.elf ] && [ -s $K/modules.txt ] && [ -s /boot/QRXOS64.img ]; then
     cores=$(conf cores64); case "$cores" in 1|2|3|4) ;; *) cores=2 ;; esac
@@ -63,6 +71,7 @@ else
     wait $pid
     rc=$?
 fi
-# QRX OS One shut down: power off; a crash restarts it (init respawns this script)
-if [ $rc = 0 ]; then poweroff; fi
+# QRX OS One shut down: power off; a crash restarts it (init respawns this script). Started with
+# qrx-start from developer mode: back to its shell.
+if [ $rc = 0 ] && [ -z "${QRX_NO_POWEROFF:-}" ]; then poweroff; fi
 sleep 1

@@ -19,3 +19,8 @@ libssl3t64
 libstdc++6
 zlib1g
 e2fsprogs
+# developer mode (qrx-dev)
+dropbear-bin
+openssh-sftp-server
+rsync
+gdbserver

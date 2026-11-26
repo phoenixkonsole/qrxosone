@@ -1,0 +1,14 @@
+#!/bin/sh
+# qrx-mode dev|armithlon: the mode the Pi boots into by default (mode= in /boot/qrx.txt; the boot
+# menu can still choose the other one). Without an argument: the current default.
+export PATH=/usr/sbin:/usr/bin
+F=/boot/qrx.txt
+case "$1" in
+"") sed -n 's/^[[:space:]]*mode[[:space:]]*=[[:space:]]*\([a-z]*\).*/\1/p' $F | tail -1; exit 0 ;;
+dev|armithlon) ;;
+*) echo "usage: qrx-mode [dev|armithlon]" >&2; exit 2 ;;
+esac
+if grep -q '^[[:space:]]*mode[[:space:]]*=' $F; then sed -i "s/^[[:space:]]*mode[[:space:]]*=.*/mode=$1/" $F
+else echo "mode=$1" >> $F; fi
+sync
+echo "mode=$1 at the next boot"

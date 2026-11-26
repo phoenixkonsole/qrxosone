@@ -31,10 +31,10 @@ ctrl_interface=/run/wpa_supplicant
 update_config=1
 country=DE
 W
-if [ -e /sys/class/net/eth0 ]; then ip link set eth0 up; udhcpc -b -S -i eth0 -p /run/udhcpc.eth0.pid >/dev/null 2>&1; fi
+if [ -e /sys/class/net/eth0 ]; then ip link set eth0 up; udhcpc -b -S -x hostname:"$(hostname)" -i eth0 -p /run/udhcpc.eth0.pid >/dev/null 2>&1; fi
 if [ -e /sys/class/net/wlan0 ]; then
   wpa_supplicant -B -D nl80211 -i wlan0 -c /etc/qrx/wpa_supplicant.conf -P /run/wpa_supplicant.pid
-  udhcpc -b -S -i wlan0 -p /run/udhcpc.wlan0.pid >/dev/null 2>&1
+  udhcpc -b -S -x hostname:"$(hostname)" -i wlan0 -p /run/udhcpc.wlan0.pid >/dev/null 2>&1
 fi
 
 # Bluetooth: the UART's hci0 comes up by itself (device tree + hci_uart in the kernel)

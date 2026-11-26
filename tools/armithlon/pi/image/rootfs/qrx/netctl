@@ -13,6 +13,7 @@
 #   bt-pair ADDRESS                 pair, trust and connect (in the background)
 #   bt-remove ADDRESS
 #   system 32|64                    which QRX OS One starts next (/boot/qrx.txt), then restart
+#   mode dev|armithlon              the boot mode (developer mode: SSH, see qrx-dev), then restart
 #   reboot | poweroff
 #   store-catalog | store-get ID | store-status ID | store-remove ID   the App Store: /qrx/appstore/store
 PATH=/usr/sbin:/usr/bin
@@ -98,6 +99,10 @@ system)
         sed -i "s/^[[:space:]]*system[[:space:]]*=.*/system=$1/" /boot/qrx.txt
     else echo "system=$1" >> /boot/qrx.txt; fi
     sync; (sleep 2; reboot) >/dev/null 2>&1 & echo "restarting into the $1-bit system" ;;
+mode)
+    case "$1" in dev|armithlon) ;; *) echo "dev or armithlon"; exit 2 ;; esac
+    /usr/sbin/qrx-mode "$1" >/dev/null || { echo "cannot write /boot/qrx.txt"; exit 1; }
+    (sleep 2; reboot) >/dev/null 2>&1 & echo "restarting into $1 mode" ;;
 reboot) (sleep 1; reboot) >/dev/null 2>&1 & echo ok ;;
 poweroff) (sleep 1; poweroff) >/dev/null 2>&1 & echo ok ;;
 *) echo "unknown command"; exit 2 ;;
