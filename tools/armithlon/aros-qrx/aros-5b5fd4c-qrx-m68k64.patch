@@ -31259,6 +31259,41 @@ index 5f77f4b7..e0a30624 100644
  
      /* All done. */
      return rcvd;
+diff --git a/rom/exec/waitio.c b/rom/exec/waitio.c
+index f7420647..98d90ecf 100644
+--- a/rom/exec/waitio.c
++++ b/rom/exec/waitio.c
+@@ -7,6 +7,9 @@
+ #include <exec/io.h>
+ #include <aros/libcall.h>
+ #include <proto/exec.h>
++#include "exec_intern.h"
++#include "semaphores.h"
++#include "exec_local.h"
+ 
+ /*****************************************************************************
+ 
+@@ -69,11 +72,17 @@
+     if(iORequest->io_Message.mn_Node.ln_Type==NT_REPLYMSG)
+     {
+         /* Arbitrate for the message queue. */
+-        Disable();
+-
++        /* the reply port's list: its lock on SMP (semaphores.h), so this core's Disable() is enough */
++        LOCAL_DISABLE();
++#if defined(__AROSEXEC_SMP__)
++        PORT_LOCK(iORequest->io_Message.mn_ReplyPort);
++#endif
+         /* Remove the message */
+         Remove(&iORequest->io_Message.mn_Node);
+-        Enable();
++#if defined(__AROSEXEC_SMP__)
++        PORT_UNLOCK(iORequest->io_Message.mn_ReplyPort);
++#endif
++        LOCAL_ENABLE();
+     }
+ 
+     /* All done. Get returncode. */
 diff --git a/rom/exec/waitport.c b/rom/exec/waitport.c
 index c7b8b229..2f3e0285 100644
 --- a/rom/exec/waitport.c
