@@ -133,6 +133,17 @@ static void release_all_keys(void)
 - (void)rightMouseUp:(NSEvent *)e { [self sendButton:1 down:NO event:e]; }
 - (void)otherMouseDown:(NSEvent *)e { [self sendButton:2 down:YES event:e]; }
 - (void)otherMouseUp:(NSEvent *)e { [self sendButton:2 down:NO event:e]; }
+- (void)scrollWheel:(NSEvent *)e
+{
+    /* the wheel's steps, positive towards the end of a page; a trackpad's fine deltas in tenths */
+    static double rest;
+    double dy = e.hasPreciseScrollingDeltas ? e.scrollingDeltaY / 10.0 : e.scrollingDeltaY;
+    if (e.isDirectionInvertedFromDevice) dy = -dy;
+    rest -= dy;
+    int steps = (int)rest;
+    rest -= steps;
+    if (board && steps) qec64_board_push_event(board, (QEC64_INPUT_WHEEL << 24) | ((uint32_t)steps & 0xFFFF));
+}
 - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
 @end
 

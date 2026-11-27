@@ -9014,7 +9014,7 @@ index ac23d51a..afc1151f 100644
  
      return 0;
 diff --git a/rom/exec/releasesemaphore.c b/rom/exec/releasesemaphore.c
-index 8cdd3da9..7e191c48 100644
+index 8cdd3da9..817c59e6 100644
 --- a/rom/exec/releasesemaphore.c
 +++ b/rom/exec/releasesemaphore.c
 @@ -73,6 +73,7 @@
@@ -9025,7 +9025,23 @@ index 8cdd3da9..7e191c48 100644
  
      /* Release one on the nest count */
      sigSem->ss_NestCount--;
-@@ -199,6 +200,7 @@
+@@ -135,6 +136,7 @@
+                     if( ((IPTR)sr->sr_Waiter & SM_SHARED) == SM_SHARED )
+                     {
+                         Remove((struct Node *)sr);
++                        sr->sr_Link.mln_Pred = NULL;   /* granted: see InternalObtainSemaphore */
+ 
+                         /* Clear the bit, and update the owner count */
+                         sr->sr_Waiter = (APTR)((IPTR)sr->sr_Waiter & ~1);
+@@ -163,6 +165,7 @@
+ 
+                 /* Only awaken the first of the nodes */
+                 Remove((struct Node *)sr);
++                sr->sr_Link.mln_Pred = NULL;   /* granted: see InternalObtainSemaphore */
+                 sigSem->ss_NestCount++;
+ 
+                 if(sr->sr_Waiter != NULL)
+@@ -199,6 +202,7 @@
      }
  
      /* All done. */
@@ -9034,7 +9050,7 @@ index 8cdd3da9..7e191c48 100644
  
      AROS_LIBFUNC_EXIT
 diff --git a/rom/exec/semaphores.c b/rom/exec/semaphores.c
-index 39590c2d..ba107679 100644
+index 39590c2d..c2c53ea6 100644
 --- a/rom/exec/semaphores.c
 +++ b/rom/exec/semaphores.c
 @@ -13,6 +13,10 @@
@@ -9061,7 +9077,7 @@ index 39590c2d..ba107679 100644
  
      /*
       * ss_QueueCount == -1 indicates that the semaphore is
-@@ -126,15 +130,19 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
+@@ -126,15 +130,38 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
          AROS_ATOMIC_AND(ThisTask->tc_SigRecvd, ~SIGF_SINGLE);
  
          AddTail((struct List *)&sigSem->ss_WaitQueue, (struct Node *)&sr);
@@ -9069,9 +9085,30 @@ index 39590c2d..ba107679 100644
  
          /*
           * Finally, we simply wait, ReleaseSemaphore() will fill in
-          * who owns the semaphore.
+-         * who owns the semaphore.
++         * who owns the semaphore. It takes our request off the queue and clears its
++         * mln_Pred before it signals us: SIGF_SINGLE also comes from others (pthread's
++         * thread start and condition variables), and returning on one of those left this
++         * stack frame's request in the queue, to be signalled later as garbage. Such signals
++         * are given back once we own the semaphore.
           */
-         Wait(SIGF_SINGLE);
+-        Wait(SIGF_SINGLE);
++        {
++            ULONG others = 0;
++            for (;;)
++            {
++                BOOL granted;
++                Wait(SIGF_SINGLE);
++                SEMAPHORE_LOCK();
++                granted = (sr.sr_Link.mln_Pred == NULL);
++                SEMAPHORE_UNLOCK();
++                if (granted)
++                    break;
++                others++;
++            }
++            if (others)
++                Signal(ThisTask, SIGF_SINGLE);
++        }
 +        Permit();
 +        return;
      }
@@ -9081,7 +9118,7 @@ index 39590c2d..ba107679 100644
      Permit();
  }
  
-@@ -147,10 +155,10 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
+@@ -147,10 +174,10 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
          return FALSE;  /* A crude attempt to recover... */
  
      /*
@@ -9094,7 +9131,7 @@ index 39590c2d..ba107679 100644
  
      /* Increment the queue count */
      sigSem->ss_QueueCount++;
-@@ -174,6 +182,7 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
+@@ -174,6 +201,7 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
      }
  
      /* All done. */

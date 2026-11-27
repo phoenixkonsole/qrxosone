@@ -478,6 +478,8 @@ static void handle(const Dev *d, const struct input_event *ev)
     if (ev->type == EV_REL) {
         if (ev->code == REL_X) { rel_dx += ev->value; moved = 1; }
         else if (ev->code == REL_Y) { rel_dy += ev->value; moved = 1; }
+        else if (ev->code == REL_WHEEL && ev->value)   /* REL_WHEEL is positive away from the user */
+            push((qrx_lio_event){ .type = QRX_LIO_WHEEL, .value = -ev->value });
         return;
     }
     if (ev->type == EV_ABS && d->abs && frame_w) {

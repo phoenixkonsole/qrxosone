@@ -19,11 +19,12 @@
 #include <stdint.h>
 
 /* Input events, after the devices' own coordinates are turned into the frame's pixels */
-enum { QRX_LIO_KEY = 1, QRX_LIO_MOVE, QRX_LIO_BUTTON, QRX_LIO_QUIT };
+enum { QRX_LIO_KEY = 1, QRX_LIO_MOVE, QRX_LIO_BUTTON, QRX_LIO_QUIT, QRX_LIO_WHEEL };
 typedef struct {
     int type;
     unsigned code;      /* KEY: Linux KEY_* code; BUTTON: 0 left, 1 right, 2 middle */
-    int value;          /* KEY/BUTTON: 1 down, 0 up (key repeats are not reported) */
+    int value;          /* KEY/BUTTON: 1 down, 0 up (key repeats are not reported); WHEEL: steps,
+                         * positive towards the end of a page (the wheel turned towards the user) */
     int x, y;           /* MOVE: the pointer in frame pixels */
     int shift;          /* KEY: Shift held (for typed text) */
 } qrx_lio_event;

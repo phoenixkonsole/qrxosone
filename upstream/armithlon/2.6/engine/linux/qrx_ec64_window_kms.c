@@ -233,6 +233,9 @@ int qec64_window_pump(void)
                 qec64_board_push_event(board, (QEC64_INPUT_BUTTON << 24) | (e.code << 16) | (e.value ? 1u : 0u));
             }
             break;
+        case QRX_LIO_WHEEL:
+            if (showing_fb && board) qec64_board_push_event(board, (QEC64_INPUT_WHEEL << 24) | ((uint32_t)e.value & 0xFFFF));
+            break;
         case QRX_LIO_QUIT: closed = 1; break;
         default: break;
         }

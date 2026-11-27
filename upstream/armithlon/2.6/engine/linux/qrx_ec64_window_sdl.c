@@ -353,6 +353,10 @@ static void handle_event(const SDL_Event *e)
         if (input.typed) input.typed(input.ctx, e->text.text, strlen(e->text.text));
         break;
     case SDL_MOUSEMOTION: mouse_move(e->motion.x, e->motion.y); break;
+    case SDL_MOUSEWHEEL:   /* y is positive away from the user */
+        if (board && showing_fb && e->wheel.y)
+            qec64_board_push_event(board, (QEC64_INPUT_WHEEL << 24) | ((uint32_t)(-e->wheel.y) & 0xFFFF));
+        break;
     case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP:
         mouse_button(e->button.button, e->type == SDL_MOUSEBUTTONDOWN, e->button.x, e->button.y);
         break;
