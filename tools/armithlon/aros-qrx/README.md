@@ -7,6 +7,10 @@ to deadwood's AROS at commit `5b5fd4c` (github.com/deadwood2/AROS). It builds wi
 
 ## Build
 
+On a network that does not reach the third-party sites AROS fetches from (Intel, SourceForge,
+savannah, GitHub's archives), `fetch-sources.sh WORK` puts the archives into `WORK/build-qrx/bin/Sources`
+first, from the Ubuntu archive and git tags. The Linux build needs flex, netpbm, gperf and Python's mako.
+
 ```sh
 cd deadwood-AROS-5b5fd4c && git apply .../aros-5b5fd4c-qrx-m68k64.patch && autoconf && cd ..
 mkdir build-qrx && cd build-qrx

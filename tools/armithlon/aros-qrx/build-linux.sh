@@ -54,8 +54,9 @@ mk() {
     if gmake -j1 "$@" 2>&1 | tee "$out"; then
       [ "${PIPESTATUS[0]}" = 0 ] && { rm -f "$out"; return; }
     fi
-    # .../gen/<module>/include/proto/<name>.h: No such file or directory
-    { grep -o '/[^ ]*/include/proto/[^ :]*\.h: No such file' "$out" || true; } | sed 's|/proto/[^/]*$||' | sort -u |
+    # .../gen/<module>/include/proto/<name>.h: No such file or directory, or the bare path
+    # .../include/proto/<name> just before an Error 20
+    { grep -oE '/[^ .]*/include/proto/[A-Za-z0-9_]+(\.h: No such file)?' "$out" || true; } | sed 's|/proto/[^/]*$||' | sort -u |
       while read -r d; do mkdir -p "$d/proto" "$d/clib" "$d/defines" "$d/inline"; done
     rm -f "$out"
   done
