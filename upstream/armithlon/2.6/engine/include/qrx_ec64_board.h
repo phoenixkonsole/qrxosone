@@ -63,6 +63,10 @@
 #define QEC64_FEATURE_NET       1u
 #define QEC64_FEATURE_GL        2u
 #define QEC64_FEATURE_HOSTFS    4u   /* service 12, qrx_ec64_hostfs.h: a host directory is shared */
+/* Service 13 is OpenGL 3.3 core (qrx_gl3.h, guest library tools/qrxgl68k/guest/qgl3.c): the block of
+ * service 8, and [7] the context the stream draws with. */
+#define QEC64_HOST_GL3          13u
+#define QEC64_FEATURE_GL3       8u
 
 /* Sound: 48 kHz stereo, 16 bit. A frame is one big endian 32-bit word, left << 16 | right. The guest
  * writes the address and count of a run of frames, then GO queues them on the host's ring; frames that

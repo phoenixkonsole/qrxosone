@@ -6,6 +6,7 @@
 #include "qrx_ec64_hostfs.h"
 #include "qrx_hostctl.h"
 #include "qrx_gl68k.h"
+#include "qrx_gl3.h"
 #include <pthread.h>
 /* One GL stream at a time: the contexts belong to whichever core's thread calls. */
 static pthread_mutex_t gl_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -104,6 +105,10 @@ static void host_call(qec64_board *b, qec64_cpu *c, uint64_t addr)
         pthread_mutex_lock(&gl_lock);
         qrx_gl68k_service(b->ram, b->ram_size, q);
         pthread_mutex_unlock(&gl_lock);
+        return;
+    }
+    if (be32(q) == QEC64_HOST_GL3) {             /* OpenGL 3.3 core on its own host thread */
+        qrx_gl3_service(b->ram, b->ram_size, q);
         return;
     }
     if (be32(q) == QRX_HFS64_SERVICE) {          /* the system's file system on a host directory */
@@ -229,6 +234,7 @@ bool qec64_board_mmio(qec64_cpu *c, uint64_t addr, unsigned size, bool write, ui
         *value = QEC64_FEATURE_NET;
 #endif
         if (qrx_ec64_hostfs_mounted()) *value |= QEC64_FEATURE_HOSTFS;
+        if (qrx_gl3_available()) *value |= QEC64_FEATURE_GL3;
         return true;
     case QEC64_IDLE: {
         /* The idle task writes this in a loop. By default the core sleeps here until an interrupt
