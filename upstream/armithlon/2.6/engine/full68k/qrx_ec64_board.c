@@ -92,7 +92,7 @@ static int net_args_ok(const qec64_board *b, uint32_t op, const uint32_t *a)
     default: return 1;
     }
 }
-static void host_call(qec64_board *b, uint64_t addr)
+static void host_call(qec64_board *b, qec64_cpu *c, uint64_t addr)
 {
     if (addr >= b->ram_size || b->ram_size - addr < 17 * 4 || (addr & 3)) return;
     uint8_t *q = b->ram + addr;
@@ -108,6 +108,14 @@ static void host_call(qec64_board *b, uint64_t addr)
     }
     if (be32(q) == QRX_HFS64_SERVICE) {          /* the system's file system on a host directory */
         qrx_ec64_hostfs_call(b->ram, b->ram_size, q);
+        /* a read put a file (often a program: LoadSeg) into the buffer: the JIT must not run what
+         * it translated from that RAM before */
+        uint32_t op = be32(q + 12);
+        if (op == QRX_HFS64_READ || op == QRX_HFS64_STAT || op == QRX_HFS64_READDIR) {
+            uint64_t buf = (uint64_t)be32(q + 16 + 2 * 4) << 32 | be32(q + 16 + 3 * 4);
+            uint64_t len = op == QRX_HFS64_READ ? be32(q + 16 + 9 * 4) : be32(q + 16 + 4 * 4);
+            qec64_host_wrote(c, buf, len);
+        }
         return;
     }
     uint32_t a[13];
@@ -194,7 +202,7 @@ bool qec64_board_mmio(qec64_cpu *c, uint64_t addr, unsigned size, bool write, ui
         *value = c->instructions; return true;
     case QEC64_HOST_CALL:
         if (!write || size != 8) return false;
-        host_call(b, *value); return true;
+        host_call(b, c, *value); return true;
     case QEC64_AUDIO_ADDR:
         if (size != 8) return false;
         if (write) b->audio_addr = *value; else *value = b->audio_addr;

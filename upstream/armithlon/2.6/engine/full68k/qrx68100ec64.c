@@ -104,6 +104,28 @@ static void code_written(qec64_cpu *c, uint64_t a, unsigned n)
     __atomic_fetch_add((uint64_t *)(void *)(c->code_gen + QEC64_GEN_RINGGENS), 1, __ATOMIC_SEQ_CST);
     __atomic_fetch_add(c->code_gen, 1, __ATOMIC_SEQ_CST);
 }
+/* The host wrote guest RAM itself (a file read by hostfs, a disk or network transfer): translations
+ * of code that was there are stale, as after a write by a core. Only granules that hold translated
+ * code are touched, so ordinary data transfers stay cheap. */
+void qec64_host_wrote(qec64_cpu *c, uint64_t a, uint64_t n)
+{
+    if (!c || !c->code_map || !n || a >= c->ram_size) return;
+    if (n > c->ram_size - a) n = c->ram_size - a;
+    int any = 0;
+    for (uint64_t g = a >> QEC64_CODE_SHIFT; g <= (a + n - 1) >> QEC64_CODE_SHIFT; g++) {
+        if (!__atomic_load_n(&c->code_map[g], __ATOMIC_RELAXED)) continue;
+        __atomic_store_n(&c->code_map[g], 0, __ATOMIC_RELAXED);
+        uint64_t *head = (uint64_t *)(void *)(c->code_gen + QEC64_GEN_HEAD);
+        uint64_t *ring = (uint64_t *)(void *)(c->code_gen + QEC64_GEN_RING);
+        uint64_t t = __atomic_fetch_add(head, 1, __ATOMIC_SEQ_CST);
+        __atomic_store_n(&ring[t & (QEC64_GEN_RING_N - 1)], (uint64_t)(uint32_t)(t + 1) << 32 | (uint32_t)g, __ATOMIC_RELEASE);
+        any = 1;
+    }
+    if (!any) return;
+    __atomic_fetch_add((uint64_t *)(void *)(c->code_gen + QEC64_GEN_RINGGENS), 1, __ATOMIC_SEQ_CST);
+    __atomic_fetch_add(c->code_gen, 1, __ATOMIC_SEQ_CST);
+}
+
 /* QRX_EC64_WATCH=<hex address>: every write that touches the 8 bytes there is logged (pc, size,
  * value); QRX_EC64_WATCHPC=<hex pc>: every write by that instruction. For the interpreter: run
  * with QRX_EC64_JIT=0. */

@@ -104,6 +104,9 @@ extern __thread unsigned qec64_undo_n, qec64_undo_cap, qec64_side_effects;
 enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max);
 /* Frees the core's translations. */
 void qec64_jit_free(qec64_cpu *c);
+/* The host wrote n bytes of guest RAM at a by itself (hostfs, disk, network): drops the JIT's
+ * translations of code that was there. */
+void qec64_host_wrote(qec64_cpu *c, uint64_t a, uint64_t n);
 /* Allocates code_map and code_gen for RAM of ram_size bytes; free both with free(). */
 bool qec64_jit_map_new(uint64_t ram_size, uint8_t **code_map, uint32_t **code_gen);
 
