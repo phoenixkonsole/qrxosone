@@ -685,7 +685,7 @@
  #  include "GLContextProviderImpl.h"
 --- a/gfx/gl/moz.build
 +++ b/gfx/gl/moz.build
-@@ -103,6 +103,14 @@
+@@ -103,6 +103,20 @@
          "GLContextEAGL.h",
      ]
  
@@ -695,6 +695,12 @@
 +        "GLContextProviderAROS.cpp",
 +        "qgl3/qgl3.c",
 +        "qgl3/qgl3_gen.c",
++    ]
++    # HeadlessCompositorWidget (the window SwapBuffers puts the frame into)
++    LOCAL_INCLUDES += [
++        "/widget",
++        "/widget/aros",
++        "/widget/headless",
 +    ]
 +
  elif gl_provider == "Linux":
