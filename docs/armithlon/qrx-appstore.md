@@ -92,8 +92,8 @@ nur im 64-Bit-Store sichtbar.
 
 | | |
 |---|---|
-| Datei | `thundercat-153.8.0-qrx64-1.tar.xz`, 92.185.832 Bytes, installiert 547,2 MB |
-| SHA-256 | `efe01e57b28c8a6b7fe64dcd4372fbac8b60e13c6210b71f06528490a189f9b7` |
+| Datei | `thundercat-153.8.0-qrx64-1.tar.xz`, 92.159.372 Bytes, installiert 547,2 MB |
+| SHA-256 | `def34cd83e470c1e333100e91aa673960779c4358c8b2b5388df352b94df500f` |
 | Adresse | `https://github.com/phoenixkonsole/qrxosone/releases/download/appstore-thundercat-153.8.0-1/thundercat-153.8.0-qrx64-1.tar.xz` |
 | Inhalt | `thundercat/`: Programm `ThunderCat`, `omni.ja`, `browser/omni.ja`, `Fonts/TrueType`, Startskript `Start` (optional eine Adresse: `Execute APPS:thundercat/Start URL`), `start.html`, `logo.png`, AROS-PNG-Icons, `NOTICE` |
 
@@ -102,7 +102,15 @@ nur im 64-Bit-Store sichtbar.
 frei; eine selbst gewählte Größe merkt sich ThunderCat. Maus, Rad, Tastatur, Popups (Menüs, Vorschläge der
 Adressleiste), Fenstergröße und Schließen gehen über Intuition.
 
-Voraussetzungen: QRX OS One 64 startet per hostfs aus einem Host-Ordner, 2 GB Gast-RAM.
+Voraussetzungen: QRX OS One 64 startet per hostfs aus einem Host-Ordner, 2 GB Gast-RAM, und die
+68100EC64-Engine mit dem Gleitkommabefehl `$AFnn` (siehe [68100ec64.md](68100ec64.md#host-floating-point-afnn)).
+ThunderCat rechnet damit Gleitkomma auf dem Host; auf einer älteren Engine bricht es beim ersten Gleitkommabefehl
+ab. Der AROS-Kern braucht den Stand mit der Port-Sperre und dem pthread-Fix (`aros-5b5fd4c-qrx-m68k64.patch`).
+
+Gemessen (Host x86-64, 2 Kerne, Engine mit JIT): qrx.rocks ist nach dem Start von ThunderCat in weniger als
+600 s vollständig dargestellt. Vorher hing die Seite: Soft-Float kostete etwa 30 % der Zeit, und zwei
+AROS-Fehler (Signale an beendete Threads, Port-Sperre in uninitialisiertem Speicher) brachten das System zum
+Stehen.
 
 Neu bauen: `tools/armithlon/spidermonkey/branding/install-branding.sh <Quellbaum>`, Gecko bauen, dann
 `tools/armithlon/spidermonkey/package-appstore.sh OBJ-BROWSER OUT 1` und
