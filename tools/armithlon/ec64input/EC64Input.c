@@ -99,6 +99,18 @@ static void button(ULONG b, BOOL down)
     send(&ie);
 }
 
+/* the wheel as AROS's input.device reports it: raw keys NM_WHEEL_UP / NM_WHEEL_DOWN, one per step */
+static void wheel(WORD steps)
+{
+    struct InputEvent ie;
+    WORD n = steps < 0 ? -steps : steps;
+    while (n-- > 0) {
+        memset(&ie, 0, sizeof ie);
+        ie.ie_Class = IECLASS_RAWKEY;
+        ie.ie_Code = steps < 0 ? 0x7A : 0x7B;   /* NM_WHEEL_UP, NM_WHEEL_DOWN */
+        send(&ie);
+    }
+}
 int main(void)
 {
     struct MsgPort *port;
@@ -118,6 +130,7 @@ int main(void)
             if (kind == 1 || kind == 2) key((e >> 16) & 0xff, kind == 1);
             else if (kind == 3) move((e >> 12) & 0xfff, e & 0xfff);
             else if (kind == 4) button((e >> 16) & 0xff, (e & 1) != 0);
+            else if (kind == 5) wheel((WORD)(e & 0xffff));
             n++;
         }
         if (SetSignal(0, 0) & SIGBREAKF_CTRL_C) break;

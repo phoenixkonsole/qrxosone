@@ -1,10 +1,11 @@
-Firefox 153.8.0 for QRX OS One 64 (m68k64 AROS), from the QRX App Store
+ThunderCat for AROS 153.8.0 (QRX OS One 64, m68k64 AROS), from the QRX App Store
 
-This is not an official build by Mozilla. It is built from the Firefox 153.8.0 source release
+ThunderCat is built from Mozilla's Firefox 153.8.0 source release
 (https://archive.mozilla.org/pub/firefox/releases/153.8.0/source/) with the changes in
 tools/armithlon/spidermonkey/spidermonkey-153.8.0-aros.patch of
 https://github.com/phoenixkonsole/qrxosone, built as described in tools/armithlon/spidermonkey/README.md.
-Firefox and the Firefox logos are trademarks of the Mozilla Foundation.
+It is not a Mozilla product and not endorsed by Mozilla. Firefox and the Firefox logos are trademarks
+of the Mozilla Foundation.
 
 Licences: the browser's code is under the Mozilla Public License 2.0 (https://mozilla.org/MPL/2.0/);
 the licences of all its parts are in about:license. Fonts/TrueType: Bitstream Vera (Bitstream Vera

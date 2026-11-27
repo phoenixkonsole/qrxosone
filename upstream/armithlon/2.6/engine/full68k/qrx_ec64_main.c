@@ -15,6 +15,10 @@
  *     --stdin          console input from stdin (without --window)
  *     --input TEXT     console input to start with, \n for a new line
  *     --seconds S      stop after S seconds (default: run until the system ends or the window closes)
+ *     --events FILE    keyboard and mouse as from the window, at set times (tests without a window):
+ *                      one per line, "SECONDS move X Y | down B | up B | click B | wheel N |
+ *                      key MACKEY | keydown MACKEY | keyup MACKEY | text WORDS"; B 0 left, 1 right,
+ *                      2 middle; X, Y framebuffer pixels; text types US layout characters
  *     --map FILE       "address name" of every function of the kickstart
  *     --stats          instructions and instructions per second per core at the end
  *     --capture FILE   the board's framebuffer at the end as a PPM, if it is on
@@ -167,6 +171,65 @@ static void *view_later(void *arg)
     return NULL;
 }
 
+/* --events FILE: input as the host window would send it, at set times (see the top) */
+typedef struct { qec64_board *board; char *path; } events_run;
+static int mac_of(char c, int *shift)
+{
+    static const char lower[] = "asdfhgzxcv\0bqweryt123465=97-80]ou[ip\0lj'k;\\,/nm.\0 `";
+    static const char upper[] = "ASDFHGZXCV\0BQWERYT!@#$^%+(&_*)}OU{IP\0LJ\"K:|<?NM>\0 ~";
+    *shift = 0;
+    for (int i = 0; i < (int)sizeof lower - 1; i++) {
+        if (lower[i] && lower[i] == c) return i;
+        if (upper[i] && upper[i] == c) { *shift = 1; return i; }
+    }
+    return -1;
+}
+static void ev_key(qec64_board *b, int k, int down) { qec64_board_push_event(b, (down ? 1u : 2u) << 24 | (uint32_t)(k & 0xff) << 16); }
+static void ev_pause(double s) { struct timespec ts = { (time_t)s, (long)((s - (time_t)s) * 1e9) }; nanosleep(&ts, NULL); }
+static void *events_thread(void *arg)
+{
+    events_run *e = arg;
+    FILE *f = fopen(e->path, "r");
+    if (!f) { fprintf(stderr, "--events: cannot read %s\n", e->path); return NULL; }
+    char line[512];
+    double t0 = 0, now = 0;
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); t0 = ts.tv_sec + ts.tv_nsec / 1e9;
+    while (fgets(line, sizeof line, f)) {
+        double at; char cmd[16]; int n = 0;
+        if (line[0] == '#' || sscanf(line, "%lf %15s %n", &at, cmd, &n) < 2) continue;
+        char *rest = line + n;
+        rest[strcspn(rest, "\n")] = 0;
+        clock_gettime(CLOCK_MONOTONIC, &ts); now = ts.tv_sec + ts.tv_nsec / 1e9 - t0;
+        if (at > now) ev_pause(at - now);
+        qec64_board *b = e->board;
+        int x = 0, y = 0;
+        if (!strcmp(cmd, "move") && sscanf(rest, "%d %d", &x, &y) == 2)
+            qec64_board_push_event(b, 3u << 24 | (uint32_t)(x & 0xfff) << 12 | (uint32_t)(y & 0xfff));
+        else if (!strcmp(cmd, "down") || !strcmp(cmd, "up") || !strcmp(cmd, "click")) {
+            uint32_t btn = (uint32_t)atoi(rest) & 0xff;
+            if (strcmp(cmd, "up")) qec64_board_push_event(b, 4u << 24 | btn << 16 | 1u);
+            if (!strcmp(cmd, "click")) ev_pause(0.08);
+            if (strcmp(cmd, "down")) qec64_board_push_event(b, 4u << 24 | btn << 16);
+        } else if (!strcmp(cmd, "wheel"))
+            qec64_board_push_event(b, 5u << 24 | ((uint32_t)atoi(rest) & 0xffff));
+        else if (!strcmp(cmd, "key")) { int k = (int)strtol(rest, NULL, 0); ev_key(b, k, 1); ev_pause(0.05); ev_key(b, k, 0); }
+        else if (!strcmp(cmd, "keydown")) ev_key(b, (int)strtol(rest, NULL, 0), 1);
+        else if (!strcmp(cmd, "keyup")) ev_key(b, (int)strtol(rest, NULL, 0), 0);
+        else if (!strcmp(cmd, "text"))
+            for (char *c = rest; *c; c++) {
+                int shift, k = mac_of(*c, &shift);
+                if (k < 0) continue;
+                if (shift) ev_key(b, 0x38, 1);
+                ev_key(b, k, 1); ev_pause(0.03); ev_key(b, k, 0);
+                if (shift) ev_key(b, 0x38, 0);
+                ev_pause(0.05);
+            }
+        else fprintf(stderr, "--events: unknown: %s", line);
+    }
+    fclose(f);
+    return NULL;
+}
+
 /* --audio-wav: drains the board's sound ring at 48 kHz, as the Mac's audio output would, into a file */
 typedef struct { qec64_board *board; FILE *f; } wav_out;
 static void wav_header(FILE *f, uint32_t frames)
@@ -206,7 +269,7 @@ int main(int argc, char **argv)
     const char *disk_path = NULL, *map_path = NULL, *kernel = NULL;
     const char *modules[MAX_MODULES];
     unsigned nmodules = 0;
-    char cmdline[400] = "econsole", *input = NULL;
+    char cmdline[400] = "econsole", *input = NULL, *events_path = NULL;
     const char *wav_path = NULL, *views[4];
     int n_views = 0;
     int disk_write = 0, hostfs_ro = 0;
@@ -225,6 +288,7 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--stdin")) use_stdin = 1;
         else if (!strcmp(a, "--input") && i + 1 < argc) input = unescape(argv[++i]);
         else if (!strcmp(a, "--seconds") && i + 1 < argc) seconds = atof(argv[++i]);
+        else if (!strcmp(a, "--events") && i + 1 < argc) events_path = argv[++i];
         else if (!strcmp(a, "--map") && i + 1 < argc) map_path = argv[++i];
         else if (!strcmp(a, "--stats")) show_stats = 1;
         else if (!strcmp(a, "--capture") && i + 1 < argc) capture_path = argv[++i];
@@ -296,6 +360,11 @@ int main(int argc, char **argv)
             wav.board = board;
             wav.f = fopen(wav_path, "wb");
             if (wav.f) { pthread_t w; pthread_create(&w, NULL, wav_writer, &wav); }
+        }
+        static events_run evr;
+        if (events_path && !use_window && boot == 0) {
+            evr = (events_run){ board, events_path };
+            pthread_t et; pthread_create(&et, NULL, events_thread, &evr);
         }
         pthread_t reader;
         if (use_stdin && !use_window && boot == 0) pthread_create(&reader, NULL, stdin_reader, m);

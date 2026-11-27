@@ -1,6 +1,6 @@
-; Firefox 153.8.0 for QRX OS One 64, from the QRX App Store (APPS:firefox)
+; ThunderCat for AROS (Gecko 153.8.0) on QRX OS One 64, from the QRX App Store (APPS:thundercat)
 ; Gecko in one process, software rendering, in a window on the desktop.
-; a step that fails (a folder that is already there, ...) must not end the script before Firefox
+; a step that fails (a folder that is already there, ...) must not end the script before ThunderCat starts
 FailAt 21
 Stack 2000000
 ; PIPE: for Gecko's pipes
@@ -12,18 +12,18 @@ EndIf
 ; the fonts come with the app; Gecko reads FONTS:TrueType
 Assign >NIL: FONTS: EXISTS
 If WARN
-  Assign >NIL: FONTS: APPS:firefox/Fonts
+  Assign >NIL: FONTS: APPS:thundercat/Fonts
 Else
   If NOT EXISTS FONTS:TrueType/VeraSans.ttf
-    Assign >NIL: FONTS: APPS:firefox/Fonts ADD
+    Assign >NIL: FONTS: APPS:thundercat/Fonts ADD
   EndIf
 EndIf
 ; the profile lives outside the app's folder, so an update keeps it
 If NOT EXISTS SYS:Home
   MakeDir >NIL: SYS:Home
 EndIf
-If NOT EXISTS SYS:Home/Firefox
-  MakeDir >NIL: SYS:Home/Firefox
+If NOT EXISTS SYS:Home/ThunderCat
+  MakeDir >NIL: SYS:Home/ThunderCat
 EndIf
 ; T: for Gecko's temporary files (TMPDIR /T); EXISTS T: on an unassigned T: would ask for a volume
 Assign >NIL: T: EXISTS
@@ -37,4 +37,4 @@ Set TMPDIR /T
 Set HOME /SYS/Home
 ; AROS cannot start Gecko's content processes (fork, shared memory handed to a child)
 Set MOZ_FORCE_DISABLE_E10S 1
-APPS:firefox/firefox --profile /SYS/Home/Firefox --width 1000 --height 680 file:///APPS/firefox/start.html
+APPS:thundercat/ThunderCat --profile /SYS/Home/ThunderCat file:///APPS/thundercat/start.html

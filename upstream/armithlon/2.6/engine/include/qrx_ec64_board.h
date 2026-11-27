@@ -27,12 +27,14 @@
 /* Keyboard and mouse for drivers: one event per read, 0 when there is none.
  * Bits 31-24 kind (1 key down, 2 key up, 3 mouse move, 4 button), for keys 23-16 the macOS virtual
  * key code (the guest maps it to Amiga raw keys), for moves 23-12 x and 11-0 y in framebuffer pixels,
- * for buttons 23-16 the button (0 left, 1 right, 2 middle) and bit 0 set while it is pressed. */
+ * for buttons 23-16 the button (0 left, 1 right, 2 middle) and bit 0 set while it is pressed, for the
+ * wheel 15-0 the steps, signed (positive: towards the user, the page moves up). */
 #define QEC64_INPUT_EVENT       0x0200u  /* .l read */
 #define QEC64_INPUT_KEY_DOWN    1u
 #define QEC64_INPUT_KEY_UP      2u
 #define QEC64_INPUT_MOVE        3u
 #define QEC64_INPUT_BUTTON      4u
+#define QEC64_INPUT_WHEEL       5u
 
 /* Host clocks */
 #define QEC64_CLOCK_US          0x0300u  /* .q read: a monotonic clock in microseconds */
