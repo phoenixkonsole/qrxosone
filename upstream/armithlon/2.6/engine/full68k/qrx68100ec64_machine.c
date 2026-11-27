@@ -197,6 +197,34 @@ static void gf_nap(void)
     struct timespec t = { 0, 20000 };
     nanosleep(&t, NULL);
 }
+/* QRX_EC64_GF_STATS=FILE: where cores took the global Forbid (pc, and the word at SP: the return
+ * address when that code is a leaf function), counted, written to FILE at the end */
+#define GF_NOTES 4096
+static struct { uint64_t pc, ret, n; } gf_notes[GF_NOTES];
+static int gf_stats = -1;
+static void gf_note(const qec64_cpu *c)
+{
+    if (gf_stats < 0) gf_stats = getenv("QRX_EC64_GF_STATS") != NULL;
+    if (!gf_stats) return;
+    uint64_t sp = c->a[7], ret = 0;
+    if (sp + 8 <= c->ram_size) for (int i = 0; i < 8; i++) ret = ret << 8 | c->ram[sp + i];
+    unsigned h = (unsigned)((c->pc * 0x9E3779B97F4A7C15ull ^ ret) >> 52) & (GF_NOTES - 1);
+    for (unsigned k = 0; k < GF_NOTES; k++, h = (h + 1) & (GF_NOTES - 1)) {
+        if (gf_notes[h].n && (gf_notes[h].pc != c->pc || gf_notes[h].ret != ret)) continue;
+        gf_notes[h].pc = c->pc; gf_notes[h].ret = ret; gf_notes[h].n++;
+        return;
+    }
+}
+static void gf_notes_write(void)
+{
+    const char *path = getenv("QRX_EC64_GF_STATS");
+    FILE *f = path ? fopen(path, "w") : NULL;
+    if (!f) return;
+    for (unsigned k = 0; k < GF_NOTES; k++)
+        if (gf_notes[k].n) fprintf(f, "%llu %016llx %016llx\n", (unsigned long long)gf_notes[k].n,
+                                   (unsigned long long)gf_notes[k].pc, (unsigned long long)gf_notes[k].ret);
+    fclose(f);
+}
 static bool gf_irq(const qec64_cpu *c)
 {
     uint32_t p = __atomic_load_n(&c->pending, __ATOMIC_RELAXED);
@@ -240,6 +268,7 @@ static void gf_gate_in(qec64_cpu *c)
         int none = -1;
         if (!__atomic_compare_exchange_n(&gf_owner, &none, id, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) continue;
         gf_acquired++;
+        gf_note(c);
         /* the others reach a block boundary, or sleep, or are not running yet */
         uint64_t until = now_us() + GF_ACK_US;
         for (unsigned k = 0; k < m->cores; k++) {
@@ -383,6 +412,7 @@ qec64_machine *qec64_machine_new(uint8_t *ram, uint64_t ram_size, unsigned cores
 }
 void qec64_machine_free(qec64_machine *m)
 {
+    if (m->cpu[0].gate) gf_notes_write();
     if (m->cpu[0].gate)
         fprintf(stderr, "[EC64] global Forbid: %llu times, %llu waits for a core cut short, %llu stops cut short\n",
                 (unsigned long long)gf_acquired, (unsigned long long)gf_ack_timeouts, (unsigned long long)gf_pause_timeouts);
