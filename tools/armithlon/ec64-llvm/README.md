@@ -32,6 +32,16 @@ CMake: soft float for `float` and `double` (the core has no FPU) and the 64- and
 
 This ABI is a starting point and will change with AROS 64-bit.
 
+## Frames larger than 32 KB
+
+Frame objects are reached through `(d16,An)`. In a frame larger than 32 KB the displacement of the far
+objects (the arguments, the saved registers, big local arrays) wrapped around to a negative one:
+Firefox's IndexedDB (`ObjectStoreAddOrPutRequestOp::DoDatabaseWork`, 35 KB of frame) read its `this`
+from the wrong place, and 64 other functions of Firefox (media codecs, ANGLE, Hunspell, Glean) had the
+same problem. `eliminateFrameIndex` now forms such an address in a scavenged address register
+(`lea (0,An)`, `adda.q #offset`) and uses `(0,An)`; frames that large get an emergency spill slot near
+SP. `tests/ctests.c` (`bigframe`) covers it.
+
 ## Not there yet
 
 Registers D8 to D15 and A8 to A15 in the allocator, the disassembler, the privileged instructions in the
