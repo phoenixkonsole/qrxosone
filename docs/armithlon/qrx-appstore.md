@@ -92,8 +92,8 @@ nur im 64-Bit-Store sichtbar.
 
 | | |
 |---|---|
-| Datei | `thundercat-153.8.0-qrx64-1.tar.xz`, 92.191.400 Bytes, installiert 547,2 MB |
-| SHA-256 | `ebb5e0183380a09282b4908c47e6598b72013644e375d96774c321bfa5decf4d` |
+| Datei | `thundercat-153.8.0-qrx64-1.tar.xz`, 92.185.832 Bytes, installiert 547,2 MB |
+| SHA-256 | `efe01e57b28c8a6b7fe64dcd4372fbac8b60e13c6210b71f06528490a189f9b7` |
 | Adresse | `https://github.com/phoenixkonsole/qrxosone/releases/download/appstore-thundercat-153.8.0-1/thundercat-153.8.0-qrx64-1.tar.xz` |
 | Inhalt | `thundercat/`: Programm `ThunderCat`, `omni.ja`, `browser/omni.ja`, `Fonts/TrueType`, Startskript `Start` (optional eine Adresse: `Execute APPS:thundercat/Start URL`), `start.html`, `logo.png`, AROS-PNG-Icons, `NOTICE` |
 

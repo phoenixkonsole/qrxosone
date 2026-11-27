@@ -373,10 +373,37 @@ static void hit(int x, int y, int w, int h, int act, int arg)
 #define C_LINE RGB(229, 229, 234)
 #define C_PILL RGB(238, 238, 240)
 
-/* an app's icon: a rounded square in the app's colours with its first letter or Blender's orb */
+#include "icon_thundercat.h"
+/* a 128 x 128 picture (0xAARRGGBB) scaled to s x s at x, y, each pixel the average of its source area */
+static void picture(const unsigned int *pic, int x, int y, int s)
+{
+    for (int dy = 0; dy < s; dy++) {
+        int sy0 = dy * 128 / s, sy1 = (dy + 1) * 128 / s;
+        if (sy1 <= sy0) sy1 = sy0 + 1;
+        for (int dx = 0; dx < s; dx++) {
+            int sx0 = dx * 128 / s, sx1 = (dx + 1) * 128 / s;
+            if (sx1 <= sx0) sx1 = sx0 + 1;
+            unsigned r = 0, g = 0, b = 0, al = 0, n = 0;
+            for (int sy = sy0; sy < sy1; sy++)
+                for (int sx = sx0; sx < sx1; sx++) {
+                    unsigned p = pic[sy * 128 + sx], pa = p >> 24;
+                    r += ((p >> 16) & 255) * pa; g += ((p >> 8) & 255) * pa; b += (p & 255) * pa; al += pa; n++;
+                }
+            if (!al) continue;
+            blend(x + dx, y + dy, RGB(r / al, g / al, b / al), (int)(al / n));
+        }
+    }
+}
+/* an app's icon: a rounded square in the app's colours with its first letter, Blender's orb or a picture */
 static void icon(const App *a, int x, int y, int s)
 {
     int r = s * 22 / 100;
+    if (!strcmp(a->id, "thundercat")) {
+        rrect(x, y, s, s, r, RGB(255, 255, 255), RGB(236, 240, 248), 255);
+        int m = s * 8 / 100;
+        picture(icon_thundercat, x + m, y + m, s - 2 * m);
+        return;
+    }
     if (!strcmp(a->id, "blender")) {
         rrect(x, y, s, s, r, RGB(36, 38, 46), RGB(18, 19, 24), 255);
         int cx = x * Q + s * Q * 52 / 100, cy = y * Q + s * Q * 54 / 100;      /* in 1/16 pixel */
