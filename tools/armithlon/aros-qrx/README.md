@@ -258,6 +258,12 @@ Two `bench` at once take as long on 4 cores as on 1: a new task stays on the cor
     error.
   - The FAT handler does not convert all its little-endian fields (it writes cluster numbers and
     sizes unswapped), so it does not work on a big-endian CPU. Not fixed: the disk uses FFS.
+  - exec's semaphores on SMP: ObtainSemaphore, AttemptSemaphore, ReleaseSemaphore, Procure, Vacate and
+    ObtainSemaphoreList guarded their wait queues with Forbid() only, which keeps only the calling
+    core from switching tasks ("TODO: SMP-aware versions of this code likely need to use spinlocks").
+    With two cores two tasks changed one queue at once; Firefox's threads then crashed in
+    ReleaseSemaphore on a waiter that was garbage. One spinlock (ExecSemaphoreLock) over all
+    semaphore structures, taken inside Forbid() and dropped before Wait().
   - Thread stacks of at least 1 MB on m68k64: `pthread_attr_init` (a thread inherits its creator's
     stack, a thread made by a small-stacked task got AROS's 64 KB) and `pthread_attr_setstack`, which
     `pthread_attr_setstacksize` calls (Gecko gives its threads 256 KB, sized for x86-64; m68k64's frames

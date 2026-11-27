@@ -8972,6 +8972,174 @@ index 36c15163..3db52ff6 100644
              APTR vectors;
              APTR structure;
              ULONG_FUNC init;
+diff --git a/rom/exec/obtainsemaphorelist.c b/rom/exec/obtainsemaphorelist.c
+index 8feb8e23..8e64390a 100644
+--- a/rom/exec/obtainsemaphorelist.c
++++ b/rom/exec/obtainsemaphorelist.c
+@@ -72,6 +72,7 @@
+      */
+      
+     Forbid();
++    SEMAPHORE_LOCK();
+ 
+     ForeachNode(sigSem, ss)
+     {
+@@ -109,6 +110,8 @@
+         }
+     }
+ 
++    SEMAPHORE_UNLOCK();
++
+     if(failedObtain > 0)
+     {
+         ss = (struct SignalSemaphore *)sigSem->lh_Head;
+diff --git a/rom/exec/procure.c b/rom/exec/procure.c
+index ac23d51a..afc1151f 100644
+--- a/rom/exec/procure.c
++++ b/rom/exec/procure.c
+@@ -67,6 +67,7 @@
+ 
+     /* Arbitrate for the semaphore structure - following like ObtainSema() */
+     Forbid();
++    SEMAPHORE_LOCK();
+ 
+     sigSem->ss_QueueCount++;
+     /*
+@@ -124,6 +125,7 @@
+         AddTail((struct List *)&sigSem->ss_WaitQueue, (struct Node *)bidMsg);
+     }
+     /* All done. */
++    SEMAPHORE_UNLOCK();
+     Permit();
+ 
+     return 0;
+diff --git a/rom/exec/releasesemaphore.c b/rom/exec/releasesemaphore.c
+index 8cdd3da9..7e191c48 100644
+--- a/rom/exec/releasesemaphore.c
++++ b/rom/exec/releasesemaphore.c
+@@ -73,6 +73,7 @@
+ 
+     /* Protect the semaphore structure from multiple access. */
+     Forbid();
++    SEMAPHORE_LOCK();
+ 
+     /* Release one on the nest count */
+     sigSem->ss_NestCount--;
+@@ -199,6 +200,7 @@
+     }
+ 
+     /* All done. */
++    SEMAPHORE_UNLOCK();
+     Permit();
+ 
+     AROS_LIBFUNC_EXIT
+diff --git a/rom/exec/semaphores.c b/rom/exec/semaphores.c
+index 39590c2d..ba107679 100644
+--- a/rom/exec/semaphores.c
++++ b/rom/exec/semaphores.c
+@@ -13,6 +13,10 @@
+ #include "exec_util.h"
+ #include "semaphores.h"
+ 
++#if defined(__AROSEXEC_SMP__)
++spinlock_t ExecSemaphoreLock;   /* zero: unlocked */
++#endif
++
+ BOOL CheckSemaphore(struct SignalSemaphore *sigSem, struct TraceLocation *caller, struct ExecBase *SysBase)
+ {
+     /* TODO: Introduce AlertContext for this */
+@@ -69,10 +73,10 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
+         return;  /* A crude attempt to recover... */
+ 
+     /*
+-     * Arbitrate for the semaphore structure.
+-     * TODO: SMP-aware versions of this code likely need to use spinlocks here
++     * Arbitrate for the semaphore structure: Forbid() for this core, the spinlock for the others.
+      */
+     Forbid();
++    SEMAPHORE_LOCK();
+ 
+     /*
+      * ss_QueueCount == -1 indicates that the semaphore is
+@@ -126,15 +130,19 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
+         AROS_ATOMIC_AND(ThisTask->tc_SigRecvd, ~SIGF_SINGLE);
+ 
+         AddTail((struct List *)&sigSem->ss_WaitQueue, (struct Node *)&sr);
++        SEMAPHORE_UNLOCK();
+ 
+         /*
+          * Finally, we simply wait, ReleaseSemaphore() will fill in
+          * who owns the semaphore.
+          */
+         Wait(SIGF_SINGLE);
++        Permit();
++        return;
+     }
+ 
+     /* All Done! */
++    SEMAPHORE_UNLOCK();
+     Permit();
+ }
+ 
+@@ -147,10 +155,10 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
+         return FALSE;  /* A crude attempt to recover... */
+ 
+     /*
+-     * Arbitrate for the semaphore structure.
+-     * TODO: SMP-aware versions of this code likely need to use spinlocks here
++     * Arbitrate for the semaphore structure: Forbid() for this core, the spinlock for the others.
+      */
+     Forbid();
++    SEMAPHORE_LOCK();
+ 
+     /* Increment the queue count */
+     sigSem->ss_QueueCount++;
+@@ -174,6 +182,7 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
+     }
+ 
+     /* All done. */
++    SEMAPHORE_UNLOCK();
+     Permit();
+ 
+     return retval;
+diff --git a/rom/exec/semaphores.h b/rom/exec/semaphores.h
+index 4354150c..778f6d6d 100644
+--- a/rom/exec/semaphores.h
++++ b/rom/exec/semaphores.h
+@@ -12,6 +12,21 @@
+ 
+ struct TraceLocation;
+ 
++/*
++ * SMP: Forbid() keeps only this core from switching tasks; another core may change the same
++ * semaphore at the same time. One spinlock over all semaphore structures (QRX OS One 64, two or
++ * more 68100EC64 cores): taken inside Forbid(), never held across Wait().
++ */
++#if defined(__AROSEXEC_SMP__)
++#include "exec_intern.h"
++extern spinlock_t ExecSemaphoreLock;
++#define SEMAPHORE_LOCK()   EXEC_SPINLOCK_LOCK(&ExecSemaphoreLock, NULL, SPINLOCK_MODE_WRITE)
++#define SEMAPHORE_UNLOCK() EXEC_SPINLOCK_UNLOCK(&ExecSemaphoreLock)
++#else
++#define SEMAPHORE_LOCK()
++#define SEMAPHORE_UNLOCK()
++#endif
++
+ BOOL CheckSemaphore(struct SignalSemaphore *sigSem, struct TraceLocation *caller, struct ExecBase *SysBase);
+ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner, struct TraceLocation *caller, struct ExecBase *SysBase);
+ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owner, struct TraceLocation *caller, struct ExecBase *SysBase);
+diff --git a/rom/exec/vacate.c b/rom/exec/vacate.c
+index 89f70020..d8ba66b6 100644
+--- a/rom/exec/vacate.c
++++ b/rom/exec/vacate.c
+@@ -53,6 +53,7 @@
+ 
+     /* Arbitrate for the semaphore structure */
+     Forbid();
++    SEMAPHORE_LOCK();
+     bidMsg->ssm_Semaphore = NULL;
+ 
+     /*
 diff --git a/rom/filesys/afs/filehandles1.c b/rom/filesys/afs/filehandles1.c
 index b699dfbe..31e16707 100644
 --- a/rom/filesys/afs/filehandles1.c
