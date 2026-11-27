@@ -51,15 +51,18 @@ static enum qec64_status run_interpreter(qec64_cpu *c, uint64_t max)
 #include <libkern/OSCacheControl.h>
 #endif
 
-#define CODE_BYTES (32u * 1024u * 1024u)
+/* Room for translated code, per core and kind (plain, ordered); pages are only taken as code fills
+ * them. ThunderCat's hot code did not fit 32 MB: 326 flushes and 19% of the time translating again
+ * (qrx.rocks, 600 s). AArch64 chains blocks with B (+-128 MB), so at most 128 MB. */
+#define CODE_BYTES (96u * 1024u * 1024u)
 #if defined(__x86_64__)
 /* x86-64: the AArch64 code is lifted (qrx68100ec64_jit_x64.h); its x86 code takes several times the room */
 #include "qrx68100ec64_jit_x64.h"
-#define X64_CODE_BYTES (256u * 1024u * 1024u)
+#define X64_CODE_BYTES (512u * 1024u * 1024u)
 #define X64_JC_BITS 12u
 #define X64_ROOM (8u * 1024u * 1024u)
 #endif
-#define HASH_BITS 16u
+#define HASH_BITS 18u
 #define MAX_INSNS 48u
 /* For tests: fewer instructions per block (1 steps instruction by instruction). */
 unsigned qec64_jit_block_limit = MAX_INSNS;
