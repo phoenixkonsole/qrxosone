@@ -6579,7 +6579,7 @@
 +print(" ".join(order + oslibs))
 --- /dev/null
 +++ b/gfx/gl/GLContextProviderAROS.cpp
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,161 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -6684,20 +6684,30 @@
 +  mutable LayoutDeviceIntSize mSize;
 +};
 +
++// why a context was not made, on stderr once each (the GL door is new; this says where it stopped)
++static void Fail(const char* aWhy) {
++  static const char* last;
++  if (last != aWhy) printf_stderr("[QRX GL] no context: %s\n", aWhy);
++  last = aWhy;
++}
++
 +static already_AddRefed<GLContextAROS> CreateContext(const GLContextDesc& aDesc,
 +                                                     CompositorWidget* aWidget,
 +                                                     nsACString* const aFailureId) {
 +  if (!DoorReady()) {
++    Fail(qgl3_available() ? "thread-local storage" : "no GL door on this board");
 +    if (aFailureId) *aFailureId = "FEATURE_FAILURE_QRX_NO_GL_DOOR"_ns;
 +    return nullptr;
 +  }
 +  qgl3_context* ctx = qgl3_create_context(nullptr);
 +  if (!ctx) {
++    Fail("the host made no OpenGL 3.3 core context");
 +    if (aFailureId) *aFailureId = "FEATURE_FAILURE_QRX_GL_CONTEXT"_ns;
 +    return nullptr;
 +  }
 +  RefPtr<GLContextAROS> gl = new GLContextAROS(aDesc, ctx, nullptr, aWidget);
 +  if (!gl->Init()) {
++    Fail("GLContext::Init failed");
 +    if (aFailureId) *aFailureId = "FEATURE_FAILURE_QRX_GL_INIT"_ns;
 +    return nullptr;
 +  }
@@ -6706,7 +6716,10 @@
 +
 +already_AddRefed<GLContext> GLContextProviderAROS::CreateForCompositorWidget(
 +    CompositorWidget* aCompositorWidget, bool aHardwareWebRender, bool aForceAccelerated) {
-+  if (!Headless(aCompositorWidget)) return nullptr;
++  if (!Headless(aCompositorWidget)) {
++    Fail("the compositor widget is not a headless one");
++    return nullptr;
++  }
 +  GLContextDesc desc;
 +  nsCString failure;
 +  RefPtr<GLContextAROS> gl = CreateContext(desc, aCompositorWidget, &failure);
@@ -6730,7 +6743,7 @@
 +}  // namespace mozilla
 --- /dev/null
 +++ b/gfx/gl/qgl3/qgl3.c
-@@ -0,0 +1,285 @@
+@@ -0,0 +1,297 @@
 +/* The guest half of the GL 3.3 door: contexts with a command stream each, the board call, and the
 + * functions the generated stubs in qgl3_gen.c leave to hand-written code (strings, shader text,
 + * glGetError). QRX OS One 64 only: the 68100EC64 board's HOST_CALL register takes the block. */
@@ -6904,8 +6917,20 @@
 +void qgl3_read_frame(void *dst, int bytes_per_row, int width, int height) { read_frame(dst, bytes_per_row, width, height, 0); }
 +void qgl3_read_frame_bgra(void *dst, int bytes_per_row, int width, int height) { read_frame(dst, bytes_per_row, width, height, 1); }
 +
++/* Entry points of the fixed-function pipeline a core context does not have. Desktop drivers export
++ * them anyway, and Gecko loads them for every desktop context (GLContext::InitImpl, for Skia/GL);
++ * calling one is an error, as in a core context. */
++static void legacy_call(void) { qgl3_unsupported("a fixed-function call"); }
++static const char *const legacy[] = {
++    "glClientActiveTexture", "glDisableClientState", "glEnableClientState", "glLoadIdentity",
++    "glLoadMatrixf", "glMatrixMode", "glTexGenf", "glTexGenfv", "glTexGeni", "glVertexPointer",
++};
++
 +void *qgl3_GetProcAddress(const char *name)
 +{
++    for (unsigned i = 0; i < sizeof legacy / sizeof *legacy; i++)
++        if (!strcmp(name, legacy[i]))
++            return (void *)legacy_call;
 +    unsigned lo = 0, hi = qgl3_nnames;
 +    while (lo < hi) {
 +        unsigned mid = (lo + hi) / 2;

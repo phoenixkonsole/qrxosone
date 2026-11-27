@@ -34,6 +34,7 @@
 #include "qrx_ec64_boot.h"
 #include "qrx_ec64_board.h"
 #include "qrx_ec64_hostfs.h"
+#include "qrx_gl3.h"
 #if defined(__APPLE__) || defined(QRX_SDL_FRONTEND)
 #define QEC64_WINDOW 1
 #include "../macos/qrx_ec64_window.h"
@@ -455,6 +456,7 @@ int main(int argc, char **argv)
         code = r.st == QEC64_HALTED ? (long long)ender->exit_code : -1;
         fflush(stdout);
         fprintf(stderr, "\n[EC64] end: status %d on core %u, value %#llx, %.2f s\n", r.st, r.who, code, t1 - t0);
+        qrx_gl3_report();   /* [QRX-GL3] streams=... calls=...: what programs drew on the host's OpenGL 3.3 */
         if (show_stats || (r.st != QEC64_HALTED && r.st != QEC64_RUNNING)) {
             uint64_t total = 0;
             for (unsigned k = 0; k < cores; k++) {

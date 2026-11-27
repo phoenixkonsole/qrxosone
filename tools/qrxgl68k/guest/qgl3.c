@@ -171,8 +171,20 @@ static void read_frame(void *dst, int bytes_per_row, int width, int height, unsi
 void qgl3_read_frame(void *dst, int bytes_per_row, int width, int height) { read_frame(dst, bytes_per_row, width, height, 0); }
 void qgl3_read_frame_bgra(void *dst, int bytes_per_row, int width, int height) { read_frame(dst, bytes_per_row, width, height, 1); }
 
+/* Entry points of the fixed-function pipeline a core context does not have. Desktop drivers export
+ * them anyway, and Gecko loads them for every desktop context (GLContext::InitImpl, for Skia/GL);
+ * calling one is an error, as in a core context. */
+static void legacy_call(void) { qgl3_unsupported("a fixed-function call"); }
+static const char *const legacy[] = {
+    "glClientActiveTexture", "glDisableClientState", "glEnableClientState", "glLoadIdentity",
+    "glLoadMatrixf", "glMatrixMode", "glTexGenf", "glTexGenfv", "glTexGeni", "glVertexPointer",
+};
+
 void *qgl3_GetProcAddress(const char *name)
 {
+    for (unsigned i = 0; i < sizeof legacy / sizeof *legacy; i++)
+        if (!strcmp(name, legacy[i]))
+            return (void *)legacy_call;
     unsigned lo = 0, hi = qgl3_nnames;
     while (lo < hi) {
         unsigned mid = (lo + hi) / 2;
