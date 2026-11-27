@@ -300,6 +300,26 @@
  // to the child process
  struct SystemFontListEntry {
      nsCString familyName;
+--- a/dom/quota/QuotaCommon.cpp
++++ b/dom/quota/QuotaCommon.cpp
+@@ -528,6 +528,17 @@
+   const auto sourceFileRelativePath =
+       detail::MakeSourceFileRelativePath(aSourceFilePath);
+ 
++#  if defined(__AROS__) && !defined(QM_LOG_ERROR_TO_CONSOLE_ENABLED)
++  // QRX OS One 64: every failed QM_TRY on stderr (the browser console is not
++  // visible there), to find where storage fails on AROS
++  printf_stderr("QM_TRY failure (%s): %s%s, %s:%u\n", severityString.get(),
++                nsPromiseFlatCString(aExpr).get(),
++                MOZ_NO_VALIDATE(extraInfosStringTainted,
++                                "diagnostics on stderr").get(),
++                nsPromiseFlatCString(sourceFileRelativePath).get(),
++                aSourceFileLine);
++#  endif
++
+ #  ifdef QM_LOG_ERROR_TO_CONSOLE_ENABLED
+   NS_DebugBreak(
+       NS_DEBUG_WARNING,
 --- a/dom/webidl/moz.build
 +++ b/dom/webidl/moz.build
 @@ -1146,7 +1146,7 @@
