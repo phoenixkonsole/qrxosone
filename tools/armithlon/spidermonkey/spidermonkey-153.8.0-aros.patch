@@ -5602,7 +5602,7 @@
  
    if (sActiveWindows) {
      int32_t index = sActiveWindows->IndexOf(this);
-@@ -160,8 +175,357 @@
+@@ -160,8 +175,374 @@
    if (mWidgetListener) mWidgetListener->WindowActivated();
  }
  
@@ -5635,6 +5635,17 @@
 +  if (gfxPlatform::IsHeadless()) return;
 +  bool popup = mWindowType == WindowType::Popup;
 +  if (!popup && mWindowType != WindowType::TopLevel && mWindowType != WindowType::Dialog) return;
++  if (!popup) {
++    // a window as large as the screen (Gecko's first size, without a saved one) would hide the
++    // desktop: it opens at 1000 x 700 instead, set in from the top left; a size the user chose
++    // and Gecko saved is kept
++    int sw = 0, sh = 0;
++    qrx_win_screen_size(&sw, &sh);
++    if (sw > 400 && sh > 300 && (mBounds.width > sw - 120 || mBounds.height > sh - 120)) {
++      ResizeInternal(std::min(1000, sw - 160), std::min(700, sh - 160), false);
++      mBounds.MoveTo(60, 40);
++    }
++  }
 +  LayoutDeviceIntPoint p = popup ? WidgetToScreenOffset() : mBounds.TopLeft();
 +  mQrxWin = qrx_win_open(p.x, p.y, mBounds.width, mBounds.height,
 +                         mQrxTitle.IsEmpty() ? "ThunderCat" : mQrxTitle.get(), popup, this);
@@ -5896,13 +5907,19 @@
 +      if (mWidgetListener) mWidgetListener->RequestWindowClose(this);
 +      return;
 +    case QRX_IN_SIZE:
-+      if (aIn.w != mBounds.width || aIn.h != mBounds.height) ResizeInternal(aIn.w, aIn.h, true);
++      if (aIn.w != mBounds.width || aIn.h != mBounds.height) {
++        mQrxUserSized = true;
++        ResizeInternal(aIn.w, aIn.h, true);
++      }
 +      return;
 +    case QRX_IN_MOVED:
 +      mQrxMoving = true;
 +      MoveInternal(aIn.x, aIn.y);
++      if (aIn.w != mBounds.width || aIn.h != mBounds.height) {
++        mQrxUserSized = true;
++        ResizeInternal(aIn.w, aIn.h, true);
++      }
 +      mQrxMoving = false;
-+      if (aIn.w != mBounds.width || aIn.h != mBounds.height) ResizeInternal(aIn.w, aIn.h, true);
 +      return;
 +    case QRX_IN_ACTIVE:
 +      // the window's activation is Gecko's; a popup's window taking it from Intuition is not a
@@ -5960,7 +5977,7 @@
  
    LOG(("HeadlessWidget::Show [%p] state %d\n", (void*)this, aState));
  
-@@ -222,6 +586,9 @@
+@@ -222,6 +603,9 @@
    }
  
    mBounds.MoveTo(aX, aY);
@@ -5970,9 +5987,23 @@
    NotifyWindowMoved(mBounds.TopLeft());
  }
  
-@@ -258,6 +625,9 @@
+@@ -257,7 +641,23 @@
+ void HeadlessWidget::ResizeInternal(int32_t aWidth, int32_t aHeight,
                                      bool aRepaint) {
    ConstrainSize(&aWidth, &aHeight);
++#ifdef MOZ_WIDGET_AROS
++  if (!mQrxUserSized && !mQrxMoving && !gfxPlatform::IsHeadless() &&
++      (mWindowType == WindowType::TopLevel)) {
++    // Gecko sizes a new browser window to the screen; on the desktop it stays 1000 x 700 (with the
++    // desktop around it) until the user resizes it
++    int sw = 0, sh = 0;
++    qrx_win_screen_size(&sw, &sh);
++    if (sw > 400 && sh > 300 && (aWidth > sw - 120 || aHeight > sh - 120)) {
++      aWidth = std::min(1000, sw - 160);
++      aHeight = std::min(700, sh - 160);
++    }
++  }
++#endif
    mBounds.SizeTo(LayoutDeviceIntSize(aWidth, aHeight));
 +#ifdef MOZ_WIDGET_AROS
 +  if (mQrxWin) qrx_win_size(mQrxWin, aWidth, aHeight);
@@ -6014,7 +6045,7 @@
    LayoutDeviceIntPoint WidgetToScreenOffset() override;
    void SetInputContext(const InputContext& aContext,
                         const InputContextAction& aAction) override {
-@@ -133,6 +147,20 @@
+@@ -133,6 +147,21 @@
    bool mVisible;
    bool mDestroyed;
    bool mAlwaysOnTop;
@@ -6031,6 +6062,7 @@
 +  LayoutDeviceIntPoint mQrxClickPoint;
 +  unsigned mQrxClickSecs = 0, mQrxClickMicros = 0;
 +  bool mQrxMoving = false;
++  bool mQrxUserSized = false;   // the user resized the window: Gecko's sizes are taken as they are
 +#endif
    HeadlessCompositorWidget* mCompositorWidget;
    nsSizeMode mSizeMode;
@@ -8894,7 +8926,7 @@
 +#endif
 --- /dev/null
 +++ b/widget/aros/aros_window_glue.c
-@@ -0,0 +1,322 @@
+@@ -0,0 +1,324 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9191,9 +9223,11 @@
 +            in->type = QRX_IN_KEY;
 +            in->rawkey = code & 0x7f;
 +            in->down = !(code & IECODE_UP_PREFIX);
-+            in->ch = char_of(m, qual & ~(IEQUALIFIER_CONTROL | IEQUALIFIER_LCOMMAND | IEQUALIFIER_RCOMMAND));
++            in->ch = char_of(m, qual & ~(IEQUALIFIER_CONTROL | IEQUALIFIER_LALT | IEQUALIFIER_LCOMMAND | IEQUALIFIER_RCOMMAND));
 +            in->ch_plain = char_of(m, qual & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT | IEQUALIFIER_CAPSLOCK));
-+            if (qual & IEQUALIFIER_CONTROL) in->ch = in->ch_plain;
++            /* Ctrl and the left Alt give the plain letter (shortcuts, menu access keys, as on other
++             * systems); the right Alt keeps the keymap's character, like AltGr */
++            if (qual & (IEQUALIFIER_CONTROL | IEQUALIFIER_LALT)) in->ch = in->ch_plain;
 +            break;
 +        case IDCMP_CLOSEWINDOW: in->type = QRX_IN_CLOSE; break;
 +        case IDCMP_NEWSIZE:
