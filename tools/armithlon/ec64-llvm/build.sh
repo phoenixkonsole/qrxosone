@@ -17,3 +17,5 @@ cmake -G Ninja -S "$V/llvm" -B build -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_T
   ${LLVM_CMAKE_EXTRA:-}   # e.g. -DLLVM_PARALLEL_LINK_JOBS=1 on machines with little memory
 ninja -C build clang lld llc llvm-mc llvm-ar llvm-ranlib llvm-as llvm-strip \
   llvm-objcopy llvm-nm llvm-objdump llvm-readelf
+# libclang: bindgen for the browser build (mozconfig-browser --with-libclang-path)
+ninja -C build libclang
