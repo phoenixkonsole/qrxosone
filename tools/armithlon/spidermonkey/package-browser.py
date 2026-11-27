@@ -81,7 +81,10 @@ with zipfile.ZipFile(os.path.join(out, "omni.ja"), "w", zipfile.ZIP_DEFLATED) as
     n1 = add_tree(z, src, "", SKIP_TOP)
 with zipfile.ZipFile(os.path.join(out, "browser", "omni.ja"), "w", zipfile.ZIP_DEFLATED) as z:
     n2 = add_tree(z, os.path.join(src, "browser"), "", {"omni.ja"})
-    z.writestr("defaults/preferences/qrx-aros.js", AROS_PREFS)
+    # a fixed date: the same omni.ja on every run (package-appstore.sh is reproducible)
+    zi = zipfile.ZipInfo("defaults/preferences/qrx-aros.js", date_time=(2026, 1, 1, 0, 0, 0))
+    zi.compress_type = zipfile.ZIP_DEFLATED
+    z.writestr(zi, AROS_PREFS)
 for f in ("application.ini", "platform.ini"):
     if os.path.exists(os.path.join(src, f)):
         shutil.copy(os.path.join(src, f), out)
