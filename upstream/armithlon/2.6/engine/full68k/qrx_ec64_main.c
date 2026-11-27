@@ -15,6 +15,7 @@
  *     --stdin          console input from stdin (without --window)
  *     --input TEXT     console input to start with, \n for a new line
  *     --seconds S      stop after S seconds (default: run until the system ends or the window closes)
+ *     --capture-at T:FILE[,T:FILE...]  the framebuffer as PPM after T seconds too (several in one run)
  *     --events FILE    keyboard and mouse as from the window, at set times (tests without a window):
  *                      one per line, "SECONDS move X Y | down B | up B | click B | wheel N |
  *                      key MACKEY | keydown MACKEY | keyup MACKEY | text WORDS"; B 0 left, 1 right,
@@ -52,7 +53,7 @@
 static int use_window, use_stdin, show_stats;
 static const char *capture_path;
 
-static void capture(const qec64_board *b)
+static void capture_to(const qec64_board *b, const char *capture_path)
 {
     const uint8_t *px; uint32_t w, h, stride, fmt;
     if (!capture_path) return;
@@ -71,6 +72,26 @@ static void capture(const qec64_board *b)
         }
     fclose(f);
     fprintf(stderr, "[EC64] framebuffer %u x %u written to %s\n", w, h, capture_path);
+}
+static void capture(const qec64_board *b) { capture_to(b, capture_path); }
+
+/* --capture-at T:FILE[,T:FILE...]: the framebuffer as PPM also after T seconds (several pictures in one run) */
+typedef struct { const qec64_board *board; char *spec; } capture_run;
+static void *capture_later(void *arg)
+{
+    capture_run *c = arg;
+    struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0);
+    for (char *item = strtok(c->spec, ","); item; item = strtok(NULL, ",")) {
+        char *colon = strchr(item, ':');
+        if (!colon) continue;
+        *colon = 0;
+        double at = atof(item);
+        struct timespec now; clock_gettime(CLOCK_MONOTONIC, &now);
+        double left = at - ((now.tv_sec - t0.tv_sec) + (now.tv_nsec - t0.tv_nsec) / 1e9);
+        if (left > 0) { struct timespec ts = { (time_t)left, (long)((left - (time_t)left) * 1e9) }; nanosleep(&ts, NULL); }
+        capture_to(c->board, colon + 1);
+    }
+    return NULL;
 }
 
 /* QRX_EC64_DUMP=<hex address>,<hex length>,<file>: that part of guest RAM at the end, e.g. the code
@@ -269,7 +290,7 @@ int main(int argc, char **argv)
     const char *disk_path = NULL, *map_path = NULL, *kernel = NULL;
     const char *modules[MAX_MODULES];
     unsigned nmodules = 0;
-    char cmdline[400] = "econsole", *input = NULL, *events_path = NULL;
+    char cmdline[400] = "econsole", *input = NULL, *events_path = NULL, *capture_at = NULL;
     const char *wav_path = NULL, *views[4];
     int n_views = 0;
     int disk_write = 0, hostfs_ro = 0;
@@ -289,6 +310,7 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--input") && i + 1 < argc) input = unescape(argv[++i]);
         else if (!strcmp(a, "--seconds") && i + 1 < argc) seconds = atof(argv[++i]);
         else if (!strcmp(a, "--events") && i + 1 < argc) events_path = argv[++i];
+        else if (!strcmp(a, "--capture-at") && i + 1 < argc) capture_at = argv[++i];
         else if (!strcmp(a, "--map") && i + 1 < argc) map_path = argv[++i];
         else if (!strcmp(a, "--stats")) show_stats = 1;
         else if (!strcmp(a, "--capture") && i + 1 < argc) capture_path = argv[++i];
@@ -360,6 +382,11 @@ int main(int argc, char **argv)
             wav.board = board;
             wav.f = fopen(wav_path, "wb");
             if (wav.f) { pthread_t w; pthread_create(&w, NULL, wav_writer, &wav); }
+        }
+        static capture_run car;
+        if (capture_at && !use_window && boot == 0) {
+            car = (capture_run){ board, strdup(capture_at) };
+            pthread_t ct; pthread_create(&ct, NULL, capture_later, &car);
         }
         static events_run evr;
         if (events_path && !use_window && boot == 0) {
