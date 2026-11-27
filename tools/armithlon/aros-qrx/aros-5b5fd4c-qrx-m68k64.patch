@@ -2087,10 +2087,10 @@ index 00000000..529aeae3
 +TARGETDIR = $(BD_OBJDIR$(BDID))
 diff --git a/arch/m68k64-native/exec/platform_init.c b/arch/m68k64-native/exec/platform_init.c
 new file mode 100644
-index 00000000..beb02adb
+index 00000000..f73efda8
 --- /dev/null
 +++ b/arch/m68k64-native/exec/platform_init.c
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,278 @@
 +/*
 +    Copyright (C) 2023, The AROS Development Team. All rights reserved.
 +*/
@@ -2279,12 +2279,35 @@ index 00000000..beb02adb
 +}
 +
 +/* krnSysCallReschedTask(): x86 does this in a syscall, here Disable() keeps this core out */
++extern spinlock_t m68k64_TaskStateLock;   /* kernel/kernel_scheduler.c */
++
 +void Exec_M68K64ReschedTask(struct Task *task, ULONG state)
 +{
 +    struct List *list;
 +    spinlock_t *lock;
 +
 +    Disable();
++    EXEC_SPINLOCK_LOCK(&m68k64_TaskStateLock, NULL, SPINLOCK_MODE_WRITE);
++
++    /* QRX: still on a core (Wait() marks its task TS_WAIT before it switches away): only the state
++     * changes here, and core_Switch() puts the task on the list for it when it leaves the core */
++    if (state != TS_REMOVED)
++    {
++        struct Node *n;
++        BOOL oncpu = FALSE;
++
++        EXEC_SPINLOCK_LOCK(&PrivExecBase(SysBase)->TaskRunningSpinLock, NULL, SPINLOCK_MODE_READ);
++        ForeachNode(&PrivExecBase(SysBase)->TaskRunning, n)
++            if (n == &task->tc_Node) { oncpu = TRUE; break; }
++        EXEC_SPINLOCK_UNLOCK(&PrivExecBase(SysBase)->TaskRunningSpinLock);
++        if (oncpu)
++        {
++            task->tc_State = (state == TS_UNSPIN) ? TS_READY : state;
++            EXEC_SPINLOCK_UNLOCK(&m68k64_TaskStateLock);
++            Enable();
++            return;
++        }
++    }
 +
 +    lock = m68k64_ListLock(SysBase, task->tc_State, &list);
 +    if (lock)
@@ -2312,6 +2335,7 @@ index 00000000..beb02adb
 +        }
 +    }
 +
++    EXEC_SPINLOCK_UNLOCK(&m68k64_TaskStateLock);
 +    Enable();
 +}
 +
@@ -2321,10 +2345,12 @@ index 00000000..beb02adb
 +    struct Task *task = GET_THIS_TASK;
 +
 +    Disable();
++    EXEC_SPINLOCK_LOCK(&m68k64_TaskStateLock, NULL, SPINLOCK_MODE_WRITE);
 +    EXEC_SPINLOCK_LOCK(&PrivExecBase(SysBase)->TaskRunningSpinLock, NULL, SPINLOCK_MODE_WRITE);
 +    Remove(&task->tc_Node);
 +    EXEC_SPINLOCK_UNLOCK(&PrivExecBase(SysBase)->TaskRunningSpinLock);
 +    task->tc_State = TS_TOMBSTONED;
++    EXEC_SPINLOCK_UNLOCK(&m68k64_TaskStateLock);
 +    Enable();
 +}
 +
@@ -3530,10 +3556,10 @@ index 00000000..e0ad50d7
 +#include "kernel_smp.h"
 diff --git a/arch/m68k64-native/kernel/kernel_scheduler.c b/arch/m68k64-native/kernel/kernel_scheduler.c
 new file mode 100644
-index 00000000..daee1ced
+index 00000000..8d01e9cc
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_scheduler.c
-@@ -0,0 +1,442 @@
+@@ -0,0 +1,462 @@
 +/*
 +    The x86 scheduler (arch/all-pc/kernel/kernel_scheduler.c) with the affinity test of the
 +    68100EC64 port in place of the APIC one.
@@ -3592,6 +3618,15 @@ index 00000000..daee1ced
 +
 +#if defined(__AROSEXEC_SMP__)
 +/* For x86's core_APIC_CPUInMask(): the affinity is a cpumask_t pointer, none or TASKAFFINITY_ANY is every core */
++#if defined(__AROSEXEC_SMP__)
++/* QRX: one lock over a task's way from one of the scheduler's lists to the next (core_Switch,
++ * core_Dispatch) and over exec's moves of a task (Exec_M68K64ReschedTask, Exec_M68K64DetachTask in
++ * exec/platform_init.c). Wait() marks its task TS_WAIT while it still runs; a Signal() from another
++ * core in that time took the task off the TaskWait list it was not in yet and made it ready, and two
++ * cores ran it on one stack. Only taken with interrupts off, before any of the list locks. */
++spinlock_t m68k64_TaskStateLock;
++#endif
++
 +static inline BOOL m68k64_CPUInMask(cpuid_t cpuNo, void *mask)
 +{
 +    if (!mask || (IPTR)mask == TASKAFFINITY_ANY)
@@ -3742,6 +3777,7 @@ index 00000000..daee1ced
 +    )
 +
 +#if defined(__AROSEXEC_SMP__)
++    KrnSpinLock(&m68k64_TaskStateLock, NULL, SPINLOCK_MODE_WRITE);
 +    KrnSpinLock(&PrivExecBase(SysBase)->TaskRunningSpinLock, NULL,
 +                SPINLOCK_MODE_WRITE);
 +#else
@@ -3828,6 +3864,9 @@ index 00000000..daee1ced
 +        KrnSpinUnLock(&PrivExecBase(SysBase)->TaskWaitSpinLock);
 +#endif
 +    }
++#if defined(__AROSEXEC_SMP__)
++    KrnSpinUnLock(&m68k64_TaskStateLock);
++#endif
 +    if (showAlert)
 +        Alert(showAlert);
 +}
@@ -3844,6 +3883,7 @@ index 00000000..daee1ced
 +    DSCHED(bug("[Kernel:%03u]" DEBUGFUNCCOLOR_SET " %s()" DEBUGCOLOR_RESET "\n", cpuNo, __func__);)
 +
 +#if defined(__AROSEXEC_SMP__)
++    KrnSpinLock(&m68k64_TaskStateLock, NULL, SPINLOCK_MODE_WRITE);
 +    KrnSpinLock(&PrivExecBase(SysBase)->TaskReadySpinLock, NULL,
 +                SPINLOCK_MODE_WRITE);
 +#endif
@@ -3944,8 +3984,11 @@ index 00000000..daee1ced
 +            /* if the new task shouldn't run - force a reschedule */
 +            DSCHED(bug("[Kernel:%03u]" DEBUGCOLOR_SET " %s: Skipping '%s' @ 0x%p (state %08X)" DEBUGCOLOR_RESET "\n", cpuNo, __func__, newtask->tc_Node.ln_Name, newtask, newtask->tc_State);)
 +
++#if defined(__AROSEXEC_SMP__)
++            KrnSpinUnLock(&m68k64_TaskStateLock);   /* both take it themselves */
++#endif
 +            core_Switch();
-+            newtask = core_Dispatch();
++            return core_Dispatch();
 +        }
 +        else
 +        {
@@ -3974,6 +4017,9 @@ index 00000000..daee1ced
 +        FLAG_SCHEDSWITCH_SET;
 +    }
 +
++#if defined(__AROSEXEC_SMP__)
++    KrnSpinUnLock(&m68k64_TaskStateLock);
++#endif
 +    return newtask;
 +}
 diff --git a/arch/m68k64-native/kernel/kernel_smp.c b/arch/m68k64-native/kernel/kernel_smp.c
