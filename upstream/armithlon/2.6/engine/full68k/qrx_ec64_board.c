@@ -259,10 +259,21 @@ bool qec64_board_mmio(qec64_cpu *c, uint64_t addr, unsigned size, bool write, ui
         if (write || size != 8) return false;
         *value = b->ram_size; return true;
     case QEC64_SMP_SPREAD: {
-        static int spread = -1;
-        if (write || size != 4) return false;
-        if (spread < 0) spread = getenv("QRX_EC64_SMP_SPREAD") && atoi(getenv("QRX_EC64_SMP_SPREAD")) != 0;
-        *value = (uint64_t)spread; return true;
+        /* Tasks on every core: QRX_EC64_SMP_SPREAD=1 or =0 decides; without it, on once the kernel
+         * has said it can (it writes 2 here at boot: the task state lock, exec's local Forbid
+         * levels and the gate points, see docs/armithlon/68100ec64.md). Older kernels never write,
+         * so they keep their tasks on the core that made them. */
+        static int kernel_ready;
+        const char *e = getenv("QRX_EC64_SMP_SPREAD");
+        if (size != 4) return false;
+        if (write) {
+            if (*value != 2) return false;
+            kernel_ready = 1;
+            if (!e || atoi(e) != 0) qec64_machine_smp_ready(c->machine);
+            return true;
+        }
+        *value = e ? (uint64_t)(atoi(e) != 0) : (uint64_t)kernel_ready;
+        return true;
     }
     case QEC64_UPTIME_US:
         if (write || size != 8) return false;

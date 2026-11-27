@@ -45,7 +45,9 @@
 #define QEC64_IDLE_US           0x0320u  /* .q read at +8*n: microseconds core n slept in IDLE, n < 8 */
 #define QEC64_RAM_SIZE          0x0360u  /* .q read: guest RAM in bytes */
 #define QEC64_UPTIME_US         0x0368u  /* .q read: microseconds since the machine started */
-#define QEC64_SMP_SPREAD        0x03C0u  /* .l read: 1 lets new tasks run on every core (QRX_EC64_SMP_SPREAD=1) */
+#define QEC64_SMP_SPREAD        0x03C0u  /* .l write 2: the kernel can spread its tasks; .l read: 1 lets new
+                                            tasks run on every core (default once the kernel wrote 2;
+                                            QRX_EC64_SMP_SPREAD=0 or =1 decides instead) */
 #define QEC64_HOST_CPU          0x0380u  /* 64 bytes read as .q: the host CPU's name, ASCII, 0 padded */
 
 /* Host services: a write of a request's RAM address runs it before the write returns. The request is

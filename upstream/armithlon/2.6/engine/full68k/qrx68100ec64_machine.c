@@ -447,6 +447,15 @@ void qec64_machine_free(qec64_machine *m)
     free(m);
 }
 qec64_cpu *qec64_machine_core(qec64_machine *m, unsigned i) { return i < m->cores ? &m->cpu[i] : NULL; }
+/* The kernel can run tasks on every core (qrx_ec64_board.c, register $3C0): the global Forbid goes
+ * on unless QRX_EC64_GFORBID=0. Called at boot, before the kernel spreads any task. */
+void qec64_machine_smp_ready(void *machine)
+{
+    qec64_machine *m = machine;
+    const char *g = getenv("QRX_EC64_GFORBID");
+    if (!m || m->cores < 2 || (g && atoi(g) == 0)) return;
+    for (unsigned i = 0; i < m->cores; i++) __atomic_store_n(&m->cpu[i].gate, gf_gate, __ATOMIC_RELEASE);
+}
 void qec64_machine_gforbid_state(qec64_machine *m, int *owner, uint32_t *stopped)
 {
     (void)m;

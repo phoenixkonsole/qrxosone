@@ -2102,10 +2102,10 @@ index 00000000..529aeae3
 +TARGETDIR = $(BD_OBJDIR$(BDID))
 diff --git a/arch/m68k64-native/exec/platform_init.c b/arch/m68k64-native/exec/platform_init.c
 new file mode 100644
-index 00000000..4f0d0a0f
+index 00000000..a93df7f7
 --- /dev/null
 +++ b/arch/m68k64-native/exec/platform_init.c
-@@ -0,0 +1,279 @@
+@@ -0,0 +1,284 @@
 +/*
 +    Copyright (C) 2023, The AROS Development Team. All rights reserved.
 +*/
@@ -2198,6 +2198,11 @@ index 00000000..4f0d0a0f
 +            BIND0(t);
 +#undef BIND0
 +        PrivExecBase(SysBase)->IntFlags |= EXECF_CPUAffinity;
++
++        /* QRX: tell the 68100EC64 that this kernel can run its tasks on every core (the task state
++         * lock in the scheduler, exec's local Forbid levels, the gate points): it then spreads new
++         * tasks by default ($3C0 reads 1) and makes Forbid() global for the rest */
++        *(volatile ULONG *)0xFFFFFFFF000003C0UL = 2;
 +    }
 +#endif
 +

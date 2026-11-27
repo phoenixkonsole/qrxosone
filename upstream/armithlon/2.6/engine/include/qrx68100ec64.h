@@ -128,6 +128,8 @@ void qec64_machine_free(qec64_machine *m);
 qec64_cpu *qec64_machine_core(qec64_machine *m, unsigned i);
 /* the global Forbid now (for the profiler): the owning core or -1, and the cores standing still */
 void qec64_machine_gforbid_state(qec64_machine *m, int *owner, uint32_t *stopped);
+/* the kernel says it can run tasks on every core (board register $3C0) */
+void qec64_machine_smp_ready(void *machine);
 /* Console output goes to out, up to cap bytes. */
 void qec64_machine_console(qec64_machine *m, char *out, size_t cap);
 size_t qec64_machine_console_used(const qec64_machine *m);
