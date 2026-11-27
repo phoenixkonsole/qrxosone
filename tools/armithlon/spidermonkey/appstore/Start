@@ -40,4 +40,9 @@ Set TMPDIR /T
 Set HOME /SYS/Home
 ; AROS cannot start Gecko's content processes (fork, shared memory handed to a child)
 Set MOZ_FORCE_DISABLE_E10S 1
-APPS:thundercat/ThunderCat --profile /SYS/Home/ThunderCat {URL$file:///APPS/thundercat/start.html}
+; without an address the start page (no {URL$...} default: AROS's shell broke on that one)
+If "{URL}" EQ ""
+  APPS:thundercat/ThunderCat --profile /SYS/Home/ThunderCat file:///APPS/thundercat/start.html
+Else
+  APPS:thundercat/ThunderCat --profile /SYS/Home/ThunderCat {URL}
+EndIf

@@ -109,7 +109,9 @@ static void code_written(qec64_cpu *c, uint64_t a, unsigned n)
  * code are touched, so ordinary data transfers stay cheap. */
 void qec64_host_wrote(qec64_cpu *c, uint64_t a, uint64_t n)
 {
-    if (!c || !c->code_map || !n || a >= c->ram_size) return;
+    static int off = -1;
+    if (off < 0) off = getenv("QRX_EC64_NO_HOSTWROTE") != NULL;
+    if (off || !c || !c->code_map || !n || a >= c->ram_size) return;
     if (n > c->ram_size - a) n = c->ram_size - a;
     int any = 0;
     for (uint64_t g = a >> QEC64_CODE_SHIFT; g <= (a + n - 1) >> QEC64_CODE_SHIFT; g++) {

@@ -9221,6 +9221,29 @@ index 2a961c41..88178d6d 100644
          CopyMem(end, entryname, len);   /* skip slash or colon */
          entryname[len] = 0;
          return findBlock(afsbase, ah, buffer, &block, error);
+diff --git a/rom/graphics/fakegfxhidd.c b/rom/graphics/fakegfxhidd.c
+index 7d4386bc..b8773878 100644
+--- a/rom/graphics/fakegfxhidd.c
++++ b/rom/graphics/fakegfxhidd.c
+@@ -31,10 +31,18 @@
+ 
+ /******************************************************************************/
+ 
++#include <aros/config.h>
++#if defined(__AROSEXEC_SMP__)
++/* SMP (QRX OS One 64): the special locking below keeps its own copy of exec's semaphore code, guarded
++ * by Forbid() only, which does not keep the other cores out; it took the fake framebuffer's lock from
++ * two cores at once and signalled garbage waiters. exec's semaphores are SMP-safe. */
++#define SPECIAL_LOCKING 0
++#else
+ #define SPECIAL_LOCKING 1   /* When activated mouse cursor relevant locks are
+                                treated in some kind of privileged way, by
+                                inserting wait-for-sem-requests at head of
+                                wait queue, instead of at tail */
++#endif
+ 
+ /******************************************************************************/
+ 
 diff --git a/rom/intuition/intuition_intern.h b/rom/intuition/intuition_intern.h
 index b38f24da..a2f7f51a 100644
 --- a/rom/intuition/intuition_intern.h

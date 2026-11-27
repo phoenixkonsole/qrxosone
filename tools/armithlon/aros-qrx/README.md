@@ -268,6 +268,8 @@ Two `bench` at once take as long on 4 cores as on 1: a new task stays on the cor
     SIGF_SINGLE also comes from pthread (a new thread's start, condition variables), and a task woken
     by one of those returned with its request still in the queue, whose stack frame then held
     "/SYS/Home/..." when the next release signalled it. Such signals are given back afterwards.
+    graphics.library's fake framebuffer (the software pointer) had its own copy of the semaphore
+    code ("SPECIAL_LOCKING", Forbid() only); on SMP it uses exec's semaphores now.
   - Thread stacks of at least 1 MB on m68k64: `pthread_attr_init` (a thread inherits its creator's
     stack, a thread made by a small-stacked task got AROS's 64 KB) and `pthread_attr_setstack`, which
     `pthread_attr_setstacksize` calls (Gecko gives its threads 256 KB, sized for x86-64; m68k64's frames
