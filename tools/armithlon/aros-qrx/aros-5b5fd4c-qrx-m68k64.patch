@@ -8032,6 +8032,21 @@ index 2041aeea..40035525 100644
  #else
  #   error unsupported CPU type
  #endif
+diff --git a/compiler/arossupport/include/atomic.h b/compiler/arossupport/include/atomic.h
+index dfb7b3ec..e4fb3265 100644
+--- a/compiler/arossupport/include/atomic.h
++++ b/compiler/arossupport/include/atomic.h
+@@ -15,6 +15,10 @@
+ #include <aros/ppc/atomic.h>
+ #elif defined(__arm__)
+ #include <aros/arm/atomic.h>
++#elif defined(__m68k64__)
++/* QRX: the 68100EC64's CAS loops; without this the Disable() fallback below was used, and on SMP
++ * every Signal() and Wait() took the machine's global Forbid for it */
++#include <aros/m68k64/atomic.h>
+ #elif defined(__mc68000)
+ #include <aros/m68k/atomic.h>
+ #endif
 diff --git a/compiler/arossupport/include/libcall.h b/compiler/arossupport/include/libcall.h
 index c21238d3..fc0a6354 100644
 --- a/compiler/arossupport/include/libcall.h
