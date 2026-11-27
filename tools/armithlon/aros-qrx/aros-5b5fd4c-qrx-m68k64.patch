@@ -30498,6 +30498,32 @@ index 6d7149c3..10fb551e 100644
  
  #ifndef PC
  #error unsupported CPU type
+diff --git a/rom/exec/getmsg.c b/rom/exec/getmsg.c
+index 82b8992d..15a97f8b 100644
+--- a/rom/exec/getmsg.c
++++ b/rom/exec/getmsg.c
+@@ -13,6 +13,7 @@
+ #include <proto/exec.h>
+ 
+ #include "exec_intern.h"
++#include "semaphores.h"
+ 
+ /*****************************************************************************
+ 
+@@ -63,11 +64,11 @@
+      */
+     Disable();
+ #if defined(__AROSEXEC_SMP__)
+-    EXEC_SPINLOCK_LOCK((spinlock_t *)&port->mp_Private, NULL, SPINLOCK_MODE_WRITE);
++    PORT_LOCK(port);
+ #endif
+     msg=(struct Message *)RemHead(&port->mp_MsgList);
+ #if defined(__AROSEXEC_SMP__)
+-    EXEC_SPINLOCK_UNLOCK((spinlock_t *)&port->mp_Private);
++    PORT_UNLOCK(port);
+ #endif
+     Enable();
+ 
 diff --git a/rom/exec/initresident.c b/rom/exec/initresident.c
 index 36c15163..3db52ff6 100644
 --- a/rom/exec/initresident.c
@@ -30553,6 +30579,33 @@ index ac23d51a..afc1151f 100644
      Permit();
  
      return 0;
+diff --git a/rom/exec/putmsg.c b/rom/exec/putmsg.c
+index e1ee66f0..eb29fbea 100644
+--- a/rom/exec/putmsg.c
++++ b/rom/exec/putmsg.c
+@@ -12,6 +12,7 @@
+ #include <proto/exec.h>
+ 
+ #include "exec_intern.h"
++#include "semaphores.h"
+ #include "exec_util.h"
+ 
+ /*****************************************************************************
+@@ -82,12 +83,12 @@ void InternalPutMsg(struct MsgPort *port, struct Message *message, struct ExecBa
+ 
+     Disable();
+ #if defined(__AROSEXEC_SMP__)
+-    EXEC_SPINLOCK_LOCK((spinlock_t *)&port->mp_Private, NULL, SPINLOCK_MODE_WRITE);
++    PORT_LOCK(port);
+ #endif
+     AddTail(&port->mp_MsgList, &message->mn_Node);
+     D(bug("[EXEC] PutMsg: Port MsgList->lh_TailPred =  0x%p\n", port->mp_MsgList.lh_TailPred);)
+ #if defined(__AROSEXEC_SMP__)
+-    EXEC_SPINLOCK_UNLOCK((spinlock_t *)&port->mp_Private);
++    PORT_UNLOCK(port);
+ #endif
+     Enable();
+ 
 diff --git a/rom/exec/releasesemaphore.c b/rom/exec/releasesemaphore.c
 index 8cdd3da9..f2d836cf 100644
 --- a/rom/exec/releasesemaphore.c
@@ -30645,21 +30698,22 @@ index 8cdd3da9..f2d836cf 100644
  
      AROS_LIBFUNC_EXIT
 diff --git a/rom/exec/semaphores.c b/rom/exec/semaphores.c
-index 39590c2d..c2c53ea6 100644
+index 39590c2d..70a83c4a 100644
 --- a/rom/exec/semaphores.c
 +++ b/rom/exec/semaphores.c
-@@ -13,6 +13,10 @@
+@@ -13,6 +13,11 @@
  #include "exec_util.h"
  #include "semaphores.h"
  
 +#if defined(__AROSEXEC_SMP__)
 +spinlock_t ExecSemaphoreLock;   /* zero: unlocked */
++spinlock_t ExecPortLock;        /* the same, for the message lists of ports (semaphores.h) */
 +#endif
 +
  BOOL CheckSemaphore(struct SignalSemaphore *sigSem, struct TraceLocation *caller, struct ExecBase *SysBase)
  {
      /* TODO: Introduce AlertContext for this */
-@@ -69,10 +73,10 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
+@@ -69,10 +74,10 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
          return;  /* A crude attempt to recover... */
  
      /*
@@ -30672,7 +30726,7 @@ index 39590c2d..c2c53ea6 100644
  
      /*
       * ss_QueueCount == -1 indicates that the semaphore is
-@@ -126,15 +130,38 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
+@@ -126,15 +131,38 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
          AROS_ATOMIC_AND(ThisTask->tc_SigRecvd, ~SIGF_SINGLE);
  
          AddTail((struct List *)&sigSem->ss_WaitQueue, (struct Node *)&sr);
@@ -30713,7 +30767,7 @@ index 39590c2d..c2c53ea6 100644
      Permit();
  }
  
-@@ -147,10 +174,10 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
+@@ -147,10 +175,10 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
          return FALSE;  /* A crude attempt to recover... */
  
      /*
@@ -30726,7 +30780,7 @@ index 39590c2d..c2c53ea6 100644
  
      /* Increment the queue count */
      sigSem->ss_QueueCount++;
-@@ -174,6 +201,7 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
+@@ -174,6 +202,7 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
      }
  
      /* All done. */
@@ -30735,10 +30789,10 @@ index 39590c2d..c2c53ea6 100644
  
      return retval;
 diff --git a/rom/exec/semaphores.h b/rom/exec/semaphores.h
-index 4354150c..778f6d6d 100644
+index 4354150c..514a2b7c 100644
 --- a/rom/exec/semaphores.h
 +++ b/rom/exec/semaphores.h
-@@ -12,6 +12,21 @@
+@@ -12,6 +12,27 @@
  
  struct TraceLocation;
  
@@ -30752,6 +30806,12 @@ index 4354150c..778f6d6d 100644
 +extern spinlock_t ExecSemaphoreLock;
 +#define SEMAPHORE_LOCK()   EXEC_SPINLOCK_LOCK(&ExecSemaphoreLock, NULL, SPINLOCK_MODE_WRITE)
 +#define SEMAPHORE_UNLOCK() EXEC_SPINLOCK_UNLOCK(&ExecSemaphoreLock)
++/* QRX: the message lists of ports are guarded by one lock, not the port's own mp_Private: ports
++ * that programs set up themselves (on the stack, Amiga style) leave mp_Private as it was, and
++ * garbage there looked like a lock held for ever (PutMsg spun with interrupts off) */
++extern spinlock_t ExecPortLock;
++#define PORT_LOCK(port)   EXEC_SPINLOCK_LOCK(&ExecPortLock, NULL, SPINLOCK_MODE_WRITE)
++#define PORT_UNLOCK(port) EXEC_SPINLOCK_UNLOCK(&ExecPortLock)
 +#else
 +#define SEMAPHORE_LOCK()
 +#define SEMAPHORE_UNLOCK()
@@ -30806,6 +30866,47 @@ index 89f70020..d8ba66b6 100644
      bidMsg->ssm_Semaphore = NULL;
  
      /*
+diff --git a/rom/exec/waitport.c b/rom/exec/waitport.c
+index c7b8b229..b2739589 100644
+--- a/rom/exec/waitport.c
++++ b/rom/exec/waitport.c
+@@ -8,6 +8,7 @@
+ #include <aros/debug.h>
+ 
+ #include "exec_intern.h"
++#include "semaphores.h"
+ #include <exec/ports.h>
+ #include <aros/libcall.h>
+ #include <proto/exec.h>
+@@ -62,12 +63,12 @@
+     /* Is messageport empty? */
+ #if defined(__AROSEXEC_SMP__)
+     Disable();
+-    EXEC_SPINLOCK_LOCK((spinlock_t *)&port->mp_Private, NULL, SPINLOCK_MODE_READ);
++    PORT_LOCK(port);
+ #endif
+     while (IsListEmpty(&port->mp_MsgList))
+     {
+ #if defined(__AROSEXEC_SMP__)
+-        EXEC_SPINLOCK_UNLOCK((spinlock_t *)&port->mp_Private);
++        PORT_UNLOCK(port);
+         Enable();
+ #endif
+         D(bug("[Exec] WaitPort: Msg list empty, waiting for activity...\n");)
+@@ -81,11 +82,11 @@
+         D(bug("[Exec] WaitPort: Msgport signal received ...\n");)
+ #if defined(__AROSEXEC_SMP__)
+         Disable();
+-        EXEC_SPINLOCK_LOCK((spinlock_t *)&port->mp_Private, NULL, SPINLOCK_MODE_READ);
++        PORT_LOCK(port);
+ #endif
+     }
+ #if defined(__AROSEXEC_SMP__)
+-    EXEC_SPINLOCK_UNLOCK((spinlock_t *)&port->mp_Private);
++    PORT_UNLOCK(port);
+     Enable();
+ #endif
+ 
 diff --git a/rom/filesys/afs/filehandles1.c b/rom/filesys/afs/filehandles1.c
 index b699dfbe..31e16707 100644
 --- a/rom/filesys/afs/filehandles1.c
