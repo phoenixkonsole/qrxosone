@@ -6,6 +6,7 @@
 #   ThunderCat (Gecko's firefox program, without debug sections: llvm-strip --strip-debug),
 #   omni.ja, browser/omni.ja, application.ini, platform.ini            package-browser.py
 #   Start        the launcher (Execute script): PIPE:, the fonts, the environment, the profile
+#   logo.png, ThunderCat.info, Start.info   the logo (branding/make-logo.py), the icons as AROS PNG icons
 #   Fonts/TrueType   Bitstream Vera and Open Sans from the AROS source (Gecko reads FONTS:TrueType)
 #   start.html   the start page, NOTICE  licences and where the source is
 # The archive is reproducible: the same input gives the same bytes and the same SHA-256.
@@ -27,6 +28,11 @@ mkdir -p "$W/$D/Fonts/TrueType"
 cp "$AROSSRC"/workbench/fonts/truetype/bitstream/*.ttf "$AROSSRC"/workbench/fonts/truetype/opensans/*.ttf \
    "$W/$D/Fonts/TrueType/"
 cp "$HERE/appstore/Start" "$HERE/appstore/start.html" "$HERE/appstore/NOTICE" "$W/$D/"
+python3 "$HERE/branding/make-logo.py" "$W/logo" >/dev/null
+cp "$W/logo/thundercat-128.png" "$W/$D/logo.png"
+cp "$W/logo/thundercat-64.png" "$W/$D/ThunderCat.info"
+cp "$W/logo/thundercat-64.png" "$W/$D/Start.info"
+rm -rf "$W/logo"
 # fixed dates, owners and order: the same bytes on every build
 find "$W/$D" -exec touch -h -d @1767225600 {} +
 tar -C "$W" --sort=name --owner=0 --group=0 --numeric-owner --mtime=@1767225600 --format=gnu \
