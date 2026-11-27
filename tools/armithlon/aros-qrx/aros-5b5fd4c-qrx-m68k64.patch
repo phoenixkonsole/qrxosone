@@ -8461,6 +8461,24 @@ index 6b67c3f4..1e2321a3 100644
  
  struct TagItem
  {
+diff --git a/compiler/pthread/pthread.c b/compiler/pthread/pthread.c
+index 11f4e00f..b2c4921c 100644
+--- a/compiler/pthread/pthread.c
++++ b/compiler/pthread/pthread.c
+@@ -819,6 +819,13 @@ int pthread_attr_setstack(pthread_attr_t *attr, void *stackaddr, size_t stacksiz
+     if (attr == NULL || (stackaddr != NULL && stacksize == 0))
+         return EINVAL;
+ 
++#if defined(__m68k64__)
++    /* QRX OS One 64: sizes chosen for x86-64 (Gecko gives its threads 256 KB) are too small for
++     * m68k64's larger stack frames; Firefox's IndexedDB thread ran over its stack in SQLite.
++     * pthread_attr_setstacksize comes here too. */
++    if (stackaddr == NULL && stacksize < 1024 * 1024)
++        stacksize = 1024 * 1024;
++#endif
+     attr->stackaddr = stackaddr;
+     attr->stacksize = stacksize;
+ 
 diff --git a/compiler/pthread/pthread.h b/compiler/pthread/pthread.h
 index 3239e940..4ad70b59 100644
 --- a/compiler/pthread/pthread.h
