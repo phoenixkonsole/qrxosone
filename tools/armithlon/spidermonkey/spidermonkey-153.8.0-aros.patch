@@ -1953,6 +1953,19 @@
      manifest = reftest.ReftestManifest(finder=context._finder)
      manifest.load(path)
      return manifest
+--- a/security/moz.build
++++ b/security/moz.build
+@@ -147,6 +147,10 @@
+ if CONFIG["GCC_USE_GNU_LD"]:
+     gyp_vars["cc_use_gnu_ld"] = 1
+ 
++# QRX OS One 64 (AROS): no certutil and pk12util (static NSS, see nss.gyp)
++if CONFIG["OS_TARGET"] == "AROS":
++    gyp_vars["no_nss_cmds"] = 1
++
+ GYP_DIRS += ["nss"]
+ GYP_DIRS["nss"].input = "nss/nss.gyp"
+ GYP_DIRS["nss"].variables = gyp_vars
 --- a/security/nss/coreconf/config.gypi
 +++ b/security/nss/coreconf/config.gypi
 @@ -233,7 +233,7 @@
@@ -2020,6 +2033,38 @@
      int result;
  
      while (fileBytes < maxLen) {
+--- a/security/nss/nss.gyp
++++ b/security/nss/nss.gyp
+@@ -5,6 +5,11 @@
+   'includes': [
+     'coreconf/config.gypi'
+   ],
++  'variables': {
++    # QRX OS One 64 (AROS): its libraries are static, and certutil's and pk12util's own copies of
++    # NSS's ASN.1 templates then collide with libnss3's; the browser needs neither tool
++    'no_nss_cmds%': 0,
++  },
+   'conditions': [
+     [ 'mozpkix_only==0', {
+       'targets': [
+@@ -111,11 +116,13 @@
+         {
+           'target_name': 'nss_cmds',
+           'type': 'none',
+-          'dependencies': [
+-            'cmd/certutil/certutil.gyp:certutil',
+-            'cmd/pk12util/pk12util.gyp:pk12util',
+-          ],
+           'conditions': [
++            [ 'no_nss_cmds==0', {
++              'dependencies': [
++                'cmd/certutil/certutil.gyp:certutil',
++                'cmd/pk12util/pk12util.gyp:pk12util',
++              ],
++            }],
+             [ 'comm_client==1', {
+               'dependencies': [
+                 'cmd/smimetools/smimetools.gyp:cmsutil',
 --- a/third_party/abseil-cpp/absl/base/config.h
 +++ b/third_party/abseil-cpp/absl/base/config.h
 @@ -377,7 +377,8 @@
