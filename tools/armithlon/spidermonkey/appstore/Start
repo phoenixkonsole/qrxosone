@@ -1,5 +1,7 @@
 ; Firefox 153.8.0 for QRX OS One 64, from the QRX App Store (APPS:firefox)
 ; Gecko in one process, software rendering, in a window on the desktop.
+; a step that fails (a folder that is already there, ...) must not end the script before Firefox
+FailAt 21
 Stack 2000000
 ; PIPE: for Gecko's pipes
 If NOT EXISTS PIPE:
@@ -17,8 +19,10 @@ Else
   EndIf
 EndIf
 ; the profile lives outside the app's folder, so an update keeps it
-If NOT EXISTS SYS:Home/Firefox
+If NOT EXISTS SYS:Home
   MakeDir >NIL: SYS:Home
+EndIf
+If NOT EXISTS SYS:Home/Firefox
   MakeDir >NIL: SYS:Home/Firefox
 EndIf
 ; T: for Gecko's temporary files (TMPDIR /T); EXISTS T: on an unassigned T: would ask for a volume
