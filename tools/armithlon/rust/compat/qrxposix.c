@@ -423,6 +423,25 @@ static void qrx_bt_handler(int sig)
     signal(sig, SIG_DFL);
     raise(sig);
 }
+/* abort() itself: AROS's posixc keeps signal handlers per task, and every pthread thread is a task of
+ * its own, so the handler above never runs for an abort in a thread (Gecko's helper threads, Rust's
+ * panic=abort); AROS then only shows "Caught Signal ... aborted". With QRX_BACKTRACE set, the same
+ * dump comes first here, whichever thread aborts. raise() then ends the thread as before. */
+void abort(void)
+{
+    static const char *bt;
+    static int bt_read;
+    if (!bt_read) { bt = getenv("QRX_BACKTRACE"); bt_read = 1; }
+    if (bt) {
+        qrx_bt_puts("QRXBT abort in task ");
+        qrx_bt_puts(FindTask(NULL)->tc_Node.ln_Name ? FindTask(NULL)->tc_Node.ln_Name : "?");
+        qrx_bt_puts("\n");
+        qrx_bt_handler(SIGABRT);   /* dumps, then raise(SIGABRT) with the default action */
+    }
+    raise(SIGABRT);
+    for (;;) Wait(0);
+}
+
 __attribute__((constructor)) static void qrx_bt_init(void)
 {
     const char *e = getenv("QRX_BACKTRACE");
