@@ -161,13 +161,15 @@ int qgl3_resize(int width, int height)
     return (int)qgl3_sync();
 }
 
-void qgl3_read_frame(void *dst, int bytes_per_row, int width, int height)
+static void read_frame(void *dst, int bytes_per_row, int width, int height, unsigned order)
 {
-    uint32_t *q = op(QGL3_OP_READFRAME, 5);
+    uint32_t *q = op(QGL3_OP_READFRAME, 6);
     q = qgl3_64(q, (unsigned long long)(unsigned long)dst);
-    q[0] = (uint32_t)bytes_per_row; q[1] = (uint32_t)width; q[2] = (uint32_t)height;
+    q[0] = (uint32_t)bytes_per_row; q[1] = (uint32_t)width; q[2] = (uint32_t)height; q[3] = order;
     qgl3_sync();
 }
+void qgl3_read_frame(void *dst, int bytes_per_row, int width, int height) { read_frame(dst, bytes_per_row, width, height, 0); }
+void qgl3_read_frame_bgra(void *dst, int bytes_per_row, int width, int height) { read_frame(dst, bytes_per_row, width, height, 1); }
 
 void *qgl3_GetProcAddress(const char *name)
 {

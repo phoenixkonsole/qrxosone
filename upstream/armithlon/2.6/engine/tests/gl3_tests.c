@@ -108,6 +108,19 @@ int main(void)
     run();
     printf("GL_RENDERER %s\n", (char *)ram + sbuf);
 
+    /* the extension list holds only what the door carries */
+    uint64_t ne = data_top; data_top += 16;
+    call(QGL3_ID_glGetIntegerv, 3); put(0x821D /* NUM_EXTENSIONS */); put64(ne);
+    run();
+    printf("%u extensions carried\n", rd32(ne));
+    for (uint32_t i = 0; i < rd32(ne); i++) {
+        call(OP_GETSTRING, 5); put(0x1F03); put(i); put64(sbuf); put(1024);
+        assert(run() != 0xFFFFFFFFu);
+        assert(strcmp((char *)ram + sbuf, "GL_ARB_texture_storage") != 0);
+    }
+    call(OP_GETSTRING, 5); put(0x1F03); put(rd32(ne)); put64(sbuf); put(1024);
+    assert(run() == 0xFFFFFFFFu);
+
     /* a clear and the window's frame */
     uint64_t frame = data_top; data_top += 64 * 64 * 4;
     call(QGL3_ID_glClearColor, 4); putf(0.0f); putf(0.0f); putf(1.0f); putf(1.0f);
@@ -185,6 +198,9 @@ int main(void)
     /* top row first: the instance at (+0.5, +0.5) is top right */
     uint32_t tr = pixel(frame, 64, 48, 16), bl = pixel(frame, 64, 16, 48), tl = pixel(frame, 64, 16, 16);
     printf("draw: top right %08x, bottom left %08x, top left %08x\n", tr, bl, tl);
+    call(OP_READFRAME, 6); put64(frame); put(64 * 4); put(64); put(64); put(1);  /* B G R A bytes */
+    run();
+    assert(pixel(frame, 64, 48, 16) == 0x00FF80FFu);
     assert(tl == 0xFF0000FFu);
     assert(tr == 0xFF80FF00u && bl == 0xFF80FF00u);  /* texel (0x80, 0xFF, 0x40) times tint (1, 1, 0) */
     assert(err() == 0);

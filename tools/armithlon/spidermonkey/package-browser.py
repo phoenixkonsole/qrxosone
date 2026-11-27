@@ -16,15 +16,16 @@ SKIP_TOP = {"firefox", "firefox-bin", "plugin-container", "xpcshell", "pingsende
             "certutil", "pk12util", "browser", "application.ini", "platform.ini", "dependentlibs.list",
             "dependentlibs.list.gtest", ".mkdir.done"}
 
-AROS_PREFS = """// QRX OS One 64 (AROS): Gecko in one process, software rendering, AROS's fonts
+AROS_PREFS = """// QRX OS One 64 (AROS): Gecko in one process, AROS's fonts. WebRender draws on the host's GPU
+// through the board's GL 3.3 door when there is one (widget/aros/GfxInfo.cpp), else with SWGL; a GL
+// that fails at run time falls back to SWGL in this process too.
 pref("browser.tabs.remote.autostart", false);
 pref("fission.autostart", false);
 pref("dom.ipc.processCount", 1);
 pref("network.process.enabled", false);
 pref("media.rdd-process.enabled", false);
 pref("layers.gpu-process.enabled", false);
-pref("layers.acceleration.disabled", true);
-pref("gfx.webrender.software", true);
+pref("gfx.webrender.fallback.software-requires-gpu-process", false);
 // no helper processes either: the JS validator of Opaque Response Blocking and media decoding run in
 // utility processes, and the web extensions in an extension process; AROS has none of them
 pref("browser.opaqueResponseBlocking.javascriptValidator", false);

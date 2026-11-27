@@ -248,6 +248,40 @@ static void qgl3h_glDrawBuffers(QGL3 *g, int32_t n, uint64_t ga)
     glDrawBuffers(n, b);
 }
 
+/* ---- extensions: only those whose calls the door carries (or that bring none). A program that
+ * found GL_ARB_texture_storage in the list would call glTexStorage2D, which it cannot have. */
+static const char *const carried_ext[] = {
+    "GL_ARB_blend_func_extended", "GL_ARB_color_buffer_float", "GL_ARB_depth_buffer_float", "GL_ARB_depth_clamp",
+    "GL_ARB_depth_texture", "GL_ARB_draw_buffers", "GL_ARB_draw_elements_base_vertex", "GL_ARB_draw_instanced",
+    "GL_ARB_explicit_attrib_location", "GL_ARB_fragment_coord_conventions", "GL_ARB_framebuffer_object",
+    "GL_ARB_framebuffer_sRGB", "GL_ARB_half_float_pixel", "GL_ARB_half_float_vertex", "GL_ARB_instanced_arrays",
+    "GL_ARB_occlusion_query", "GL_ARB_occlusion_query2", "GL_ARB_pixel_buffer_object", "GL_ARB_provoking_vertex",
+    "GL_ARB_sampler_objects", "GL_ARB_seamless_cube_map", "GL_ARB_shader_bit_encoding", "GL_ARB_shader_texture_lod",
+    "GL_ARB_sync", "GL_ARB_texture_float", "GL_ARB_texture_multisample", "GL_ARB_texture_non_power_of_two",
+    "GL_ARB_texture_rectangle", "GL_ARB_texture_rg", "GL_ARB_texture_rgb10_a2ui", "GL_ARB_texture_swizzle",
+    "GL_ARB_timer_query", "GL_ARB_uniform_buffer_object", "GL_ARB_vertex_array_bgra", "GL_ARB_vertex_array_object",
+    "GL_ARB_vertex_type_2_10_10_10_rev", "GL_EXT_bgra", "GL_EXT_framebuffer_blit", "GL_EXT_framebuffer_multisample",
+    "GL_EXT_packed_depth_stencil", "GL_EXT_packed_float", "GL_EXT_texture_compression_rgtc",
+    "GL_EXT_texture_compression_s3tc", "GL_EXT_texture_filter_anisotropic", "GL_EXT_texture_integer",
+    "GL_EXT_texture_shared_exponent", "GL_EXT_texture_snorm", "GL_EXT_texture_sRGB", "GL_EXT_texture_swizzle",
+    "GL_ARB_texture_compression_rgtc",
+};
+static const char **ext_list;
+static GLint ext_n = -1;
+static void ext_build(void)
+{
+    if (ext_n >= 0) return;
+    GLint n = 0;
+    glGetIntegerv(GL_NUM_EXTENSIONS, &n);
+    ext_list = calloc(n > 0 ? (size_t)n : 1, sizeof *ext_list);
+    ext_n = 0;
+    for (GLint i = 0; i < n; i++) {
+        const char *e = (const char *)glGetStringi(GL_EXTENSIONS, (GLuint)i);
+        for (size_t k = 0; e && k < sizeof carried_ext / sizeof *carried_ext; k++)
+            if (!strcmp(e, carried_ext[k])) { ext_list[ext_n++] = e; break; }
+    }
+}
+
 /* ---- state: what the guest must see differently, then the host's answer */
 static bool own_state(QGL3 *g, uint32_t pname, int64_t *v)
 {
@@ -270,6 +304,10 @@ static bool own_state(QGL3 *g, uint32_t pname, int64_t *v)
         return true;
     case GL_DOUBLEBUFFER:
         *v = 1;
+        return true;
+    case GL_NUM_EXTENSIONS:
+        ext_build();
+        *v = ext_n;
         return true;
     default:
         return false;
@@ -520,8 +558,9 @@ static void capture_frame(QGL3 *g, uint64_t src, uint32_t bpr, int w, int h)
     fclose(f);
 }
 
-/* the window's frame into guest memory, A R G B bytes, top row first; the guest's state is kept */
-static void op_readframe(QGL3 *g, uint64_t dst, uint32_t bpr, int w, int h)
+/* the window's frame into guest memory, top row first, A R G B bytes (order 0) or B G R A (1);
+ * the guest's state is kept */
+static void op_readframe(QGL3 *g, uint64_t dst, uint32_t bpr, int w, int h, uint32_t order)
 {
     Ctx *c = g->cur;
     if (!c || w <= 0 || h <= 0 || w > c->w || h > c->h || bpr < (uint32_t)w * 4) return;
@@ -544,11 +583,11 @@ static void op_readframe(QGL3 *g, uint64_t dst, uint32_t bpr, int w, int h)
     if (pack_buf) glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     uint8_t *tmp = arena_alloc(g, (size_t)w * (size_t)h * 4);
     if (tmp) {
-        /* BGRA with 8_8_8_8 is A R G B in memory on a little-endian host */
-        glReadPixels(0, c->h - h, w, h, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8, tmp);
+        /* BGRA with 8_8_8_8 is A R G B in memory on a little-endian host, with bytes B G R A */
+        glReadPixels(0, c->h - h, w, h, GL_BGRA, order ? GL_UNSIGNED_BYTE : GL_UNSIGNED_INT_8_8_8_8, tmp);
         for (int y = 0; y < h; y++)
             memcpy(g->ram + dst + (uint64_t)y * bpr, tmp + (size_t)(h - 1 - y) * (size_t)w * 4, (size_t)w * 4);
-        capture_frame(g, dst, bpr, w, h);
+        if (!order) capture_frame(g, dst, bpr, w, h);
     }
     glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read_fb);
     glReadBuffer((GLenum)read_buf);
@@ -563,7 +602,13 @@ static void op_readframe(QGL3 *g, uint64_t dst, uint32_t bpr, int w, int h)
 /* glGetString (index 0xFFFFFFFF) and glGetStringi: the length, the text into dst if it fits */
 static uint32_t op_getstring(QGL3 *g, uint32_t name, uint32_t index, uint64_t dst, uint32_t size)
 {
-    const char *s = index == 0xFFFFFFFFu ? (const char *)glGetString(name) : (const char *)glGetStringi(name, index);
+    const char *s;
+    if (name == GL_EXTENSIONS && index != 0xFFFFFFFFu) {
+        ext_build();
+        s = (GLint)index < ext_n ? ext_list[index] : NULL;
+    } else {
+        s = index == 0xFFFFFFFFu ? (const char *)glGetString(name) : (const char *)glGetStringi(name, index);
+    }
     if (!s) { glGetError(); return 0xFFFFFFFFu; }
     size_t len = strlen(s);
     if (size && guest_ok(g, dst, size)) {
@@ -581,7 +626,7 @@ static void run_op(QGL3 *g, unsigned id, const uint8_t *a, const uint8_t *end)
     case OP_CREATE: if (n >= 4) g->ret = op_create(g, R32(a)); break;
     case OP_DESTROY: if (n >= 4) op_destroy(g, R32(a)); break;
     case OP_RESIZE: if (n >= 8 && g->cur) g->ret = op_resize(g->cur, (int)R32(a), (int)R32(a + 4)); break;
-    case OP_READFRAME: if (n >= 20) op_readframe(g, R64(a), R32(a + 8), (int)R32(a + 12), (int)R32(a + 16)); break;
+    case OP_READFRAME: if (n >= 20) op_readframe(g, R64(a), R32(a + 8), (int)R32(a + 12), (int)R32(a + 16), n >= 24 ? R32(a + 20) : 0); break;
     case OP_GETSTRING: if (n >= 20 && g->cur) g->ret = op_getstring(g, R32(a), R32(a + 4), R64(a + 8), R32(a + 16)); break;
     case OP_SHADERSOURCE:
         if (n >= 8 && g->cur) {

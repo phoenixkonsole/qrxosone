@@ -666,6 +666,40 @@
      EXPORTS.cairo += [
          'cairo-pdf.h',
      ]
+--- a/gfx/gl/GLContextProvider.h
++++ b/gfx/gl/GLContextProvider.h
+@@ -61,6 +61,14 @@
+ #  define GL_CONTEXT_PROVIDER_DEFAULT GLContextProviderLinux
+ #endif
+ 
++#if defined(MOZ_WIDGET_AROS)
++// QRX OS One 64: OpenGL 3.3 core of the host through the 68100EC64 board (GLContextProviderAROS.cpp)
++#  define GL_CONTEXT_PROVIDER_NAME GLContextProviderAROS
++#  include "GLContextProviderImpl.h"
++#  undef GL_CONTEXT_PROVIDER_NAME
++#  define GL_CONTEXT_PROVIDER_DEFAULT GLContextProviderAROS
++#endif
++
+ #if defined(MOZ_WIDGET_UIKIT)
+ #  define GL_CONTEXT_PROVIDER_NAME GLContextProviderEAGL
+ #  include "GLContextProviderImpl.h"
+--- a/gfx/gl/moz.build
++++ b/gfx/gl/moz.build
+@@ -103,6 +103,14 @@
+         "GLContextEAGL.h",
+     ]
+ 
++elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "aros":
++    # QRX OS One 64: the GL 3.3 door of the 68100EC64 board (tools/qrxgl68k/guest, gen3.py)
++    SOURCES += [
++        "GLContextProviderAROS.cpp",
++        "qgl3/qgl3.c",
++        "qgl3/qgl3_gen.c",
++    ]
++
+ elif gl_provider == "Linux":
+     # GLContextProviderGLX.cpp needs to be kept out of UNIFIED_SOURCES
+     # as it includes X11 headers which cause conflicts.
 --- a/gfx/layers/ipc/SharedSurfacesMemoryReport.h
 +++ b/gfx/layers/ipc/SharedSurfacesMemoryReport.h
 @@ -25,7 +25,8 @@
@@ -971,6 +1005,162 @@
      CXXFLAGS += CONFIG["CAIRO_FT_CFLAGS"]
  
  if CONFIG["COMPILE_ENVIRONMENT"]:
+--- a/gfx/webrender_bindings/src/bindings.rs
++++ b/gfx/webrender_bindings/src/bindings.rs
+@@ -1238,7 +1238,8 @@
+ 
+     info!("WebRender - OpenGL version new {}", version);
+ 
+-    let upload_method = if unsafe { is_glcontext_angle(gl_context) } {
++    // QRX OS One 64 (AROS): the GL door carries no mapped buffers, so no pixel buffer uploads
++    let upload_method = if cfg!(target_os = "aros") || unsafe { is_glcontext_angle(gl_context) } {
+         UploadMethod::Immediate
+     } else {
+         UploadMethod::PixelBuffer(ONE_TIME_USAGE_HINT)
+@@ -2039,7 +2040,8 @@
+         }
+     };
+ 
+-    let upload_method = if !gl_context.is_null() && unsafe { is_glcontext_angle(gl_context) } {
++    // QRX OS One 64 (AROS): the GL door carries no mapped buffers, so no pixel buffer uploads
++    let upload_method = if cfg!(target_os = "aros") || (!gl_context.is_null() && unsafe { is_glcontext_angle(gl_context) }) {
+         UploadMethod::Immediate
+     } else {
+         UploadMethod::PixelBuffer(ONE_TIME_USAGE_HINT)
+--- a/gfx/wr/webrender/src/device/gl.rs
++++ b/gfx/wr/webrender/src/device/gl.rs
+@@ -681,6 +681,35 @@
+     instance_stride: usize,
+     instance_divisor: u32,
+     owns_vertices_and_indices: bool,
++    // QRX OS One 64: the layouts, to put vertex data into the host's byte order (vertex_data_le)
++    main_attributes: &'static [VertexAttribute],
++    instance_attributes: &'static [VertexAttribute],
++}
++
++/// QRX OS One 64: a copy of vertex data with each attribute value in little-endian byte order. The
++/// GL of QRX OS One 64 is the host's (gfx/gl/GLContextProviderAROS.cpp), which reads buffers as they
++/// are; GL has no byte swapping for vertex data. A layout that is not the type's is left as it is.
++#[cfg(target_endian = "big")]
++fn vertices_to_le<V>(data: &[V], attributes: &[VertexAttribute]) -> Vec<u8> {
++    let size = mem::size_of::<V>();
++    let mut out = unsafe { slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * size) }.to_vec();
++    let stride: usize = attributes.iter().map(|a| a.size_in_bytes() as usize).sum();
++    if stride == 0 || stride != size {
++        return out;
++    }
++    for record in out.chunks_exact_mut(stride) {
++        let mut offset = 0;
++        for a in attributes {
++            let es = a.kind.size_in_bytes() as usize;
++            for _ in 0 .. a.count {
++                if es > 1 {
++                    record[offset .. offset + es].reverse();
++                }
++                offset += es;
++            }
++        }
++    }
++    out
+ }
+ 
+ impl Drop for VAO {
+@@ -1236,6 +1265,9 @@
+ 
+     ///
+     is_software_webrender: bool,
++    /// QRX OS One 64: vertex and index data go to the GL in little-endian byte order (big-endian
++    /// target, the host's GL; SWGL reads them as they are)
++    vertex_data_le: bool,
+ 
+     // GL extensions
+     extensions: Vec<String>,
+@@ -2060,6 +2092,7 @@
+             requires_null_terminated_shader_source,
+             requires_texture_external_unbind,
+             is_software_webrender,
++            vertex_data_le: cfg!(target_endian = "big") && !is_software_webrender,
+             required_pbo_stride,
+             dump_shader_source,
+             surface_origin_is_top_left,
+@@ -2083,7 +2116,8 @@
+     pub fn set_parameter(&mut self, param: &Parameter) {
+         match param {
+             Parameter::Bool(BoolParameter::PboUploads, enabled) => {
+-                if !self.is_software_webrender {
++                // QRX OS One 64 (AROS): no mapped buffers through the GL door, uploads stay immediate
++                if !self.is_software_webrender && !cfg!(target_os = "aros") {
+                     self.upload_method = if *enabled {
+                         UploadMethod::PixelBuffer(crate::ONE_TIME_USAGE_HINT)
+                     } else {
+@@ -3513,6 +3547,8 @@
+             instance_stride,
+             instance_divisor,
+             owns_vertices_and_indices,
++            main_attributes: descriptor.vertex_attributes,
++            instance_attributes: descriptor.instance_attributes,
+         }
+     }
+ 
+@@ -3627,10 +3663,18 @@
+         vbo: VBOId,
+         vertices: &[V],
+         usage_hint: VertexUsageHint,
++        attributes: &'static [VertexAttribute],
+     ) {
+         debug_assert!(self.inside_frame);
+ 
+         vbo.bind(self.gl());
++        #[cfg(target_endian = "big")]
++        if self.vertex_data_le {
++            let le = vertices_to_le(vertices, attributes);
++            gl::buffer_data(self.gl(), gl::ARRAY_BUFFER, &le, usage_hint.to_gl());
++            return;
++        }
++        let _ = attributes;
+         gl::buffer_data(self.gl(), gl::ARRAY_BUFFER, vertices, usage_hint.to_gl());
+     }
+ 
+@@ -3661,7 +3705,7 @@
+         usage_hint: VertexUsageHint,
+     ) {
+         debug_assert_eq!(self.bound_vao, vao.id);
+-        self.update_vbo_data(vao.main_vbo_id, vertices, usage_hint)
++        self.update_vbo_data(vao.main_vbo_id, vertices, usage_hint, vao.main_attributes)
+     }
+ 
+     pub fn update_vao_instances<V: Clone>(
+@@ -3709,7 +3753,7 @@
+                 self.gl.unmap_buffer(target);
+             }
+             None => {
+-                self.update_vbo_data(vao.instance_vbo_id, instances, usage_hint);
++                self.update_vbo_data(vao.instance_vbo_id, instances, usage_hint, vao.instance_attributes);
+             }
+         }
+ 
+@@ -3727,6 +3771,21 @@
+         debug_assert_eq!(self.bound_vao, vao.id);
+ 
+         vao.ibo_id.bind(self.gl());
++        #[cfg(target_endian = "big")]
++        if self.vertex_data_le {
++            // indices are u16 (draw_triangles_u16 and the others)
++            let size = mem::size_of::<I>();
++            let mut le = unsafe {
++                slice::from_raw_parts(indices.as_ptr() as *const u8, indices.len() * size)
++            }.to_vec();
++            if size > 1 {
++                for i in le.chunks_exact_mut(size) {
++                    i.reverse();
++                }
++            }
++            gl::buffer_data(self.gl(), gl::ELEMENT_ARRAY_BUFFER, &le, usage_hint.to_gl());
++            return;
++        }
+         gl::buffer_data(
+             self.gl(),
+             gl::ELEMENT_ARRAY_BUFFER,
 --- a/image/imgLoader.cpp
 +++ b/image/imgLoader.cpp
 @@ -421,18 +421,19 @@
@@ -5481,16 +5671,6 @@
  #else
  #  error "Unknown platform, need scrollbar implementation."
  #endif
---- a/widget/aros/moz.build
-+++ b/widget/aros/moz.build
-@@ -14,6 +14,7 @@
- 
- SOURCES += [
-     "aros_appshell_glue.c",
-+    "aros_window_glue.c",
-     "GfxInfo.cpp",
-     "MediaKeysEventSourceFactory.cpp",
-     "nsAppShell.cpp",
 --- a/widget/headless/HeadlessCompositorWidget.cpp
 +++ b/widget/headless/HeadlessCompositorWidget.cpp
 @@ -5,6 +5,11 @@
@@ -5505,7 +5685,7 @@
  
  namespace mozilla {
  namespace widget {
-@@ -26,6 +31,36 @@
+@@ -26,6 +31,51 @@
  
  nsIWidget* HeadlessCompositorWidget::RealWidget() { return mWidget; }
  
@@ -5526,6 +5706,21 @@
 +      gfx::SurfaceFormat::A8R8G8B8_UINT32);
 +}
 +
++uint8_t* HeadlessCompositorWidget::QrxFrameBuffer(const LayoutDeviceIntSize& aSize) {
++  if (!mWidget || !mWidget->QrxWindow() || aSize.width <= 0 || aSize.height <= 0) return nullptr;
++  if (aSize != mPixelsSize) {
++    mPixels = MakeUnique<uint8_t[]>(size_t(aSize.width) * aSize.height * 4);
++    mPixelsSize = aSize;
++  }
++  return mPixels.get();
++}
++
++void HeadlessCompositorWidget::QrxPresentFrame() {
++  if (!mWidget || !mWidget->QrxWindow() || !mPixels) return;
++  qrx_win_blit(mWidget->QrxWindow(), mPixels.get(), mPixelsSize.width * 4, 0, 0,
++               mPixelsSize.width, mPixelsSize.height);
++}
++
 +void HeadlessCompositorWidget::EndRemoteDrawingInRegion(
 +    gfx::DrawTarget* aDrawTarget, const LayoutDeviceIntRegion& aInvalidRegion) {
 +  if (!mWidget || !mWidget->QrxWindow() || !mPixels) return;
@@ -5544,7 +5739,7 @@
    auto size = mClientSize.Lock();
 --- a/widget/headless/HeadlessCompositorWidget.h
 +++ b/widget/headless/HeadlessCompositorWidget.h
-@@ -34,6 +34,15 @@
+@@ -34,6 +34,19 @@
  
    void ObserveVsync(VsyncObserver* aObserver) override;
  
@@ -5555,12 +5750,16 @@
 +  void EndRemoteDrawingInRegion(
 +      gfx::DrawTarget* aDrawTarget,
 +      const LayoutDeviceIntRegion& aInvalidRegion) override;
++  // the frame of a GL context of the host (gfx/gl/GLContextProviderAROS.cpp): read back into
++  // this buffer of the window's size, then put into the window as a whole
++  uint8_t* QrxFrameBuffer(const LayoutDeviceIntSize& aSize);
++  void QrxPresentFrame();
 +#endif
 +
    // CompositorWidgetDelegate Overrides
  
    HeadlessCompositorWidget* AsHeadlessCompositorWidget() override {
-@@ -42,6 +51,10 @@
+@@ -42,6 +55,10 @@
  
   private:
    HeadlessWidget* mWidget;
@@ -6328,6 +6527,4154 @@
 +    visit(a)
 +print(" ".join(order + oslibs))
 --- /dev/null
++++ b/gfx/gl/GLContextProviderAROS.cpp
+@@ -0,0 +1,148 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++/* QRX OS One 64: GL contexts on the host's OpenGL 3.3 core, through HOST_CALL service 13 of the
++ * 68100EC64 board (the GL 3.3 door, qgl3/). WebRender draws with one per window; its framebuffer 0
++ * is a host framebuffer object, read back into the widget's buffer on SwapBuffers and put into the
++ * Intuition window like a SWGL frame. Without the door there is no context, and WebRender falls back
++ * to SWGL. */
++
++#include "GLContextProvider.h"
++#include "GLContext.h"
++#include "GLLibraryLoader.h"
++#include "mozilla/ThreadLocal.h"
++#include "mozilla/widget/CompositorWidget.h"
++#include "HeadlessCompositorWidget.h"
++
++extern "C" {
++#include "qgl3/qgl3.h"
++}
++
++namespace mozilla {
++namespace gl {
++
++using namespace mozilla::widget;
++
++static MOZ_THREAD_LOCAL(qgl3_context*) sCurrent;
++static qgl3_context* TlsGet() { return sCurrent.get(); }
++static void TlsSet(qgl3_context* c) { sCurrent.set(c); }
++
++static bool DoorReady() {
++  static int state;
++  if (!state) {
++    state = -1;
++    if (qgl3_available() && sCurrent.init()) {
++      qgl3_set_tls(TlsGet, TlsSet);
++      state = 1;
++    }
++  }
++  return state > 0;
++}
++
++static HeadlessCompositorWidget* Headless(CompositorWidget* aWidget) {
++  CompositorWidgetDelegate* d = aWidget ? aWidget->AsDelegate() : nullptr;
++  return d ? d->AsHeadlessCompositorWidget() : nullptr;
++}
++
++static void* GetProc(const char* aName) { return qgl3_GetProcAddress(aName); }
++
++class GLContextAROS final : public GLContext {
++ public:
++  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(GLContextAROS, override)
++
++  GLContextAROS(const GLContextDesc& aDesc, qgl3_context* aCtx, GLContextAROS* aShared,
++                CompositorWidget* aWidget)
++      : GLContext(aDesc, aShared), mCtx(aCtx), mWidget(aWidget) {}
++
++  ~GLContextAROS() override {
++    MarkDestroyed();
++    qgl3_destroy_context(mCtx);
++  }
++
++  GLContextType GetContextType() const override { return GLContextType::Unknown; }
++
++  bool MakeCurrentImpl() const override {
++    qgl3_make_current(mCtx);
++    if (mWidget) {
++      // framebuffer 0 follows the window's size, as a drawable would
++      LayoutDeviceIntSize size = mWidget->GetClientSize();
++      if (size != mSize) {
++        mSize = size;
++        qgl3_resize(std::max(size.width, 1), std::max(size.height, 1));
++      }
++    }
++    return true;
++  }
++
++  bool IsCurrentImpl() const override { return qgl3_tls_get() == mCtx; }
++
++  Maybe<SymbolLoader> GetSymbolLoader() const override { return Some(SymbolLoader(&GetProc)); }
++
++  void GetWSIInfo(nsCString* const out) const override {
++    out->AppendLiteral("QRX OS One 64 GL 3.3 door");
++  }
++
++  bool SwapBuffers() override {
++    HeadlessCompositorWidget* hw = Headless(mWidget);
++    if (!hw || mSize.width <= 0 || mSize.height <= 0) return false;
++    uint8_t* pixels = hw->QrxFrameBuffer(mSize);
++    if (!pixels) return false;
++    // B, G, R, A bytes, top row first: what the window glue takes from SWGL
++    qgl3_read_frame_bgra(pixels, mSize.width * 4, mSize.width, mSize.height);
++    hw->QrxPresentFrame();
++    return true;
++  }
++
++  bool IsDoubleBuffered() const override { return true; }
++
++ private:
++  qgl3_context* const mCtx;
++  CompositorWidget* mWidget;           // not owned (GLContextProviderImpl.h)
++  mutable LayoutDeviceIntSize mSize;
++};
++
++static already_AddRefed<GLContextAROS> CreateContext(const GLContextDesc& aDesc,
++                                                     CompositorWidget* aWidget,
++                                                     nsACString* const aFailureId) {
++  if (!DoorReady()) {
++    if (aFailureId) *aFailureId = "FEATURE_FAILURE_QRX_NO_GL_DOOR"_ns;
++    return nullptr;
++  }
++  qgl3_context* ctx = qgl3_create_context(nullptr);
++  if (!ctx) {
++    if (aFailureId) *aFailureId = "FEATURE_FAILURE_QRX_GL_CONTEXT"_ns;
++    return nullptr;
++  }
++  RefPtr<GLContextAROS> gl = new GLContextAROS(aDesc, ctx, nullptr, aWidget);
++  if (!gl->Init()) {
++    if (aFailureId) *aFailureId = "FEATURE_FAILURE_QRX_GL_INIT"_ns;
++    return nullptr;
++  }
++  return gl.forget();
++}
++
++already_AddRefed<GLContext> GLContextProviderAROS::CreateForCompositorWidget(
++    CompositorWidget* aCompositorWidget, bool aHardwareWebRender, bool aForceAccelerated) {
++  if (!Headless(aCompositorWidget)) return nullptr;
++  GLContextDesc desc;
++  nsCString failure;
++  RefPtr<GLContextAROS> gl = CreateContext(desc, aCompositorWidget, &failure);
++  return gl.forget();
++}
++
++already_AddRefed<GLContext> GLContextProviderAROS::CreateHeadless(
++    const GLContextCreateDesc& aDesc, nsACString* const out_failureId) {
++  GLContextDesc desc;
++  static_cast<GLContextCreateDesc&>(desc) = aDesc;
++  desc.isOffscreen = true;
++  RefPtr<GLContextAROS> gl = CreateContext(desc, nullptr, out_failureId);
++  return gl.forget();
++}
++
++GLContext* GLContextProviderAROS::GetGlobalContext() { return nullptr; }
++
++void GLContextProviderAROS::Shutdown() {}
++
++}  // namespace gl
++}  // namespace mozilla
+--- /dev/null
++++ b/gfx/gl/qgl3/qgl3.c
+@@ -0,0 +1,285 @@
++/* The guest half of the GL 3.3 door: contexts with a command stream each, the board call, and the
++ * functions the generated stubs in qgl3_gen.c leave to hand-written code (strings, shader text,
++ * glGetError). QRX OS One 64 only: the 68100EC64 board's HOST_CALL register takes the block. */
++#include "qgl3.h"
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#define BOARD_Q(off) (*(volatile uint64_t *)(0xFFFFFFFF00000000ull + (off)))
++#define BOARD_L(off) (*(volatile uint32_t *)(0xFFFFFFFF00000000ull + (off)))
++#define BOARD_MAGIC 0x5152584543363442ull
++#define FEATURE_GL3 8u
++#define SVC_GL3 13u
++#define STREAM_WORDS (256u * 1024u)
++
++int qgl3_available(void)
++{
++    static int state;
++    if (!state)
++        state = BOARD_Q(0) == BOARD_MAGIC && (BOARD_L(0x408) & FEATURE_GL3) ? 1 : -1;
++    return state > 0;
++}
++
++/* ---- the current context: one for the program, or where the program keeps it per thread */
++static qgl3_context none;      /* calls without a context go here; the host refuses them */
++static qgl3_context *global_cur;
++static qgl3_context *get_global(void) { return global_cur; }
++static void set_global(qgl3_context *c) { global_cur = c; }
++qgl3_context *(*qgl3_tls_get)(void) = get_global;
++static void (*tls_set)(qgl3_context *) = set_global;
++static unsigned local_error;   /* raised by this library, given out first by glGetError */
++
++void qgl3_set_tls(qgl3_context *(*get)(void), void (*set)(qgl3_context *))
++{
++    qgl3_tls_get = get ? get : get_global;
++    tls_set = set ? set : set_global;
++}
++
++qgl3_context *qgl3_current(void)
++{
++    qgl3_context *c = qgl3_tls_get();
++    return c ? c : &none;
++}
++
++/* runs what is in the context's stream; the host leaves the last call's result in the block */
++static unsigned long long run(qgl3_context *c)
++{
++    unsigned long long r = 0;
++    if (c->stream && c->cur != c->stream && qgl3_available()) {
++        uint32_t *b = c->block;
++        b[0] = SVC_GL3; b[1] = 0; b[2] = 0; b[3] = 1;
++        b[4] = (uint32_t)((unsigned long long)(unsigned long)c->stream >> 32);
++        b[5] = (uint32_t)(unsigned long)c->stream;
++        b[6] = (uint32_t)((char *)c->cur - (char *)c->stream);
++        b[7] = c->id;
++        b[8] = 0; b[9] = 0;
++        __asm__ volatile("" ::: "memory");
++        BOARD_Q(0x400) = (uint64_t)(unsigned long)b;
++        __asm__ volatile("" ::: "memory");
++        r = ((unsigned long long)b[8] << 32) | b[9];
++    }
++    c->cur = c->stream;
++    return r;
++}
++
++uint32_t *qgl3_flush_for(qgl3_context *c, unsigned words)
++{
++    if (c->stream)
++        run(c);
++    if (!c->stream || words > c->words) {
++        unsigned n = words > STREAM_WORDS ? words + 1024u : STREAM_WORDS;
++        free(c->stream);
++        c->stream = malloc(n * 4u);
++        if (!c->stream) {
++            fprintf(stderr, "qgl3: no memory for a stream of %u words\n", n);
++            abort();
++        }
++        c->words = n;
++    }
++    c->cur = c->stream;
++    c->lim = c->stream + c->words;
++    return c->cur;
++}
++
++unsigned long long qgl3_sync(void) { return run(qgl3_current()); }
++void qgl3_flush(void) { run(qgl3_current()); }
++
++void qgl3_unsupported(const char *name)
++{
++    static const char *seen[64];
++    static unsigned n;
++    if (!local_error)
++        local_error = 0x0502; /* GL_INVALID_OPERATION */
++    for (unsigned i = 0; i < n; i++)
++        if (seen[i] == name)
++            return;
++    if (n < 64)
++        seen[n++] = name;
++    fprintf(stderr, "qgl3: %s is not carried by the GL door\n", name);
++}
++
++static uint32_t *op(unsigned id, unsigned words)
++{
++    uint32_t *q = qgl3_put(words + 1);
++    *q++ = ((uint32_t)id << 20) | words;
++    return q;
++}
++
++/* ---- contexts */
++qgl3_context *qgl3_create_context(qgl3_context *share)
++{
++    if (!qgl3_available())
++        return NULL;
++    qgl3_context *c = calloc(1, sizeof *c);
++    if (!c)
++        return NULL;
++    /* sent on the new context's own stream, with no context in the block */
++    qgl3_context *was = qgl3_tls_get();
++    tls_set(c);
++    uint32_t *q = op(QGL3_OP_CREATE, 1);
++    q[0] = share ? share->id : 0;
++    c->id = (unsigned)qgl3_sync();
++    tls_set(was);
++    if (!c->id) {
++        free(c->stream);
++        free(c);
++        return NULL;
++    }
++    return c;
++}
++
++void qgl3_destroy_context(qgl3_context *c)
++{
++    if (!c)
++        return;
++    qgl3_context *was = qgl3_tls_get();
++    tls_set(c);
++    run(c);
++    uint32_t *q = op(QGL3_OP_DESTROY, 1);
++    q[0] = c->id;
++    c->id = 0;          /* the stream runs without a context */
++    qgl3_sync();
++    tls_set(was == c ? NULL : was);
++    free(c->stream);
++    free(c);
++}
++
++int qgl3_make_current(qgl3_context *c)
++{
++    qgl3_context *was = qgl3_tls_get();
++    if (was && was != c)
++        run(was);       /* what it has queued is drawn before another context takes over */
++    tls_set(c);
++    return 1;
++}
++
++int qgl3_resize(int width, int height)
++{
++    uint32_t *q = op(QGL3_OP_RESIZE, 2);
++    q[0] = (uint32_t)width; q[1] = (uint32_t)height;
++    return (int)qgl3_sync();
++}
++
++static void read_frame(void *dst, int bytes_per_row, int width, int height, unsigned order)
++{
++    uint32_t *q = op(QGL3_OP_READFRAME, 6);
++    q = qgl3_64(q, (unsigned long long)(unsigned long)dst);
++    q[0] = (uint32_t)bytes_per_row; q[1] = (uint32_t)width; q[2] = (uint32_t)height; q[3] = order;
++    qgl3_sync();
++}
++void qgl3_read_frame(void *dst, int bytes_per_row, int width, int height) { read_frame(dst, bytes_per_row, width, height, 0); }
++void qgl3_read_frame_bgra(void *dst, int bytes_per_row, int width, int height) { read_frame(dst, bytes_per_row, width, height, 1); }
++
++void *qgl3_GetProcAddress(const char *name)
++{
++    unsigned lo = 0, hi = qgl3_nnames;
++    while (lo < hi) {
++        unsigned mid = (lo + hi) / 2;
++        int c = strcmp(name, qgl3_names[mid].name);
++        if (!c)
++            return qgl3_names[mid].fn;
++        if (c < 0)
++            hi = mid;
++        else
++            lo = mid + 1;
++    }
++    return NULL;
++}
++
++/* ---- strings: kept, as GL promises pointers that stay valid. One host, so one set for all contexts. */
++static char *fetch_string(unsigned name, unsigned index)
++{
++    unsigned size = 256;
++    char *s = NULL;
++    for (;;) {
++        char *n = realloc(s, size);
++        if (!n) {
++            free(s);
++            return NULL;
++        }
++        s = n;
++        uint32_t *q = op(QGL3_OP_GETSTRING, 5);
++        q[0] = name; q[1] = index;
++        q = qgl3_64(q + 2, (unsigned long long)(unsigned long)s);
++        q[0] = size;
++        unsigned len = (unsigned)qgl3_sync();
++        if (len == 0xFFFFFFFFu) {
++            free(s);
++            if (!local_error)
++                local_error = 0x0500; /* GL_INVALID_ENUM */
++            return NULL;
++        }
++        if (len < size)
++            return s;
++        size = len + 1;
++    }
++}
++
++const unsigned char *q3_glGetString(unsigned int name)
++{
++    static struct { unsigned name; char *s; } cache[8];
++    unsigned i;
++    for (i = 0; i < 8 && cache[i].s; i++)
++        if (cache[i].name == name)
++            return (const unsigned char *)cache[i].s;
++    char *s = fetch_string(name, 0xFFFFFFFFu);
++    if (s && i < 8) {
++        cache[i].name = name;
++        cache[i].s = s;
++    }
++    return (const unsigned char *)s;
++}
++
++const unsigned char *q3_glGetStringi(unsigned int name, unsigned int index)
++{
++    /* GL_EXTENSIONS and GL_SHADING_LANGUAGE_VERSION have lists; each entry is asked for once */
++    static struct { unsigned name, n; char **s; } lists[2];
++    unsigned k = name == 0x1F03 ? 0 : 1;
++    if (lists[k].name != name) {
++        if (lists[k].s && lists[k].name)
++            return (const unsigned char *)fetch_string(name, index);  /* a third list: not kept */
++        lists[k].name = name;
++    }
++    if (index >= lists[k].n) {
++        unsigned n = index + 64;
++        char **s = realloc(lists[k].s, n * sizeof *s);
++        if (!s)
++            return NULL;
++        memset(s + lists[k].n, 0, (n - lists[k].n) * sizeof *s);
++        lists[k].s = s;
++        lists[k].n = n;
++    }
++    if (!lists[k].s[index])
++        lists[k].s[index] = fetch_string(name, index);
++    return (const unsigned char *)lists[k].s[index];
++}
++
++/* ---- shader text: all strings joined, sent inline */
++void q3_glShaderSource(unsigned int shader, int count, const char **string, const int *length)
++{
++    unsigned total = 0;
++    for (int i = 0; i < count; i++)
++        total += length && length[i] >= 0 ? (unsigned)length[i] : (unsigned)strlen(string[i]);
++    uint32_t *q = op(QGL3_OP_SHADERSOURCE, 2 + QGL3_W(total));
++    q[0] = shader; q[1] = total;
++    char *d = (char *)(q + 2);
++    if (QGL3_W(total))
++        q[2 + QGL3_W(total) - 1] = 0;
++    for (int i = 0; i < count; i++) {
++        unsigned l = length && length[i] >= 0 ? (unsigned)length[i] : (unsigned)strlen(string[i]);
++        memcpy(d, string[i], l);
++        d += l;
++    }
++}
++
++unsigned int q3_glGetError(void)
++{
++    if (local_error) {
++        unsigned e = local_error;
++        local_error = 0;
++        return e;
++    }
++    op(QGL3_OP_GETERROR, 0);
++    return (unsigned)qgl3_sync();
++}
+--- /dev/null
++++ b/gfx/gl/qgl3/qgl3.h
+@@ -0,0 +1,82 @@
++/* OpenGL 3.3 core for programs of QRX OS One 64, drawn by the host through HOST_CALL service 13 of the
++ * 68100EC64 board (engine full68k/qrx_gl3.c). Calls go into the command stream of the current context;
++ * see tools/qrxgl68k/gen3.py for its format and what the host does with pointers.
++ *
++ * Programs get the functions with qgl3_GetProcAddress. Buffer data goes to the host as bytes: vertex,
++ * instance and index data must be little endian. Texel data is the guest's own (big endian). */
++#ifndef QGL3_H
++#define QGL3_H
++#include <stdint.h>
++#include <string.h>
++#include "qgl3_ids.h"
++
++/* the door's own requests, ids below the first GL function */
++enum {
++    QGL3_OP_CREATE = 1,       /* share context id -> context id */
++    QGL3_OP_DESTROY = 2,      /* context id */
++    QGL3_OP_RESIZE = 3,       /* width, height of framebuffer 0 -> 1 */
++    QGL3_OP_READFRAME = 4,    /* dst (64), bytes per row, width, height[, order]: framebuffer 0, top row
++                                 first, as A R G B bytes (order 0) or B G R A (order 1) */
++    QGL3_OP_GETSTRING = 5,    /* name, index (~0 for glGetString), dst (64), size -> length */
++    QGL3_OP_SHADERSOURCE = 6, /* shader, length, the text inline */
++    QGL3_OP_GETERROR = 7,     /* -> the error */
++};
++
++typedef struct qgl3_context {
++    unsigned id;
++    uint32_t *stream, *cur, *lim;
++    unsigned words;
++    uint32_t block[32] __attribute__((aligned(16)));
++} qgl3_context;
++
++/* the current context of the calling thread (qgl3_set_tls, else one for the program) */
++extern qgl3_context *(*qgl3_tls_get)(void);
++qgl3_context *qgl3_current(void);
++uint32_t *qgl3_flush_for(qgl3_context *c, unsigned words);
++unsigned long long qgl3_sync(void);
++void qgl3_unsupported(const char *name);
++
++#define QGL3_W(b) ((b) == 0xFFFFFFFFu ? 0u : ((b) + 3u) / 4u)
++
++static inline uint32_t *qgl3_put(unsigned n)
++{
++    qgl3_context *c = qgl3_current();
++    uint32_t *p = c->cur;
++    if ((unsigned)(c->lim - p) < n)
++        p = qgl3_flush_for(c, n);
++    c->cur = p + n;
++    return p;
++}
++static inline uint32_t qgl3_f2u(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
++static inline uint32_t *qgl3_d(uint32_t *q, double d) { memcpy(q, &d, 8); return q + 2; }
++static inline uint32_t *qgl3_64(uint32_t *q, unsigned long long v) { q[0] = (uint32_t)(v >> 32); q[1] = (uint32_t)v; return q + 2; }
++static inline uint32_t *qgl3_inline(uint32_t *q, const void *p, unsigned bytes)
++{
++    *q++ = bytes;
++    if (bytes != 0xFFFFFFFFu) {
++        unsigned w = QGL3_W(bytes);
++        if (w)
++            q[w - 1] = 0;
++        memcpy(q, p, bytes);
++        q += w;
++    }
++    return q;
++}
++
++struct qgl3_name { const char *name; void *fn; };
++extern const struct qgl3_name qgl3_names[];
++extern const unsigned qgl3_nnames;
++
++/* ---- the program's side */
++int qgl3_available(void);
++/* where the current context of a thread is kept; without it one for the whole program */
++void qgl3_set_tls(qgl3_context *(*get)(void), void (*set)(qgl3_context *));
++qgl3_context *qgl3_create_context(qgl3_context *share);
++void qgl3_destroy_context(qgl3_context *c);
++int qgl3_make_current(qgl3_context *c);  /* NULL: none */
++int qgl3_resize(int width, int height);   /* framebuffer 0 of the current context */
++void qgl3_read_frame(void *dst, int bytes_per_row, int width, int height);       /* A R G B bytes */
++void qgl3_read_frame_bgra(void *dst, int bytes_per_row, int width, int height);  /* B G R A bytes */
++void qgl3_flush(void);
++void *qgl3_GetProcAddress(const char *name);
++#endif
+--- /dev/null
++++ b/gfx/gl/qgl3/qgl3_gen.c
+@@ -0,0 +1,3258 @@
++/* Generated by tools/qrxgl68k/gen3.py, do not edit. */
++#include "qgl3.h"
++
++static void q3_glCullFace(unsigned int mode) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)16 << 20) | _nw;
++    *_q++ = (uint32_t)mode;
++}
++static void q3_glFrontFace(unsigned int mode) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)17 << 20) | _nw;
++    *_q++ = (uint32_t)mode;
++}
++static void q3_glHint(unsigned int target, unsigned int mode) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)18 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)mode;
++}
++static void q3_glLineWidth(float width) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)19 << 20) | _nw;
++    *_q++ = qgl3_f2u(width);
++}
++static void q3_glPointSize(float size) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)20 << 20) | _nw;
++    *_q++ = qgl3_f2u(size);
++}
++static void q3_glPolygonMode(unsigned int face, unsigned int mode) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)21 << 20) | _nw;
++    *_q++ = (uint32_t)face;
++    *_q++ = (uint32_t)mode;
++}
++static void q3_glScissor(int x, int y, int width, int height) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)22 << 20) | _nw;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++}
++static void q3_glTexParameterf(unsigned int target, unsigned int pname, float param) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)23 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    *_q++ = qgl3_f2u(param);
++}
++static void q3_glTexParameterfv(unsigned int target, unsigned int pname, const float * params) {
++    unsigned _b0 = params ? (unsigned)(PN(pname)) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)24 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    _q = qgl3_inline(_q, params, _b0);
++}
++static void q3_glTexParameteri(unsigned int target, unsigned int pname, int param) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)25 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    *_q++ = (uint32_t)param;
++}
++static void q3_glTexParameteriv(unsigned int target, unsigned int pname, const int * params) {
++    unsigned _b0 = params ? (unsigned)(PN(pname)) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)26 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    _q = qgl3_inline(_q, params, _b0);
++}
++static void q3_glTexImage1D(unsigned int target, int level, int internalformat, int width, int border, unsigned int format, unsigned int type, const void * pixels) {
++    unsigned _nw = 9;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)27 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)internalformat;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)border;
++    *_q++ = (uint32_t)format;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)pixels);
++    qgl3_sync();
++}
++static void q3_glTexImage2D(unsigned int target, int level, int internalformat, int width, int height, int border, unsigned int format, unsigned int type, const void * pixels) {
++    unsigned _nw = 10;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)28 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)internalformat;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++    *_q++ = (uint32_t)border;
++    *_q++ = (uint32_t)format;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)pixels);
++    qgl3_sync();
++}
++static void q3_glDrawBuffer(unsigned int buf) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)29 << 20) | _nw;
++    *_q++ = (uint32_t)buf;
++    qgl3_sync();
++}
++static void q3_glClear(unsigned int mask) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)30 << 20) | _nw;
++    *_q++ = (uint32_t)mask;
++}
++static void q3_glClearColor(float red, float green, float blue, float alpha) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)31 << 20) | _nw;
++    *_q++ = qgl3_f2u(red);
++    *_q++ = qgl3_f2u(green);
++    *_q++ = qgl3_f2u(blue);
++    *_q++ = qgl3_f2u(alpha);
++}
++static void q3_glClearStencil(int s) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)32 << 20) | _nw;
++    *_q++ = (uint32_t)s;
++}
++static void q3_glClearDepth(double depth) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)33 << 20) | _nw;
++    _q = qgl3_d(_q, depth);
++}
++static void q3_glStencilMask(unsigned int mask) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)34 << 20) | _nw;
++    *_q++ = (uint32_t)mask;
++}
++static void q3_glColorMask(unsigned char red, unsigned char green, unsigned char blue, unsigned char alpha) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)35 << 20) | _nw;
++    *_q++ = (uint32_t)red;
++    *_q++ = (uint32_t)green;
++    *_q++ = (uint32_t)blue;
++    *_q++ = (uint32_t)alpha;
++}
++static void q3_glDepthMask(unsigned char flag) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)36 << 20) | _nw;
++    *_q++ = (uint32_t)flag;
++}
++static void q3_glDisable(unsigned int cap) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)37 << 20) | _nw;
++    *_q++ = (uint32_t)cap;
++}
++static void q3_glEnable(unsigned int cap) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)38 << 20) | _nw;
++    *_q++ = (uint32_t)cap;
++}
++static void q3_glFinish(void) {
++    unsigned _nw = 0;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)39 << 20) | _nw;
++}
++static void q3_glFlush(void) {
++    unsigned _nw = 0;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)40 << 20) | _nw;
++}
++static void q3_glBlendFunc(unsigned int sfactor, unsigned int dfactor) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)41 << 20) | _nw;
++    *_q++ = (uint32_t)sfactor;
++    *_q++ = (uint32_t)dfactor;
++}
++static void q3_glLogicOp(unsigned int opcode) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)42 << 20) | _nw;
++    *_q++ = (uint32_t)opcode;
++}
++static void q3_glStencilFunc(unsigned int func, int ref, unsigned int mask) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)43 << 20) | _nw;
++    *_q++ = (uint32_t)func;
++    *_q++ = (uint32_t)ref;
++    *_q++ = (uint32_t)mask;
++}
++static void q3_glStencilOp(unsigned int fail, unsigned int zfail, unsigned int zpass) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)44 << 20) | _nw;
++    *_q++ = (uint32_t)fail;
++    *_q++ = (uint32_t)zfail;
++    *_q++ = (uint32_t)zpass;
++}
++static void q3_glDepthFunc(unsigned int func) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)45 << 20) | _nw;
++    *_q++ = (uint32_t)func;
++}
++static void q3_glPixelStoref(unsigned int pname, float param) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)46 << 20) | _nw;
++    *_q++ = (uint32_t)pname;
++    *_q++ = qgl3_f2u(param);
++}
++static void q3_glPixelStorei(unsigned int pname, int param) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)47 << 20) | _nw;
++    *_q++ = (uint32_t)pname;
++    *_q++ = (uint32_t)param;
++}
++static void q3_glReadBuffer(unsigned int src) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)48 << 20) | _nw;
++    *_q++ = (uint32_t)src;
++    qgl3_sync();
++}
++static void q3_glReadPixels(int x, int y, int width, int height, unsigned int format, unsigned int type, void * pixels) {
++    unsigned _nw = 8;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)49 << 20) | _nw;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++    *_q++ = (uint32_t)format;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)pixels);
++    qgl3_sync();
++}
++static void q3_glGetBooleanv(unsigned int pname, unsigned char * data) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)50 << 20) | _nw;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void q3_glGetDoublev(unsigned int pname, double * data) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)51 << 20) | _nw;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++unsigned int q3_glGetError(void);
++static void q3_glGetFloatv(unsigned int pname, float * data) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)53 << 20) | _nw;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void q3_glGetIntegerv(unsigned int pname, int * data) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)54 << 20) | _nw;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++const unsigned char * q3_glGetString(unsigned int name);
++static void q3_glGetTexImage(unsigned int target, int level, unsigned int format, unsigned int type, void * pixels) {
++    unsigned _nw = 6;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)56 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)format;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)pixels);
++    qgl3_sync();
++}
++static void q3_glGetTexParameterfv(unsigned int target, unsigned int pname, float * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)57 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetTexParameteriv(unsigned int target, unsigned int pname, int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)58 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetTexLevelParameterfv(unsigned int target, int level, unsigned int pname, float * params) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)59 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetTexLevelParameteriv(unsigned int target, int level, unsigned int pname, int * params) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)60 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static unsigned char q3_glIsEnabled(unsigned int cap) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)61 << 20) | _nw;
++    *_q++ = (uint32_t)cap;
++    return (unsigned char)qgl3_sync();
++}
++static void q3_glDepthRange(double n, double f) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)62 << 20) | _nw;
++    _q = qgl3_d(_q, n);
++    _q = qgl3_d(_q, f);
++}
++static void q3_glViewport(int x, int y, int width, int height) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)63 << 20) | _nw;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++}
++static void q3_glDrawArrays(unsigned int mode, int first, int count) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)64 << 20) | _nw;
++    *_q++ = (uint32_t)mode;
++    *_q++ = (uint32_t)first;
++    *_q++ = (uint32_t)count;
++}
++static void q3_glDrawElements(unsigned int mode, int count, unsigned int type, const void * indices) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)65 << 20) | _nw;
++    *_q++ = (uint32_t)mode;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)indices);
++}
++static void q3_glGetPointerv(unsigned int pname, void * * params) { qgl3_unsupported("glGetPointerv"); }
++static void q3_glPolygonOffset(float factor, float units) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)67 << 20) | _nw;
++    *_q++ = qgl3_f2u(factor);
++    *_q++ = qgl3_f2u(units);
++}
++static void q3_glCopyTexImage1D(unsigned int target, int level, unsigned int internalformat, int x, int y, int width, int border) {
++    unsigned _nw = 7;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)68 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)internalformat;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)border;
++}
++static void q3_glCopyTexImage2D(unsigned int target, int level, unsigned int internalformat, int x, int y, int width, int height, int border) {
++    unsigned _nw = 8;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)69 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)internalformat;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++    *_q++ = (uint32_t)border;
++}
++static void q3_glCopyTexSubImage1D(unsigned int target, int level, int xoffset, int x, int y, int width) {
++    unsigned _nw = 6;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)70 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)xoffset;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)width;
++}
++static void q3_glCopyTexSubImage2D(unsigned int target, int level, int xoffset, int yoffset, int x, int y, int width, int height) {
++    unsigned _nw = 8;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)71 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)xoffset;
++    *_q++ = (uint32_t)yoffset;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++}
++static void q3_glTexSubImage1D(unsigned int target, int level, int xoffset, int width, unsigned int format, unsigned int type, const void * pixels) {
++    unsigned _nw = 8;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)72 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)xoffset;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)format;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)pixels);
++    qgl3_sync();
++}
++static void q3_glTexSubImage2D(unsigned int target, int level, int xoffset, int yoffset, int width, int height, unsigned int format, unsigned int type, const void * pixels) {
++    unsigned _nw = 10;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)73 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)xoffset;
++    *_q++ = (uint32_t)yoffset;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++    *_q++ = (uint32_t)format;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)pixels);
++    qgl3_sync();
++}
++static void q3_glBindTexture(unsigned int target, unsigned int texture) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)74 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)texture;
++}
++static void q3_glDeleteTextures(int n, const unsigned int * textures) {
++    unsigned _b0 = textures ? (unsigned)(n) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)75 << 20) | _nw;
++    *_q++ = (uint32_t)n;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)textures);
++    _q = qgl3_inline(_q, textures, _b0);
++}
++static void q3_glGenTextures(int n, unsigned int * textures) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)76 << 20) | _nw;
++    *_q++ = (uint32_t)n;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)textures);
++    qgl3_sync();
++}
++static unsigned char q3_glIsTexture(unsigned int texture) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)77 << 20) | _nw;
++    *_q++ = (uint32_t)texture;
++    return (unsigned char)qgl3_sync();
++}
++static void q3_glDrawRangeElements(unsigned int mode, unsigned int start, unsigned int end, int count, unsigned int type, const void * indices) {
++    unsigned _nw = 7;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)78 << 20) | _nw;
++    *_q++ = (uint32_t)mode;
++    *_q++ = (uint32_t)start;
++    *_q++ = (uint32_t)end;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)indices);
++}
++static void q3_glTexImage3D(unsigned int target, int level, int internalformat, int width, int height, int depth, int border, unsigned int format, unsigned int type, const void * pixels) {
++    unsigned _nw = 11;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)79 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)internalformat;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++    *_q++ = (uint32_t)depth;
++    *_q++ = (uint32_t)border;
++    *_q++ = (uint32_t)format;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)pixels);
++    qgl3_sync();
++}
++static void q3_glTexSubImage3D(unsigned int target, int level, int xoffset, int yoffset, int zoffset, int width, int height, int depth, unsigned int format, unsigned int type, const void * pixels) {
++    unsigned _nw = 12;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)80 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)xoffset;
++    *_q++ = (uint32_t)yoffset;
++    *_q++ = (uint32_t)zoffset;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++    *_q++ = (uint32_t)depth;
++    *_q++ = (uint32_t)format;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)pixels);
++    qgl3_sync();
++}
++static void q3_glCopyTexSubImage3D(unsigned int target, int level, int xoffset, int yoffset, int zoffset, int x, int y, int width, int height) {
++    unsigned _nw = 9;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)81 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)xoffset;
++    *_q++ = (uint32_t)yoffset;
++    *_q++ = (uint32_t)zoffset;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++}
++static void q3_glActiveTexture(unsigned int texture) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)82 << 20) | _nw;
++    *_q++ = (uint32_t)texture;
++}
++static void q3_glSampleCoverage(float value, unsigned char invert) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)83 << 20) | _nw;
++    *_q++ = qgl3_f2u(value);
++    *_q++ = (uint32_t)invert;
++}
++static void q3_glCompressedTexImage3D(unsigned int target, int level, unsigned int internalformat, int width, int height, int depth, int border, int imageSize, const void * data) {
++    unsigned _nw = 10;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)84 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)internalformat;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++    *_q++ = (uint32_t)depth;
++    *_q++ = (uint32_t)border;
++    *_q++ = (uint32_t)imageSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void q3_glCompressedTexImage2D(unsigned int target, int level, unsigned int internalformat, int width, int height, int border, int imageSize, const void * data) {
++    unsigned _nw = 9;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)85 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)internalformat;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++    *_q++ = (uint32_t)border;
++    *_q++ = (uint32_t)imageSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void q3_glCompressedTexImage1D(unsigned int target, int level, unsigned int internalformat, int width, int border, int imageSize, const void * data) {
++    unsigned _nw = 8;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)86 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)internalformat;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)border;
++    *_q++ = (uint32_t)imageSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void q3_glCompressedTexSubImage3D(unsigned int target, int level, int xoffset, int yoffset, int zoffset, int width, int height, int depth, unsigned int format, int imageSize, const void * data) {
++    unsigned _nw = 12;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)87 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)xoffset;
++    *_q++ = (uint32_t)yoffset;
++    *_q++ = (uint32_t)zoffset;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++    *_q++ = (uint32_t)depth;
++    *_q++ = (uint32_t)format;
++    *_q++ = (uint32_t)imageSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void q3_glCompressedTexSubImage2D(unsigned int target, int level, int xoffset, int yoffset, int width, int height, unsigned int format, int imageSize, const void * data) {
++    unsigned _nw = 10;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)88 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)xoffset;
++    *_q++ = (uint32_t)yoffset;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++    *_q++ = (uint32_t)format;
++    *_q++ = (uint32_t)imageSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void q3_glCompressedTexSubImage1D(unsigned int target, int level, int xoffset, int width, unsigned int format, int imageSize, const void * data) {
++    unsigned _nw = 8;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)89 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)xoffset;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)format;
++    *_q++ = (uint32_t)imageSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void q3_glGetCompressedTexImage(unsigned int target, int level, void * img) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)90 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)level;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)img);
++    qgl3_sync();
++}
++static void q3_glBlendFuncSeparate(unsigned int sfactorRGB, unsigned int dfactorRGB, unsigned int sfactorAlpha, unsigned int dfactorAlpha) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)91 << 20) | _nw;
++    *_q++ = (uint32_t)sfactorRGB;
++    *_q++ = (uint32_t)dfactorRGB;
++    *_q++ = (uint32_t)sfactorAlpha;
++    *_q++ = (uint32_t)dfactorAlpha;
++}
++static void q3_glMultiDrawArrays(unsigned int mode, const int * first, const int * count, int drawcount) {
++    unsigned _b0 = first ? (unsigned)(drawcount) * 4u : 0xFFFFFFFFu;
++    unsigned _b1 = count ? (unsigned)(drawcount) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 6 + 1 + QGL3_W(_b0) + 1 + QGL3_W(_b1);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)92 << 20) | _nw;
++    *_q++ = (uint32_t)mode;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)first);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)count);
++    *_q++ = (uint32_t)drawcount;
++    _q = qgl3_inline(_q, first, _b0);
++    _q = qgl3_inline(_q, count, _b1);
++}
++static void q3_glMultiDrawElements(unsigned int mode, const int * count, unsigned int type, const void * * indices, int drawcount) { qgl3_unsupported("glMultiDrawElements"); }
++static void q3_glPointParameterf(unsigned int pname, float param) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)94 << 20) | _nw;
++    *_q++ = (uint32_t)pname;
++    *_q++ = qgl3_f2u(param);
++}
++static void q3_glPointParameterfv(unsigned int pname, const float * params) {
++    unsigned _b0 = params ? (unsigned)(PN(pname)) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)95 << 20) | _nw;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    _q = qgl3_inline(_q, params, _b0);
++}
++static void q3_glPointParameteri(unsigned int pname, int param) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)96 << 20) | _nw;
++    *_q++ = (uint32_t)pname;
++    *_q++ = (uint32_t)param;
++}
++static void q3_glPointParameteriv(unsigned int pname, const int * params) {
++    unsigned _b0 = params ? (unsigned)(PN(pname)) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)97 << 20) | _nw;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    _q = qgl3_inline(_q, params, _b0);
++}
++static void q3_glBlendColor(float red, float green, float blue, float alpha) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)98 << 20) | _nw;
++    *_q++ = qgl3_f2u(red);
++    *_q++ = qgl3_f2u(green);
++    *_q++ = qgl3_f2u(blue);
++    *_q++ = qgl3_f2u(alpha);
++}
++static void q3_glBlendEquation(unsigned int mode) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)99 << 20) | _nw;
++    *_q++ = (uint32_t)mode;
++}
++static void q3_glGenQueries(int n, unsigned int * ids) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)100 << 20) | _nw;
++    *_q++ = (uint32_t)n;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)ids);
++    qgl3_sync();
++}
++static void q3_glDeleteQueries(int n, const unsigned int * ids) {
++    unsigned _b0 = ids ? (unsigned)(n) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)101 << 20) | _nw;
++    *_q++ = (uint32_t)n;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)ids);
++    _q = qgl3_inline(_q, ids, _b0);
++}
++static unsigned char q3_glIsQuery(unsigned int id) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)102 << 20) | _nw;
++    *_q++ = (uint32_t)id;
++    return (unsigned char)qgl3_sync();
++}
++static void q3_glBeginQuery(unsigned int target, unsigned int id) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)103 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)id;
++}
++static void q3_glEndQuery(unsigned int target) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)104 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++}
++static void q3_glGetQueryiv(unsigned int target, unsigned int pname, int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)105 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetQueryObjectiv(unsigned int id, unsigned int pname, int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)106 << 20) | _nw;
++    *_q++ = (uint32_t)id;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetQueryObjectuiv(unsigned int id, unsigned int pname, unsigned int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)107 << 20) | _nw;
++    *_q++ = (uint32_t)id;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glBindBuffer(unsigned int target, unsigned int buffer) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)108 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)buffer;
++}
++static void q3_glDeleteBuffers(int n, const unsigned int * buffers) {
++    unsigned _b0 = buffers ? (unsigned)(n) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)109 << 20) | _nw;
++    *_q++ = (uint32_t)n;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)buffers);
++    _q = qgl3_inline(_q, buffers, _b0);
++}
++static void q3_glGenBuffers(int n, unsigned int * buffers) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)110 << 20) | _nw;
++    *_q++ = (uint32_t)n;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)buffers);
++    qgl3_sync();
++}
++static unsigned char q3_glIsBuffer(unsigned int buffer) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)111 << 20) | _nw;
++    *_q++ = (uint32_t)buffer;
++    return (unsigned char)qgl3_sync();
++}
++static void q3_glBufferData(unsigned int target, long size, const void * data, unsigned int usage) {
++    unsigned _nw = 6;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)112 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    _q = qgl3_64(_q, (unsigned long long)size);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    *_q++ = (uint32_t)usage;
++    qgl3_sync();
++}
++static void q3_glBufferSubData(unsigned int target, long offset, long size, const void * data) {
++    unsigned _nw = 7;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)113 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    _q = qgl3_64(_q, (unsigned long long)offset);
++    _q = qgl3_64(_q, (unsigned long long)size);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void q3_glGetBufferSubData(unsigned int target, long offset, long size, void * data) {
++    unsigned _nw = 7;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)114 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    _q = qgl3_64(_q, (unsigned long long)offset);
++    _q = qgl3_64(_q, (unsigned long long)size);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void * q3_glMapBuffer(unsigned int target, unsigned int access) { qgl3_unsupported("glMapBuffer"); return 0; }
++static unsigned char q3_glUnmapBuffer(unsigned int target) { qgl3_unsupported("glUnmapBuffer"); return 0; }
++static void q3_glGetBufferParameteriv(unsigned int target, unsigned int pname, int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)117 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetBufferPointerv(unsigned int target, unsigned int pname, void * * params) { qgl3_unsupported("glGetBufferPointerv"); }
++static void q3_glBlendEquationSeparate(unsigned int modeRGB, unsigned int modeAlpha) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)119 << 20) | _nw;
++    *_q++ = (uint32_t)modeRGB;
++    *_q++ = (uint32_t)modeAlpha;
++}
++static void q3_glDrawBuffers(int n, const unsigned int * bufs) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)120 << 20) | _nw;
++    *_q++ = (uint32_t)n;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)bufs);
++    qgl3_sync();
++}
++static void q3_glStencilOpSeparate(unsigned int face, unsigned int sfail, unsigned int dpfail, unsigned int dppass) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)121 << 20) | _nw;
++    *_q++ = (uint32_t)face;
++    *_q++ = (uint32_t)sfail;
++    *_q++ = (uint32_t)dpfail;
++    *_q++ = (uint32_t)dppass;
++}
++static void q3_glStencilFuncSeparate(unsigned int face, unsigned int func, int ref, unsigned int mask) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)122 << 20) | _nw;
++    *_q++ = (uint32_t)face;
++    *_q++ = (uint32_t)func;
++    *_q++ = (uint32_t)ref;
++    *_q++ = (uint32_t)mask;
++}
++static void q3_glStencilMaskSeparate(unsigned int face, unsigned int mask) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)123 << 20) | _nw;
++    *_q++ = (uint32_t)face;
++    *_q++ = (uint32_t)mask;
++}
++static void q3_glAttachShader(unsigned int program, unsigned int shader) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)124 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)shader;
++}
++static void q3_glBindAttribLocation(unsigned int program, unsigned int index, const char * name) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)125 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)name);
++    qgl3_sync();
++}
++static void q3_glCompileShader(unsigned int shader) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)126 << 20) | _nw;
++    *_q++ = (uint32_t)shader;
++}
++static unsigned int q3_glCreateProgram(void) {
++    unsigned _nw = 0;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)127 << 20) | _nw;
++    return (unsigned int)qgl3_sync();
++}
++static unsigned int q3_glCreateShader(unsigned int type) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)128 << 20) | _nw;
++    *_q++ = (uint32_t)type;
++    return (unsigned int)qgl3_sync();
++}
++static void q3_glDeleteProgram(unsigned int program) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)129 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++}
++static void q3_glDeleteShader(unsigned int shader) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)130 << 20) | _nw;
++    *_q++ = (uint32_t)shader;
++}
++static void q3_glDetachShader(unsigned int program, unsigned int shader) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)131 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)shader;
++}
++static void q3_glDisableVertexAttribArray(unsigned int index) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)132 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++}
++static void q3_glEnableVertexAttribArray(unsigned int index) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)133 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++}
++static void q3_glGetActiveAttrib(unsigned int program, unsigned int index, int bufSize, int * length, int * size, unsigned int * type, char * name) {
++    unsigned _nw = 11;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)134 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)bufSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)length);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)size);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)type);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)name);
++    qgl3_sync();
++}
++static void q3_glGetActiveUniform(unsigned int program, unsigned int index, int bufSize, int * length, int * size, unsigned int * type, char * name) {
++    unsigned _nw = 11;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)135 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)bufSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)length);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)size);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)type);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)name);
++    qgl3_sync();
++}
++static void q3_glGetAttachedShaders(unsigned int program, int maxCount, int * count, unsigned int * shaders) {
++    unsigned _nw = 6;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)136 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)maxCount;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)count);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)shaders);
++    qgl3_sync();
++}
++static int q3_glGetAttribLocation(unsigned int program, const char * name) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)137 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)name);
++    return (int)qgl3_sync();
++}
++static void q3_glGetProgramiv(unsigned int program, unsigned int pname, int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)138 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetProgramInfoLog(unsigned int program, int bufSize, int * length, char * infoLog) {
++    unsigned _nw = 6;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)139 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)bufSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)length);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)infoLog);
++    qgl3_sync();
++}
++static void q3_glGetShaderiv(unsigned int shader, unsigned int pname, int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)140 << 20) | _nw;
++    *_q++ = (uint32_t)shader;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetShaderInfoLog(unsigned int shader, int bufSize, int * length, char * infoLog) {
++    unsigned _nw = 6;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)141 << 20) | _nw;
++    *_q++ = (uint32_t)shader;
++    *_q++ = (uint32_t)bufSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)length);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)infoLog);
++    qgl3_sync();
++}
++static void q3_glGetShaderSource(unsigned int shader, int bufSize, int * length, char * source) {
++    unsigned _nw = 6;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)142 << 20) | _nw;
++    *_q++ = (uint32_t)shader;
++    *_q++ = (uint32_t)bufSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)length);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)source);
++    qgl3_sync();
++}
++static int q3_glGetUniformLocation(unsigned int program, const char * name) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)143 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)name);
++    return (int)qgl3_sync();
++}
++static void q3_glGetUniformfv(unsigned int program, int location, float * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)144 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)location;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetUniformiv(unsigned int program, int location, int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)145 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)location;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetVertexAttribdv(unsigned int index, unsigned int pname, double * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)146 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetVertexAttribfv(unsigned int index, unsigned int pname, float * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)147 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetVertexAttribiv(unsigned int index, unsigned int pname, int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)148 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetVertexAttribPointerv(unsigned int index, unsigned int pname, void * * pointer) { qgl3_unsupported("glGetVertexAttribPointerv"); }
++static unsigned char q3_glIsProgram(unsigned int program) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)150 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    return (unsigned char)qgl3_sync();
++}
++static unsigned char q3_glIsShader(unsigned int shader) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)151 << 20) | _nw;
++    *_q++ = (uint32_t)shader;
++    return (unsigned char)qgl3_sync();
++}
++static void q3_glLinkProgram(unsigned int program) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)152 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++}
++void q3_glShaderSource(unsigned int shader, int count, const char * * string, const int * length);
++static void q3_glUseProgram(unsigned int program) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)154 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++}
++static void q3_glUniform1f(int location, float v0) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)155 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = qgl3_f2u(v0);
++}
++static void q3_glUniform2f(int location, float v0, float v1) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)156 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = qgl3_f2u(v0);
++    *_q++ = qgl3_f2u(v1);
++}
++static void q3_glUniform3f(int location, float v0, float v1, float v2) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)157 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = qgl3_f2u(v0);
++    *_q++ = qgl3_f2u(v1);
++    *_q++ = qgl3_f2u(v2);
++}
++static void q3_glUniform4f(int location, float v0, float v1, float v2, float v3) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)158 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = qgl3_f2u(v0);
++    *_q++ = qgl3_f2u(v1);
++    *_q++ = qgl3_f2u(v2);
++    *_q++ = qgl3_f2u(v3);
++}
++static void q3_glUniform1i(int location, int v0) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)159 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)v0;
++}
++static void q3_glUniform2i(int location, int v0, int v1) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)160 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)v0;
++    *_q++ = (uint32_t)v1;
++}
++static void q3_glUniform3i(int location, int v0, int v1, int v2) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)161 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)v0;
++    *_q++ = (uint32_t)v1;
++    *_q++ = (uint32_t)v2;
++}
++static void q3_glUniform4i(int location, int v0, int v1, int v2, int v3) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)162 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)v0;
++    *_q++ = (uint32_t)v1;
++    *_q++ = (uint32_t)v2;
++    *_q++ = (uint32_t)v3;
++}
++static void q3_glUniform1fv(int location, int count, const float * value) {
++    unsigned _b0 = value ? (unsigned)(count*1) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)163 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniform2fv(int location, int count, const float * value) {
++    unsigned _b0 = value ? (unsigned)(count*2) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)164 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniform3fv(int location, int count, const float * value) {
++    unsigned _b0 = value ? (unsigned)(count*3) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)165 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniform4fv(int location, int count, const float * value) {
++    unsigned _b0 = value ? (unsigned)(count*4) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)166 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniform1iv(int location, int count, const int * value) {
++    unsigned _b0 = value ? (unsigned)(count*1) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)167 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniform2iv(int location, int count, const int * value) {
++    unsigned _b0 = value ? (unsigned)(count*2) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)168 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniform3iv(int location, int count, const int * value) {
++    unsigned _b0 = value ? (unsigned)(count*3) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)169 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniform4iv(int location, int count, const int * value) {
++    unsigned _b0 = value ? (unsigned)(count*4) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)170 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniformMatrix2fv(int location, int count, unsigned char transpose, const float * value) {
++    unsigned _b0 = value ? (unsigned)(count*4) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 5 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)171 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)transpose;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniformMatrix3fv(int location, int count, unsigned char transpose, const float * value) {
++    unsigned _b0 = value ? (unsigned)(count*9) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 5 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)172 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)transpose;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniformMatrix4fv(int location, int count, unsigned char transpose, const float * value) {
++    unsigned _b0 = value ? (unsigned)(count*16) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 5 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)173 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)transpose;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glValidateProgram(unsigned int program) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)174 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++}
++static void q3_glVertexAttrib1d(unsigned int index, double x) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)175 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_d(_q, x);
++}
++static void q3_glVertexAttrib1dv(unsigned int index, const double * v) {
++    unsigned _b0 = v ? (unsigned)(1) * 8u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)176 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib1f(unsigned int index, float x) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)177 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = qgl3_f2u(x);
++}
++static void q3_glVertexAttrib1fv(unsigned int index, const float * v) {
++    unsigned _b0 = v ? (unsigned)(1) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)178 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib1s(unsigned int index, short x) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)179 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)x;
++}
++static void q3_glVertexAttrib1sv(unsigned int index, const short * v) {
++    unsigned _b0 = v ? (unsigned)(1) * 2u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)180 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib2d(unsigned int index, double x, double y) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)181 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_d(_q, x);
++    _q = qgl3_d(_q, y);
++}
++static void q3_glVertexAttrib2dv(unsigned int index, const double * v) {
++    unsigned _b0 = v ? (unsigned)(2) * 8u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)182 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib2f(unsigned int index, float x, float y) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)183 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = qgl3_f2u(x);
++    *_q++ = qgl3_f2u(y);
++}
++static void q3_glVertexAttrib2fv(unsigned int index, const float * v) {
++    unsigned _b0 = v ? (unsigned)(2) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)184 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib2s(unsigned int index, short x, short y) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)185 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++}
++static void q3_glVertexAttrib2sv(unsigned int index, const short * v) {
++    unsigned _b0 = v ? (unsigned)(2) * 2u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)186 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib3d(unsigned int index, double x, double y, double z) {
++    unsigned _nw = 7;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)187 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_d(_q, x);
++    _q = qgl3_d(_q, y);
++    _q = qgl3_d(_q, z);
++}
++static void q3_glVertexAttrib3dv(unsigned int index, const double * v) {
++    unsigned _b0 = v ? (unsigned)(3) * 8u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)188 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib3f(unsigned int index, float x, float y, float z) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)189 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = qgl3_f2u(x);
++    *_q++ = qgl3_f2u(y);
++    *_q++ = qgl3_f2u(z);
++}
++static void q3_glVertexAttrib3fv(unsigned int index, const float * v) {
++    unsigned _b0 = v ? (unsigned)(3) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)190 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib3s(unsigned int index, short x, short y, short z) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)191 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)z;
++}
++static void q3_glVertexAttrib3sv(unsigned int index, const short * v) {
++    unsigned _b0 = v ? (unsigned)(3) * 2u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)192 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4Nbv(unsigned int index, const signed char * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 1u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)193 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4Niv(unsigned int index, const int * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)194 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4Nsv(unsigned int index, const short * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 2u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)195 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4Nub(unsigned int index, unsigned char x, unsigned char y, unsigned char z, unsigned char w) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)196 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)z;
++    *_q++ = (uint32_t)w;
++}
++static void q3_glVertexAttrib4Nubv(unsigned int index, const unsigned char * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 1u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)197 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4Nuiv(unsigned int index, const unsigned int * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)198 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4Nusv(unsigned int index, const unsigned short * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 2u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)199 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4bv(unsigned int index, const signed char * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 1u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)200 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4d(unsigned int index, double x, double y, double z, double w) {
++    unsigned _nw = 9;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)201 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_d(_q, x);
++    _q = qgl3_d(_q, y);
++    _q = qgl3_d(_q, z);
++    _q = qgl3_d(_q, w);
++}
++static void q3_glVertexAttrib4dv(unsigned int index, const double * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 8u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)202 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4f(unsigned int index, float x, float y, float z, float w) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)203 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = qgl3_f2u(x);
++    *_q++ = qgl3_f2u(y);
++    *_q++ = qgl3_f2u(z);
++    *_q++ = qgl3_f2u(w);
++}
++static void q3_glVertexAttrib4fv(unsigned int index, const float * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)204 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4iv(unsigned int index, const int * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)205 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4s(unsigned int index, short x, short y, short z, short w) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)206 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)z;
++    *_q++ = (uint32_t)w;
++}
++static void q3_glVertexAttrib4sv(unsigned int index, const short * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 2u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)207 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4ubv(unsigned int index, const unsigned char * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 1u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)208 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4uiv(unsigned int index, const unsigned int * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)209 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttrib4usv(unsigned int index, const unsigned short * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 2u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)210 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttribPointer(unsigned int index, int size, unsigned int type, unsigned char normalized, int stride, const void * pointer) {
++    unsigned _nw = 7;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)211 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)size;
++    *_q++ = (uint32_t)type;
++    *_q++ = (uint32_t)normalized;
++    *_q++ = (uint32_t)stride;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)pointer);
++}
++static void q3_glUniformMatrix2x3fv(int location, int count, unsigned char transpose, const float * value) {
++    unsigned _b0 = value ? (unsigned)(count*6) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 5 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)212 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)transpose;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniformMatrix3x2fv(int location, int count, unsigned char transpose, const float * value) {
++    unsigned _b0 = value ? (unsigned)(count*6) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 5 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)213 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)transpose;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniformMatrix2x4fv(int location, int count, unsigned char transpose, const float * value) {
++    unsigned _b0 = value ? (unsigned)(count*8) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 5 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)214 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)transpose;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniformMatrix4x2fv(int location, int count, unsigned char transpose, const float * value) {
++    unsigned _b0 = value ? (unsigned)(count*8) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 5 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)215 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)transpose;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniformMatrix3x4fv(int location, int count, unsigned char transpose, const float * value) {
++    unsigned _b0 = value ? (unsigned)(count*12) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 5 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)216 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)transpose;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniformMatrix4x3fv(int location, int count, unsigned char transpose, const float * value) {
++    unsigned _b0 = value ? (unsigned)(count*12) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 5 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)217 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)transpose;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glColorMaski(unsigned int index, unsigned char r, unsigned char g, unsigned char b, unsigned char a) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)218 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)r;
++    *_q++ = (uint32_t)g;
++    *_q++ = (uint32_t)b;
++    *_q++ = (uint32_t)a;
++}
++static void q3_glGetBooleani_v(unsigned int target, unsigned int index, unsigned char * data) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)219 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void q3_glGetIntegeri_v(unsigned int target, unsigned int index, int * data) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)220 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void q3_glEnablei(unsigned int target, unsigned int index) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)221 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)index;
++}
++static void q3_glDisablei(unsigned int target, unsigned int index) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)222 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)index;
++}
++static unsigned char q3_glIsEnabledi(unsigned int target, unsigned int index) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)223 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)index;
++    return (unsigned char)qgl3_sync();
++}
++static void q3_glBeginTransformFeedback(unsigned int primitiveMode) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)224 << 20) | _nw;
++    *_q++ = (uint32_t)primitiveMode;
++}
++static void q3_glEndTransformFeedback(void) {
++    unsigned _nw = 0;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)225 << 20) | _nw;
++}
++static void q3_glBindBufferRange(unsigned int target, unsigned int index, unsigned int buffer, long offset, long size) {
++    unsigned _nw = 7;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)226 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)buffer;
++    _q = qgl3_64(_q, (unsigned long long)offset);
++    _q = qgl3_64(_q, (unsigned long long)size);
++}
++static void q3_glBindBufferBase(unsigned int target, unsigned int index, unsigned int buffer) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)227 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)buffer;
++}
++static void q3_glTransformFeedbackVaryings(unsigned int program, int count, const char * * varyings, unsigned int bufferMode) { qgl3_unsupported("glTransformFeedbackVaryings"); }
++static void q3_glGetTransformFeedbackVarying(unsigned int program, unsigned int index, int bufSize, int * length, int * size, unsigned int * type, char * name) {
++    unsigned _nw = 11;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)229 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)bufSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)length);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)size);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)type);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)name);
++    qgl3_sync();
++}
++static void q3_glClampColor(unsigned int target, unsigned int clamp) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)230 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)clamp;
++}
++static void q3_glBeginConditionalRender(unsigned int id, unsigned int mode) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)231 << 20) | _nw;
++    *_q++ = (uint32_t)id;
++    *_q++ = (uint32_t)mode;
++}
++static void q3_glEndConditionalRender(void) {
++    unsigned _nw = 0;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)232 << 20) | _nw;
++}
++static void q3_glVertexAttribIPointer(unsigned int index, int size, unsigned int type, int stride, const void * pointer) {
++    unsigned _nw = 6;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)233 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)size;
++    *_q++ = (uint32_t)type;
++    *_q++ = (uint32_t)stride;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)pointer);
++}
++static void q3_glGetVertexAttribIiv(unsigned int index, unsigned int pname, int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)234 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetVertexAttribIuiv(unsigned int index, unsigned int pname, unsigned int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)235 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glVertexAttribI1i(unsigned int index, int x) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)236 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)x;
++}
++static void q3_glVertexAttribI2i(unsigned int index, int x, int y) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)237 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++}
++static void q3_glVertexAttribI3i(unsigned int index, int x, int y, int z) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)238 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)z;
++}
++static void q3_glVertexAttribI4i(unsigned int index, int x, int y, int z, int w) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)239 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)z;
++    *_q++ = (uint32_t)w;
++}
++static void q3_glVertexAttribI1ui(unsigned int index, unsigned int x) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)240 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)x;
++}
++static void q3_glVertexAttribI2ui(unsigned int index, unsigned int x, unsigned int y) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)241 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++}
++static void q3_glVertexAttribI3ui(unsigned int index, unsigned int x, unsigned int y, unsigned int z) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)242 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)z;
++}
++static void q3_glVertexAttribI4ui(unsigned int index, unsigned int x, unsigned int y, unsigned int z, unsigned int w) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)243 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)x;
++    *_q++ = (uint32_t)y;
++    *_q++ = (uint32_t)z;
++    *_q++ = (uint32_t)w;
++}
++static void q3_glVertexAttribI1iv(unsigned int index, const int * v) {
++    unsigned _b0 = v ? (unsigned)(1) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)244 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttribI2iv(unsigned int index, const int * v) {
++    unsigned _b0 = v ? (unsigned)(2) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)245 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttribI3iv(unsigned int index, const int * v) {
++    unsigned _b0 = v ? (unsigned)(3) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)246 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttribI4iv(unsigned int index, const int * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)247 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttribI1uiv(unsigned int index, const unsigned int * v) {
++    unsigned _b0 = v ? (unsigned)(1) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)248 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttribI2uiv(unsigned int index, const unsigned int * v) {
++    unsigned _b0 = v ? (unsigned)(2) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)249 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttribI3uiv(unsigned int index, const unsigned int * v) {
++    unsigned _b0 = v ? (unsigned)(3) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)250 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttribI4uiv(unsigned int index, const unsigned int * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)251 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttribI4bv(unsigned int index, const signed char * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 1u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)252 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttribI4sv(unsigned int index, const short * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 2u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)253 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttribI4ubv(unsigned int index, const unsigned char * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 1u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)254 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glVertexAttribI4usv(unsigned int index, const unsigned short * v) {
++    unsigned _b0 = v ? (unsigned)(4) * 2u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)255 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)v);
++    _q = qgl3_inline(_q, v, _b0);
++}
++static void q3_glGetUniformuiv(unsigned int program, int location, unsigned int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)256 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)location;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glBindFragDataLocation(unsigned int program, unsigned int color, const char * name) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)257 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)color;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)name);
++    qgl3_sync();
++}
++static int q3_glGetFragDataLocation(unsigned int program, const char * name) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)258 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)name);
++    return (int)qgl3_sync();
++}
++static void q3_glUniform1ui(int location, unsigned int v0) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)259 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)v0;
++}
++static void q3_glUniform2ui(int location, unsigned int v0, unsigned int v1) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)260 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)v0;
++    *_q++ = (uint32_t)v1;
++}
++static void q3_glUniform3ui(int location, unsigned int v0, unsigned int v1, unsigned int v2) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)261 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)v0;
++    *_q++ = (uint32_t)v1;
++    *_q++ = (uint32_t)v2;
++}
++static void q3_glUniform4ui(int location, unsigned int v0, unsigned int v1, unsigned int v2, unsigned int v3) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)262 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)v0;
++    *_q++ = (uint32_t)v1;
++    *_q++ = (uint32_t)v2;
++    *_q++ = (uint32_t)v3;
++}
++static void q3_glUniform1uiv(int location, int count, const unsigned int * value) {
++    unsigned _b0 = value ? (unsigned)(count*1) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)263 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniform2uiv(int location, int count, const unsigned int * value) {
++    unsigned _b0 = value ? (unsigned)(count*2) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)264 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniform3uiv(int location, int count, const unsigned int * value) {
++    unsigned _b0 = value ? (unsigned)(count*3) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)265 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glUniform4uiv(int location, int count, const unsigned int * value) {
++    unsigned _b0 = value ? (unsigned)(count*4) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)266 << 20) | _nw;
++    *_q++ = (uint32_t)location;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glTexParameterIiv(unsigned int target, unsigned int pname, const int * params) {
++    unsigned _b0 = params ? (unsigned)(PN(pname)) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)267 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    _q = qgl3_inline(_q, params, _b0);
++}
++static void q3_glTexParameterIuiv(unsigned int target, unsigned int pname, const unsigned int * params) {
++    unsigned _b0 = params ? (unsigned)(PN(pname)) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)268 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    _q = qgl3_inline(_q, params, _b0);
++}
++static void q3_glGetTexParameterIiv(unsigned int target, unsigned int pname, int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)269 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetTexParameterIuiv(unsigned int target, unsigned int pname, unsigned int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)270 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glClearBufferiv(unsigned int buffer, int drawbuffer, const int * value) {
++    unsigned _b0 = value ? (unsigned)((buffer == 0x1800 ? 4 : 1)) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)271 << 20) | _nw;
++    *_q++ = (uint32_t)buffer;
++    *_q++ = (uint32_t)drawbuffer;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glClearBufferuiv(unsigned int buffer, int drawbuffer, const unsigned int * value) {
++    unsigned _b0 = value ? (unsigned)((buffer == 0x1800 ? 4 : 1)) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)272 << 20) | _nw;
++    *_q++ = (uint32_t)buffer;
++    *_q++ = (uint32_t)drawbuffer;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glClearBufferfv(unsigned int buffer, int drawbuffer, const float * value) {
++    unsigned _b0 = value ? (unsigned)((buffer == 0x1800 ? 4 : 1)) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)273 << 20) | _nw;
++    *_q++ = (uint32_t)buffer;
++    *_q++ = (uint32_t)drawbuffer;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)value);
++    _q = qgl3_inline(_q, value, _b0);
++}
++static void q3_glClearBufferfi(unsigned int buffer, int drawbuffer, float depth, int stencil) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)274 << 20) | _nw;
++    *_q++ = (uint32_t)buffer;
++    *_q++ = (uint32_t)drawbuffer;
++    *_q++ = qgl3_f2u(depth);
++    *_q++ = (uint32_t)stencil;
++}
++const unsigned char * q3_glGetStringi(unsigned int name, unsigned int index);
++static unsigned char q3_glIsRenderbuffer(unsigned int renderbuffer) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)276 << 20) | _nw;
++    *_q++ = (uint32_t)renderbuffer;
++    return (unsigned char)qgl3_sync();
++}
++static void q3_glBindRenderbuffer(unsigned int target, unsigned int renderbuffer) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)277 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)renderbuffer;
++}
++static void q3_glDeleteRenderbuffers(int n, const unsigned int * renderbuffers) {
++    unsigned _b0 = renderbuffers ? (unsigned)(n) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)278 << 20) | _nw;
++    *_q++ = (uint32_t)n;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)renderbuffers);
++    _q = qgl3_inline(_q, renderbuffers, _b0);
++}
++static void q3_glGenRenderbuffers(int n, unsigned int * renderbuffers) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)279 << 20) | _nw;
++    *_q++ = (uint32_t)n;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)renderbuffers);
++    qgl3_sync();
++}
++static void q3_glRenderbufferStorage(unsigned int target, unsigned int internalformat, int width, int height) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)280 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)internalformat;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++}
++static void q3_glGetRenderbufferParameteriv(unsigned int target, unsigned int pname, int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)281 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static unsigned char q3_glIsFramebuffer(unsigned int framebuffer) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)282 << 20) | _nw;
++    *_q++ = (uint32_t)framebuffer;
++    return (unsigned char)qgl3_sync();
++}
++static void q3_glBindFramebuffer(unsigned int target, unsigned int framebuffer) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)283 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)framebuffer;
++    qgl3_sync();
++}
++static void q3_glDeleteFramebuffers(int n, const unsigned int * framebuffers) {
++    unsigned _b0 = framebuffers ? (unsigned)(n) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)284 << 20) | _nw;
++    *_q++ = (uint32_t)n;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)framebuffers);
++    _q = qgl3_inline(_q, framebuffers, _b0);
++}
++static void q3_glGenFramebuffers(int n, unsigned int * framebuffers) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)285 << 20) | _nw;
++    *_q++ = (uint32_t)n;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)framebuffers);
++    qgl3_sync();
++}
++static unsigned int q3_glCheckFramebufferStatus(unsigned int target) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)286 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    return (unsigned int)qgl3_sync();
++}
++static void q3_glFramebufferTexture1D(unsigned int target, unsigned int attachment, unsigned int textarget, unsigned int texture, int level) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)287 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)attachment;
++    *_q++ = (uint32_t)textarget;
++    *_q++ = (uint32_t)texture;
++    *_q++ = (uint32_t)level;
++}
++static void q3_glFramebufferTexture2D(unsigned int target, unsigned int attachment, unsigned int textarget, unsigned int texture, int level) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)288 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)attachment;
++    *_q++ = (uint32_t)textarget;
++    *_q++ = (uint32_t)texture;
++    *_q++ = (uint32_t)level;
++}
++static void q3_glFramebufferTexture3D(unsigned int target, unsigned int attachment, unsigned int textarget, unsigned int texture, int level, int zoffset) {
++    unsigned _nw = 6;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)289 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)attachment;
++    *_q++ = (uint32_t)textarget;
++    *_q++ = (uint32_t)texture;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)zoffset;
++}
++static void q3_glFramebufferRenderbuffer(unsigned int target, unsigned int attachment, unsigned int renderbuffertarget, unsigned int renderbuffer) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)290 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)attachment;
++    *_q++ = (uint32_t)renderbuffertarget;
++    *_q++ = (uint32_t)renderbuffer;
++}
++static void q3_glGetFramebufferAttachmentParameteriv(unsigned int target, unsigned int attachment, unsigned int pname, int * params) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)291 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)attachment;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGenerateMipmap(unsigned int target) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)292 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++}
++static void q3_glBlitFramebuffer(int srcX0, int srcY0, int srcX1, int srcY1, int dstX0, int dstY0, int dstX1, int dstY1, unsigned int mask, unsigned int filter) {
++    unsigned _nw = 10;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)293 << 20) | _nw;
++    *_q++ = (uint32_t)srcX0;
++    *_q++ = (uint32_t)srcY0;
++    *_q++ = (uint32_t)srcX1;
++    *_q++ = (uint32_t)srcY1;
++    *_q++ = (uint32_t)dstX0;
++    *_q++ = (uint32_t)dstY0;
++    *_q++ = (uint32_t)dstX1;
++    *_q++ = (uint32_t)dstY1;
++    *_q++ = (uint32_t)mask;
++    *_q++ = (uint32_t)filter;
++}
++static void q3_glRenderbufferStorageMultisample(unsigned int target, int samples, unsigned int internalformat, int width, int height) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)294 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)samples;
++    *_q++ = (uint32_t)internalformat;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++}
++static void q3_glFramebufferTextureLayer(unsigned int target, unsigned int attachment, unsigned int texture, int level, int layer) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)295 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)attachment;
++    *_q++ = (uint32_t)texture;
++    *_q++ = (uint32_t)level;
++    *_q++ = (uint32_t)layer;
++}
++static void * q3_glMapBufferRange(unsigned int target, long offset, long length, unsigned int access) { qgl3_unsupported("glMapBufferRange"); return 0; }
++static void q3_glFlushMappedBufferRange(unsigned int target, long offset, long length) { qgl3_unsupported("glFlushMappedBufferRange"); }
++static void q3_glBindVertexArray(unsigned int array) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)298 << 20) | _nw;
++    *_q++ = (uint32_t)array;
++}
++static void q3_glDeleteVertexArrays(int n, const unsigned int * arrays) {
++    unsigned _b0 = arrays ? (unsigned)(n) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)299 << 20) | _nw;
++    *_q++ = (uint32_t)n;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)arrays);
++    _q = qgl3_inline(_q, arrays, _b0);
++}
++static void q3_glGenVertexArrays(int n, unsigned int * arrays) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)300 << 20) | _nw;
++    *_q++ = (uint32_t)n;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)arrays);
++    qgl3_sync();
++}
++static unsigned char q3_glIsVertexArray(unsigned int array) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)301 << 20) | _nw;
++    *_q++ = (uint32_t)array;
++    return (unsigned char)qgl3_sync();
++}
++static void q3_glDrawArraysInstanced(unsigned int mode, int first, int count, int instancecount) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)302 << 20) | _nw;
++    *_q++ = (uint32_t)mode;
++    *_q++ = (uint32_t)first;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)instancecount;
++}
++static void q3_glDrawElementsInstanced(unsigned int mode, int count, unsigned int type, const void * indices, int instancecount) {
++    unsigned _nw = 6;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)303 << 20) | _nw;
++    *_q++ = (uint32_t)mode;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)indices);
++    *_q++ = (uint32_t)instancecount;
++}
++static void q3_glTexBuffer(unsigned int target, unsigned int internalformat, unsigned int buffer) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)304 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)internalformat;
++    *_q++ = (uint32_t)buffer;
++}
++static void q3_glPrimitiveRestartIndex(unsigned int index) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)305 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++}
++static void q3_glCopyBufferSubData(unsigned int readTarget, unsigned int writeTarget, long readOffset, long writeOffset, long size) {
++    unsigned _nw = 8;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)306 << 20) | _nw;
++    *_q++ = (uint32_t)readTarget;
++    *_q++ = (uint32_t)writeTarget;
++    _q = qgl3_64(_q, (unsigned long long)readOffset);
++    _q = qgl3_64(_q, (unsigned long long)writeOffset);
++    _q = qgl3_64(_q, (unsigned long long)size);
++}
++static void q3_glGetUniformIndices(unsigned int program, int uniformCount, const char * * uniformNames, unsigned int * uniformIndices) { qgl3_unsupported("glGetUniformIndices"); }
++static void q3_glGetActiveUniformsiv(unsigned int program, int uniformCount, const unsigned int * uniformIndices, unsigned int pname, int * params) { qgl3_unsupported("glGetActiveUniformsiv"); }
++static void q3_glGetActiveUniformName(unsigned int program, unsigned int uniformIndex, int bufSize, int * length, char * uniformName) {
++    unsigned _nw = 7;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)309 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)uniformIndex;
++    *_q++ = (uint32_t)bufSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)length);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)uniformName);
++    qgl3_sync();
++}
++static unsigned int q3_glGetUniformBlockIndex(unsigned int program, const char * uniformBlockName) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)310 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)uniformBlockName);
++    return (unsigned int)qgl3_sync();
++}
++static void q3_glGetActiveUniformBlockiv(unsigned int program, unsigned int uniformBlockIndex, unsigned int pname, int * params) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)311 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)uniformBlockIndex;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetActiveUniformBlockName(unsigned int program, unsigned int uniformBlockIndex, int bufSize, int * length, char * uniformBlockName) {
++    unsigned _nw = 7;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)312 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)uniformBlockIndex;
++    *_q++ = (uint32_t)bufSize;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)length);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)uniformBlockName);
++    qgl3_sync();
++}
++static void q3_glUniformBlockBinding(unsigned int program, unsigned int uniformBlockIndex, unsigned int uniformBlockBinding) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)313 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)uniformBlockIndex;
++    *_q++ = (uint32_t)uniformBlockBinding;
++}
++static void q3_glDrawElementsBaseVertex(unsigned int mode, int count, unsigned int type, const void * indices, int basevertex) {
++    unsigned _nw = 6;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)314 << 20) | _nw;
++    *_q++ = (uint32_t)mode;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)indices);
++    *_q++ = (uint32_t)basevertex;
++}
++static void q3_glDrawRangeElementsBaseVertex(unsigned int mode, unsigned int start, unsigned int end, int count, unsigned int type, const void * indices, int basevertex) {
++    unsigned _nw = 8;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)315 << 20) | _nw;
++    *_q++ = (uint32_t)mode;
++    *_q++ = (uint32_t)start;
++    *_q++ = (uint32_t)end;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)indices);
++    *_q++ = (uint32_t)basevertex;
++}
++static void q3_glDrawElementsInstancedBaseVertex(unsigned int mode, int count, unsigned int type, const void * indices, int instancecount, int basevertex) {
++    unsigned _nw = 7;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)316 << 20) | _nw;
++    *_q++ = (uint32_t)mode;
++    *_q++ = (uint32_t)count;
++    *_q++ = (uint32_t)type;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)indices);
++    *_q++ = (uint32_t)instancecount;
++    *_q++ = (uint32_t)basevertex;
++}
++static void q3_glMultiDrawElementsBaseVertex(unsigned int mode, const int * count, unsigned int type, const void * * indices, int drawcount, const int * basevertex) { qgl3_unsupported("glMultiDrawElementsBaseVertex"); }
++static void q3_glProvokingVertex(unsigned int mode) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)318 << 20) | _nw;
++    *_q++ = (uint32_t)mode;
++}
++static void * q3_glFenceSync(unsigned int condition, unsigned int flags) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)319 << 20) | _nw;
++    *_q++ = (uint32_t)condition;
++    *_q++ = (uint32_t)flags;
++    return (void *)(unsigned long)qgl3_sync();
++}
++static unsigned char q3_glIsSync(void * sync) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)320 << 20) | _nw;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)sync);
++    return (unsigned char)qgl3_sync();
++}
++static void q3_glDeleteSync(void * sync) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)321 << 20) | _nw;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)sync);
++}
++static unsigned int q3_glClientWaitSync(void * sync, unsigned int flags, unsigned long long timeout) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)322 << 20) | _nw;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)sync);
++    *_q++ = (uint32_t)flags;
++    _q = qgl3_64(_q, (unsigned long long)timeout);
++    return (unsigned int)qgl3_sync();
++}
++static void q3_glWaitSync(void * sync, unsigned int flags, unsigned long long timeout) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)323 << 20) | _nw;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)sync);
++    *_q++ = (uint32_t)flags;
++    _q = qgl3_64(_q, (unsigned long long)timeout);
++}
++static void q3_glGetInteger64v(unsigned int pname, long long * data) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)324 << 20) | _nw;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void q3_glGetSynciv(void * sync, unsigned int pname, int count, int * length, int * values) {
++    unsigned _nw = 8;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)325 << 20) | _nw;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)sync);
++    *_q++ = (uint32_t)pname;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)length);
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)values);
++    qgl3_sync();
++}
++static void q3_glGetInteger64i_v(unsigned int target, unsigned int index, long long * data) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)326 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)data);
++    qgl3_sync();
++}
++static void q3_glGetBufferParameteri64v(unsigned int target, unsigned int pname, long long * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)327 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glFramebufferTexture(unsigned int target, unsigned int attachment, unsigned int texture, int level) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)328 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)attachment;
++    *_q++ = (uint32_t)texture;
++    *_q++ = (uint32_t)level;
++}
++static void q3_glTexImage2DMultisample(unsigned int target, int samples, unsigned int internalformat, int width, int height, unsigned char fixedsamplelocations) {
++    unsigned _nw = 6;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)329 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)samples;
++    *_q++ = (uint32_t)internalformat;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++    *_q++ = (uint32_t)fixedsamplelocations;
++}
++static void q3_glTexImage3DMultisample(unsigned int target, int samples, unsigned int internalformat, int width, int height, int depth, unsigned char fixedsamplelocations) {
++    unsigned _nw = 7;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)330 << 20) | _nw;
++    *_q++ = (uint32_t)target;
++    *_q++ = (uint32_t)samples;
++    *_q++ = (uint32_t)internalformat;
++    *_q++ = (uint32_t)width;
++    *_q++ = (uint32_t)height;
++    *_q++ = (uint32_t)depth;
++    *_q++ = (uint32_t)fixedsamplelocations;
++}
++static void q3_glGetMultisamplefv(unsigned int pname, unsigned int index, float * val) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)331 << 20) | _nw;
++    *_q++ = (uint32_t)pname;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)val);
++    qgl3_sync();
++}
++static void q3_glSampleMaski(unsigned int maskNumber, unsigned int mask) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)332 << 20) | _nw;
++    *_q++ = (uint32_t)maskNumber;
++    *_q++ = (uint32_t)mask;
++}
++static void q3_glBindFragDataLocationIndexed(unsigned int program, unsigned int colorNumber, unsigned int index, const char * name) {
++    unsigned _nw = 5;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)333 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    *_q++ = (uint32_t)colorNumber;
++    *_q++ = (uint32_t)index;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)name);
++    qgl3_sync();
++}
++static int q3_glGetFragDataIndex(unsigned int program, const char * name) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)334 << 20) | _nw;
++    *_q++ = (uint32_t)program;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)name);
++    return (int)qgl3_sync();
++}
++static void q3_glGenSamplers(int count, unsigned int * samplers) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)335 << 20) | _nw;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)samplers);
++    qgl3_sync();
++}
++static void q3_glDeleteSamplers(int count, const unsigned int * samplers) {
++    unsigned _b0 = samplers ? (unsigned)(count) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 3 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)336 << 20) | _nw;
++    *_q++ = (uint32_t)count;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)samplers);
++    _q = qgl3_inline(_q, samplers, _b0);
++}
++static unsigned char q3_glIsSampler(unsigned int sampler) {
++    unsigned _nw = 1;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)337 << 20) | _nw;
++    *_q++ = (uint32_t)sampler;
++    return (unsigned char)qgl3_sync();
++}
++static void q3_glBindSampler(unsigned int unit, unsigned int sampler) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)338 << 20) | _nw;
++    *_q++ = (uint32_t)unit;
++    *_q++ = (uint32_t)sampler;
++}
++static void q3_glSamplerParameteri(unsigned int sampler, unsigned int pname, int param) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)339 << 20) | _nw;
++    *_q++ = (uint32_t)sampler;
++    *_q++ = (uint32_t)pname;
++    *_q++ = (uint32_t)param;
++}
++static void q3_glSamplerParameteriv(unsigned int sampler, unsigned int pname, const int * param) {
++    unsigned _b0 = param ? (unsigned)(PN(pname)) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)340 << 20) | _nw;
++    *_q++ = (uint32_t)sampler;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)param);
++    _q = qgl3_inline(_q, param, _b0);
++}
++static void q3_glSamplerParameterf(unsigned int sampler, unsigned int pname, float param) {
++    unsigned _nw = 3;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)341 << 20) | _nw;
++    *_q++ = (uint32_t)sampler;
++    *_q++ = (uint32_t)pname;
++    *_q++ = qgl3_f2u(param);
++}
++static void q3_glSamplerParameterfv(unsigned int sampler, unsigned int pname, const float * param) {
++    unsigned _b0 = param ? (unsigned)(PN(pname)) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)342 << 20) | _nw;
++    *_q++ = (uint32_t)sampler;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)param);
++    _q = qgl3_inline(_q, param, _b0);
++}
++static void q3_glSamplerParameterIiv(unsigned int sampler, unsigned int pname, const int * param) {
++    unsigned _b0 = param ? (unsigned)(PN(pname)) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)343 << 20) | _nw;
++    *_q++ = (uint32_t)sampler;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)param);
++    _q = qgl3_inline(_q, param, _b0);
++}
++static void q3_glSamplerParameterIuiv(unsigned int sampler, unsigned int pname, const unsigned int * param) {
++    unsigned _b0 = param ? (unsigned)(PN(pname)) * 4u : 0xFFFFFFFFu;
++    unsigned _nw = 4 + 1 + QGL3_W(_b0);
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)344 << 20) | _nw;
++    *_q++ = (uint32_t)sampler;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)param);
++    _q = qgl3_inline(_q, param, _b0);
++}
++static void q3_glGetSamplerParameteriv(unsigned int sampler, unsigned int pname, int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)345 << 20) | _nw;
++    *_q++ = (uint32_t)sampler;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetSamplerParameterIiv(unsigned int sampler, unsigned int pname, int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)346 << 20) | _nw;
++    *_q++ = (uint32_t)sampler;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetSamplerParameterfv(unsigned int sampler, unsigned int pname, float * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)347 << 20) | _nw;
++    *_q++ = (uint32_t)sampler;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetSamplerParameterIuiv(unsigned int sampler, unsigned int pname, unsigned int * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)348 << 20) | _nw;
++    *_q++ = (uint32_t)sampler;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glQueryCounter(unsigned int id, unsigned int target) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)349 << 20) | _nw;
++    *_q++ = (uint32_t)id;
++    *_q++ = (uint32_t)target;
++}
++static void q3_glGetQueryObjecti64v(unsigned int id, unsigned int pname, long long * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)350 << 20) | _nw;
++    *_q++ = (uint32_t)id;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glGetQueryObjectui64v(unsigned int id, unsigned int pname, unsigned long long * params) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)351 << 20) | _nw;
++    *_q++ = (uint32_t)id;
++    *_q++ = (uint32_t)pname;
++    _q = qgl3_64(_q, (unsigned long long)(unsigned long)params);
++    qgl3_sync();
++}
++static void q3_glVertexAttribDivisor(unsigned int index, unsigned int divisor) {
++    unsigned _nw = 2;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)352 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)divisor;
++}
++static void q3_glVertexAttribP1ui(unsigned int index, unsigned int type, unsigned char normalized, unsigned int value) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)353 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)type;
++    *_q++ = (uint32_t)normalized;
++    *_q++ = (uint32_t)value;
++}
++static void q3_glVertexAttribP1uiv(unsigned int index, unsigned int type, unsigned char normalized, const unsigned int * value) { qgl3_unsupported("glVertexAttribP1uiv"); }
++static void q3_glVertexAttribP2ui(unsigned int index, unsigned int type, unsigned char normalized, unsigned int value) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)355 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)type;
++    *_q++ = (uint32_t)normalized;
++    *_q++ = (uint32_t)value;
++}
++static void q3_glVertexAttribP2uiv(unsigned int index, unsigned int type, unsigned char normalized, const unsigned int * value) { qgl3_unsupported("glVertexAttribP2uiv"); }
++static void q3_glVertexAttribP3ui(unsigned int index, unsigned int type, unsigned char normalized, unsigned int value) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)357 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)type;
++    *_q++ = (uint32_t)normalized;
++    *_q++ = (uint32_t)value;
++}
++static void q3_glVertexAttribP3uiv(unsigned int index, unsigned int type, unsigned char normalized, const unsigned int * value) { qgl3_unsupported("glVertexAttribP3uiv"); }
++static void q3_glVertexAttribP4ui(unsigned int index, unsigned int type, unsigned char normalized, unsigned int value) {
++    unsigned _nw = 4;
++    uint32_t *_q = qgl3_put(_nw + 1);
++    *_q++ = ((uint32_t)359 << 20) | _nw;
++    *_q++ = (uint32_t)index;
++    *_q++ = (uint32_t)type;
++    *_q++ = (uint32_t)normalized;
++    *_q++ = (uint32_t)value;
++}
++static void q3_glVertexAttribP4uiv(unsigned int index, unsigned int type, unsigned char normalized, const unsigned int * value) { qgl3_unsupported("glVertexAttribP4uiv"); }
++const struct qgl3_name qgl3_names[] = {
++    {"glActiveTexture", (void *)q3_glActiveTexture},
++    {"glAttachShader", (void *)q3_glAttachShader},
++    {"glBeginConditionalRender", (void *)q3_glBeginConditionalRender},
++    {"glBeginQuery", (void *)q3_glBeginQuery},
++    {"glBeginTransformFeedback", (void *)q3_glBeginTransformFeedback},
++    {"glBindAttribLocation", (void *)q3_glBindAttribLocation},
++    {"glBindBuffer", (void *)q3_glBindBuffer},
++    {"glBindBufferBase", (void *)q3_glBindBufferBase},
++    {"glBindBufferRange", (void *)q3_glBindBufferRange},
++    {"glBindFragDataLocation", (void *)q3_glBindFragDataLocation},
++    {"glBindFragDataLocationIndexed", (void *)q3_glBindFragDataLocationIndexed},
++    {"glBindFramebuffer", (void *)q3_glBindFramebuffer},
++    {"glBindRenderbuffer", (void *)q3_glBindRenderbuffer},
++    {"glBindSampler", (void *)q3_glBindSampler},
++    {"glBindTexture", (void *)q3_glBindTexture},
++    {"glBindVertexArray", (void *)q3_glBindVertexArray},
++    {"glBlendColor", (void *)q3_glBlendColor},
++    {"glBlendEquation", (void *)q3_glBlendEquation},
++    {"glBlendEquationSeparate", (void *)q3_glBlendEquationSeparate},
++    {"glBlendFunc", (void *)q3_glBlendFunc},
++    {"glBlendFuncSeparate", (void *)q3_glBlendFuncSeparate},
++    {"glBlitFramebuffer", (void *)q3_glBlitFramebuffer},
++    {"glBufferData", (void *)q3_glBufferData},
++    {"glBufferSubData", (void *)q3_glBufferSubData},
++    {"glCheckFramebufferStatus", (void *)q3_glCheckFramebufferStatus},
++    {"glClampColor", (void *)q3_glClampColor},
++    {"glClear", (void *)q3_glClear},
++    {"glClearBufferfi", (void *)q3_glClearBufferfi},
++    {"glClearBufferfv", (void *)q3_glClearBufferfv},
++    {"glClearBufferiv", (void *)q3_glClearBufferiv},
++    {"glClearBufferuiv", (void *)q3_glClearBufferuiv},
++    {"glClearColor", (void *)q3_glClearColor},
++    {"glClearDepth", (void *)q3_glClearDepth},
++    {"glClearStencil", (void *)q3_glClearStencil},
++    {"glClientWaitSync", (void *)q3_glClientWaitSync},
++    {"glColorMask", (void *)q3_glColorMask},
++    {"glColorMaski", (void *)q3_glColorMaski},
++    {"glCompileShader", (void *)q3_glCompileShader},
++    {"glCompressedTexImage1D", (void *)q3_glCompressedTexImage1D},
++    {"glCompressedTexImage2D", (void *)q3_glCompressedTexImage2D},
++    {"glCompressedTexImage3D", (void *)q3_glCompressedTexImage3D},
++    {"glCompressedTexSubImage1D", (void *)q3_glCompressedTexSubImage1D},
++    {"glCompressedTexSubImage2D", (void *)q3_glCompressedTexSubImage2D},
++    {"glCompressedTexSubImage3D", (void *)q3_glCompressedTexSubImage3D},
++    {"glCopyBufferSubData", (void *)q3_glCopyBufferSubData},
++    {"glCopyTexImage1D", (void *)q3_glCopyTexImage1D},
++    {"glCopyTexImage2D", (void *)q3_glCopyTexImage2D},
++    {"glCopyTexSubImage1D", (void *)q3_glCopyTexSubImage1D},
++    {"glCopyTexSubImage2D", (void *)q3_glCopyTexSubImage2D},
++    {"glCopyTexSubImage3D", (void *)q3_glCopyTexSubImage3D},
++    {"glCreateProgram", (void *)q3_glCreateProgram},
++    {"glCreateShader", (void *)q3_glCreateShader},
++    {"glCullFace", (void *)q3_glCullFace},
++    {"glDeleteBuffers", (void *)q3_glDeleteBuffers},
++    {"glDeleteFramebuffers", (void *)q3_glDeleteFramebuffers},
++    {"glDeleteProgram", (void *)q3_glDeleteProgram},
++    {"glDeleteQueries", (void *)q3_glDeleteQueries},
++    {"glDeleteRenderbuffers", (void *)q3_glDeleteRenderbuffers},
++    {"glDeleteSamplers", (void *)q3_glDeleteSamplers},
++    {"glDeleteShader", (void *)q3_glDeleteShader},
++    {"glDeleteSync", (void *)q3_glDeleteSync},
++    {"glDeleteTextures", (void *)q3_glDeleteTextures},
++    {"glDeleteVertexArrays", (void *)q3_glDeleteVertexArrays},
++    {"glDepthFunc", (void *)q3_glDepthFunc},
++    {"glDepthMask", (void *)q3_glDepthMask},
++    {"glDepthRange", (void *)q3_glDepthRange},
++    {"glDetachShader", (void *)q3_glDetachShader},
++    {"glDisable", (void *)q3_glDisable},
++    {"glDisableVertexAttribArray", (void *)q3_glDisableVertexAttribArray},
++    {"glDisablei", (void *)q3_glDisablei},
++    {"glDrawArrays", (void *)q3_glDrawArrays},
++    {"glDrawArraysInstanced", (void *)q3_glDrawArraysInstanced},
++    {"glDrawBuffer", (void *)q3_glDrawBuffer},
++    {"glDrawBuffers", (void *)q3_glDrawBuffers},
++    {"glDrawElements", (void *)q3_glDrawElements},
++    {"glDrawElementsBaseVertex", (void *)q3_glDrawElementsBaseVertex},
++    {"glDrawElementsInstanced", (void *)q3_glDrawElementsInstanced},
++    {"glDrawElementsInstancedBaseVertex", (void *)q3_glDrawElementsInstancedBaseVertex},
++    {"glDrawRangeElements", (void *)q3_glDrawRangeElements},
++    {"glDrawRangeElementsBaseVertex", (void *)q3_glDrawRangeElementsBaseVertex},
++    {"glEnable", (void *)q3_glEnable},
++    {"glEnableVertexAttribArray", (void *)q3_glEnableVertexAttribArray},
++    {"glEnablei", (void *)q3_glEnablei},
++    {"glEndConditionalRender", (void *)q3_glEndConditionalRender},
++    {"glEndQuery", (void *)q3_glEndQuery},
++    {"glEndTransformFeedback", (void *)q3_glEndTransformFeedback},
++    {"glFenceSync", (void *)q3_glFenceSync},
++    {"glFinish", (void *)q3_glFinish},
++    {"glFlush", (void *)q3_glFlush},
++    {"glFlushMappedBufferRange", (void *)q3_glFlushMappedBufferRange},
++    {"glFramebufferRenderbuffer", (void *)q3_glFramebufferRenderbuffer},
++    {"glFramebufferTexture", (void *)q3_glFramebufferTexture},
++    {"glFramebufferTexture1D", (void *)q3_glFramebufferTexture1D},
++    {"glFramebufferTexture2D", (void *)q3_glFramebufferTexture2D},
++    {"glFramebufferTexture3D", (void *)q3_glFramebufferTexture3D},
++    {"glFramebufferTextureLayer", (void *)q3_glFramebufferTextureLayer},
++    {"glFrontFace", (void *)q3_glFrontFace},
++    {"glGenBuffers", (void *)q3_glGenBuffers},
++    {"glGenFramebuffers", (void *)q3_glGenFramebuffers},
++    {"glGenQueries", (void *)q3_glGenQueries},
++    {"glGenRenderbuffers", (void *)q3_glGenRenderbuffers},
++    {"glGenSamplers", (void *)q3_glGenSamplers},
++    {"glGenTextures", (void *)q3_glGenTextures},
++    {"glGenVertexArrays", (void *)q3_glGenVertexArrays},
++    {"glGenerateMipmap", (void *)q3_glGenerateMipmap},
++    {"glGetActiveAttrib", (void *)q3_glGetActiveAttrib},
++    {"glGetActiveUniform", (void *)q3_glGetActiveUniform},
++    {"glGetActiveUniformBlockName", (void *)q3_glGetActiveUniformBlockName},
++    {"glGetActiveUniformBlockiv", (void *)q3_glGetActiveUniformBlockiv},
++    {"glGetActiveUniformName", (void *)q3_glGetActiveUniformName},
++    {"glGetActiveUniformsiv", (void *)q3_glGetActiveUniformsiv},
++    {"glGetAttachedShaders", (void *)q3_glGetAttachedShaders},
++    {"glGetAttribLocation", (void *)q3_glGetAttribLocation},
++    {"glGetBooleani_v", (void *)q3_glGetBooleani_v},
++    {"glGetBooleanv", (void *)q3_glGetBooleanv},
++    {"glGetBufferParameteri64v", (void *)q3_glGetBufferParameteri64v},
++    {"glGetBufferParameteriv", (void *)q3_glGetBufferParameteriv},
++    {"glGetBufferPointerv", (void *)q3_glGetBufferPointerv},
++    {"glGetBufferSubData", (void *)q3_glGetBufferSubData},
++    {"glGetCompressedTexImage", (void *)q3_glGetCompressedTexImage},
++    {"glGetDoublev", (void *)q3_glGetDoublev},
++    {"glGetError", (void *)q3_glGetError},
++    {"glGetFloatv", (void *)q3_glGetFloatv},
++    {"glGetFragDataIndex", (void *)q3_glGetFragDataIndex},
++    {"glGetFragDataLocation", (void *)q3_glGetFragDataLocation},
++    {"glGetFramebufferAttachmentParameteriv", (void *)q3_glGetFramebufferAttachmentParameteriv},
++    {"glGetInteger64i_v", (void *)q3_glGetInteger64i_v},
++    {"glGetInteger64v", (void *)q3_glGetInteger64v},
++    {"glGetIntegeri_v", (void *)q3_glGetIntegeri_v},
++    {"glGetIntegerv", (void *)q3_glGetIntegerv},
++    {"glGetMultisamplefv", (void *)q3_glGetMultisamplefv},
++    {"glGetPointerv", (void *)q3_glGetPointerv},
++    {"glGetProgramInfoLog", (void *)q3_glGetProgramInfoLog},
++    {"glGetProgramiv", (void *)q3_glGetProgramiv},
++    {"glGetQueryObjecti64v", (void *)q3_glGetQueryObjecti64v},
++    {"glGetQueryObjectiv", (void *)q3_glGetQueryObjectiv},
++    {"glGetQueryObjectui64v", (void *)q3_glGetQueryObjectui64v},
++    {"glGetQueryObjectuiv", (void *)q3_glGetQueryObjectuiv},
++    {"glGetQueryiv", (void *)q3_glGetQueryiv},
++    {"glGetRenderbufferParameteriv", (void *)q3_glGetRenderbufferParameteriv},
++    {"glGetSamplerParameterIiv", (void *)q3_glGetSamplerParameterIiv},
++    {"glGetSamplerParameterIuiv", (void *)q3_glGetSamplerParameterIuiv},
++    {"glGetSamplerParameterfv", (void *)q3_glGetSamplerParameterfv},
++    {"glGetSamplerParameteriv", (void *)q3_glGetSamplerParameteriv},
++    {"glGetShaderInfoLog", (void *)q3_glGetShaderInfoLog},
++    {"glGetShaderSource", (void *)q3_glGetShaderSource},
++    {"glGetShaderiv", (void *)q3_glGetShaderiv},
++    {"glGetString", (void *)q3_glGetString},
++    {"glGetStringi", (void *)q3_glGetStringi},
++    {"glGetSynciv", (void *)q3_glGetSynciv},
++    {"glGetTexImage", (void *)q3_glGetTexImage},
++    {"glGetTexLevelParameterfv", (void *)q3_glGetTexLevelParameterfv},
++    {"glGetTexLevelParameteriv", (void *)q3_glGetTexLevelParameteriv},
++    {"glGetTexParameterIiv", (void *)q3_glGetTexParameterIiv},
++    {"glGetTexParameterIuiv", (void *)q3_glGetTexParameterIuiv},
++    {"glGetTexParameterfv", (void *)q3_glGetTexParameterfv},
++    {"glGetTexParameteriv", (void *)q3_glGetTexParameteriv},
++    {"glGetTransformFeedbackVarying", (void *)q3_glGetTransformFeedbackVarying},
++    {"glGetUniformBlockIndex", (void *)q3_glGetUniformBlockIndex},
++    {"glGetUniformIndices", (void *)q3_glGetUniformIndices},
++    {"glGetUniformLocation", (void *)q3_glGetUniformLocation},
++    {"glGetUniformfv", (void *)q3_glGetUniformfv},
++    {"glGetUniformiv", (void *)q3_glGetUniformiv},
++    {"glGetUniformuiv", (void *)q3_glGetUniformuiv},
++    {"glGetVertexAttribIiv", (void *)q3_glGetVertexAttribIiv},
++    {"glGetVertexAttribIuiv", (void *)q3_glGetVertexAttribIuiv},
++    {"glGetVertexAttribPointerv", (void *)q3_glGetVertexAttribPointerv},
++    {"glGetVertexAttribdv", (void *)q3_glGetVertexAttribdv},
++    {"glGetVertexAttribfv", (void *)q3_glGetVertexAttribfv},
++    {"glGetVertexAttribiv", (void *)q3_glGetVertexAttribiv},
++    {"glHint", (void *)q3_glHint},
++    {"glIsBuffer", (void *)q3_glIsBuffer},
++    {"glIsEnabled", (void *)q3_glIsEnabled},
++    {"glIsEnabledi", (void *)q3_glIsEnabledi},
++    {"glIsFramebuffer", (void *)q3_glIsFramebuffer},
++    {"glIsProgram", (void *)q3_glIsProgram},
++    {"glIsQuery", (void *)q3_glIsQuery},
++    {"glIsRenderbuffer", (void *)q3_glIsRenderbuffer},
++    {"glIsSampler", (void *)q3_glIsSampler},
++    {"glIsShader", (void *)q3_glIsShader},
++    {"glIsSync", (void *)q3_glIsSync},
++    {"glIsTexture", (void *)q3_glIsTexture},
++    {"glIsVertexArray", (void *)q3_glIsVertexArray},
++    {"glLineWidth", (void *)q3_glLineWidth},
++    {"glLinkProgram", (void *)q3_glLinkProgram},
++    {"glLogicOp", (void *)q3_glLogicOp},
++    {"glMapBuffer", (void *)q3_glMapBuffer},
++    {"glMapBufferRange", (void *)q3_glMapBufferRange},
++    {"glMultiDrawArrays", (void *)q3_glMultiDrawArrays},
++    {"glMultiDrawElements", (void *)q3_glMultiDrawElements},
++    {"glMultiDrawElementsBaseVertex", (void *)q3_glMultiDrawElementsBaseVertex},
++    {"glPixelStoref", (void *)q3_glPixelStoref},
++    {"glPixelStorei", (void *)q3_glPixelStorei},
++    {"glPointParameterf", (void *)q3_glPointParameterf},
++    {"glPointParameterfv", (void *)q3_glPointParameterfv},
++    {"glPointParameteri", (void *)q3_glPointParameteri},
++    {"glPointParameteriv", (void *)q3_glPointParameteriv},
++    {"glPointSize", (void *)q3_glPointSize},
++    {"glPolygonMode", (void *)q3_glPolygonMode},
++    {"glPolygonOffset", (void *)q3_glPolygonOffset},
++    {"glPrimitiveRestartIndex", (void *)q3_glPrimitiveRestartIndex},
++    {"glProvokingVertex", (void *)q3_glProvokingVertex},
++    {"glQueryCounter", (void *)q3_glQueryCounter},
++    {"glReadBuffer", (void *)q3_glReadBuffer},
++    {"glReadPixels", (void *)q3_glReadPixels},
++    {"glRenderbufferStorage", (void *)q3_glRenderbufferStorage},
++    {"glRenderbufferStorageMultisample", (void *)q3_glRenderbufferStorageMultisample},
++    {"glSampleCoverage", (void *)q3_glSampleCoverage},
++    {"glSampleMaski", (void *)q3_glSampleMaski},
++    {"glSamplerParameterIiv", (void *)q3_glSamplerParameterIiv},
++    {"glSamplerParameterIuiv", (void *)q3_glSamplerParameterIuiv},
++    {"glSamplerParameterf", (void *)q3_glSamplerParameterf},
++    {"glSamplerParameterfv", (void *)q3_glSamplerParameterfv},
++    {"glSamplerParameteri", (void *)q3_glSamplerParameteri},
++    {"glSamplerParameteriv", (void *)q3_glSamplerParameteriv},
++    {"glScissor", (void *)q3_glScissor},
++    {"glShaderSource", (void *)q3_glShaderSource},
++    {"glStencilFunc", (void *)q3_glStencilFunc},
++    {"glStencilFuncSeparate", (void *)q3_glStencilFuncSeparate},
++    {"glStencilMask", (void *)q3_glStencilMask},
++    {"glStencilMaskSeparate", (void *)q3_glStencilMaskSeparate},
++    {"glStencilOp", (void *)q3_glStencilOp},
++    {"glStencilOpSeparate", (void *)q3_glStencilOpSeparate},
++    {"glTexBuffer", (void *)q3_glTexBuffer},
++    {"glTexImage1D", (void *)q3_glTexImage1D},
++    {"glTexImage2D", (void *)q3_glTexImage2D},
++    {"glTexImage2DMultisample", (void *)q3_glTexImage2DMultisample},
++    {"glTexImage3D", (void *)q3_glTexImage3D},
++    {"glTexImage3DMultisample", (void *)q3_glTexImage3DMultisample},
++    {"glTexParameterIiv", (void *)q3_glTexParameterIiv},
++    {"glTexParameterIuiv", (void *)q3_glTexParameterIuiv},
++    {"glTexParameterf", (void *)q3_glTexParameterf},
++    {"glTexParameterfv", (void *)q3_glTexParameterfv},
++    {"glTexParameteri", (void *)q3_glTexParameteri},
++    {"glTexParameteriv", (void *)q3_glTexParameteriv},
++    {"glTexSubImage1D", (void *)q3_glTexSubImage1D},
++    {"glTexSubImage2D", (void *)q3_glTexSubImage2D},
++    {"glTexSubImage3D", (void *)q3_glTexSubImage3D},
++    {"glTransformFeedbackVaryings", (void *)q3_glTransformFeedbackVaryings},
++    {"glUniform1f", (void *)q3_glUniform1f},
++    {"glUniform1fv", (void *)q3_glUniform1fv},
++    {"glUniform1i", (void *)q3_glUniform1i},
++    {"glUniform1iv", (void *)q3_glUniform1iv},
++    {"glUniform1ui", (void *)q3_glUniform1ui},
++    {"glUniform1uiv", (void *)q3_glUniform1uiv},
++    {"glUniform2f", (void *)q3_glUniform2f},
++    {"glUniform2fv", (void *)q3_glUniform2fv},
++    {"glUniform2i", (void *)q3_glUniform2i},
++    {"glUniform2iv", (void *)q3_glUniform2iv},
++    {"glUniform2ui", (void *)q3_glUniform2ui},
++    {"glUniform2uiv", (void *)q3_glUniform2uiv},
++    {"glUniform3f", (void *)q3_glUniform3f},
++    {"glUniform3fv", (void *)q3_glUniform3fv},
++    {"glUniform3i", (void *)q3_glUniform3i},
++    {"glUniform3iv", (void *)q3_glUniform3iv},
++    {"glUniform3ui", (void *)q3_glUniform3ui},
++    {"glUniform3uiv", (void *)q3_glUniform3uiv},
++    {"glUniform4f", (void *)q3_glUniform4f},
++    {"glUniform4fv", (void *)q3_glUniform4fv},
++    {"glUniform4i", (void *)q3_glUniform4i},
++    {"glUniform4iv", (void *)q3_glUniform4iv},
++    {"glUniform4ui", (void *)q3_glUniform4ui},
++    {"glUniform4uiv", (void *)q3_glUniform4uiv},
++    {"glUniformBlockBinding", (void *)q3_glUniformBlockBinding},
++    {"glUniformMatrix2fv", (void *)q3_glUniformMatrix2fv},
++    {"glUniformMatrix2x3fv", (void *)q3_glUniformMatrix2x3fv},
++    {"glUniformMatrix2x4fv", (void *)q3_glUniformMatrix2x4fv},
++    {"glUniformMatrix3fv", (void *)q3_glUniformMatrix3fv},
++    {"glUniformMatrix3x2fv", (void *)q3_glUniformMatrix3x2fv},
++    {"glUniformMatrix3x4fv", (void *)q3_glUniformMatrix3x4fv},
++    {"glUniformMatrix4fv", (void *)q3_glUniformMatrix4fv},
++    {"glUniformMatrix4x2fv", (void *)q3_glUniformMatrix4x2fv},
++    {"glUniformMatrix4x3fv", (void *)q3_glUniformMatrix4x3fv},
++    {"glUnmapBuffer", (void *)q3_glUnmapBuffer},
++    {"glUseProgram", (void *)q3_glUseProgram},
++    {"glValidateProgram", (void *)q3_glValidateProgram},
++    {"glVertexAttrib1d", (void *)q3_glVertexAttrib1d},
++    {"glVertexAttrib1dv", (void *)q3_glVertexAttrib1dv},
++    {"glVertexAttrib1f", (void *)q3_glVertexAttrib1f},
++    {"glVertexAttrib1fv", (void *)q3_glVertexAttrib1fv},
++    {"glVertexAttrib1s", (void *)q3_glVertexAttrib1s},
++    {"glVertexAttrib1sv", (void *)q3_glVertexAttrib1sv},
++    {"glVertexAttrib2d", (void *)q3_glVertexAttrib2d},
++    {"glVertexAttrib2dv", (void *)q3_glVertexAttrib2dv},
++    {"glVertexAttrib2f", (void *)q3_glVertexAttrib2f},
++    {"glVertexAttrib2fv", (void *)q3_glVertexAttrib2fv},
++    {"glVertexAttrib2s", (void *)q3_glVertexAttrib2s},
++    {"glVertexAttrib2sv", (void *)q3_glVertexAttrib2sv},
++    {"glVertexAttrib3d", (void *)q3_glVertexAttrib3d},
++    {"glVertexAttrib3dv", (void *)q3_glVertexAttrib3dv},
++    {"glVertexAttrib3f", (void *)q3_glVertexAttrib3f},
++    {"glVertexAttrib3fv", (void *)q3_glVertexAttrib3fv},
++    {"glVertexAttrib3s", (void *)q3_glVertexAttrib3s},
++    {"glVertexAttrib3sv", (void *)q3_glVertexAttrib3sv},
++    {"glVertexAttrib4Nbv", (void *)q3_glVertexAttrib4Nbv},
++    {"glVertexAttrib4Niv", (void *)q3_glVertexAttrib4Niv},
++    {"glVertexAttrib4Nsv", (void *)q3_glVertexAttrib4Nsv},
++    {"glVertexAttrib4Nub", (void *)q3_glVertexAttrib4Nub},
++    {"glVertexAttrib4Nubv", (void *)q3_glVertexAttrib4Nubv},
++    {"glVertexAttrib4Nuiv", (void *)q3_glVertexAttrib4Nuiv},
++    {"glVertexAttrib4Nusv", (void *)q3_glVertexAttrib4Nusv},
++    {"glVertexAttrib4bv", (void *)q3_glVertexAttrib4bv},
++    {"glVertexAttrib4d", (void *)q3_glVertexAttrib4d},
++    {"glVertexAttrib4dv", (void *)q3_glVertexAttrib4dv},
++    {"glVertexAttrib4f", (void *)q3_glVertexAttrib4f},
++    {"glVertexAttrib4fv", (void *)q3_glVertexAttrib4fv},
++    {"glVertexAttrib4iv", (void *)q3_glVertexAttrib4iv},
++    {"glVertexAttrib4s", (void *)q3_glVertexAttrib4s},
++    {"glVertexAttrib4sv", (void *)q3_glVertexAttrib4sv},
++    {"glVertexAttrib4ubv", (void *)q3_glVertexAttrib4ubv},
++    {"glVertexAttrib4uiv", (void *)q3_glVertexAttrib4uiv},
++    {"glVertexAttrib4usv", (void *)q3_glVertexAttrib4usv},
++    {"glVertexAttribDivisor", (void *)q3_glVertexAttribDivisor},
++    {"glVertexAttribI1i", (void *)q3_glVertexAttribI1i},
++    {"glVertexAttribI1iv", (void *)q3_glVertexAttribI1iv},
++    {"glVertexAttribI1ui", (void *)q3_glVertexAttribI1ui},
++    {"glVertexAttribI1uiv", (void *)q3_glVertexAttribI1uiv},
++    {"glVertexAttribI2i", (void *)q3_glVertexAttribI2i},
++    {"glVertexAttribI2iv", (void *)q3_glVertexAttribI2iv},
++    {"glVertexAttribI2ui", (void *)q3_glVertexAttribI2ui},
++    {"glVertexAttribI2uiv", (void *)q3_glVertexAttribI2uiv},
++    {"glVertexAttribI3i", (void *)q3_glVertexAttribI3i},
++    {"glVertexAttribI3iv", (void *)q3_glVertexAttribI3iv},
++    {"glVertexAttribI3ui", (void *)q3_glVertexAttribI3ui},
++    {"glVertexAttribI3uiv", (void *)q3_glVertexAttribI3uiv},
++    {"glVertexAttribI4bv", (void *)q3_glVertexAttribI4bv},
++    {"glVertexAttribI4i", (void *)q3_glVertexAttribI4i},
++    {"glVertexAttribI4iv", (void *)q3_glVertexAttribI4iv},
++    {"glVertexAttribI4sv", (void *)q3_glVertexAttribI4sv},
++    {"glVertexAttribI4ubv", (void *)q3_glVertexAttribI4ubv},
++    {"glVertexAttribI4ui", (void *)q3_glVertexAttribI4ui},
++    {"glVertexAttribI4uiv", (void *)q3_glVertexAttribI4uiv},
++    {"glVertexAttribI4usv", (void *)q3_glVertexAttribI4usv},
++    {"glVertexAttribIPointer", (void *)q3_glVertexAttribIPointer},
++    {"glVertexAttribP1ui", (void *)q3_glVertexAttribP1ui},
++    {"glVertexAttribP1uiv", (void *)q3_glVertexAttribP1uiv},
++    {"glVertexAttribP2ui", (void *)q3_glVertexAttribP2ui},
++    {"glVertexAttribP2uiv", (void *)q3_glVertexAttribP2uiv},
++    {"glVertexAttribP3ui", (void *)q3_glVertexAttribP3ui},
++    {"glVertexAttribP3uiv", (void *)q3_glVertexAttribP3uiv},
++    {"glVertexAttribP4ui", (void *)q3_glVertexAttribP4ui},
++    {"glVertexAttribP4uiv", (void *)q3_glVertexAttribP4uiv},
++    {"glVertexAttribPointer", (void *)q3_glVertexAttribPointer},
++    {"glViewport", (void *)q3_glViewport},
++    {"glWaitSync", (void *)q3_glWaitSync},
++};
++const unsigned qgl3_nnames = 345;
+--- /dev/null
++++ b/gfx/gl/qgl3/qgl3_ids.h
+@@ -0,0 +1,360 @@
++/* Generated by tools/qrxgl68k/gen3.py, do not edit. */
++#ifndef QGL3_IDS_H
++#define QGL3_IDS_H
++#define QGL3_ID_glCullFace 16
++#define QGL3_ID_glFrontFace 17
++#define QGL3_ID_glHint 18
++#define QGL3_ID_glLineWidth 19
++#define QGL3_ID_glPointSize 20
++#define QGL3_ID_glPolygonMode 21
++#define QGL3_ID_glScissor 22
++#define QGL3_ID_glTexParameterf 23
++#define QGL3_ID_glTexParameterfv 24
++#define QGL3_ID_glTexParameteri 25
++#define QGL3_ID_glTexParameteriv 26
++#define QGL3_ID_glTexImage1D 27
++#define QGL3_ID_glTexImage2D 28
++#define QGL3_ID_glDrawBuffer 29
++#define QGL3_ID_glClear 30
++#define QGL3_ID_glClearColor 31
++#define QGL3_ID_glClearStencil 32
++#define QGL3_ID_glClearDepth 33
++#define QGL3_ID_glStencilMask 34
++#define QGL3_ID_glColorMask 35
++#define QGL3_ID_glDepthMask 36
++#define QGL3_ID_glDisable 37
++#define QGL3_ID_glEnable 38
++#define QGL3_ID_glFinish 39
++#define QGL3_ID_glFlush 40
++#define QGL3_ID_glBlendFunc 41
++#define QGL3_ID_glLogicOp 42
++#define QGL3_ID_glStencilFunc 43
++#define QGL3_ID_glStencilOp 44
++#define QGL3_ID_glDepthFunc 45
++#define QGL3_ID_glPixelStoref 46
++#define QGL3_ID_glPixelStorei 47
++#define QGL3_ID_glReadBuffer 48
++#define QGL3_ID_glReadPixels 49
++#define QGL3_ID_glGetBooleanv 50
++#define QGL3_ID_glGetDoublev 51
++#define QGL3_ID_glGetError 52
++#define QGL3_ID_glGetFloatv 53
++#define QGL3_ID_glGetIntegerv 54
++#define QGL3_ID_glGetString 55
++#define QGL3_ID_glGetTexImage 56
++#define QGL3_ID_glGetTexParameterfv 57
++#define QGL3_ID_glGetTexParameteriv 58
++#define QGL3_ID_glGetTexLevelParameterfv 59
++#define QGL3_ID_glGetTexLevelParameteriv 60
++#define QGL3_ID_glIsEnabled 61
++#define QGL3_ID_glDepthRange 62
++#define QGL3_ID_glViewport 63
++#define QGL3_ID_glDrawArrays 64
++#define QGL3_ID_glDrawElements 65
++#define QGL3_ID_glGetPointerv 66
++#define QGL3_ID_glPolygonOffset 67
++#define QGL3_ID_glCopyTexImage1D 68
++#define QGL3_ID_glCopyTexImage2D 69
++#define QGL3_ID_glCopyTexSubImage1D 70
++#define QGL3_ID_glCopyTexSubImage2D 71
++#define QGL3_ID_glTexSubImage1D 72
++#define QGL3_ID_glTexSubImage2D 73
++#define QGL3_ID_glBindTexture 74
++#define QGL3_ID_glDeleteTextures 75
++#define QGL3_ID_glGenTextures 76
++#define QGL3_ID_glIsTexture 77
++#define QGL3_ID_glDrawRangeElements 78
++#define QGL3_ID_glTexImage3D 79
++#define QGL3_ID_glTexSubImage3D 80
++#define QGL3_ID_glCopyTexSubImage3D 81
++#define QGL3_ID_glActiveTexture 82
++#define QGL3_ID_glSampleCoverage 83
++#define QGL3_ID_glCompressedTexImage3D 84
++#define QGL3_ID_glCompressedTexImage2D 85
++#define QGL3_ID_glCompressedTexImage1D 86
++#define QGL3_ID_glCompressedTexSubImage3D 87
++#define QGL3_ID_glCompressedTexSubImage2D 88
++#define QGL3_ID_glCompressedTexSubImage1D 89
++#define QGL3_ID_glGetCompressedTexImage 90
++#define QGL3_ID_glBlendFuncSeparate 91
++#define QGL3_ID_glMultiDrawArrays 92
++#define QGL3_ID_glMultiDrawElements 93
++#define QGL3_ID_glPointParameterf 94
++#define QGL3_ID_glPointParameterfv 95
++#define QGL3_ID_glPointParameteri 96
++#define QGL3_ID_glPointParameteriv 97
++#define QGL3_ID_glBlendColor 98
++#define QGL3_ID_glBlendEquation 99
++#define QGL3_ID_glGenQueries 100
++#define QGL3_ID_glDeleteQueries 101
++#define QGL3_ID_glIsQuery 102
++#define QGL3_ID_glBeginQuery 103
++#define QGL3_ID_glEndQuery 104
++#define QGL3_ID_glGetQueryiv 105
++#define QGL3_ID_glGetQueryObjectiv 106
++#define QGL3_ID_glGetQueryObjectuiv 107
++#define QGL3_ID_glBindBuffer 108
++#define QGL3_ID_glDeleteBuffers 109
++#define QGL3_ID_glGenBuffers 110
++#define QGL3_ID_glIsBuffer 111
++#define QGL3_ID_glBufferData 112
++#define QGL3_ID_glBufferSubData 113
++#define QGL3_ID_glGetBufferSubData 114
++#define QGL3_ID_glMapBuffer 115
++#define QGL3_ID_glUnmapBuffer 116
++#define QGL3_ID_glGetBufferParameteriv 117
++#define QGL3_ID_glGetBufferPointerv 118
++#define QGL3_ID_glBlendEquationSeparate 119
++#define QGL3_ID_glDrawBuffers 120
++#define QGL3_ID_glStencilOpSeparate 121
++#define QGL3_ID_glStencilFuncSeparate 122
++#define QGL3_ID_glStencilMaskSeparate 123
++#define QGL3_ID_glAttachShader 124
++#define QGL3_ID_glBindAttribLocation 125
++#define QGL3_ID_glCompileShader 126
++#define QGL3_ID_glCreateProgram 127
++#define QGL3_ID_glCreateShader 128
++#define QGL3_ID_glDeleteProgram 129
++#define QGL3_ID_glDeleteShader 130
++#define QGL3_ID_glDetachShader 131
++#define QGL3_ID_glDisableVertexAttribArray 132
++#define QGL3_ID_glEnableVertexAttribArray 133
++#define QGL3_ID_glGetActiveAttrib 134
++#define QGL3_ID_glGetActiveUniform 135
++#define QGL3_ID_glGetAttachedShaders 136
++#define QGL3_ID_glGetAttribLocation 137
++#define QGL3_ID_glGetProgramiv 138
++#define QGL3_ID_glGetProgramInfoLog 139
++#define QGL3_ID_glGetShaderiv 140
++#define QGL3_ID_glGetShaderInfoLog 141
++#define QGL3_ID_glGetShaderSource 142
++#define QGL3_ID_glGetUniformLocation 143
++#define QGL3_ID_glGetUniformfv 144
++#define QGL3_ID_glGetUniformiv 145
++#define QGL3_ID_glGetVertexAttribdv 146
++#define QGL3_ID_glGetVertexAttribfv 147
++#define QGL3_ID_glGetVertexAttribiv 148
++#define QGL3_ID_glGetVertexAttribPointerv 149
++#define QGL3_ID_glIsProgram 150
++#define QGL3_ID_glIsShader 151
++#define QGL3_ID_glLinkProgram 152
++#define QGL3_ID_glShaderSource 153
++#define QGL3_ID_glUseProgram 154
++#define QGL3_ID_glUniform1f 155
++#define QGL3_ID_glUniform2f 156
++#define QGL3_ID_glUniform3f 157
++#define QGL3_ID_glUniform4f 158
++#define QGL3_ID_glUniform1i 159
++#define QGL3_ID_glUniform2i 160
++#define QGL3_ID_glUniform3i 161
++#define QGL3_ID_glUniform4i 162
++#define QGL3_ID_glUniform1fv 163
++#define QGL3_ID_glUniform2fv 164
++#define QGL3_ID_glUniform3fv 165
++#define QGL3_ID_glUniform4fv 166
++#define QGL3_ID_glUniform1iv 167
++#define QGL3_ID_glUniform2iv 168
++#define QGL3_ID_glUniform3iv 169
++#define QGL3_ID_glUniform4iv 170
++#define QGL3_ID_glUniformMatrix2fv 171
++#define QGL3_ID_glUniformMatrix3fv 172
++#define QGL3_ID_glUniformMatrix4fv 173
++#define QGL3_ID_glValidateProgram 174
++#define QGL3_ID_glVertexAttrib1d 175
++#define QGL3_ID_glVertexAttrib1dv 176
++#define QGL3_ID_glVertexAttrib1f 177
++#define QGL3_ID_glVertexAttrib1fv 178
++#define QGL3_ID_glVertexAttrib1s 179
++#define QGL3_ID_glVertexAttrib1sv 180
++#define QGL3_ID_glVertexAttrib2d 181
++#define QGL3_ID_glVertexAttrib2dv 182
++#define QGL3_ID_glVertexAttrib2f 183
++#define QGL3_ID_glVertexAttrib2fv 184
++#define QGL3_ID_glVertexAttrib2s 185
++#define QGL3_ID_glVertexAttrib2sv 186
++#define QGL3_ID_glVertexAttrib3d 187
++#define QGL3_ID_glVertexAttrib3dv 188
++#define QGL3_ID_glVertexAttrib3f 189
++#define QGL3_ID_glVertexAttrib3fv 190
++#define QGL3_ID_glVertexAttrib3s 191
++#define QGL3_ID_glVertexAttrib3sv 192
++#define QGL3_ID_glVertexAttrib4Nbv 193
++#define QGL3_ID_glVertexAttrib4Niv 194
++#define QGL3_ID_glVertexAttrib4Nsv 195
++#define QGL3_ID_glVertexAttrib4Nub 196
++#define QGL3_ID_glVertexAttrib4Nubv 197
++#define QGL3_ID_glVertexAttrib4Nuiv 198
++#define QGL3_ID_glVertexAttrib4Nusv 199
++#define QGL3_ID_glVertexAttrib4bv 200
++#define QGL3_ID_glVertexAttrib4d 201
++#define QGL3_ID_glVertexAttrib4dv 202
++#define QGL3_ID_glVertexAttrib4f 203
++#define QGL3_ID_glVertexAttrib4fv 204
++#define QGL3_ID_glVertexAttrib4iv 205
++#define QGL3_ID_glVertexAttrib4s 206
++#define QGL3_ID_glVertexAttrib4sv 207
++#define QGL3_ID_glVertexAttrib4ubv 208
++#define QGL3_ID_glVertexAttrib4uiv 209
++#define QGL3_ID_glVertexAttrib4usv 210
++#define QGL3_ID_glVertexAttribPointer 211
++#define QGL3_ID_glUniformMatrix2x3fv 212
++#define QGL3_ID_glUniformMatrix3x2fv 213
++#define QGL3_ID_glUniformMatrix2x4fv 214
++#define QGL3_ID_glUniformMatrix4x2fv 215
++#define QGL3_ID_glUniformMatrix3x4fv 216
++#define QGL3_ID_glUniformMatrix4x3fv 217
++#define QGL3_ID_glColorMaski 218
++#define QGL3_ID_glGetBooleani_v 219
++#define QGL3_ID_glGetIntegeri_v 220
++#define QGL3_ID_glEnablei 221
++#define QGL3_ID_glDisablei 222
++#define QGL3_ID_glIsEnabledi 223
++#define QGL3_ID_glBeginTransformFeedback 224
++#define QGL3_ID_glEndTransformFeedback 225
++#define QGL3_ID_glBindBufferRange 226
++#define QGL3_ID_glBindBufferBase 227
++#define QGL3_ID_glTransformFeedbackVaryings 228
++#define QGL3_ID_glGetTransformFeedbackVarying 229
++#define QGL3_ID_glClampColor 230
++#define QGL3_ID_glBeginConditionalRender 231
++#define QGL3_ID_glEndConditionalRender 232
++#define QGL3_ID_glVertexAttribIPointer 233
++#define QGL3_ID_glGetVertexAttribIiv 234
++#define QGL3_ID_glGetVertexAttribIuiv 235
++#define QGL3_ID_glVertexAttribI1i 236
++#define QGL3_ID_glVertexAttribI2i 237
++#define QGL3_ID_glVertexAttribI3i 238
++#define QGL3_ID_glVertexAttribI4i 239
++#define QGL3_ID_glVertexAttribI1ui 240
++#define QGL3_ID_glVertexAttribI2ui 241
++#define QGL3_ID_glVertexAttribI3ui 242
++#define QGL3_ID_glVertexAttribI4ui 243
++#define QGL3_ID_glVertexAttribI1iv 244
++#define QGL3_ID_glVertexAttribI2iv 245
++#define QGL3_ID_glVertexAttribI3iv 246
++#define QGL3_ID_glVertexAttribI4iv 247
++#define QGL3_ID_glVertexAttribI1uiv 248
++#define QGL3_ID_glVertexAttribI2uiv 249
++#define QGL3_ID_glVertexAttribI3uiv 250
++#define QGL3_ID_glVertexAttribI4uiv 251
++#define QGL3_ID_glVertexAttribI4bv 252
++#define QGL3_ID_glVertexAttribI4sv 253
++#define QGL3_ID_glVertexAttribI4ubv 254
++#define QGL3_ID_glVertexAttribI4usv 255
++#define QGL3_ID_glGetUniformuiv 256
++#define QGL3_ID_glBindFragDataLocation 257
++#define QGL3_ID_glGetFragDataLocation 258
++#define QGL3_ID_glUniform1ui 259
++#define QGL3_ID_glUniform2ui 260
++#define QGL3_ID_glUniform3ui 261
++#define QGL3_ID_glUniform4ui 262
++#define QGL3_ID_glUniform1uiv 263
++#define QGL3_ID_glUniform2uiv 264
++#define QGL3_ID_glUniform3uiv 265
++#define QGL3_ID_glUniform4uiv 266
++#define QGL3_ID_glTexParameterIiv 267
++#define QGL3_ID_glTexParameterIuiv 268
++#define QGL3_ID_glGetTexParameterIiv 269
++#define QGL3_ID_glGetTexParameterIuiv 270
++#define QGL3_ID_glClearBufferiv 271
++#define QGL3_ID_glClearBufferuiv 272
++#define QGL3_ID_glClearBufferfv 273
++#define QGL3_ID_glClearBufferfi 274
++#define QGL3_ID_glGetStringi 275
++#define QGL3_ID_glIsRenderbuffer 276
++#define QGL3_ID_glBindRenderbuffer 277
++#define QGL3_ID_glDeleteRenderbuffers 278
++#define QGL3_ID_glGenRenderbuffers 279
++#define QGL3_ID_glRenderbufferStorage 280
++#define QGL3_ID_glGetRenderbufferParameteriv 281
++#define QGL3_ID_glIsFramebuffer 282
++#define QGL3_ID_glBindFramebuffer 283
++#define QGL3_ID_glDeleteFramebuffers 284
++#define QGL3_ID_glGenFramebuffers 285
++#define QGL3_ID_glCheckFramebufferStatus 286
++#define QGL3_ID_glFramebufferTexture1D 287
++#define QGL3_ID_glFramebufferTexture2D 288
++#define QGL3_ID_glFramebufferTexture3D 289
++#define QGL3_ID_glFramebufferRenderbuffer 290
++#define QGL3_ID_glGetFramebufferAttachmentParameteriv 291
++#define QGL3_ID_glGenerateMipmap 292
++#define QGL3_ID_glBlitFramebuffer 293
++#define QGL3_ID_glRenderbufferStorageMultisample 294
++#define QGL3_ID_glFramebufferTextureLayer 295
++#define QGL3_ID_glMapBufferRange 296
++#define QGL3_ID_glFlushMappedBufferRange 297
++#define QGL3_ID_glBindVertexArray 298
++#define QGL3_ID_glDeleteVertexArrays 299
++#define QGL3_ID_glGenVertexArrays 300
++#define QGL3_ID_glIsVertexArray 301
++#define QGL3_ID_glDrawArraysInstanced 302
++#define QGL3_ID_glDrawElementsInstanced 303
++#define QGL3_ID_glTexBuffer 304
++#define QGL3_ID_glPrimitiveRestartIndex 305
++#define QGL3_ID_glCopyBufferSubData 306
++#define QGL3_ID_glGetUniformIndices 307
++#define QGL3_ID_glGetActiveUniformsiv 308
++#define QGL3_ID_glGetActiveUniformName 309
++#define QGL3_ID_glGetUniformBlockIndex 310
++#define QGL3_ID_glGetActiveUniformBlockiv 311
++#define QGL3_ID_glGetActiveUniformBlockName 312
++#define QGL3_ID_glUniformBlockBinding 313
++#define QGL3_ID_glDrawElementsBaseVertex 314
++#define QGL3_ID_glDrawRangeElementsBaseVertex 315
++#define QGL3_ID_glDrawElementsInstancedBaseVertex 316
++#define QGL3_ID_glMultiDrawElementsBaseVertex 317
++#define QGL3_ID_glProvokingVertex 318
++#define QGL3_ID_glFenceSync 319
++#define QGL3_ID_glIsSync 320
++#define QGL3_ID_glDeleteSync 321
++#define QGL3_ID_glClientWaitSync 322
++#define QGL3_ID_glWaitSync 323
++#define QGL3_ID_glGetInteger64v 324
++#define QGL3_ID_glGetSynciv 325
++#define QGL3_ID_glGetInteger64i_v 326
++#define QGL3_ID_glGetBufferParameteri64v 327
++#define QGL3_ID_glFramebufferTexture 328
++#define QGL3_ID_glTexImage2DMultisample 329
++#define QGL3_ID_glTexImage3DMultisample 330
++#define QGL3_ID_glGetMultisamplefv 331
++#define QGL3_ID_glSampleMaski 332
++#define QGL3_ID_glBindFragDataLocationIndexed 333
++#define QGL3_ID_glGetFragDataIndex 334
++#define QGL3_ID_glGenSamplers 335
++#define QGL3_ID_glDeleteSamplers 336
++#define QGL3_ID_glIsSampler 337
++#define QGL3_ID_glBindSampler 338
++#define QGL3_ID_glSamplerParameteri 339
++#define QGL3_ID_glSamplerParameteriv 340
++#define QGL3_ID_glSamplerParameterf 341
++#define QGL3_ID_glSamplerParameterfv 342
++#define QGL3_ID_glSamplerParameterIiv 343
++#define QGL3_ID_glSamplerParameterIuiv 344
++#define QGL3_ID_glGetSamplerParameteriv 345
++#define QGL3_ID_glGetSamplerParameterIiv 346
++#define QGL3_ID_glGetSamplerParameterfv 347
++#define QGL3_ID_glGetSamplerParameterIuiv 348
++#define QGL3_ID_glQueryCounter 349
++#define QGL3_ID_glGetQueryObjecti64v 350
++#define QGL3_ID_glGetQueryObjectui64v 351
++#define QGL3_ID_glVertexAttribDivisor 352
++#define QGL3_ID_glVertexAttribP1ui 353
++#define QGL3_ID_glVertexAttribP1uiv 354
++#define QGL3_ID_glVertexAttribP2ui 355
++#define QGL3_ID_glVertexAttribP2uiv 356
++#define QGL3_ID_glVertexAttribP3ui 357
++#define QGL3_ID_glVertexAttribP3uiv 358
++#define QGL3_ID_glVertexAttribP4ui 359
++#define QGL3_ID_glVertexAttribP4uiv 360
++#define QGL3_NFUNCS 361
++static inline unsigned qgl_pn(unsigned pname) {
++    switch (pname) {
++    case 0x0C22: case 0x0BA2: case 0x0C10: case 0x0C23: case 0x0B00: case 0x0B03: case 0x0B07: case 0x0B04: case 0x0B06: case 0x0B80: case 0x8005: case 0x0B66: case 0x0B53: case 0x1200: case 0x1201: case 0x1202: case 0x1203: case 0x1600: case 0x1602: case 0x2201: case 0x1004: case 0x2501: case 0x2502: case 0x8459: case 0x8626: case 0x0DD3: return 4;
++    case 0x1603: case 0x1204: case 0x0B02: case 0x8129: return 3;
++    case 0x0B70: case 0x0B22: case 0x0B12: case 0x0D3A: case 0x0B40: case 0x846D: case 0x846E: case 0x0DD0: case 0x0DD2: return 2;
++    case 0x0BA6: case 0x0BA7: case 0x0BA8: case 0x80B1: case 0x84E3: case 0x84E4: case 0x84E5: case 0x84E6: return 16;
++    default: return 1;
++    }
++}
++#define PN(p) qgl_pn(p)
++#endif
+--- /dev/null
 +++ b/gfx/thebes/gfxAROSPlatform.cpp
 @@ -0,0 +1,105 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -6437,7 +10784,7 @@
 +}
 --- /dev/null
 +++ b/gfx/thebes/gfxAROSPlatform.h
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,51 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -6451,6 +10798,8 @@
 +
 +#include "gfxPlatform.h"
 +#include "nsTArray.h"
++
++extern "C" int qgl3_available(void);  // gfx/gl/qgl3/qgl3.c
 +
 +class gfxAROSPlatform final : public gfxPlatform {
 + public:
@@ -6482,7 +10831,8 @@
 +  static bool CheckVariationFontSupport() { return true; }
 +
 + protected:
-+  bool AccelerateLayersByDefault() override { return false; }
++  // QRX OS One 64: with the board's GL 3.3 door WebRender draws on the host's GPU
++  bool AccelerateLayersByDefault() override { return qgl3_available() != 0; }
 +};
 +
 +#endif /* GFX_PLATFORM_AROS_H */
@@ -8534,13 +12884,15 @@
 +}  // namespace mozilla
 --- /dev/null
 +++ b/widget/aros/GfxInfo.cpp
-@@ -0,0 +1,216 @@
+@@ -0,0 +1,230 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +#include "GfxInfo.h"
 +#include "nsServiceManagerUtils.h"
++
++extern "C" int qgl3_available(void);  // gfx/gl/qgl3/qgl3.c
 +
 +namespace mozilla {
 +namespace widget {
@@ -8715,6 +13067,18 @@
 +  if (aFeature == nsIGfxInfo::FEATURE_OPENGL_LAYERS ||
 +      aFeature == nsIGfxInfo::FEATURE_WEBGL_OPENGL) {
 +    *aStatus = nsIGfxInfo::FEATURE_STATUS_OK;
++    return NS_OK;
++  }
++
++  // QRX OS One 64: WebRender draws with the host's GPU when the 68100EC64 board has the GL 3.3
++  // door (gfx/gl/GLContextProviderAROS.cpp), else with SWGL
++  if (aFeature == nsIGfxInfo::FEATURE_WEBRENDER) {
++    if (qgl3_available()) {
++      *aStatus = nsIGfxInfo::FEATURE_STATUS_OK;
++    } else {
++      *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
++      aFailureId = "FEATURE_FAILURE_QRX_NO_GL_DOOR";
++    }
 +    return NS_OK;
 +  }
 +
@@ -9824,16 +14188,50 @@
 +        'processes': ProcessSelector.ALLOW_IN_GPU_RDD_VR_SOCKET_AND_UTILITY_PROCESS,
 +    },
 +]
---- a/widget/aros/moz.build
+--- /dev/null
 +++ b/widget/aros/moz.build
-@@ -14,6 +14,7 @@
- 
- SOURCES += [
-     "aros_appshell_glue.c",
+@@ -0,0 +1,41 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++# QRX OS One 64 (AROS): the widget backend. First stage: an Exec event loop, fixed look and feel,
++# the windows and clipboard of the headless backend.
++
++with Files("**"):
++    BUG_COMPONENT = ("Core", "Widget")
++
++EXPORTS.mozilla.widget += [
++    "GfxInfo.h",
++]
++
++SOURCES += [
++    "aros_appshell_glue.c",
 +    "aros_window_glue.c",
-     "GfxInfo.cpp",
-     "MediaKeysEventSourceFactory.cpp",
-     "nsAppShell.cpp",
++    "GfxInfo.cpp",
++    "MediaKeysEventSourceFactory.cpp",
++    "nsAppShell.cpp",
++    "nsBidiKeyboard.cpp",
++    "nsLookAndFeel.cpp",
++    "nsNativeThemeAROS.cpp",
++    "nsPrintSettingsAROS.cpp",
++    "nsUserIdleServiceAROS.cpp",
++    "nsWidgetFactory.cpp",
++]
++
++include("/ipc/chromium/chromium-config.mozbuild")
++
++FINAL_LIBRARY = "xul"
++LOCAL_INCLUDES += [
++    "/toolkit/xre",
++    "/widget",
++    "/widget/headless",
++    "/xpcom/components",
++]
++
++XPCOM_MANIFESTS += [
++    "components.conf",
++]
 --- /dev/null
 +++ b/widget/aros/nsAppShell.cpp
 @@ -0,0 +1,71 @@

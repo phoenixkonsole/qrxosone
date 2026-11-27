@@ -15,7 +15,8 @@ enum {
     QGL3_OP_CREATE = 1,       /* share context id -> context id */
     QGL3_OP_DESTROY = 2,      /* context id */
     QGL3_OP_RESIZE = 3,       /* width, height of framebuffer 0 -> 1 */
-    QGL3_OP_READFRAME = 4,    /* dst (64), bytes per row, width, height: framebuffer 0 as ARGB, top row first */
+    QGL3_OP_READFRAME = 4,    /* dst (64), bytes per row, width, height[, order]: framebuffer 0, top row
+                                 first, as A R G B bytes (order 0) or B G R A (order 1) */
     QGL3_OP_GETSTRING = 5,    /* name, index (~0 for glGetString), dst (64), size -> length */
     QGL3_OP_SHADERSOURCE = 6, /* shader, length, the text inline */
     QGL3_OP_GETERROR = 7,     /* -> the error */
@@ -74,7 +75,8 @@ qgl3_context *qgl3_create_context(qgl3_context *share);
 void qgl3_destroy_context(qgl3_context *c);
 int qgl3_make_current(qgl3_context *c);  /* NULL: none */
 int qgl3_resize(int width, int height);   /* framebuffer 0 of the current context */
-void qgl3_read_frame(void *dst, int bytes_per_row, int width, int height);
+void qgl3_read_frame(void *dst, int bytes_per_row, int width, int height);       /* A R G B bytes */
+void qgl3_read_frame_bgra(void *dst, int bytes_per_row, int width, int height);  /* B G R A bytes */
 void qgl3_flush(void);
 void *qgl3_GetProcAddress(const char *name);
 #endif
