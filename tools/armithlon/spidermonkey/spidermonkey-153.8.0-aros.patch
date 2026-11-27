@@ -17,6 +17,47 @@
  
  if CONFIG["MOZ_NO_PIE_COMPAT"]:
      GeckoProgram(CONFIG["MOZ_APP_NAME"] + "-bin", linkage=browser_linkage)
+--- a/browser/base/content/aboutDialog.xhtml
++++ b/browser/base/content/aboutDialog.xhtml
+@@ -14,7 +14,7 @@
+         data-l10n-id="aboutDialog-title"
+ #endif
+         role="dialog"
+-        aria-describedby="version distribution distributionId communityDesc contributeDesc trademark"
++        aria-describedby="version distribution distributionId thundercatDesc trademark"
+         >
+ #ifdef XP_MACOSX
+ #include macWindow.inc.xhtml
+@@ -124,11 +124,17 @@
+               <label is="text-link" useoriginprincipal="true" href="about:credits" data-l10n-name="community-exp-creditsLink"/>
+             </description>
+           </vbox>
+-          <description class="text-blurb" id="communityDesc" data-l10n-id="community-2">
++          <!-- QRX: ThunderCat for AROS -->
++          <description class="text-blurb" id="thundercatDesc">ThunderCat for AROS &#169; 2026 by Pascal Papara.
++            Based on Firefox by Mozilla, for QRX OS One 64 (64-bit AROS on the 68100EC64).</description>
++          <description class="text-blurb" id="thundercatLink">
++            <label is="text-link" href="https://qrx.rocks/">qrx.rocks</label>
++          </description>
++          <description class="text-blurb" id="communityDesc" data-l10n-id="community-2" hidden="true">
+             <label is="text-link" href="https://www.mozilla.org/?utm_source=firefox-browser&#38;utm_medium=firefox-desktop&#38;utm_campaign=about-dialog" data-l10n-name="community-mozillaLink"/>
+             <label is="text-link" useoriginprincipal="true" href="about:credits" data-l10n-name="community-creditsLink"/>
+           </description>
+-          <description class="text-blurb" id="contributeDesc" data-l10n-id="helpus">
++          <description class="text-blurb" id="contributeDesc" data-l10n-id="helpus" hidden="true">
+             <label is="text-link" href="https://foundation.mozilla.org/?form=firefox-about" data-l10n-name="helpus-donateLink"/>
+             <label is="text-link" href="https://www.mozilla.org/contribute/?utm_source=firefox-browser&#38;utm_medium=firefox-desktop&#38;utm_campaign=about-dialog" data-l10n-name="helpus-getInvolvedLink"/>
+           </description>
+@@ -138,8 +144,7 @@
+     <vbox id="bottomBox">
+       <hbox pack="center">
+         <label is="text-link" class="bottom-link" useoriginprincipal="true" href="about:license" data-l10n-id="bottomLinks-license"/>
+-        <label is="text-link" class="bottom-link" href="https://www.mozilla.org/about/legal/terms/firefox/" data-l10n-id="bottom-links-terms"/>
+-        <label is="text-link" class="bottom-link" href="https://www.mozilla.org/privacy/firefox/?utm_source=firefox-browser&#38;utm_medium=firefox-desktop&#38;utm_campaign=about-dialog" data-l10n-id="bottom-links-privacy"/>
++        <label is="text-link" class="bottom-link" href="https://qrx.rocks/">qrx.rocks</label>
+       </hbox>
+       <description id="trademark" data-l10n-id="trademarkInfo"></description>
+     </vbox>
 --- a/browser/branding/unofficial/locales/en-US/brand.ftl
 +++ b/browser/branding/unofficial/locales/en-US/brand.ftl
 @@ -16,12 +16,12 @@
@@ -35,9 +76,10 @@
  # remain unchanged across different versions (Nightly, Beta, etc.).
 --brand-product-name = Firefox
 --vendor-short-name = Mozilla
+-trademarkInfo = { " " }
 +-brand-product-name = ThunderCat
 +-vendor-short-name = QRX
- trademarkInfo = { " " }
++trademarkInfo = ThunderCat for AROS © 2026 by Pascal Papara. Based on Firefox; Firefox and the Firefox logos are trademarks of the Mozilla Foundation.
 --- a/browser/branding/unofficial/locales/en-US/brand.properties
 +++ b/browser/branding/unofficial/locales/en-US/brand.properties
 @@ -2,6 +2,6 @@
