@@ -283,7 +283,24 @@
  
 --- a/llvm/lib/Target/M68k64/M68k64ExpandPseudo.cpp
 +++ b/llvm/lib/Target/M68k64/M68k64ExpandPseudo.cpp
-@@ -83,6 +83,8 @@
+@@ -79,10 +79,25 @@
+   default:
+     return false;
+ 
++  case M68k64::LEA64far: {
++    Register Dst = MI.getOperand(0).getReg();
++    Register Base = MI.getOperand(1).getReg();
++    int64_t Off = MI.getOperand(2).getImm();
++    BuildMI(MBB, MBBI, DL, TII->get(M68k64::LEA64p), Dst).addImm(0).addReg(Base);
++    MachineInstr *Add = BuildMI(MBB, MBBI, DL, TII->get(M68k64::ADD64ai), Dst)
++                            .addReg(Dst)
++                            .addImm(Off);
++    Add->getOperand(3).setIsDead();
++    MBB.erase(MBBI);
++    return true;
++  }
++
+   case M68k64::MOVI8di:
      return TII->ExpandMOVI(MIB, MVT::i8);
    case M68k64::MOVI16ri:
      return TII->ExpandMOVI(MIB, MVT::i16);
@@ -292,7 +309,7 @@
    case M68k64::MOVI32ri:
      return TII->ExpandMOVI(MIB, MVT::i32);
  
-@@ -189,6 +191,23 @@
+@@ -189,6 +204,23 @@
  
    case M68k64::MOVM16jm_P:
      return TII->ExpandMOVEM(MIB, TII->get(M68k64::MOVM16jm), /*IsRM=*/false);
@@ -316,7 +333,7 @@
    case M68k64::MOVM32jm_P:
      return TII->ExpandMOVEM(MIB, TII->get(M68k64::MOVM32jm), /*IsRM=*/false);
  
-@@ -256,23 +275,23 @@
+@@ -256,23 +288,23 @@
    }
    case M68k64::RET: {
      if (MBB.getParent()->getFunction().getCallingConv() ==
@@ -619,11 +636,16 @@
        M68k64::addRegIndirectWithDisp(
            BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr), FramePtr, false,
            LEAAmount);
-@@ -765,6 +834,18 @@
+@@ -765,6 +834,25 @@
        Offset += mergeSPUpdates(MBB, MBBI, true);
        emitSPUpdate(MBB, MBBI, Offset, /*InEpilogue=*/true);
      }
 +  }
++}
++
++bool M68k64FrameLowering::allocateScavengingFrameIndexesNearIncomingSP(
++    const MachineFunction &MF) const {
++  return hasFP(MF) && !TRI->hasStackRealignment(MF) && !TRI->hasBasePointer(MF);
 +}
 +
 +// A frame beyond the reach of (d16,An) needs a scratch address register for
@@ -632,13 +654,15 @@
 +void M68k64FrameLowering::processFunctionBeforeFrameFinalized(
 +    MachineFunction &MF, RegScavenger *RS) const {
 +  MachineFrameInfo &MFI = MF.getFrameInfo();
-+  if (RS && MFI.estimateStackSize(MF) + 256 > 32767) {
-+    int FI = MFI.CreateSpillStackObject(8, Align(8));
-+    RS->addScavengingFrameIndex(FI);
++  // estimateStackSize counts the objects only; the saved registers, the
++  // stack protector and the argument area come on top
++  if (RS && MFI.estimateStackSize(MF) + 1024 > 32767) {
++    for (int I = 0; I < 2; I++)
++      RS->addScavengingFrameIndex(MFI.CreateSpillStackObject(8, Align(8)));
    }
  }
  
-@@ -823,8 +904,25 @@
+@@ -823,8 +911,25 @@
      }
    }
  
@@ -666,7 +690,7 @@
  }
  
  bool M68k64FrameLowering::spillCalleeSavedRegisters(
-@@ -833,7 +931,7 @@
+@@ -833,7 +938,7 @@
    auto &MRI = *static_cast<const M68k64RegisterInfo *>(TRI);
    auto DL = MBB.findDebugLoc(MI);
  
@@ -675,7 +699,7 @@
    unsigned Mask = 0;
    for (const auto &Info : CSI) {
      FI = std::max(FI, Info.getFrameIdx());
-@@ -843,7 +941,7 @@
+@@ -843,7 +948,7 @@
    }
  
    auto I =
@@ -684,7 +708,7 @@
            .addImm(Mask)
            .setMIFlag(MachineInstr::FrameSetup);
  
-@@ -868,7 +966,7 @@
+@@ -868,7 +973,7 @@
    auto &MRI = *static_cast<const M68k64RegisterInfo *>(TRI);
    auto DL = MBB.findDebugLoc(MI);
  
@@ -693,7 +717,7 @@
    unsigned Mask = 0;
    for (const auto &Info : CSI) {
      FI = std::max(FI, Info.getFrameIdx());
-@@ -878,7 +976,7 @@
+@@ -878,7 +983,7 @@
    }
  
    auto I = M68k64::addFrameReference(
@@ -704,19 +728,18 @@
    // Append implicit registers and mem locations
 --- a/llvm/lib/Target/M68k64/M68k64FrameLowering.h
 +++ b/llvm/lib/Target/M68k64/M68k64FrameLowering.h
-@@ -91,6 +91,16 @@
+@@ -91,6 +91,15 @@
    /// this function to save additional registers.
    /// This method also sets up the register scavenger ensuring there is a free
    /// register or a frameindex available.
 +  void processFunctionBeforeFrameFinalized(
 +      MachineFunction &MF, RegScavenger *RS = nullptr) const override;
 +
-+  // Without a frame pointer frame objects are reached from SP: the scavenging
-+  // slot must lie near it, within the reach of (d16,SP).
++  // The scavenging slot must lie near the register its frame objects are
++  // reached from (M68k64RegisterInfo::eliminateFrameIndex), within (d16,An):
++  // near the incoming SP only when locals go through the frame pointer.
 +  bool allocateScavengingFrameIndexesNearIncomingSP(
-+      const MachineFunction &MF) const override {
-+    return hasFP(MF);
-+  }
++      const MachineFunction &MF) const override;
 +
    void determineCalleeSaves(MachineFunction &MF, BitVector &SavedRegs,
                              RegScavenger *RS = nullptr) const override;
@@ -1934,7 +1957,7 @@
  
  
  //===----------------------------------------------------------------------===//
-@@ -120,7 +119,23 @@
+@@ -120,7 +119,31 @@
  // the heap.
  //===----------------------------------------------------------------------===//
  
@@ -1944,6 +1967,14 @@
 -def SALLOCA : MxPseudo<(outs MxARD32:$dst), (ins MxARD32:$size),
 +def SALLOCA : MxPseudo<(outs MxARD64:$dst), (ins MxARD64:$size),
                         [(set iPTR:$dst, (MxSegAlloca iPTR:$size))]>;
++
++// $dst = $base + $off with a 32-bit offset: the address of a frame object
++// beyond the reach of (d16,An) (M68k64RegisterInfo::eliminateFrameIndex). One
++// definition of $dst, so the scavenger can give it a register; it becomes
++// lea (0,base),dst and adda.q #off,dst after frame finalization
++// (M68k64ExpandPseudo). Neither touches the condition codes.
++let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
++def LEA64far : MxPseudo<(outs MxARD64:$dst), (ins MxARD64:$base, i64imm:$off)>;
 +
 +//===----------------------------------------------------------------------===//
 +// i64 and its smaller parts. A .L write to a data register clears bits 63 to 32.
@@ -2823,7 +2854,15 @@
  #include "M68k64MachineFunction.h"
  #include "M68k64Subtarget.h"
  
-@@ -45,11 +47,11 @@
+@@ -21,6 +23,7 @@
+ 
+ #include "llvm/CodeGen/MachineFrameInfo.h"
+ #include "llvm/CodeGen/MachineRegisterInfo.h"
++#include "llvm/CodeGen/RegisterScavenging.h"
+ #include "llvm/IR/Function.h"
+ #include "llvm/IR/Type.h"
+ #include "llvm/Support/CommandLine.h"
+@@ -45,11 +48,11 @@
  M68k64RegisterInfo::M68k64RegisterInfo(const M68k64Subtarget &ST)
      // FIXME x26 not sure it this the correct value, it expects RA, but M68k64
      // passes IP anyway, how this works?
@@ -2840,7 +2879,7 @@
  }
  
  //===----------------------------------------------------------------------===//
-@@ -69,7 +71,7 @@
+@@ -69,7 +72,7 @@
  
  const TargetRegisterClass *
  M68k64RegisterInfo::getRegsForTailCall(const MachineFunction &MF) const {
@@ -2849,7 +2888,7 @@
  }
  
  unsigned
-@@ -141,7 +143,7 @@
+@@ -141,7 +144,7 @@
    }
  
    setBitVector(M68k64::PC);
@@ -2858,29 +2897,28 @@
  
    if (TFI->hasFP(MF)) {
      setBitVector(FramePtr);
-@@ -207,13 +209,41 @@
+@@ -207,13 +210,40 @@
    if (BasePtr == StackPtr)
      FIOffset += SPAdj;
  
 -  Disp.ChangeToImmediate(FIOffset + Imm);
-+  int64_t Offset = FIOffset + Imm;
++  // getFrameIndexReference's offsets are 32-bit values (a negative one comes
++  // back as its 32-bit pattern); frames are far below 2 GB
++  int64_t Offset = SignExtend64<32>(FIOffset + Imm);
 +  if (!isInt<16>(Offset)) {
 +    // Frame objects reach only through (d16,An): a frame larger than 32 KB
 +    // (Gecko's IndexedDB, media codecs) put its objects out of reach, and the
 +    // displacement wrapped around to a negative one. Form the address in a
-+    // scratch address register (scavenged after frame index elimination; ADDA
-+    // and LEA leave the condition codes alone) and use (0,An) on it.
++    // scratch address register (LEA64far, one definition of a virtual register
++    // the scavenger gives a register after frame index elimination; it spills
++    // one into an emergency slot when none is free) and use (0,An) on it.
 +    MachineBasicBlock &MBB = *MI.getParent();
 +    const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
 +    MachineRegisterInfo &MRI = MF.getRegInfo();
-+    const DebugLoc &DL = MI.getDebugLoc();
 +    Register Tmp = MRI.createVirtualRegister(&M68k64::AR64_NOSPRegClass);
-+    M68k64::addRegIndirectWithDisp(
-+        BuildMI(MBB, II, DL, TII.get(M68k64::LEA64p), Tmp), BasePtr, false, 0);
-+    MachineInstr *Add = BuildMI(MBB, II, DL, TII.get(M68k64::ADD64ai), Tmp)
-+                            .addReg(Tmp)
-+                            .addImm(Offset);
-+    Add->getOperand(3).setIsDead();
++    BuildMI(MBB, II, MI.getDebugLoc(), TII.get(M68k64::LEA64far), Tmp)
++        .addReg(BasePtr)
++        .addImm(Offset);
 +    Base.ChangeToRegister(Tmp, false, false, /*isKill=*/true);
 +    Disp.ChangeToImmediate(0);
 +    return false;

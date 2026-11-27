@@ -38,9 +38,13 @@ Frame objects are reached through `(d16,An)`. In a frame larger than 32 KB the d
 objects (the arguments, the saved registers, big local arrays) wrapped around to a negative one:
 Firefox's IndexedDB (`ObjectStoreAddOrPutRequestOp::DoDatabaseWork`, 35 KB of frame) read its `this`
 from the wrong place, and 64 other functions of Firefox (media codecs, ANGLE, Hunspell, Glean) had the
-same problem. `eliminateFrameIndex` now forms such an address in a scavenged address register
-(`lea (0,An)`, `adda.q #offset`) and uses `(0,An)`; frames that large get an emergency spill slot near
-SP. `tests/ctests.c` (`bigframe`) covers it.
+same problem. `eliminateFrameIndex` now forms such an address with the pseudo `LEA64far` in a virtual
+address register (one definition, so frame index scavenging can give it a register), which
+`M68k64ExpandPseudo` turns into `lea (0,An)` and `adda.q #offset` (neither touches the condition codes),
+and uses `(0,An)`. Frames that large get two emergency spill slots near the register their locals are
+reached from (SP, unless they go through the frame pointer). The offsets are sign-extended from 32 bits:
+`getFrameIndexReference` hands negative ones back as 32-bit patterns. `tests/ctests.c` (`bigframe`)
+covers it.
 
 ## Not there yet
 
