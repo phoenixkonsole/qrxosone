@@ -3530,10 +3530,10 @@ index 00000000..e0ad50d7
 +#include "kernel_smp.h"
 diff --git a/arch/m68k64-native/kernel/kernel_scheduler.c b/arch/m68k64-native/kernel/kernel_scheduler.c
 new file mode 100644
-index 00000000..994aa796
+index 00000000..daee1ced
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_scheduler.c
-@@ -0,0 +1,438 @@
+@@ -0,0 +1,442 @@
 +/*
 +    The x86 scheduler (arch/all-pc/kernel/kernel_scheduler.c) with the affinity test of the
 +    68100EC64 port in place of the APIC one.
@@ -3783,6 +3783,9 @@ index 00000000..994aa796
 +#endif
 +    }
 +    task->tc_IDNestCnt = IDNESTCOUNT_GET;
++    /* QRX: and the part of it that exec_local.h's sections hold (Wait() switches inside one) */
++    if (task->tc_Flags & TF_ETASK)
++        IntETask(task->tc_UnionETask.tc_ETask)->iet_LocalIDNest = TLS_GET(LocalIDNest);
 +
 +    if (task->tc_State == TS_READY)
 +    {
@@ -3890,6 +3893,7 @@ index 00000000..994aa796
 +                cpuNo, __func__, newtask->tc_Node.ln_Name, newtask);)
 +
 +            IDNESTCOUNT_SET(newtask->tc_IDNestCnt);
++            TLS_SET(LocalIDNest, (newtask->tc_Flags & TF_ETASK) ? IntETask(newtask->tc_UnionETask.tc_ETask)->iet_LocalIDNest : 0);
 +            SET_THIS_TASK(newtask);
 +            SCHEDELAPSED_SET(SCHEDQUANTUM_GET);
 +            FLAG_SCHEDQUANTUM_CLEAR;
@@ -30434,12 +30438,57 @@ index 65834b14..963b8a03 100644
                  else if (0 == stricmp(node->ln_Name, "econsole"))
                  {
                      LIBBASE->db_BootFlags |= BF_EMERGENCY_CONSOLE;
+diff --git a/rom/exec/allocsignal.c b/rom/exec/allocsignal.c
+index f7f63ff1..e81b7e62 100644
+--- a/rom/exec/allocsignal.c
++++ b/rom/exec/allocsignal.c
+@@ -15,6 +15,7 @@
+ #if defined(__AROSEXEC_SMP__)
+ #include "etask.h"
+ #include "exec_locks.h"
++#include "exec_local.h"
+ #endif
+ 
+ /*****************************************************************************
+@@ -122,7 +123,7 @@ LONG AllocTaskSignal(struct Task *thisTask, LONG signalNum, struct ExecBase *Sys
+     thisTask->tc_SigExcept &= ~mask1;
+     thisTask->tc_SigWait   &= ~mask1;
+ 
+-    Disable();
++    LOCAL_DISABLE();
+ #if defined(__AROSEXEC_SMP__)
+     if (thisTask->tc_UnionETask.tc_ETask)
+     {
+@@ -138,7 +139,7 @@ LONG AllocTaskSignal(struct Task *thisTask, LONG signalNum, struct ExecBase *Sys
+         EXEC_UNLOCK(&IntETask(thisTask->tc_UnionETask.tc_ETask)->iet_TaskLock);
+     }
+ #endif
+-    Enable();
++    LOCAL_ENABLE();
+ 
+     return signalNum;
+ }
+diff --git a/rom/exec/etask.h b/rom/exec/etask.h
+index 44ae4014..e6811f8b 100644
+--- a/rom/exec/etask.h
++++ b/rom/exec/etask.h
+@@ -62,6 +62,10 @@ struct IntETask
+     IPTR                iet_CpuNumber;          /* core this task is currently running on  */
+     cpumask_t           *iet_CpuAffinity;        /* bitmap of cores this task can run on    */
+     spinlock_t          *iet_SpinLock;          /* pointer to spinlock task is spinning on */
++#if defined(__m68k64__)
++    UBYTE               iet_LocalIDNest;        /* QRX: the TLS's LocalIDNest while the task is not
++                                                   running, as tc_IDNestCnt (exec_local.h) */
++#endif
+ #endif
+ #ifdef DEBUG_ETASK
+     STRPTR              iet_Me;
 diff --git a/rom/exec/exec_local.h b/rom/exec/exec_local.h
 new file mode 100644
-index 00000000..385e11fe
+index 00000000..3f297825
 --- /dev/null
 +++ b/rom/exec/exec_local.h
-@@ -0,0 +1,84 @@
+@@ -0,0 +1,92 @@
 +/*
 +    QRX OS One 64: Forbid()/Permit() and Disable()/Enable() for exec code that guards its data with a
 +    spinlock as well (semaphores, message ports, memory lists). They count like the real ones on this
@@ -30458,6 +30507,10 @@ index 00000000..385e11fe
 +#include "exec_intern.h"
 +#include <proto/kernel.h>
 +#define QRX_LOCAL_BARRIER() __asm__ volatile("" ::: "memory")
++/* kernel.resource's calls want a KernelBase in scope; exec defines it differently in places */
++#pragma push_macro("KernelBase")
++#undef KernelBase
++#define QRX_LOCAL_KERNELBASE APTR KernelBase = PrivExecBase(SysBase)->KernelBase
 +static inline void qrx_local_forbid(void)
 +{
 +    tls_t *t = TLS_PTR_GET();
@@ -30468,6 +30521,7 @@ index 00000000..385e11fe
 +}
 +static inline void qrx_local_permit(struct ExecBase *SysBase)
 +{
++    QRX_LOCAL_KERNELBASE;
 +    tls_t *t = TLS_PTR_GET();
 +    QRX_LOCAL_BARRIER();
 +    t->LocalTDNest--;
@@ -30480,6 +30534,7 @@ index 00000000..385e11fe
 +}
 +static inline void qrx_local_disable(struct ExecBase *SysBase)
 +{
++    QRX_LOCAL_KERNELBASE;
 +    if (KernelBase)
 +        KrnCli();
 +    tls_t *t = TLS_PTR_GET();
@@ -30490,6 +30545,7 @@ index 00000000..385e11fe
 +}
 +static inline void qrx_local_enable(struct ExecBase *SysBase)
 +{
++    QRX_LOCAL_KERNELBASE;
 +    tls_t *t = TLS_PTR_GET();
 +    QRX_LOCAL_BARRIER();
 +    t->LocalIDNest--;
@@ -30506,6 +30562,7 @@ index 00000000..385e11fe
 +            KrnSchedule();
 +    }
 +}
++#pragma pop_macro("KernelBase")
 +/* around a Wait() inside a qrx_local_forbid() section: the next task must not inherit the local part */
 +static inline void qrx_local_forbid_suspend(void) { tls_t *t = TLS_PTR_GET(); QRX_LOCAL_BARRIER(); t->LocalTDNest--; QRX_LOCAL_BARRIER(); }
 +static inline void qrx_local_forbid_resume(void) { tls_t *t = TLS_PTR_GET(); QRX_LOCAL_BARRIER(); t->LocalTDNest++; QRX_LOCAL_BARRIER(); }
@@ -30971,11 +31028,49 @@ index 4354150c..514a2b7c 100644
  BOOL CheckSemaphore(struct SignalSemaphore *sigSem, struct TraceLocation *caller, struct ExecBase *SysBase);
  void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner, struct TraceLocation *caller, struct ExecBase *SysBase);
  ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owner, struct TraceLocation *caller, struct ExecBase *SysBase);
+diff --git a/rom/exec/setsignal.c b/rom/exec/setsignal.c
+index 7ed6532a..15b5928d 100644
+--- a/rom/exec/setsignal.c
++++ b/rom/exec/setsignal.c
+@@ -13,6 +13,7 @@
+ #include "exec_intern.h"
+ #if defined(__AROSEXEC_SMP__)
+ #include "etask.h"
++#include "exec_local.h"
+ #endif
+ 
+ /*****************************************************************************
+@@ -60,7 +61,7 @@
+     if (thisTask)
+     {
+         /* Protect the signal mask against access by other tasks. */
+-        Disable();
++        LOCAL_DISABLE();
+ 
+         /* Get address */
+         sig = &thisTask->tc_SigRecvd;
+@@ -69,7 +70,7 @@
+         old = *sig;
+         *sig = (old & ~signalSet) | (newSignals & signalSet);
+ 
+-        Enable();
++        LOCAL_ENABLE();
+     }
+ 
+     return old;
 diff --git a/rom/exec/signal.c b/rom/exec/signal.c
-index a7d30c49..224932e7 100644
+index a7d30c49..373abbdb 100644
 --- a/rom/exec/signal.c
 +++ b/rom/exec/signal.c
-@@ -93,6 +93,29 @@ AROS_UFH3(IPTR, signal_hook,
+@@ -18,6 +18,7 @@
+ #include <utility/hooks.h>
+ 
+ #include "kernel_ipi.h"
++#include "exec_local.h"
+ 
+ AROS_UFH3(IPTR, signal_hook,
+     AROS_UFHA(struct IPIHook *, hook, A0),
+@@ -93,6 +94,29 @@ AROS_UFH3(IPTR, signal_hook,
      struct KernelBase *KernelBase = __kernelBase;
      int cpunum = KrnGetCPUNumber();
  
@@ -31005,6 +31100,33 @@ index a7d30c49..224932e7 100644
      /*
          * # If current CPU number is not the task's CPU and the task is running now, send signal to that task
          *   from CPU which the task is running on.
+@@ -154,7 +178,7 @@ AROS_UFH3(IPTR, signal_hook,
+         D(bug("[Exec] %s(0x%p, %08lX)\n", __func__, task, signalSet);)
+ #endif
+ 
+-        Disable();
++        LOCAL_DISABLE();
+         D(
+             bug("[Exec] %s: Signaling 0x%p '%s', state = %08x\n", __func__, task, task->tc_Node.ln_Name, task->tc_State);
+ #if (0)
+@@ -207,7 +231,7 @@ AROS_UFH3(IPTR, signal_hook,
+                     KrnScheduleCPU(IntETask(task->tc_UnionETask.tc_ETask)->iet_CpuAffinity);
+                 }
+ #endif
+-                Enable();
++                LOCAL_ENABLE();
+ 
+                 /* All done. */
+                 return;
+@@ -271,7 +295,7 @@ AROS_UFH3(IPTR, signal_hook,
+             }
+         }
+ 
+-        Enable();
++        LOCAL_ENABLE();
+ 
+         D(
+             bug("[Exec] %s: 0x%p finished signal processing\n", __func__, task);
 diff --git a/rom/exec/vacate.c b/rom/exec/vacate.c
 index 89f70020..d8ba66b6 100644
 --- a/rom/exec/vacate.c
@@ -31017,6 +31139,36 @@ index 89f70020..d8ba66b6 100644
      bidMsg->ssm_Semaphore = NULL;
  
      /*
+diff --git a/rom/exec/wait.c b/rom/exec/wait.c
+index 5f77f4b7..593265d4 100644
+--- a/rom/exec/wait.c
++++ b/rom/exec/wait.c
+@@ -14,6 +14,7 @@
+ #include "exec_intern.h"
+ #if defined(__AROSEXEC_SMP__)
+ #include "etask.h"
++#include "exec_local.h"
+ #endif
+ 
+ /*****************************************************************************
+@@ -65,7 +66,7 @@
+     ULONG rcvd;
+ 
+     D(bug("[Exec] Wait(%08lX)\n", signalSet);)
+-    Disable();
++    LOCAL_DISABLE();
+ 
+     /* If at least one of the signals is already set do not wait. */
+     while (!(thisTask->tc_SigRecvd & signalSet))
+@@ -113,7 +114,7 @@
+ #else
+     thisTask->tc_SigRecvd &= ~signalSet;
+ #endif
+-    Enable();
++    LOCAL_ENABLE();
+ 
+     /* All done. */
+     return rcvd;
 diff --git a/rom/exec/waitport.c b/rom/exec/waitport.c
 index c7b8b229..2f3e0285 100644
 --- a/rom/exec/waitport.c
