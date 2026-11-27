@@ -2087,10 +2087,10 @@ index 00000000..529aeae3
 +TARGETDIR = $(BD_OBJDIR$(BDID))
 diff --git a/arch/m68k64-native/exec/platform_init.c b/arch/m68k64-native/exec/platform_init.c
 new file mode 100644
-index 00000000..f73efda8
+index 00000000..4f0d0a0f
 --- /dev/null
 +++ b/arch/m68k64-native/exec/platform_init.c
-@@ -0,0 +1,278 @@
+@@ -0,0 +1,279 @@
 +/*
 +    Copyright (C) 2023, The AROS Development Team. All rights reserved.
 +*/
@@ -2118,6 +2118,7 @@ index 00000000..f73efda8
 +#include <exec/rawfmt.h>
 +
 +#include "exec_intern.h"
++#include "exec_local.h"
 +#if defined(__AROSEXEC_SMP__)
 +#include "etask.h"
 +#endif
@@ -2286,7 +2287,7 @@ index 00000000..f73efda8
 +    struct List *list;
 +    spinlock_t *lock;
 +
-+    Disable();
++    LOCAL_DISABLE();
 +    EXEC_SPINLOCK_LOCK(&m68k64_TaskStateLock, NULL, SPINLOCK_MODE_WRITE);
 +
 +    /* QRX: still on a core (Wait() marks its task TS_WAIT before it switches away): only the state
@@ -2304,7 +2305,7 @@ index 00000000..f73efda8
 +        {
 +            task->tc_State = (state == TS_UNSPIN) ? TS_READY : state;
 +            EXEC_SPINLOCK_UNLOCK(&m68k64_TaskStateLock);
-+            Enable();
++            LOCAL_ENABLE();
 +            return;
 +        }
 +    }
@@ -2336,7 +2337,7 @@ index 00000000..f73efda8
 +    }
 +
 +    EXEC_SPINLOCK_UNLOCK(&m68k64_TaskStateLock);
-+    Enable();
++    LOCAL_ENABLE();
 +}
 +
 +/* krnSysCallSwitch() in RemTask(NULL), inside its Forbid(): this core keeps running the task */
@@ -2344,14 +2345,14 @@ index 00000000..f73efda8
 +{
 +    struct Task *task = GET_THIS_TASK;
 +
-+    Disable();
++    LOCAL_DISABLE();
 +    EXEC_SPINLOCK_LOCK(&m68k64_TaskStateLock, NULL, SPINLOCK_MODE_WRITE);
 +    EXEC_SPINLOCK_LOCK(&PrivExecBase(SysBase)->TaskRunningSpinLock, NULL, SPINLOCK_MODE_WRITE);
 +    Remove(&task->tc_Node);
 +    EXEC_SPINLOCK_UNLOCK(&PrivExecBase(SysBase)->TaskRunningSpinLock);
 +    task->tc_State = TS_TOMBSTONED;
 +    EXEC_SPINLOCK_UNLOCK(&m68k64_TaskStateLock);
-+    Enable();
++    LOCAL_ENABLE();
 +}
 +
 +int Exec_M68K64CPUSMPInit(struct ExecBase *SysBase)
@@ -30515,16 +30516,18 @@ index f7f63ff1..e81b7e62 100644
      return signalNum;
  }
 diff --git a/rom/exec/etask.h b/rom/exec/etask.h
-index 44ae4014..e6811f8b 100644
+index 44ae4014..3574902e 100644
 --- a/rom/exec/etask.h
 +++ b/rom/exec/etask.h
-@@ -62,6 +62,10 @@ struct IntETask
+@@ -62,6 +62,12 @@ struct IntETask
      IPTR                iet_CpuNumber;          /* core this task is currently running on  */
      cpumask_t           *iet_CpuAffinity;        /* bitmap of cores this task can run on    */
      spinlock_t          *iet_SpinLock;          /* pointer to spinlock task is spinning on */
 +#if defined(__m68k64__)
 +    UBYTE               iet_LocalIDNest;        /* QRX: the TLS's LocalIDNest while the task is not
 +                                                   running, as tc_IDNestCnt (exec_local.h) */
++    UBYTE               iet_LocalTDNest;        /* QRX: and LocalTDNest while it Wait()s, as
++                                                   tc_TDNestCnt */
 +#endif
  #endif
  #ifdef DEBUG_ETASK
@@ -30943,7 +30946,7 @@ index 8cdd3da9..ae20e5e8 100644
      AROS_LIBFUNC_EXIT
  } /* ReleaseSemaphore */
 diff --git a/rom/exec/semaphores.c b/rom/exec/semaphores.c
-index 39590c2d..10728e4f 100644
+index 39590c2d..a60d4956 100644
 --- a/rom/exec/semaphores.c
 +++ b/rom/exec/semaphores.c
 @@ -12,6 +12,12 @@
@@ -30973,7 +30976,7 @@ index 39590c2d..10728e4f 100644
  
      /*
       * ss_QueueCount == -1 indicates that the semaphore is
-@@ -126,16 +132,41 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
+@@ -126,16 +132,39 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
          AROS_ATOMIC_AND(ThisTask->tc_SigRecvd, ~SIGF_SINGLE);
  
          AddTail((struct List *)&sigSem->ss_WaitQueue, (struct Node *)&sr);
@@ -30994,9 +30997,7 @@ index 39590c2d..10728e4f 100644
 +            for (;;)
 +            {
 +                BOOL granted;
-+                LOCAL_SUSPEND();        /* Wait() lets other tasks run on this core */
-+                Wait(SIGF_SINGLE);
-+                LOCAL_RESUME();
++                Wait(SIGF_SINGLE);      /* it keeps the local part of the Forbid() level too */
 +                SEMAPHORE_LOCK();
 +                granted = (sr.sr_Link.mln_Pred == NULL);
 +                SEMAPHORE_UNLOCK();
@@ -31018,7 +31019,7 @@ index 39590c2d..10728e4f 100644
  }
  
  ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owner, struct TraceLocation *caller, struct ExecBase *SysBase)
-@@ -147,10 +178,10 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
+@@ -147,10 +176,10 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
          return FALSE;  /* A crude attempt to recover... */
  
      /*
@@ -31032,7 +31033,7 @@ index 39590c2d..10728e4f 100644
  
      /* Increment the queue count */
      sigSem->ss_QueueCount++;
-@@ -174,7 +205,8 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
+@@ -174,7 +203,8 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
      }
  
      /* All done. */
@@ -31186,7 +31187,7 @@ index 89f70020..d8ba66b6 100644
  
      /*
 diff --git a/rom/exec/wait.c b/rom/exec/wait.c
-index 5f77f4b7..593265d4 100644
+index 5f77f4b7..e0a30624 100644
 --- a/rom/exec/wait.c
 +++ b/rom/exec/wait.c
 @@ -14,6 +14,7 @@
@@ -31206,7 +31207,30 @@ index 5f77f4b7..593265d4 100644
  
      /* If at least one of the signals is already set do not wait. */
      while (!(thisTask->tc_SigRecvd & signalSet))
-@@ -113,7 +114,7 @@
+@@ -83,6 +84,12 @@
+         thisTask->tc_TDNestCnt = TDNESTCOUNT_GET;
+         D(bug("[Exec] Wait: Task TDNestCount = %d\n", thisTask->tc_TDNestCnt);)
+         TDNESTCOUNT_SET(-1);
++#if defined(__m68k64__) && defined(__AROSEXEC_SMP__)
++        /* QRX: the part of it that exec_local.h's sections hold goes with it (after: the level is
++         * already -1, so no one sees a Forbid() without its local part) */
++        GetIntETask(thisTask)->iet_LocalTDNest = TLS_GET(LocalTDNest);
++        TLS_SET(LocalTDNest, 0);
++#endif
+ 
+         thisTask->tc_State = TS_WAIT;
+         // nb: on smp builds switch will move us.
+@@ -102,6 +109,9 @@
+         D(bug("[Exec] Wait: Awoken...\n");)
+ 
+         /* Restore TDNestCnt. */
++#if defined(__m68k64__) && defined(__AROSEXEC_SMP__)
++        TLS_SET(LocalTDNest, GetIntETask(thisTask)->iet_LocalTDNest);   /* before the level comes back */
++#endif
+         TDNESTCOUNT_SET(thisTask->tc_TDNestCnt);
+     }
+     /* Get active signals. */
+@@ -113,7 +123,7 @@
  #else
      thisTask->tc_SigRecvd &= ~signalSet;
  #endif

@@ -199,11 +199,11 @@ static void gf_nap(void)
     struct timespec t = { 0, 20000 };
     nanosleep(&t, NULL);
 }
-/* QRX_EC64_GF_STATS=FILE: where cores took the global Forbid: pc and the first 6 words on the
+/* QRX_EC64_GF_STATS=FILE: where cores took the global Forbid: pc and the first 12 words on the
  * stack (the return addresses are among them; ec64gfstat.py picks the first one in code), counted,
  * written to FILE at the end */
 #define GF_NOTES 8192
-#define GF_WORDS 6
+#define GF_WORDS 12
 static struct { uint64_t pc, w[GF_WORDS], n; } gf_notes[GF_NOTES];
 static int gf_stats = -1;
 static void gf_note(const qec64_cpu *c)
