@@ -30736,6 +30736,40 @@ index 4354150c..778f6d6d 100644
  BOOL CheckSemaphore(struct SignalSemaphore *sigSem, struct TraceLocation *caller, struct ExecBase *SysBase);
  void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner, struct TraceLocation *caller, struct ExecBase *SysBase);
  ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owner, struct TraceLocation *caller, struct ExecBase *SysBase);
+diff --git a/rom/exec/signal.c b/rom/exec/signal.c
+index a7d30c49..224932e7 100644
+--- a/rom/exec/signal.c
++++ b/rom/exec/signal.c
+@@ -93,6 +93,29 @@ AROS_UFH3(IPTR, signal_hook,
+     struct KernelBase *KernelBase = __kernelBase;
+     int cpunum = KrnGetCPUNumber();
+ 
++#if defined(__m68k64__)
++    /* QRX: a task that has ended (its ETask freed and the memory used again) can still get a
++     * signal, e.g. from a semaphore request it left behind. Reading its CPU mask then faulted.
++     * Such a signal reaches nobody: say so and drop it. */
++    if (PrivExecBase(SysBase)->IntFlags & EXECF_CPUAffinity)
++    {
++        IPTR et = (IPTR)task->tc_UnionETask.tc_ETask, m = 0;
++        BOOL ok = ((IPTR)task & 7) == 0 && (IPTR)task >= 0x1000 && (IPTR)task < 0x100000000ULL &&
++                  (task->tc_Flags & TF_ETASK) && (et & 7) == 0 && et >= 0x1000 && et < 0x100000000ULL;
++        if (ok)
++        {
++            m = (IPTR)IntETask((struct ETask *)et)->iet_CpuAffinity;
++            ok = m == TASKAFFINITY_ANY || (m >= 0x1000 && m < 0x100000000ULL);
++        }
++        if (!ok)
++        {
++            kprintf("[exec] Signal %08lx to %p: not a living task (ETask %p, CPU mask %p), dropped; from %p\n",
++                    (unsigned long)signalSet, task, (void *)et, (void *)m, __builtin_return_address(0));
++            return;
++        }
++    }
++#endif
++
+     /*
+         * # If current CPU number is not the task's CPU and the task is running now, send signal to that task
+         *   from CPU which the task is running on.
 diff --git a/rom/exec/vacate.c b/rom/exec/vacate.c
 index 89f70020..d8ba66b6 100644
 --- a/rom/exec/vacate.c
