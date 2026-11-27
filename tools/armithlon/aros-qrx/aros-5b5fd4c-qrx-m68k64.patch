@@ -8577,6 +8577,24 @@ index 3239e940..4ad70b59 100644
  
  #if defined(CLIB_BSDSOCKET_PROTOS_H) || defined(CLIB_SOCKET_PROTOS_H)
  #if defined(DEFINES_BSDSOCKET_PROTOS_H) || defined(DEFINES_SOCKET_PROTOS_H)
+diff --git a/compiler/pthread/pthread_attr_init.c b/compiler/pthread/pthread_attr_init.c
+index e9ef9799..35f5a5f5 100644
+--- a/compiler/pthread/pthread_attr_init.c
++++ b/compiler/pthread/pthread_attr_init.c
+@@ -46,6 +46,13 @@ int pthread_attr_init(pthread_attr_t *attr)
+ #else
+     attr->stacksize = (UBYTE *)task->tc_SPUpper - (UBYTE *)task->tc_SPLower;
+ #endif
++#if defined(__m68k64__)
++    /* QRX OS One 64: programs ported from Unix (Gecko, SQLite, Rust) expect thread stacks of
++     * megabytes and leave the size to the system; a thread made by one of AROS's small-stacked
++     * tasks would get only its 64 KB, and an overflow lands in whatever memory lies below. */
++    if (attr->stacksize < 1024 * 1024)
++        attr->stacksize = 1024 * 1024;
++#endif
+ 
+     return 0;
+ }
 diff --git a/compiler/pthread/pthread_intern.h b/compiler/pthread/pthread_intern.h
 index f91f3c55..1759b645 100644
 --- a/compiler/pthread/pthread_intern.h

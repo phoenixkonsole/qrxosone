@@ -258,6 +258,10 @@ Two `bench` at once take as long on 4 cores as on 1: a new task stays on the cor
     error.
   - The FAT handler does not convert all its little-endian fields (it writes cluster numbers and
     sizes unswapped), so it does not work on a big-endian CPU. Not fixed: the disk uses FFS.
+  - `pthread_attr_init` (and so every `pthread_create` without a stack size: NSPR, Gecko) gives a
+    thread at least 1 MB of stack on m68k64. It inherits its creator's stack, and a thread made by a
+    small-stacked task got AROS's 64 KB; Firefox then wrote past a thread's stack into an exec
+    semaphore's waiter (Signal() on a garbage task in ReleaseSemaphore).
 
 ## State (2026-11-11)
 
