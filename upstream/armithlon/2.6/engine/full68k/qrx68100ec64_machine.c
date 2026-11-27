@@ -187,6 +187,8 @@ uint64_t qec64_machine_idle(qec64_cpu *c, uint64_t max_us)
 #define TLS_IDNEST 28
 #define TLS_TDNEST 29
 #define TLS_SPINS 31
+#define TLS_LOCALTD 44
+#define TLS_LOCALID 45
 #define GF_ACK_US 5000u
 #define GF_PAUSE_US 50000u
 static int gf_owner = -1;
@@ -241,13 +243,19 @@ static bool gf_irq(const qec64_cpu *c)
     unsigned level = 31u - (unsigned)__builtin_clz(p);
     return level > c->ipl || level == 7;
 }
+/* The levels of Disable() and Forbid() that ask for the machine: AROS's (QRX OS One 64) exec counts
+ * the ones it takes around data it also guards with a spinlock (semaphores, ports, memory) a second
+ * time at TLS_LOCALTD/TLS_LOCALID (arch/m68k64-native/kernel/tls.h, rom/exec/exec_local.h); those
+ * need no other core to stand still. Older kernels leave both bytes 0 (their TLS is zeroed). */
 static bool gf_tls(const qec64_cpu *c, int *spins)
 {
     uint64_t t = c->a[8];
     *spins = 0;
-    if (!t || t + 40 > c->ram_size) return false;
+    if (!t || t + 48 > c->ram_size) return false;
     *spins = c->ram[t + TLS_SPINS];
-    return (int8_t)c->ram[t + TLS_IDNEST] >= 0 || (int8_t)c->ram[t + TLS_TDNEST] >= 0;
+    int id = (int8_t)c->ram[t + TLS_IDNEST] - c->ram[t + TLS_LOCALID];
+    int td = (int8_t)c->ram[t + TLS_TDNEST] - c->ram[t + TLS_LOCALTD];
+    return id >= 0 || td >= 0;
 }
 static void gf_gate_in(qec64_cpu *c)
 {

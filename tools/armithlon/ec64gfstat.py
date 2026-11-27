@@ -26,7 +26,9 @@ rows = []
 for line in open(a.stats):
     f = line.split()
     n, pc, words = int(f[0]), int(f[1], 16), [int(w, 16) for w in f[2:]]
-    ret = next((w for w in words if in_code(w)), 0)
+    # the first code address on the stack that is not Forbid, Disable or their way back
+    skip = ('Forbid', 'Disable', 'Permit', 'Enable')
+    ret = next((w for w in words if in_code(w) and not any(k in ec64prof.name(w) for k in skip)), 0)
     rows.append((n, pc, ret))
 total = sum(r[0] for r in rows)
 by_pc = collections.Counter()

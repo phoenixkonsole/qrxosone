@@ -4710,10 +4710,10 @@ index 00000000..76e71e17
 +}
 diff --git a/arch/m68k64-native/kernel/tls.h b/arch/m68k64-native/kernel/tls.h
 new file mode 100644
-index 00000000..6fff1266
+index 00000000..47c18aac
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/tls.h
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,76 @@
 +#ifndef ASM_TLS_H
 +#define ASM_TLS_H
 +
@@ -4745,9 +4745,16 @@ index 00000000..6fff1266
 +    ULONG               SuperDepth;     /* Exceptions this core is in (the boot counts as one):
 +                                           KrnIsSuper() without a trap. intr.c uses its offset. */
 +    ULONG               IntPending;     /* Interrupt levels that came while Disable()d (soft) */
++    UBYTE               LocalTDNest;    /* of TDNestCnt and IDNestCnt, the levels that exec code takes
++                                           around data it guards with its own spinlocks as well
++                                           (semaphores, ports, memory: exec_local.h). The machine's
++                                           global Forbid leaves them out. */
++    UBYTE               LocalIDNest;
 +} tls_t;
 +
 +#define TLS_SUPERDEPTH_OFFSET   36      /* for the exception entry in intr.c */
++#define TLS_LOCALTDNEST_OFFSET  44      /* read by the 68100EC64 for its global Forbid */
++#define TLS_LOCALIDNEST_OFFSET  45
 +
 +#define TLSSF_Quantum       (1 << 0)
 +#define TLSSF_Switch        (1 << 1)
@@ -6251,10 +6258,10 @@ index 00000000..4fff861f
 +#endif /* VESAGFX_SUPPORT_H */
 diff --git a/arch/m68k64-native/qrx/kernel/kernel_startup.c b/arch/m68k64-native/qrx/kernel/kernel_startup.c
 new file mode 100644
-index 00000000..20a4fa6a
+index 00000000..ba5e312a
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/kernel/kernel_startup.c
-@@ -0,0 +1,275 @@
+@@ -0,0 +1,277 @@
 +/*
 +    Copyright (C) 2013-2026, The AROS Development Team. All rights reserved.
 +*/
@@ -6414,6 +6421,8 @@ index 00000000..20a4fa6a
 +    __tls->ScheduleFlags = 0;
 +    __tls->IDNestCnt = 0;
 +    __tls->TDNestCnt = 0;
++    __tls->LocalTDNest = 0;
++    __tls->LocalIDNest = 0;
 +    __tls->SuperDepth = 1;      /* the boot runs in supervisor state: KrnIsSuper() */
 +    __tls->Quantum = SCHEDQUANTUM_VALUE;
 +    __tls->Elapsed = SCHEDQUANTUM_VALUE;
@@ -30425,6 +30434,96 @@ index 65834b14..963b8a03 100644
                  else if (0 == stricmp(node->ln_Name, "econsole"))
                  {
                      LIBBASE->db_BootFlags |= BF_EMERGENCY_CONSOLE;
+diff --git a/rom/exec/exec_local.h b/rom/exec/exec_local.h
+new file mode 100644
+index 00000000..385e11fe
+--- /dev/null
++++ b/rom/exec/exec_local.h
+@@ -0,0 +1,84 @@
++/*
++    QRX OS One 64: Forbid()/Permit() and Disable()/Enable() for exec code that guards its data with a
++    spinlock as well (semaphores, message ports, memory lists). They count like the real ones on this
++    core, and also in the TLS's LocalTDNest/LocalIDNest, which the 68100EC64's global Forbid leaves
++    out: such a section needs no other core to stand still, the spinlock already keeps it out.
++    The counter and its local part change in one run of straight code (one JIT block of the machine),
++    the real level first when taking and last when giving back, so no task switch and no check of the
++    global Forbid falls between them in the wrong order. Code that Wait()s inside such a section gives
++    its local part back first (qrx_local_forbid_suspend) and takes it again after.
++    Elsewhere they are the plain calls.
++*/
++#ifndef EXEC_LOCAL_H
++#define EXEC_LOCAL_H
++#include <exec/execbase.h>
++#if defined(__m68k64__) && defined(__AROSEXEC_SMP__)
++#include "exec_intern.h"
++#include <proto/kernel.h>
++#define QRX_LOCAL_BARRIER() __asm__ volatile("" ::: "memory")
++static inline void qrx_local_forbid(void)
++{
++    tls_t *t = TLS_PTR_GET();
++    t->TDNestCnt++;
++    QRX_LOCAL_BARRIER();
++    t->LocalTDNest++;
++    QRX_LOCAL_BARRIER();
++}
++static inline void qrx_local_permit(struct ExecBase *SysBase)
++{
++    tls_t *t = TLS_PTR_GET();
++    QRX_LOCAL_BARRIER();
++    t->LocalTDNest--;
++    QRX_LOCAL_BARRIER();
++    t->TDNestCnt--;
++    QRX_LOCAL_BARRIER();
++    /* as Permit() */
++    if (KernelBase && t->TDNestCnt < 0 && t->IDNestCnt < 0 && (t->ScheduleFlags & TLSSF_Switch) && !KrnIsSuper())
++        KrnSchedule();
++}
++static inline void qrx_local_disable(struct ExecBase *SysBase)
++{
++    if (KernelBase)
++        KrnCli();
++    tls_t *t = TLS_PTR_GET();
++    t->IDNestCnt++;
++    QRX_LOCAL_BARRIER();
++    t->LocalIDNest++;
++    QRX_LOCAL_BARRIER();
++}
++static inline void qrx_local_enable(struct ExecBase *SysBase)
++{
++    tls_t *t = TLS_PTR_GET();
++    QRX_LOCAL_BARRIER();
++    t->LocalIDNest--;
++    QRX_LOCAL_BARRIER();
++    t->IDNestCnt--;
++    QRX_LOCAL_BARRIER();
++    /* as Enable() */
++    if (KernelBase && t->IDNestCnt < 0 && !KrnIsSuper())
++    {
++        KrnSti();
++        if (SysBase->SysFlags & SFF_SoftInt)
++            KrnCause();
++        if (t->TDNestCnt < 0 && (t->ScheduleFlags & TLSSF_Switch))
++            KrnSchedule();
++    }
++}
++/* around a Wait() inside a qrx_local_forbid() section: the next task must not inherit the local part */
++static inline void qrx_local_forbid_suspend(void) { tls_t *t = TLS_PTR_GET(); QRX_LOCAL_BARRIER(); t->LocalTDNest--; QRX_LOCAL_BARRIER(); }
++static inline void qrx_local_forbid_resume(void) { tls_t *t = TLS_PTR_GET(); QRX_LOCAL_BARRIER(); t->LocalTDNest++; QRX_LOCAL_BARRIER(); }
++#define LOCAL_FORBID()   qrx_local_forbid()
++#define LOCAL_PERMIT()   qrx_local_permit(SysBase)
++#define LOCAL_DISABLE()  qrx_local_disable(SysBase)
++#define LOCAL_ENABLE()   qrx_local_enable(SysBase)
++#define LOCAL_SUSPEND()  qrx_local_forbid_suspend()
++#define LOCAL_RESUME()   qrx_local_forbid_resume()
++#else
++#define LOCAL_FORBID()   Forbid()
++#define LOCAL_PERMIT()   Permit()
++#define LOCAL_DISABLE()  Disable()
++#define LOCAL_ENABLE()   Enable()
++#define LOCAL_SUSPEND()
++#define LOCAL_RESUME()
++#endif
++#endif
 diff --git a/rom/exec/exec_locks.c b/rom/exec/exec_locks.c
 index cad0d0ba..f4f9102f 100644
 --- a/rom/exec/exec_locks.c
@@ -30499,20 +30598,24 @@ index 6d7149c3..10fb551e 100644
  #ifndef PC
  #error unsupported CPU type
 diff --git a/rom/exec/getmsg.c b/rom/exec/getmsg.c
-index 82b8992d..15a97f8b 100644
+index 82b8992d..da0bcb14 100644
 --- a/rom/exec/getmsg.c
 +++ b/rom/exec/getmsg.c
-@@ -13,6 +13,7 @@
+@@ -13,6 +13,8 @@
  #include <proto/exec.h>
  
  #include "exec_intern.h"
 +#include "semaphores.h"
++#include "exec_local.h"
  
  /*****************************************************************************
  
-@@ -63,11 +64,11 @@
+@@ -61,15 +63,15 @@
+     /*
+      * Protect the message list, and get the first node.
       */
-     Disable();
+-    Disable();
++    LOCAL_DISABLE();
  #if defined(__AROSEXEC_SMP__)
 -    EXEC_SPINLOCK_LOCK((spinlock_t *)&port->mp_Private, NULL, SPINLOCK_MODE_WRITE);
 +    PORT_LOCK(port);
@@ -30522,8 +30625,11 @@ index 82b8992d..15a97f8b 100644
 -    EXEC_SPINLOCK_UNLOCK((spinlock_t *)&port->mp_Private);
 +    PORT_UNLOCK(port);
  #endif
-     Enable();
+-    Enable();
++    LOCAL_ENABLE();
  
+     /* All done. */
+     ASSERT_VALID_PTR_OR_NULL(msg);
 diff --git a/rom/exec/initresident.c b/rom/exec/initresident.c
 index 36c15163..3db52ff6 100644
 --- a/rom/exec/initresident.c
@@ -30538,6 +30644,26 @@ index 36c15163..3db52ff6 100644
              APTR vectors;
              APTR structure;
              ULONG_FUNC init;
+diff --git a/rom/exec/memory.h b/rom/exec/memory.h
+index 1e4764ee..3091070e 100644
+--- a/rom/exec/memory.h
++++ b/rom/exec/memory.h
+@@ -10,11 +10,12 @@
+ #include <exec/semaphores.h>
+ #include <exec/memory.h>
+ #include <stddef.h>
++#include "exec_local.h"
+ 
+ #if defined(__AROSEXEC_SMP__)
+-#define MEM_LOCK        do { Forbid(); EXEC_SPINLOCK_LOCK(&PrivExecBase(SysBase)->MemListSpinLock, NULL, SPINLOCK_MODE_WRITE); } while(0)
+-#define MEM_LOCK_SHARED do { Forbid(); EXEC_SPINLOCK_LOCK(&PrivExecBase(SysBase)->MemListSpinLock, NULL, SPINLOCK_MODE_READ); } while(0)
+-#define MEM_UNLOCK      do { EXEC_SPINLOCK_UNLOCK(&PrivExecBase(SysBase)->MemListSpinLock); Permit(); } while(0)
++#define MEM_LOCK        do { LOCAL_FORBID(); EXEC_SPINLOCK_LOCK(&PrivExecBase(SysBase)->MemListSpinLock, NULL, SPINLOCK_MODE_WRITE); } while(0)
++#define MEM_LOCK_SHARED do { LOCAL_FORBID(); EXEC_SPINLOCK_LOCK(&PrivExecBase(SysBase)->MemListSpinLock, NULL, SPINLOCK_MODE_READ); } while(0)
++#define MEM_UNLOCK      do { EXEC_SPINLOCK_UNLOCK(&PrivExecBase(SysBase)->MemListSpinLock); LOCAL_PERMIT(); } while(0)
+ #else
+ #if defined(__AROSEXEC_BROKENMEMLOCK__)
+ #define MEM_LOCK        ObtainSemaphore(&PrivExecBase(SysBase)->MemListSem)
 diff --git a/rom/exec/obtainsemaphorelist.c b/rom/exec/obtainsemaphorelist.c
 index 8feb8e23..8e64390a 100644
 --- a/rom/exec/obtainsemaphorelist.c
@@ -30580,20 +30706,25 @@ index ac23d51a..afc1151f 100644
  
      return 0;
 diff --git a/rom/exec/putmsg.c b/rom/exec/putmsg.c
-index e1ee66f0..eb29fbea 100644
+index e1ee66f0..d43150ab 100644
 --- a/rom/exec/putmsg.c
 +++ b/rom/exec/putmsg.c
-@@ -12,6 +12,7 @@
+@@ -12,7 +12,9 @@
  #include <proto/exec.h>
  
  #include "exec_intern.h"
 +#include "semaphores.h"
  #include "exec_util.h"
++#include "exec_local.h"
  
  /*****************************************************************************
-@@ -82,12 +83,12 @@ void InternalPutMsg(struct MsgPort *port, struct Message *message, struct ExecBa
  
-     Disable();
+@@ -80,16 +82,16 @@ void InternalPutMsg(struct MsgPort *port, struct Message *message, struct ExecBa
+ 
+     D(bug("[EXEC] PutMsg: Port @ 0x%p, Msg @ 0x%p\n", port, message);)
+ 
+-    Disable();
++    LOCAL_DISABLE();
  #if defined(__AROSEXEC_SMP__)
 -    EXEC_SPINLOCK_LOCK((spinlock_t *)&port->mp_Private, NULL, SPINLOCK_MODE_WRITE);
 +    PORT_LOCK(port);
@@ -30604,13 +30735,20 @@ index e1ee66f0..eb29fbea 100644
 -    EXEC_SPINLOCK_UNLOCK((spinlock_t *)&port->mp_Private);
 +    PORT_UNLOCK(port);
  #endif
-     Enable();
+-    Enable();
++    LOCAL_ENABLE();
  
+     if (port->mp_SigTask)
+     {
 diff --git a/rom/exec/releasesemaphore.c b/rom/exec/releasesemaphore.c
-index 8cdd3da9..f2d836cf 100644
+index 8cdd3da9..ae20e5e8 100644
 --- a/rom/exec/releasesemaphore.c
 +++ b/rom/exec/releasesemaphore.c
-@@ -13,6 +13,36 @@
+@@ -10,9 +10,40 @@
+ #include "exec_intern.h"
+ #include "exec_util.h"
+ #include "semaphores.h"
++#include "exec_local.h"
  
  #define CHECK_TASK      0 /* it seems to be legal to call ObtainSemaphore in one task and ReleaseSemaphore in another */
  
@@ -30647,15 +30785,17 @@ index 8cdd3da9..f2d836cf 100644
  /*****************************************************************************/
  #undef  Exec
  #ifdef UseExecstubs
-@@ -73,6 +103,7 @@
+@@ -72,7 +103,8 @@
+         return;
  
      /* Protect the semaphore structure from multiple access. */
-     Forbid();
+-    Forbid();
++    LOCAL_FORBID();
 +    SEMAPHORE_LOCK();
  
      /* Release one on the nest count */
      sigSem->ss_NestCount--;
-@@ -135,6 +166,7 @@
+@@ -135,6 +167,7 @@
                      if( ((IPTR)sr->sr_Waiter & SM_SHARED) == SM_SHARED )
                      {
                          Remove((struct Node *)sr);
@@ -30663,7 +30803,7 @@ index 8cdd3da9..f2d836cf 100644
  
                          /* Clear the bit, and update the owner count */
                          sr->sr_Waiter = (APTR)((IPTR)sr->sr_Waiter & ~1);
-@@ -143,7 +175,8 @@
+@@ -143,7 +176,8 @@
                          if(sr->sr_Waiter != NULL)
                          {
                              /* This is a task, signal it */
@@ -30673,7 +30813,7 @@ index 8cdd3da9..f2d836cf 100644
                          }
                          else
                          {
-@@ -163,12 +196,14 @@
+@@ -163,12 +197,14 @@
  
                  /* Only awaken the first of the nodes */
                  Remove((struct Node *)sr);
@@ -30689,31 +30829,34 @@ index 8cdd3da9..f2d836cf 100644
                  }
                  else
                  {
-@@ -199,6 +234,7 @@
+@@ -199,7 +235,8 @@
      }
  
      /* All done. */
+-    Permit();
 +    SEMAPHORE_UNLOCK();
-     Permit();
++    LOCAL_PERMIT();
  
      AROS_LIBFUNC_EXIT
+ } /* ReleaseSemaphore */
 diff --git a/rom/exec/semaphores.c b/rom/exec/semaphores.c
-index 39590c2d..70a83c4a 100644
+index 39590c2d..10728e4f 100644
 --- a/rom/exec/semaphores.c
 +++ b/rom/exec/semaphores.c
-@@ -13,6 +13,11 @@
+@@ -12,6 +12,12 @@
+ 
  #include "exec_util.h"
  #include "semaphores.h"
- 
++#include "exec_local.h"
++
 +#if defined(__AROSEXEC_SMP__)
 +spinlock_t ExecSemaphoreLock;   /* zero: unlocked */
 +spinlock_t ExecPortLock;        /* the same, for the message lists of ports (semaphores.h) */
 +#endif
-+
+ 
  BOOL CheckSemaphore(struct SignalSemaphore *sigSem, struct TraceLocation *caller, struct ExecBase *SysBase)
  {
-     /* TODO: Introduce AlertContext for this */
-@@ -69,10 +74,10 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
+@@ -69,10 +75,10 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
          return;  /* A crude attempt to recover... */
  
      /*
@@ -30721,12 +30864,13 @@ index 39590c2d..70a83c4a 100644
 -     * TODO: SMP-aware versions of this code likely need to use spinlocks here
 +     * Arbitrate for the semaphore structure: Forbid() for this core, the spinlock for the others.
       */
-     Forbid();
+-    Forbid();
++    LOCAL_FORBID();
 +    SEMAPHORE_LOCK();
  
      /*
       * ss_QueueCount == -1 indicates that the semaphore is
-@@ -126,15 +131,38 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
+@@ -126,16 +132,41 @@ void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner,
          AROS_ATOMIC_AND(ThisTask->tc_SigRecvd, ~SIGF_SINGLE);
  
          AddTail((struct List *)&sigSem->ss_WaitQueue, (struct Node *)&sr);
@@ -30747,7 +30891,9 @@ index 39590c2d..70a83c4a 100644
 +            for (;;)
 +            {
 +                BOOL granted;
++                LOCAL_SUSPEND();        /* Wait() lets other tasks run on this core */
 +                Wait(SIGF_SINGLE);
++                LOCAL_RESUME();
 +                SEMAPHORE_LOCK();
 +                granted = (sr.sr_Link.mln_Pred == NULL);
 +                SEMAPHORE_UNLOCK();
@@ -30758,16 +30904,18 @@ index 39590c2d..70a83c4a 100644
 +            if (others)
 +                Signal(ThisTask, SIGF_SINGLE);
 +        }
-+        Permit();
++        LOCAL_PERMIT();
 +        return;
      }
  
      /* All Done! */
+-    Permit();
 +    SEMAPHORE_UNLOCK();
-     Permit();
++    LOCAL_PERMIT();
  }
  
-@@ -147,10 +175,10 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
+ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owner, struct TraceLocation *caller, struct ExecBase *SysBase)
+@@ -147,10 +178,10 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
          return FALSE;  /* A crude attempt to recover... */
  
      /*
@@ -30775,19 +30923,22 @@ index 39590c2d..70a83c4a 100644
 -     * TODO: SMP-aware versions of this code likely need to use spinlocks here
 +     * Arbitrate for the semaphore structure: Forbid() for this core, the spinlock for the others.
       */
-     Forbid();
+-    Forbid();
++    LOCAL_FORBID();
 +    SEMAPHORE_LOCK();
  
      /* Increment the queue count */
      sigSem->ss_QueueCount++;
-@@ -174,6 +202,7 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
+@@ -174,7 +205,8 @@ ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owne
      }
  
      /* All done. */
+-    Permit();
 +    SEMAPHORE_UNLOCK();
-     Permit();
++    LOCAL_PERMIT();
  
      return retval;
+ }
 diff --git a/rom/exec/semaphores.h b/rom/exec/semaphores.h
 index 4354150c..514a2b7c 100644
 --- a/rom/exec/semaphores.h
@@ -30867,10 +31018,10 @@ index 89f70020..d8ba66b6 100644
  
      /*
 diff --git a/rom/exec/waitport.c b/rom/exec/waitport.c
-index c7b8b229..b2739589 100644
+index c7b8b229..2f3e0285 100644
 --- a/rom/exec/waitport.c
 +++ b/rom/exec/waitport.c
-@@ -8,6 +8,7 @@
+@@ -8,9 +8,11 @@
  #include <aros/debug.h>
  
  #include "exec_intern.h"
@@ -30878,35 +31029,47 @@ index c7b8b229..b2739589 100644
  #include <exec/ports.h>
  #include <aros/libcall.h>
  #include <proto/exec.h>
-@@ -62,12 +63,12 @@
++#include "exec_local.h"
+ 
+ /*****************************************************************************
+ 
+@@ -61,14 +63,14 @@
+ 
      /* Is messageport empty? */
  #if defined(__AROSEXEC_SMP__)
-     Disable();
+-    Disable();
 -    EXEC_SPINLOCK_LOCK((spinlock_t *)&port->mp_Private, NULL, SPINLOCK_MODE_READ);
++    LOCAL_DISABLE();
 +    PORT_LOCK(port);
  #endif
      while (IsListEmpty(&port->mp_MsgList))
      {
  #if defined(__AROSEXEC_SMP__)
 -        EXEC_SPINLOCK_UNLOCK((spinlock_t *)&port->mp_Private);
+-        Enable();
 +        PORT_UNLOCK(port);
-         Enable();
++        LOCAL_ENABLE();
  #endif
          D(bug("[Exec] WaitPort: Msg list empty, waiting for activity...\n");)
-@@ -81,11 +82,11 @@
+ 
+@@ -80,13 +82,13 @@
+ 
          D(bug("[Exec] WaitPort: Msgport signal received ...\n");)
  #if defined(__AROSEXEC_SMP__)
-         Disable();
+-        Disable();
 -        EXEC_SPINLOCK_LOCK((spinlock_t *)&port->mp_Private, NULL, SPINLOCK_MODE_READ);
++        LOCAL_DISABLE();
 +        PORT_LOCK(port);
  #endif
      }
  #if defined(__AROSEXEC_SMP__)
 -    EXEC_SPINLOCK_UNLOCK((spinlock_t *)&port->mp_Private);
+-    Enable();
 +    PORT_UNLOCK(port);
-     Enable();
++    LOCAL_ENABLE();
  #endif
  
+     D(bug("[Exec] WaitPort: Returning...\n");)
 diff --git a/rom/filesys/afs/filehandles1.c b/rom/filesys/afs/filehandles1.c
 index b699dfbe..31e16707 100644
 --- a/rom/filesys/afs/filehandles1.c
