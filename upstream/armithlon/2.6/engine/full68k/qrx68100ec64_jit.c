@@ -1178,7 +1178,8 @@ static unsigned jit_off(void)
 static bool i_hostfp(T *t)
 {
     uint64_t probe = 0;
-    if ((t->op & 0xFF00) != 0xAF00 || !qec64_hostfp(&probe, 0, t->op & 0xFF)) return 0;
+    /* $AFF0, the gate point, stays out of every block: the dispatcher runs it, after its gate */
+    if ((t->op & 0xFF00) != 0xAF00 || t->op == 0xAFF0 || !qec64_hostfp(&probe, 0, t->op & 0xFF)) return 0;
     flush_flags(t);
     spill_pending(t);
     unsigned self = tmp(t), n = tmp(t);
@@ -1462,7 +1463,7 @@ static Block *translate(qec64_cpu *c, Jit *j, uint64_t pc)
             struct timespec l0, l1;
             if (lt) clock_gettime(CLOCK_MONOTONIC, &l0);
             X64Lookup lk = { jc_ret ? jc_ret - code : -1, j->jc && !verify_on() && !(jit_off() & 0x800) ? j->jc : NULL,
-                             X64_JC_BITS, (unsigned)offsetof(qec64_cpu, pc), (unsigned)offsetof(qec64_cpu, gate) };
+                             X64_JC_BITS, (unsigned)offsetof(qec64_cpu, pc), (unsigned)offsetof(qec64_cpu, gate_kick) };
             j->a64_words += (uint64_t)(t.p - code);
             bool lifted = x64_lift(code, (unsigned)(t.p - code), &j->xpos, j->xend, j->xbuf, j->xmap + (code - j->buf), &lk);
             if (lt) { clock_gettime(CLOCK_MONOTONIC, &l1); j->lift_ns += (uint64_t)((l1.tv_sec - l0.tv_sec) * 1000000000LL + (l1.tv_nsec - l0.tv_nsec)); }
@@ -1709,7 +1710,6 @@ enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
                 j->last_exit = NULL;
             }
         }
-        if (c->gate) j->last_exit = NULL;
         if (!c->m64 || c->waiting || pending_irq(c)) {
             j->last_exit = NULL;
             uint64_t before = c->instructions;
@@ -1742,7 +1742,7 @@ enum qec64_status qec64_jit_run(qec64_cpu *c, uint64_t max)
             if (fl != j->flushes) site = NULL;
         }
         if (verify_on()) site = NULL;                    /* each block on its own */
-        if (site && b->code && !(jit_off() & 0x800) && !c->gate) {   /* chain the exit that brought us here */
+        if (site && b->code && !(jit_off() & 0x800)) {   /* chain the exit that brought us here */
 #if defined(__x86_64__)
             uint8_t *xs = j->xbuf + j->xmap[site - j->buf];          /* the lifted B: jmp rel32 */
             if (*xs == 0xE9 && j->nchains < j->maxchains) {

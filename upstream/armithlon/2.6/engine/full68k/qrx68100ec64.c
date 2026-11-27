@@ -1251,6 +1251,7 @@ static void execute(ctx *x)
     x->pfx = 0;
     x->start_pc = c->pc;
     x->op = fetch16(x);
+    if (x->op == 0xAFF0 && c->m64) return;                  /* gate point: nothing here (the JIT's dispatcher looks) */
     if ((x->op & 0xFF00) == 0xAF00 && c->m64) {             /* host floating point, qrx_ec64_hostfp.h */
         if (!qec64_hostfp(&c->d[0], c->d[1], x->op & 0xFF)) unimpl(x);
         return;

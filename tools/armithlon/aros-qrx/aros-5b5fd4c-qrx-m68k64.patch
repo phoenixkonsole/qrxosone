@@ -1814,10 +1814,10 @@ index 00000000..026444f9
 +}
 diff --git a/arch/m68k64-native/exec/exec_platform.h b/arch/m68k64-native/exec/exec_platform.h
 new file mode 100644
-index 00000000..80ea0a2a
+index 00000000..59a73f37
 --- /dev/null
 +++ b/arch/m68k64-native/exec/exec_platform.h
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,230 @@
 +/*
 +    Copyright (C) 2023, The AROS Development Team. All rights reserved.
 +*/
@@ -1873,26 +1873,35 @@ index 00000000..80ea0a2a
 +    /* No platform-specific data by default */
 +};
 +
++/* QRX: the 68100EC64's gate point ($AFF0): after a change of this core's Disable()/Forbid() level,
++ * so that the machine's global Forbid sees it before the next instruction (its JIT chains blocks
++ * otherwise). A no-op on the core itself; engines older than it stop on it as unimplemented. */
++#define QRX_GATE_POINT() __asm__ volatile(".short 0xAFF0" ::: "memory")
++
 +#if defined(AROS_NO_ATOMIC_OPERATIONS)
 +#define IDNESTCOUNT_INC \
 +    do { \
 +        tls_t *__tls = TLS_PTR_GET(); \
 +        __tls->IDNestCnt++; \
++        QRX_GATE_POINT(); \
 +    } while(0)
 +#define IDNESTCOUNT_DEC \
 +    do { \
 +        tls_t *__tls = TLS_PTR_GET(); \
 +        __tls->IDNestCnt--; \
++        QRX_GATE_POINT(); \
 +    } while(0)
 +#define TDNESTCOUNT_INC \
 +    do { \
 +        tls_t *__tls = TLS_PTR_GET(); \
 +        __tls->TDNestCnt++; \
++        QRX_GATE_POINT(); \
 +    } while(0)
 +#define TDNESTCOUNT_DEC \
 +    do { \
 +        tls_t *__tls = TLS_PTR_GET(); \
 +        __tls->TDNestCnt--; \
++        QRX_GATE_POINT(); \
 +    } while(0)
 +#define FLAG_SCHEDQUANTUM_CLEAR \
 +    do { \
@@ -1929,21 +1938,25 @@ index 00000000..80ea0a2a
 +    do { \
 +        tls_t *__tls = TLS_PTR_GET(); \
 +        AROS_ATOMIC_INC(__tls->IDNestCnt); \
++        QRX_GATE_POINT(); \
 +    } while(0)
 +#define IDNESTCOUNT_DEC \
 +    do { \
 +        tls_t *__tls = TLS_PTR_GET(); \
 +        AROS_ATOMIC_DEC(__tls->IDNestCnt); \
++        QRX_GATE_POINT(); \
 +    } while(0)
 +#define TDNESTCOUNT_INC \
 +    do { \
 +        tls_t *__tls = TLS_PTR_GET(); \
 +        AROS_ATOMIC_INC(__tls->TDNestCnt); \
++        QRX_GATE_POINT(); \
 +    } while(0)
 +#define TDNESTCOUNT_DEC \
 +    do { \
 +        tls_t *__tls = TLS_PTR_GET(); \
 +        AROS_ATOMIC_DEC(__tls->TDNestCnt); \
++        QRX_GATE_POINT(); \
 +    } while(0)
 +#define FLAG_SCHEDQUANTUM_CLEAR \
 +    do { \
@@ -1986,6 +1999,7 @@ index 00000000..80ea0a2a
 +    do { \
 +        tls_t *__tls = TLS_PTR_GET(); \
 +        __tls->IDNestCnt = val; \
++        QRX_GATE_POINT(); \
 +    } while(0)
 +#define TDNESTCOUNT_GET \
 +    ({ \
@@ -1997,6 +2011,7 @@ index 00000000..80ea0a2a
 +    do { \
 +        tls_t *__tls = TLS_PTR_GET(); \
 +        __tls->TDNestCnt = val; \
++        QRX_GATE_POINT(); \
 +    } while(0)
 +#define FLAG_SCHEDQUANTUM_ISSET \
 +    ({ \

@@ -286,6 +286,8 @@ static void gf_gate_in(qec64_cpu *c)
         if (!__atomic_compare_exchange_n(&gf_owner, &none, id, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) continue;
         gf_acquired++;
         gf_note(c);
+        for (unsigned k = 0; k < m->cores; k++)        /* out of their chains at the next jump */
+            if ((int)k != id) __atomic_store_n(&m->cpu[k].gate_kick, 1, __ATOMIC_RELEASE);
         /* the others reach a block boundary, or sleep, or are not running yet */
         uint64_t until = now_us() + GF_ACK_US;
         for (unsigned k = 0; k < m->cores; k++) {
@@ -305,6 +307,7 @@ static void gf_gate(qec64_cpu *c)
 {
     qec64_machine *m = c->machine;
     uint32_t me = 1u << c->core_id;
+    __atomic_store_n(&c->gate_kick, 0, __ATOMIC_RELAXED);
     __atomic_fetch_or(&m->in_gate, me, __ATOMIC_SEQ_CST);
     gf_gate_in(c);
     __atomic_fetch_and(&m->in_gate, ~me, __ATOMIC_SEQ_CST);   /* then want_ordered reads the active mask */

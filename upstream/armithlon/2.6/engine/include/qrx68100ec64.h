@@ -69,9 +69,13 @@ struct qec64_cpu {
     void *jit;
     uint8_t *code_map;
     uint32_t *code_gen;
-    /* Called before every block when set (the machine's global Forbid, see
-     * qrx68100ec64_machine.c); blocks are then not chained, so it really is every block. */
+    /* Called by the JIT's dispatcher when set (the machine's global Forbid, see
+     * qrx68100ec64_machine.c). Blocks chain as usual: a core's own Forbid() and Disable() levels
+     * change only just before a gate point ($AFF0, which no block holds, so the dispatcher comes
+     * first), and a chain runs at most CHAIN_RUN instructions. gate_kick: set by a core that took the
+     * global Forbid, so that the others leave their chains at the next indirect jump already. */
     void (*gate)(qec64_cpu *self);
+    uint64_t gate_kick;
     /* Memory order between cores (qrx68100ec64_machine.c, qrx68100ec64_jit.c). active_mask: the
      * machine's cores that may touch shared memory now (NULL: no machine; the JIT then orders
      * whenever num_cores > 1). quiet: this core sleeps in STOP or in its idle task and touches no
