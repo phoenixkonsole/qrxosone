@@ -30530,10 +30530,10 @@ index ac23d51a..afc1151f 100644
  
      return 0;
 diff --git a/rom/exec/releasesemaphore.c b/rom/exec/releasesemaphore.c
-index 8cdd3da9..703005c5 100644
+index 8cdd3da9..f2d836cf 100644
 --- a/rom/exec/releasesemaphore.c
 +++ b/rom/exec/releasesemaphore.c
-@@ -13,6 +13,23 @@
+@@ -13,6 +13,36 @@
  
  #define CHECK_TASK      0 /* it seems to be legal to call ObtainSemaphore in one task and ReleaseSemaphore in another */
  
@@ -30542,9 +30542,22 @@ index 8cdd3da9..703005c5 100644
 +static BOOL waiter_ok(struct SignalSemaphore *sigSem, struct SemaphoreRequest *sr, struct ExecBase *SysBase)
 +{
 +    struct Task *w = sr->sr_Waiter;
-+    if (((IPTR)w & 7) == 0 && (IPTR)w >= 0x1000 && (IPTR)w < 0x100000000ULL &&
-+        (w->tc_Node.ln_Type == NT_TASK || w->tc_Node.ln_Type == NT_PROCESS))
++#define QRX_PTR_OK(p) (((IPTR)(p) & 7) == 0 && (IPTR)(p) >= 0x1000 && (IPTR)(p) < 0x100000000ULL)
++    /* a task that ended and whose memory went elsewhere keeps its type byte for a while: its ETask
++     * and the ETask's CPU mask (which Signal() reads first) have to look right too */
++    if (QRX_PTR_OK(w) &&
++        (w->tc_Node.ln_Type == NT_TASK || w->tc_Node.ln_Type == NT_PROCESS) &&
++        w->tc_State != TS_REMOVED && w->tc_State != TS_INVALID &&
++        (w->tc_Flags & TF_ETASK) && QRX_PTR_OK(w->tc_UnionETask.tc_ETask)
++#if defined(__AROSEXEC_SMP__)
++        && (!(PrivExecBase(SysBase)->IntFlags & EXECF_CPUAffinity) ||
++            (IPTR)IntETask(w->tc_UnionETask.tc_ETask)->iet_CpuAffinity == TASKAFFINITY_ANY ||
++            ((IPTR)IntETask(w->tc_UnionETask.tc_ETask)->iet_CpuAffinity >= 0x1000 &&
++             (IPTR)IntETask(w->tc_UnionETask.tc_ETask)->iet_CpuAffinity < 0x100000000ULL))
++#endif
++       )
 +        return TRUE;
++#undef QRX_PTR_OK
 +    {
 +        struct Task *me = GET_THIS_TASK;
 +        kprintf("[exec] ReleaseSemaphore %p '%s': waiter %p in request %p is no task; released by %p '%s' from %p\n",
@@ -30557,7 +30570,7 @@ index 8cdd3da9..703005c5 100644
  /*****************************************************************************/
  #undef  Exec
  #ifdef UseExecstubs
-@@ -73,6 +90,7 @@
+@@ -73,6 +103,7 @@
  
      /* Protect the semaphore structure from multiple access. */
      Forbid();
@@ -30565,7 +30578,7 @@ index 8cdd3da9..703005c5 100644
  
      /* Release one on the nest count */
      sigSem->ss_NestCount--;
-@@ -135,6 +153,7 @@
+@@ -135,6 +166,7 @@
                      if( ((IPTR)sr->sr_Waiter & SM_SHARED) == SM_SHARED )
                      {
                          Remove((struct Node *)sr);
@@ -30573,7 +30586,7 @@ index 8cdd3da9..703005c5 100644
  
                          /* Clear the bit, and update the owner count */
                          sr->sr_Waiter = (APTR)((IPTR)sr->sr_Waiter & ~1);
-@@ -143,7 +162,8 @@
+@@ -143,7 +175,8 @@
                          if(sr->sr_Waiter != NULL)
                          {
                              /* This is a task, signal it */
@@ -30583,7 +30596,7 @@ index 8cdd3da9..703005c5 100644
                          }
                          else
                          {
-@@ -163,12 +183,14 @@
+@@ -163,12 +196,14 @@
  
                  /* Only awaken the first of the nodes */
                  Remove((struct Node *)sr);
@@ -30599,7 +30612,7 @@ index 8cdd3da9..703005c5 100644
                  }
                  else
                  {
-@@ -199,6 +221,7 @@
+@@ -199,6 +234,7 @@
      }
  
      /* All done. */
