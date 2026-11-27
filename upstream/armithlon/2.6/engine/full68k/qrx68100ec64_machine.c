@@ -397,6 +397,12 @@ void qec64_machine_free(qec64_machine *m)
     free(m);
 }
 qec64_cpu *qec64_machine_core(qec64_machine *m, unsigned i) { return i < m->cores ? &m->cpu[i] : NULL; }
+void qec64_machine_gforbid_state(qec64_machine *m, int *owner, uint32_t *stopped)
+{
+    (void)m;
+    *owner = __atomic_load_n(&gf_owner, __ATOMIC_RELAXED);
+    *stopped = __atomic_load_n(&gf_stopped, __ATOMIC_RELAXED);
+}
 void qec64_machine_console(qec64_machine *m, char *out, size_t cap) { m->out = out; m->cap = cap; m->used = 0; }
 size_t qec64_machine_console_used(const qec64_machine *m) { return m->used; }
 void qec64_machine_console_input(qec64_machine *m, const char *in, size_t len) { m->in = in; m->in_len = len; m->in_pos = 0; }

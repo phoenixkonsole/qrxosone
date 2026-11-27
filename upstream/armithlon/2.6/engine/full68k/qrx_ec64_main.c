@@ -149,7 +149,7 @@ static void *stdin_reader(void *arg)
 
 /* --profile FILE: every 2 ms of wall time each core's pc goes to FILE as a record of
  * 16 bytes (little endian): u32 milliseconds since the start, u8 core, u8 flags (1 supervisor,
- * 2 waiting after STOP), u16 0, u64 pc. tools/armithlon/ec64prof.py sums them up by symbol. */
+ * 2 waiting after STOP, 4 owns the global Forbid, 8 stands still for it), u16 0, u64 pc. tools/armithlon/ec64prof.py sums them up by symbol. */
 struct prof_args { qec64_machine *m; unsigned cores; FILE *f; int stop; };
 static void *profile_thread(void *arg)
 {
@@ -159,13 +159,15 @@ static void *profile_thread(void *arg)
         struct timespec ts = { 0, 2000000 };
         nanosleep(&ts, NULL);
         uint32_t ms = (uint32_t)((wall() - t0) * 1000.0);
+        int gowner; uint32_t gstopped;
+        qec64_machine_gforbid_state(p->m, &gowner, &gstopped);
         for (unsigned k = 0; k < p->cores; k++) {
             qec64_cpu *c = qec64_machine_core(p->m, k);
             uint8_t rec[16] = { 0 };
             uint64_t pc = __atomic_load_n(&c->pc, __ATOMIC_RELAXED);
             for (int i = 0; i < 4; i++) rec[i] = (uint8_t)(ms >> (8 * i));
             rec[4] = (uint8_t)k;
-            rec[5] = (uint8_t)((c->supervisor ? 1 : 0) | (c->waiting ? 2 : 0));
+            rec[5] = (uint8_t)((c->supervisor ? 1 : 0) | (c->waiting ? 2 : 0) | (gowner == (int)k ? 4 : 0) | (gstopped >> k & 1 ? 8 : 0));
             for (int i = 0; i < 8; i++) rec[8 + i] = (uint8_t)(pc >> (8 * i));
             fwrite(rec, 1, sizeof rec, p->f);
         }

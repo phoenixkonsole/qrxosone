@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Sums up a 68100EC64 profile (qrx_ec64_run --profile FILE) by function.
 Usage: ec64prof.py PROFILE LOG [--program ELF] [--kernel-map MAP] [--from S] [--to S] [--top N]
-  PROFILE  records of 16 bytes: u32 ms, u8 core, u8 flags (1 supervisor, 2 waiting), u16, u64 pc
+  PROFILE  records of 16 bytes: u32 ms, u8 core, u8 flags (1 supervisor, 2 waiting, 4 owns the global
+           Forbid, 8 stands still for it), u16, u64 pc
   LOG      the run's console log: the "module PATH at A-B" lines name the ROM modules; with
            QRX_BACKTRACE set the program prints "QRXBT anchor A" (its qrx_bt_anchor), which gives
            the load base of --program (an ET_REL AROS executable with symbols, e.g. Gecko's firefox)
@@ -15,6 +16,7 @@ ap.add_argument('profile'); ap.add_argument('log')
 ap.add_argument('--program'); ap.add_argument('--kernel-map'); ap.add_argument('--kernel-base', default='0x100000')
 ap.add_argument('--from', dest='t0', type=float, default=0); ap.add_argument('--to', dest='t1', type=float, default=1e12)
 ap.add_argument('--top', type=int, default=40)
+ap.add_argument('--flags', type=int, default=0, help='only samples with one of these flag bits (4 owner of the global Forbid, 8 standing still for it)')
 ap.add_argument('--llvm', default='/opt/qrx-os-one/ec64llvm/build/bin')
 a = ap.parse_args()
 
@@ -71,17 +73,21 @@ def name(pc):
     return '%s:%s' % (mod, syms[j][1] if j >= 0 else '?')
 
 data = open(a.profile, 'rb').read()
-cores = collections.Counter(); idle = collections.Counter(); hot = collections.Counter(); mods = collections.Counter()
+cores = collections.Counter(); idle = collections.Counter(); owner = collections.Counter(); stopped = collections.Counter(); hot = collections.Counter(); mods = collections.Counter()
 n = 0
 for ms, core, fl, _, pc in struct.iter_unpack('<IBBHQ', data):
     t = ms / 1000.0
     if t < a.t0 or t >= a.t1: continue
     cores[core] += 1
+    if fl & 4: owner[core] += 1
+    if fl & 8: stopped[core] += 1
+    if a.flags and not (fl & a.flags): continue
     if fl & 2: idle[core] += 1; continue
     nm_ = name(pc)
     hot[nm_] += 1; mods[nm_.split(':')[0]] += 1; n += 1
 for c in sorted(cores):
-    print('core %d: %d samples, %.1f%% idle' % (c, cores[c], 100.0 * idle[c] / cores[c]))
+    print('core %d: %d samples, %.1f%% idle, %.1f%% owning the global Forbid, %.1f%% standing still for it' % (
+        c, cores[c], 100.0 * idle[c] / cores[c], 100.0 * owner[c] / cores[c], 100.0 * stopped[c] / cores[c]))
 print('\nbusy samples by module:')
 for k, v in mods.most_common(12): print('  %6.2f%%  %s' % (100.0 * v / max(n, 1), k))
 print('\nhottest functions (share of busy samples):')
