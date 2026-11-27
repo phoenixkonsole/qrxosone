@@ -76,3 +76,19 @@ Bau: läuft an, die ersten Übersetzungseinheiten scheitern. Offen, in dieser Re
 
 Erledigt dafür im Compiler: `_BitInt(N)` für m68k64 eingeschaltet (libc++ `<bitset>`, fmt), Rechnung im Gast geprüft
 (128 und 65 Bit, Ergebnis wie Python).
+
+## ThunderCat for AROS (the browser on QRX OS One 64)
+
+The browser build is ThunderCat for AROS: Firefox 153.8.0's source with this patch, the names from
+the unofficial branding (`brand.ftl`, `brand.properties`, in the patch) and the logo from
+`branding/install-branding.sh` (the project's artwork, `branding/thundercat-logo-source.png`).
+
+- Windows: `widget/aros/aros_window_glue.c` opens an Intuition window for each top-level widget and
+  popup (menus, the address bar's suggestions, lists) of HeadlessWidget; all windows share one IDCMP
+  port that nsAppShell waits on. Mouse (buttons, double clicks, context menu, wheel), keyboard
+  (through the keymap, TextEventDispatcher), resizing, moving and the close gadget reach Gecko;
+  a press outside an open popup closes it. `QRX_INPUT_LOG=1` prints each input event.
+- Colours on big endian: SWGL reads B, G, R, A bytes; Gecko's OS_RGBA there is A, R, G, B, so
+  RenderTextureHostSWGL hands SWGL a byte-swapped copy of such images; Skia's kBGRA_8888 is A, R, G, B
+  in a big-endian memory, so A8R8G8B8 maps to it and the canvas uses OS_RGBA.
+- Packaging: `package-appstore.sh OBJ OUT REV` (the App Store archive `thundercat-153.8.0-qrx64-REV`).

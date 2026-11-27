@@ -17,6 +17,39 @@
  
  if CONFIG["MOZ_NO_PIE_COMPAT"]:
      GeckoProgram(CONFIG["MOZ_APP_NAME"] + "-bin", linkage=browser_linkage)
+--- a/browser/branding/unofficial/locales/en-US/brand.ftl
++++ b/browser/branding/unofficial/locales/en-US/brand.ftl
+@@ -16,12 +16,12 @@
+ ## For further details, consult:
+ ## https://mozilla-l10n.github.io/styleguides/mozilla_general/#brands-copyright-and-trademark
+ 
+--brand-shorter-name = Nightly
+--brand-short-name = Nightly
+--brand-shortcut-name = Nightly
+--brand-full-name = Nightly
++-brand-shorter-name = ThunderCat
++-brand-short-name = ThunderCat
++-brand-shortcut-name = ThunderCat
++-brand-full-name = ThunderCat for AROS
+ # This brand name can be used in messages where the product name needs to
+ # remain unchanged across different versions (Nightly, Beta, etc.).
+--brand-product-name = Firefox
+--vendor-short-name = Mozilla
++-brand-product-name = ThunderCat
++-vendor-short-name = QRX
+ trademarkInfo = { " " }
+--- a/browser/branding/unofficial/locales/en-US/brand.properties
++++ b/browser/branding/unofficial/locales/en-US/brand.properties
+@@ -2,6 +2,6 @@
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-brandShorterName=Nightly
+-brandShortName=Nightly
+-brandFullName=Nightly
++brandShorterName=ThunderCat
++brandShortName=ThunderCat
++brandFullName=ThunderCat for AROS
 --- a/browser/components/shell/HeadlessShell.sys.mjs
 +++ b/browser/components/shell/HeadlessShell.sys.mjs
 @@ -89,13 +89,20 @@
@@ -287,6 +320,22 @@
  
  ifeq (clang-cl_WINNT,$(CC_TYPE)_$(OS_ARCH))
  endif	# WINNT && !GCC
+--- a/dom/canvas/CanvasRenderingContext2D.cpp
++++ b/dom/canvas/CanvasRenderingContext2D.cpp
+@@ -2349,7 +2349,13 @@
+ }
+ 
+ SurfaceFormat CanvasRenderingContext2D::GetSurfaceFormat() const {
++#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++  // QRX: big endian. Skia cannot write B, G, R, A bytes there (its 8888 types are 32-bit words), so
++  // a canvas labelled B8G8R8A8 held A, R, G, B: the canvas is OS_RGBA, which is what Skia writes.
++  return mOpaque ? SurfaceFormat::OS_RGBX : SurfaceFormat::OS_RGBA;
++#else
+   return mOpaque ? SurfaceFormat::B8G8R8X8 : SurfaceFormat::B8G8R8A8;
++#endif
+ }
+ 
+ //
 --- a/dom/ipc/PContent.ipdl
 +++ b/dom/ipc/PContent.ipdl
 @@ -202,8 +202,8 @@
@@ -410,6 +459,28 @@
  already_AddRefed<ScaledFont> Factory::CreateScaledFontForFreeTypeFont(
      const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
      RefPtr<SharedFTFace> aFace, bool aApplySyntheticBold) {
+--- a/gfx/2d/HelpersSkia.h
++++ b/gfx/2d/HelpersSkia.h
+@@ -35,10 +35,17 @@
+       return kRGBA_8888_SkColorType;
+     case SurfaceFormat::A8R8G8B8:
+     case SurfaceFormat::X8R8G8B8:
+-#ifndef FUZZING
++#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++      // QRX: big endian. Skia's 8888 types are 32-bit words: kBGRA_8888 is 0xAARRGGBB, which in a
++      // big-endian memory is A, R, G, B: Gecko's A8R8G8B8 (OS_RGBA there). kRGBA_8888 would be
++      // A, B, G, R.
++      return kBGRA_8888_SkColorType;
++#else
++#  ifndef FUZZING
+       MOZ_DIAGNOSTIC_CRASH("A8R8G8B8 unsupported by Skia");
++#  endif
++      return kRGBA_8888_SkColorType;
+ #endif
+-      return kRGBA_8888_SkColorType;
+     default:
+ #ifndef FUZZING
+       MOZ_DIAGNOSTIC_CRASH("Unknown surface format");
 --- a/gfx/2d/NativeFontResourceFreeType.cpp
 +++ b/gfx/2d/NativeFontResourceFreeType.cpp
 @@ -33,7 +33,7 @@
@@ -752,19 +823,42 @@
      if (!mSurface || !mSurface->Map(gfx::DataSourceSurface::READ_WRITE, &map)) {
 --- a/gfx/webrender_bindings/RenderTextureHostSWGL.cpp
 +++ b/gfx/webrender_bindings/RenderTextureHostSWGL.cpp
-@@ -36,6 +36,11 @@
-     switch (format) {
-       case gfx::SurfaceFormat::B8G8R8A8:
-       case gfx::SurfaceFormat::B8G8R8X8:
-+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-+      // QRX: big endian, SWGL's BGRA8 is A8R8G8B8 in memory (see WebRenderTypes.h)
-+      case gfx::SurfaceFormat::A8R8G8B8:
-+      case gfx::SurfaceFormat::X8R8G8B8:
-+#endif
+@@ -3,6 +3,7 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "RenderTextureHostSWGL.h"
++#include "mozilla/gfx/Swizzle.h"
+ 
+ #include "mozilla/gfx/Logging.h"
+ #include "mozilla/layers/TextureHost.h"
+@@ -39,6 +40,26 @@
          MOZ_ASSERT(colorDepth == gfx::ColorDepth::COLOR_8);
          internalFormat = LOCAL_GL_RGBA8;
          break;
-@@ -193,6 +198,11 @@
++#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++      // QRX: big endian. SWGL reads B, G, R, A bytes; Gecko's OS_RGBA here (decoded images, canvas,
++      // rasterized SVG) is A8R8G8B8, A, R, G, B in memory: SWGL gets a copy with the bytes turned
++      // round. Handing these over as BGRA8 made red and green transparent and blue opaque.
++      case gfx::SurfaceFormat::A8R8G8B8:
++      case gfx::SurfaceFormat::X8R8G8B8: {
++        MOZ_ASSERT(colorDepth == gfx::ColorDepth::COLOR_8);
++        internalFormat = LOCAL_GL_RGBA8;
++        int32_t stride = plane.mSize.width * 4;
++        plane.mConverted.resize(size_t(stride) * plane.mSize.height);
++        gfx::SwizzleData(static_cast<const uint8_t*>(plane.mData), plane.mStride, format,
++                         plane.mConverted.data(), stride,
++                         format == gfx::SurfaceFormat::A8R8G8B8 ? gfx::SurfaceFormat::B8G8R8A8
++                                                                : gfx::SurfaceFormat::B8G8R8X8,
++                         plane.mSize);
++        plane.mData = plane.mConverted.data();
++        plane.mStride = stride;
++        break;
++      }
++#endif
+       case gfx::SurfaceFormat::YUV420:
+         switch (colorDepth) {
+           case gfx::ColorDepth::COLOR_8:
+@@ -193,6 +214,11 @@
      }
      case gfx::SurfaceFormat::B8G8R8A8:
      case gfx::SurfaceFormat::B8G8R8X8:
@@ -776,6 +870,19 @@
        break;
      default:
        gfxCriticalNote << "Unhandled external image format: " << GetFormat();
+--- a/gfx/webrender_bindings/RenderTextureHostSWGL.h
++++ b/gfx/webrender_bindings/RenderTextureHostSWGL.h
+@@ -39,6 +39,10 @@
+     void* mData = nullptr;
+     int32_t mStride = 0;
+     gfx::IntSize mSize;
++#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    // QRX: big endian, A8R8G8B8 pixels turned into the B8G8R8A8 SWGL reads (UpdatePlanes)
++    std::vector<uint8_t> mConverted;
++#endif
+   };
+ 
+   virtual bool MapPlane(RenderCompositor* aCompositor, uint8_t aChannelIndex,
 --- a/gfx/webrender_bindings/WebRenderTypes.h
 +++ b/gfx/webrender_bindings/WebRenderTypes.h
 @@ -6,6 +6,7 @@
@@ -5424,18 +5531,22 @@
    DataMutex<LayoutDeviceIntSize> mClientSize;
 --- a/widget/headless/HeadlessWidget.cpp
 +++ b/widget/headless/HeadlessWidget.cpp
-@@ -3,6 +3,10 @@
+@@ -3,6 +3,14 @@
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
  #include "InputData.h"
  #include "HeadlessWidget.h"
 +#ifdef MOZ_WIDGET_AROS
 +#  include "gfxPlatform.h"
 +#  include "aros_window_glue.h"
++#  include "mozilla/dom/KeyboardEventBinding.h"
++#  include "mozilla/dom/MouseEventBinding.h"
++#  include "mozilla/TextEventDispatcherListener.h"
++#  include "nsIRollupListener.h"
 +#endif
  #include "ErrorList.h"
  #include "HeadlessCompositorWidget.h"
  #include "BasicEvents.h"
-@@ -96,6 +100,12 @@
+@@ -96,6 +104,13 @@
    }
    LOG(("HeadlessWidget::Destroy [%p]\n", (void*)this));
    mDestroyed = true;
@@ -5443,12 +5554,13 @@
 +  if (mQrxWin) {
 +    qrx_win_close(mQrxWin);
 +    mQrxWin = nullptr;
++    QrxForget(this);
 +  }
 +#endif
  
    if (sActiveWindows) {
      int32_t index = sActiveWindows->IndexOf(this);
-@@ -160,8 +170,32 @@
+@@ -160,8 +175,357 @@
    if (mWidgetListener) mWidgetListener->WindowActivated();
  }
  
@@ -5469,19 +5581,354 @@
 +}
 +#endif
 +
++#ifdef MOZ_WIDGET_AROS
++// ---- QRX OS One 64: input from the Intuition windows (aros_window_glue.c, nsAppShell)
++
++// the widgets with an Intuition window, in the order they opened (popups last, on top)
++static nsTArray<HeadlessWidget*>* sQrxWindows;
++// the widget a press went to: it keeps the pointer until all buttons are up
++static HeadlessWidget* sQrxCapture;
++
++void HeadlessWidget::QrxOpenWindow() {
++  if (gfxPlatform::IsHeadless()) return;
++  bool popup = mWindowType == WindowType::Popup;
++  if (!popup && mWindowType != WindowType::TopLevel && mWindowType != WindowType::Dialog) return;
++  LayoutDeviceIntPoint p = popup ? WidgetToScreenOffset() : mBounds.TopLeft();
++  mQrxWin = qrx_win_open(p.x, p.y, mBounds.width, mBounds.height,
++                         mQrxTitle.IsEmpty() ? "ThunderCat" : mQrxTitle.get(), popup, this);
++  if (!mQrxWin) return;
++  if (!sQrxWindows) {
++    sQrxWindows = new nsTArray<HeadlessWidget*>();
++  }
++  sQrxWindows->AppendElement(this);
++  if (!popup) {
++    // the window sits where Intuition put it (below the screen's bar, inside its border)
++    int x, y;
++    qrx_win_position(mQrxWin, &x, &y);
++    mQrxMoving = true;
++    MoveInternal(x, y);
++    mQrxMoving = false;
++  }
++}
++
++void HeadlessWidget::QrxForget(HeadlessWidget* aWidget) {
++  if (sQrxWindows) sQrxWindows->RemoveElement(aWidget);
++  if (sQrxCapture == aWidget) sQrxCapture = nullptr;
++  if (aWidget->mWindowType == WindowType::Popup) {
++    // Intuition activated the popup's window when it was clicked: the top-level window takes the
++    // keyboard again
++    nsIWidget* top = aWidget->GetTopLevelWidget();
++    if (top && top != aWidget) {
++      HeadlessWidget* t = static_cast<HeadlessWidget*>(top);
++      if (t->mQrxWin) qrx_win_front(t->mQrxWin);
++    }
++  }
++}
++
++static Modifiers QrxModifiers(unsigned aMods) {
++  Modifiers m = MODIFIER_NONE;
++  if (aMods & QRX_MOD_SHIFT) m |= MODIFIER_SHIFT;
++  if (aMods & QRX_MOD_CTRL) m |= MODIFIER_CONTROL;
++  if (aMods & QRX_MOD_ALT) m |= MODIFIER_ALT;
++  if (aMods & QRX_MOD_META) m |= MODIFIER_META;
++  if (aMods & QRX_MOD_CAPS) m |= MODIFIER_CAPSLOCK;
++  return m;
++}
++
++static int16_t QrxButtons(unsigned aButtons) {
++  int16_t b = 0;
++  if (aButtons & QRX_BTN_LEFT) b |= MouseButtonsFlag::ePrimaryFlag;
++  if (aButtons & QRX_BTN_RIGHT) b |= MouseButtonsFlag::eSecondaryFlag;
++  if (aButtons & QRX_BTN_MIDDLE) b |= MouseButtonsFlag::eMiddleFlag;
++  return b;
++}
++
++// a press outside the open popups closes them, as GTK's nsWindow::CheckForRollup does; true when
++// the press is used up by that
++static bool QrxRollup(const LayoutDeviceIntPoint& aScreenPoint, bool aWheel) {
++  nsIRollupListener* listener = nsIWidget::GetActiveRollupListener();
++  if (!listener) return false;
++  nsCOMPtr<nsIWidget> rollupWidget = listener->GetRollupWidget();
++  if (!rollupWidget) return false;
++  if (rollupWidget->GetScreenBounds().Contains(aScreenPoint)) return false;
++  bool consume = false;
++  if (aWheel) {
++    consume = listener->ShouldConsumeOnMouseWheelEvent();
++    if (!listener->ShouldRollupOnMouseWheelEvent()) return consume;
++  }
++  nsIRollupListener::RollupOptions options;
++  AutoTArray<nsIWidget*, 5> chain;
++  uint32_t sameTypeCount = listener->GetSubmenuWidgetChain(&chain);
++  for (uint32_t i = 0; i < chain.Length(); i++) {
++    if (chain[i]->GetScreenBounds().Contains(aScreenPoint)) {
++      if (i < sameTypeCount) return consume;
++      options.mCount = sameTypeCount;
++      break;
++    }
++  }
++  LayoutDeviceIntPoint point = aScreenPoint;
++  if (!aWheel) options.mPoint = &point;
++  if (listener->Rollup(options)) consume = true;
++  return consume;
++}
++
++// the widget under a point of the screen: the newest popup there, else a top-level window
++static HeadlessWidget* QrxWidgetAt(const LayoutDeviceIntPoint& aScreenPoint,
++                                   HeadlessWidget* aFallback) {
++  if (!sQrxWindows) return aFallback;
++  for (size_t i = sQrxWindows->Length(); i-- > 0;) {
++    HeadlessWidget* w = (*sQrxWindows)[i];
++    if (w->GetScreenBounds().Contains(aScreenPoint)) return w;
++  }
++  return aFallback;
++}
++
++void HeadlessWidget::QrxMouse(EventMessage aMsg, const ::qrx_input& aIn) {
++  WidgetMouseEvent event(true, aMsg, this, WidgetMouseEvent::eReal);
++  event.mRefPoint = LayoutDeviceIntPoint(aIn.x, aIn.y);
++  event.mModifiers = QrxModifiers(aIn.mods);
++  event.mButtons = QrxButtons(aIn.buttons);
++  if (aMsg != eMouseMove) {
++    event.mButton = aIn.button == 1   ? MouseButton::eSecondary
++                    : aIn.button == 2 ? MouseButton::eMiddle
++                                      : MouseButton::ePrimary;
++    event.mClickCount = mQrxClickCount;
++  }
++  event.AssignEventTime(WidgetEventTime());
++  DispatchInputEvent(&event);
++  if (aMsg == eMouseDown && aIn.button == 1 && !Destroyed()) {
++    WidgetPointerEvent contextMenu(true, eContextMenu, this);
++    contextMenu.mRefPoint = event.mRefPoint;
++    contextMenu.mModifiers = event.mModifiers;
++    contextMenu.mButton = MouseButton::eSecondary;
++    contextMenu.mButtons = event.mButtons;
++    contextMenu.mClickCount = 1;
++    contextMenu.AssignEventTime(WidgetEventTime());
++    DispatchInputEvent(&contextMenu);
++  }
++}
++
++// Amiga raw keys that are not characters
++static KeyNameIndex QrxKeyName(int aRaw) {
++  switch (aRaw) {
++    case 0x41: return KEY_NAME_INDEX_Backspace;
++    case 0x42: return KEY_NAME_INDEX_Tab;
++    case 0x43:
++    case 0x44: return KEY_NAME_INDEX_Enter;
++    case 0x45: return KEY_NAME_INDEX_Escape;
++    case 0x46: return KEY_NAME_INDEX_Delete;
++    case 0x47: return KEY_NAME_INDEX_Insert;
++    case 0x48: return KEY_NAME_INDEX_PageUp;
++    case 0x49: return KEY_NAME_INDEX_PageDown;
++    case 0x4C: return KEY_NAME_INDEX_ArrowUp;
++    case 0x4D: return KEY_NAME_INDEX_ArrowDown;
++    case 0x4E: return KEY_NAME_INDEX_ArrowRight;
++    case 0x4F: return KEY_NAME_INDEX_ArrowLeft;
++    case 0x50: return KEY_NAME_INDEX_F1;
++    case 0x51: return KEY_NAME_INDEX_F2;
++    case 0x52: return KEY_NAME_INDEX_F3;
++    case 0x53: return KEY_NAME_INDEX_F4;
++    case 0x54: return KEY_NAME_INDEX_F5;
++    case 0x55: return KEY_NAME_INDEX_F6;
++    case 0x56: return KEY_NAME_INDEX_F7;
++    case 0x57: return KEY_NAME_INDEX_F8;
++    case 0x58: return KEY_NAME_INDEX_F9;
++    case 0x59: return KEY_NAME_INDEX_F10;
++    case 0x4B: return KEY_NAME_INDEX_F11;
++    case 0x6F: return KEY_NAME_INDEX_F12;
++    case 0x5F: return KEY_NAME_INDEX_Help;
++    case 0x70: return KEY_NAME_INDEX_Home;
++    case 0x71: return KEY_NAME_INDEX_End;
++    default: return KEY_NAME_INDEX_USE_STRING;
++  }
++}
++
++void HeadlessWidget::QrxKey(const ::qrx_input& aIn) {
++  RefPtr<TextEventDispatcher> dispatcher = GetTextEventDispatcher();
++  if (!dispatcher || NS_FAILED(dispatcher->BeginNativeInputTransaction())) return;
++  WidgetKeyboardEvent event(true, aIn.down ? eKeyDown : eKeyUp, this);
++  event.mModifiers = QrxModifiers(aIn.mods);
++  KeyNameIndex name = QrxKeyName(aIn.rawkey);
++  if (name == KEY_NAME_INDEX_USE_STRING) {
++    unsigned ch = aIn.ch;
++    if (!ch) return;   // a dead key, or nothing on the keymap
++    event.mKeyNameIndex = KEY_NAME_INDEX_USE_STRING;
++    event.mKeyValue.Assign(char16_t(ch));
++    unsigned up = aIn.ch_plain >= 'a' && aIn.ch_plain <= 'z' ? aIn.ch_plain - 32 : aIn.ch_plain;
++    if (up >= 'A' && up <= 'Z') {
++      event.mKeyCode = dom::KeyboardEvent_Binding::DOM_VK_A + (up - 'A');
++    } else if (up >= '0' && up <= '9') {
++      event.mKeyCode = dom::KeyboardEvent_Binding::DOM_VK_0 + (up - '0');
++    } else if (up == ' ') {
++      event.mKeyCode = dom::KeyboardEvent_Binding::DOM_VK_SPACE;
++    }
++  } else {
++    event.mKeyNameIndex = name;
++    event.mKeyCode = WidgetKeyboardEvent::ComputeKeyCodeFromKeyNameIndex(name);
++  }
++  if (aIn.rawkey >= 0x0F && aIn.rawkey <= 0x5E &&
++      (aIn.rawkey == 0x0F || (aIn.rawkey >= 0x1D && aIn.rawkey <= 0x1F) ||
++       (aIn.rawkey >= 0x2D && aIn.rawkey <= 0x2F) || (aIn.rawkey >= 0x3C && aIn.rawkey <= 0x3F) ||
++       aIn.rawkey == 0x43 || aIn.rawkey == 0x4A || (aIn.rawkey >= 0x5A && aIn.rawkey <= 0x5E))) {
++    event.mLocation = dom::KeyboardEvent_Binding::DOM_KEY_LOCATION_NUMPAD;
++  }
++  event.AssignEventTime(WidgetEventTime());
++  nsEventStatus status = nsEventStatus_eIgnore;
++  if (!aIn.down) {
++    dispatcher->DispatchKeyboardEvent(eKeyUp, event, status);
++    return;
++  }
++  if (dispatcher->DispatchKeyboardEvent(eKeyDown, event, status)) {
++    dispatcher->MaybeDispatchKeypressEvents(event, status);
++  }
++}
++
++void HeadlessWidget::QrxInput(const ::qrx_input& aIn) {
++  RefPtr<HeadlessWidget> kungFuDeathGrip(this);
++  if (Destroyed()) return;
++  static const bool sLog = !!getenv("QRX_INPUT_LOG");
++  if (sLog) {
++    printf_stderr("QRXIN %p type %d x %d y %d button %d down %d steps %d raw %02x ch %u mods %x\n",
++                  this, aIn.type, aIn.x, aIn.y, aIn.button, aIn.down, aIn.steps, aIn.rawkey, aIn.ch,
++                  aIn.mods);
++  }
++  LayoutDeviceIntPoint screen = WidgetToScreenOffset() + LayoutDeviceIntPoint(aIn.x, aIn.y);
++  switch (aIn.type) {
++    case QRX_IN_MOVE:
++    case QRX_IN_BUTTON: {
++      // the window under the pointer gets it (Intuition reports the pointer to the active window
++      // wherever it is), the pressed one while a button is held
++      HeadlessWidget* target = sQrxCapture ? sQrxCapture : QrxWidgetAt(screen, this);
++      RefPtr<HeadlessWidget> t = target;
++      LayoutDeviceIntPoint local = screen - t->WidgetToScreenOffset();
++      ::qrx_input in = aIn;
++      in.x = local.x;
++      in.y = local.y;
++      if (aIn.type == QRX_IN_MOVE) {
++        t->QrxMouse(eMouseMove, in);
++        return;
++      }
++      if (aIn.down) {
++        if (QrxRollup(screen, false)) return;
++        // a second press of the same button soon at the same place: a double click
++        unsigned dt = (aIn.secs - t->mQrxClickSecs) * 1000u + aIn.micros / 1000u - t->mQrxClickMicros / 1000u;
++        if (aIn.button == t->mQrxClickButton && dt < 500u &&
++            std::abs(local.x - t->mQrxClickPoint.x) < 5 && std::abs(local.y - t->mQrxClickPoint.y) < 5) {
++          t->mQrxClickCount++;
++        } else {
++          t->mQrxClickCount = 1;
++        }
++        t->mQrxClickButton = aIn.button;
++        t->mQrxClickPoint = local;
++        t->mQrxClickSecs = aIn.secs;
++        t->mQrxClickMicros = aIn.micros;
++        sQrxCapture = t;
++        t->QrxMouse(eMouseDown, in);
++      } else {
++        if (!(aIn.buttons & (QRX_BTN_LEFT | QRX_BTN_RIGHT | QRX_BTN_MIDDLE))) sQrxCapture = nullptr;
++        t->QrxMouse(eMouseUp, in);
++      }
++      return;
++    }
++    case QRX_IN_WHEEL: {
++      if (QrxRollup(screen, true)) return;
++      RefPtr<HeadlessWidget> t = QrxWidgetAt(screen, this);
++      WidgetWheelEvent event(true, eWheel, t);
++      event.mRefPoint = screen - t->WidgetToScreenOffset();
++      event.mModifiers = QrxModifiers(aIn.mods);
++      event.mDeltaMode = dom::WheelEvent_Binding::DOM_DELTA_LINE;
++      event.mDeltaY = aIn.steps * 3;
++      event.mLineOrPageDeltaY = aIn.steps * 3;
++      event.AssignEventTime(WidgetEventTime());
++      t->DispatchInputEvent(&event);
++      return;
++    }
++    case QRX_IN_KEY: {
++      // keys are for the top-level window, also while Intuition has a popup's window active
++      nsIWidget* top = mWindowType == WindowType::Popup ? GetTopLevelWidget() : this;
++      RefPtr<HeadlessWidget> t = static_cast<HeadlessWidget*>(top ? top : this);
++      t->QrxKey(aIn);
++      return;
++    }
++    case QRX_IN_CLOSE:
++      if (mWidgetListener) mWidgetListener->RequestWindowClose(this);
++      return;
++    case QRX_IN_SIZE:
++      if (aIn.w != mBounds.width || aIn.h != mBounds.height) ResizeInternal(aIn.w, aIn.h, true);
++      return;
++    case QRX_IN_MOVED:
++      mQrxMoving = true;
++      MoveInternal(aIn.x, aIn.y);
++      mQrxMoving = false;
++      if (aIn.w != mBounds.width || aIn.h != mBounds.height) ResizeInternal(aIn.w, aIn.h, true);
++      return;
++    case QRX_IN_ACTIVE:
++      // the window's activation is Gecko's; a popup's window taking it from Intuition is not a
++      // deactivation of the browser
++      if (aIn.down && mWindowType != WindowType::Popup) RaiseWindow();
++      return;
++  }
++}
++
++void QrxWindowInput(const ::qrx_input& aIn) {
++  if (!aIn.owner) return;
++  static_cast<HeadlessWidget*>(aIn.owner)->QrxInput(aIn);
++}
++
++// keyboard events go through TextEventDispatcher, which wants a listener for the native input;
++// there is no IME here, so it has nothing to do
++class QrxTextListener final : public TextEventDispatcherListener {
++ public:
++  NS_DECL_ISUPPORTS
++  NS_IMETHOD NotifyIME(TextEventDispatcher*, const IMENotification&) override { return NS_OK; }
++  NS_IMETHOD_(IMENotificationRequests) GetIMENotificationRequests() override {
++    return IMENotificationRequests();
++  }
++  NS_IMETHOD_(void) OnRemovedFrom(TextEventDispatcher*) override {}
++  NS_IMETHOD_(void)
++  WillDispatchKeyboardEvent(TextEventDispatcher*, WidgetKeyboardEvent&, uint32_t, void*) override {}
++
++ private:
++  ~QrxTextListener() = default;
++};
++NS_IMPL_ISUPPORTS(QrxTextListener, TextEventDispatcherListener, nsISupportsWeakReference)
++
++TextEventDispatcherListener* HeadlessWidget::GetNativeTextEventDispatcherListener() {
++  static StaticRefPtr<QrxTextListener> sListener;
++  if (!sListener) {
++    sListener = new QrxTextListener();
++    ClearOnShutdown(&sListener);
++  }
++  return sListener;
++}
++#endif
++
  void HeadlessWidget::Show(bool aState) {
    mVisible = aState;
 +#ifdef MOZ_WIDGET_AROS
-+  if (aState && !mQrxWin && !gfxPlatform::IsHeadless() &&
-+      (mWindowType == WindowType::TopLevel || mWindowType == WindowType::Dialog)) {
-+    mQrxWin = qrx_win_open(mBounds.x, mBounds.y, mBounds.width, mBounds.height,
-+                           mQrxTitle.IsEmpty() ? "Firefox" : mQrxTitle.get());
++  if (aState && !mQrxWin) {
++    QrxOpenWindow();
++  } else if (!aState && mQrxWin && mWindowType == WindowType::Popup) {
++    // a hidden popup's window goes; the next Show opens it again where the popup is then
++    qrx_win_close(mQrxWin);
++    mQrxWin = nullptr;
++    QrxForget(this);
 +  }
 +#endif
  
    LOG(("HeadlessWidget::Show [%p] state %d\n", (void*)this, aState));
  
-@@ -258,6 +292,9 @@
+@@ -222,6 +586,9 @@
+   }
+ 
+   mBounds.MoveTo(aX, aY);
++#ifdef MOZ_WIDGET_AROS
++  if (mQrxWin && !mQrxMoving) qrx_win_move(mQrxWin, aX, aY);
++#endif
+   NotifyWindowMoved(mBounds.TopLeft());
+ }
+ 
+@@ -258,6 +625,9 @@
                                      bool aRepaint) {
    ConstrainSize(&aWidth, &aHeight);
    mBounds.SizeTo(LayoutDeviceIntSize(aWidth, aHeight));
@@ -5493,18 +5940,19 @@
      mCompositorWidget->NotifyClientSizeChanged(mBounds.Size());
 --- a/widget/headless/HeadlessWidget.h
 +++ b/widget/headless/HeadlessWidget.h
-@@ -32,6 +32,10 @@
+@@ -32,6 +32,11 @@
  #else
  #  define MOZ_HEADLESS_SCROLL_MULTIPLIER -1
  #  define MOZ_HEADLESS_SCROLL_DELTA_MODE -1
 +#endif
 +
 +#ifdef MOZ_WIDGET_AROS
-+struct qrx_win;  // widget/aros/aros_window_glue.h
++struct qrx_win;    // widget/aros/aros_window_glue.h
++struct qrx_input;
  #endif
  
  namespace mozilla {
-@@ -72,10 +76,16 @@
+@@ -72,10 +77,19 @@
    void Invalidate(const LayoutDeviceIntRect& aRect) override {
      // TODO: see if we need to do anything here.
    }
@@ -5512,6 +5960,9 @@
 +  // QRX OS One 64: a top-level widget is an Intuition window unless Firefox runs headless
 +  nsresult SetTitle(const nsAString& title) override;
 +  ::qrx_win* QrxWindow() const { return mQrxWin; }
++  // mouse, keyboard and window changes from the Intuition window (nsAppShell, main thread)
++  void QrxInput(const ::qrx_input& aIn);
++  TextEventDispatcherListener* GetNativeTextEventDispatcherListener() override;
 +#else
    nsresult SetTitle(const nsAString& title) override {
      // Headless widgets have no title, so just ignore it.
@@ -5521,13 +5972,23 @@
    LayoutDeviceIntPoint WidgetToScreenOffset() override;
    void SetInputContext(const InputContext& aContext,
                         const InputContextAction& aAction) override {
-@@ -133,6 +143,10 @@
+@@ -133,6 +147,20 @@
    bool mVisible;
    bool mDestroyed;
    bool mAlwaysOnTop;
 +#ifdef MOZ_WIDGET_AROS
 +  ::qrx_win* mQrxWin = nullptr;
 +  nsCString mQrxTitle;
++  void QrxOpenWindow();
++  static void QrxForget(HeadlessWidget* aWidget);
++  void QrxMouse(mozilla::EventMessage aMsg, const ::qrx_input& aIn);
++  void QrxKey(const ::qrx_input& aIn);
++  // double clicks: the last press's button, place and Intuition time
++  int mQrxClickButton = -1;
++  int mQrxClickCount = 0;
++  LayoutDeviceIntPoint mQrxClickPoint;
++  unsigned mQrxClickSecs = 0, mQrxClickMicros = 0;
++  bool mQrxMoving = false;
 +#endif
    HeadlessCompositorWidget* mCompositorWidget;
    nsSizeMode mSizeMode;
@@ -8391,45 +8852,69 @@
 +#endif
 --- /dev/null
 +++ b/widget/aros/aros_window_glue.c
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,322 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +/*
-+ * QRX OS One 64 (AROS): the Intuition side of Gecko's top-level windows. HeadlessWidget opens one of
-+ * these for a top-level widget when Firefox is not headless; HeadlessCompositorWidget gives SWGL a
-+ * pixel buffer and copies each finished frame here with cybergraphics' WritePixelArray. A window's
-+ * semaphore keeps the compositor's copy and the main thread's close apart.
++ * QRX OS One 64 (AROS): the Intuition side of Gecko's windows. HeadlessWidget opens one of these
++ * for a top-level widget or a popup when Firefox is not headless; HeadlessCompositorWidget gives SWGL
++ * a pixel buffer and copies each finished frame here with cybergraphics' WritePixelArray. A window's
++ * semaphore over the list of open windows keeps the compositor's copy and the main thread's close
++ * apart: a copy goes only to a window still in the list.
++ *
++ * Input: all windows share one IDCMP port, made by and signalling Gecko's main thread; its signal is
++ * in the main thread's wait mask (aros_appshell_glue.c), and nsAppShell takes the messages with
++ * qrx_win_poll and hands them to the widget each window belongs to.
 + */
 +#include <proto/exec.h>
 +#include <proto/intuition.h>
 +#include <proto/graphics.h>
 +#include <proto/cybergraphics.h>
++#include <proto/keymap.h>
 +#include <exec/memory.h>
 +#include <exec/semaphores.h>
++#include <devices/inputevent.h>
 +#include <intuition/intuition.h>
 +#include <intuition/screens.h>
 +#include <cybergraphx/cybergraphics.h>
 +#include <string.h>
 +#include "aros_window_glue.h"
++#include "aros_appshell_glue.h"
 +
 +struct IntuitionBase *IntuitionBase;
 +struct GfxBase *GfxBase;
 +struct Library *CyberGfxBase;
++struct Library *KeymapBase;
 +
 +struct qrx_win {
++    struct qrx_win *next;
 +    struct Window *w;
 +    struct SignalSemaphore lock;
++    void *owner;
++    int popup;
 +    char title[128];
 +};
++
++static struct MsgPort *port;    /* the windows' shared IDCMP port */
++static struct qrx_win *wins;    /* the open windows */
++static struct SignalSemaphore wins_lock;
++static int wins_lock_ready;
++
++#define TOP_IDCMP (IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_CLOSEWINDOW | \
++                   IDCMP_NEWSIZE | IDCMP_CHANGEWINDOW | IDCMP_ACTIVEWINDOW | IDCMP_INACTIVEWINDOW)
++#define POPUP_IDCMP (IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY)
 +
 +static int open_libs(void)
 +{
 +    if (!IntuitionBase) IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 39);
 +    if (!GfxBase) GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 39);
 +    if (!CyberGfxBase) CyberGfxBase = OpenLibrary("cybergraphics.library", 40);
-+    return IntuitionBase && GfxBase && CyberGfxBase;
++    if (!KeymapBase) KeymapBase = OpenLibrary("keymap.library", 37);
++    if (!wins_lock_ready) { InitSemaphore(&wins_lock); wins_lock_ready = 1; }
++    if (!port && (port = CreateMsgPort()) != NULL) qrx_appshell_add_wait_mask(1UL << port->mp_SigBit);
++    return IntuitionBase && GfxBase && CyberGfxBase && port;
 +}
 +
 +void qrx_win_screen_size(int *w, int *h)
@@ -8443,34 +8928,74 @@
 +    UnlockPubScreen(NULL, s);
 +}
 +
-+qrx_win *qrx_win_open(int x, int y, int w, int h, const char *title)
++qrx_win *qrx_win_open(int x, int y, int w, int h, const char *title, int popup, void *owner)
 +{
 +    if (!open_libs()) return NULL;
 +    qrx_win *q = AllocVec(sizeof *q, MEMF_ANY | MEMF_CLEAR);
 +    if (!q) return NULL;
 +    InitSemaphore(&q->lock);
++    q->owner = owner;
++    q->popup = popup;
 +    strncpy(q->title, title ? title : "", sizeof q->title - 1);
 +    struct Screen *s = LockPubScreen(NULL);
 +    if (!s) { FreeVec(q); return NULL; }
-+    if (x < 0) x = 0;
-+    if (y < s->BarHeight + 1) y = s->BarHeight + 1;
-+    q->w = OpenWindowTags(NULL,
-+                          WA_Left, x, WA_Top, y, WA_InnerWidth, w, WA_InnerHeight, h,
-+                          WA_Title, (IPTR)q->title, WA_PubScreen, (IPTR)s,
-+                          WA_DragBar, TRUE, WA_DepthGadget, TRUE, WA_CloseGadget, TRUE, WA_SizeGadget, TRUE,
-+                          WA_SmartRefresh, TRUE, WA_Activate, TRUE, WA_NoCareRefresh, TRUE,
-+                          WA_MinWidth, 100, WA_MinHeight, 60, WA_MaxWidth, -1, WA_MaxHeight, -1,
-+                          WA_IDCMP, 0, TAG_DONE);
++    if (w < 1) w = 1;
++    if (h < 1) h = 1;
++    if (popup) {
++        q->w = OpenWindowTags(NULL,
++                              WA_Left, x, WA_Top, y, WA_Width, w, WA_Height, h,
++                              WA_PubScreen, (IPTR)s, WA_Borderless, TRUE, WA_Activate, FALSE,
++                              WA_SmartRefresh, TRUE, WA_NoCareRefresh, TRUE, WA_RMBTrap, TRUE,
++                              WA_ReportMouse, TRUE, WA_IDCMP, 0, TAG_DONE);
++    } else {
++        /* x, y is the inside's top left: the border goes around it, and stays below the screen's bar */
++        int bl = s->WBorLeft, bt = s->WBorTop + s->Font->ta_YSize + 1;
++        x -= bl;
++        y -= bt;
++        if (x < 0) x = 0;
++        if (y < s->BarHeight + 1) y = s->BarHeight + 1;
++        q->w = OpenWindowTags(NULL,
++                              WA_Left, x, WA_Top, y, WA_InnerWidth, w, WA_InnerHeight, h,
++                              WA_Title, (IPTR)q->title, WA_PubScreen, (IPTR)s,
++                              WA_DragBar, TRUE, WA_DepthGadget, TRUE, WA_CloseGadget, TRUE, WA_SizeGadget, TRUE,
++                              WA_SmartRefresh, TRUE, WA_Activate, TRUE, WA_NoCareRefresh, TRUE,
++                              WA_RMBTrap, TRUE, WA_ReportMouse, TRUE,
++                              WA_MinWidth, 200, WA_MinHeight, 120, WA_MaxWidth, -1, WA_MaxHeight, -1,
++                              WA_IDCMP, 0, TAG_DONE);
++    }
 +    UnlockPubScreen(NULL, s);
 +    if (!q->w) { FreeVec(q); return NULL; }
++    q->w->UserPort = port;
++    q->w->UserData = (APTR)q;
++    ModifyIDCMP(q->w, popup ? POPUP_IDCMP : TOP_IDCMP);
++    ObtainSemaphore(&wins_lock);
++    q->next = wins;
++    wins = q;
++    ReleaseSemaphore(&wins_lock);
 +    return q;
 +}
 +
 +void qrx_win_close(qrx_win *q)
 +{
 +    if (!q) return;
++    ObtainSemaphore(&wins_lock);
++    for (struct qrx_win **p = &wins; *p; p = &(*p)->next)
++        if (*p == q) { *p = q->next; break; }
++    ReleaseSemaphore(&wins_lock);
 +    ObtainSemaphore(&q->lock);
-+    if (q->w) CloseWindow(q->w);
++    if (q->w) {
++        /* the shared port: take this window's messages back before it closes */
++        Forbid();
++        struct Node *n = port->mp_MsgList.lh_Head, *next;
++        for (; (next = n->ln_Succ) != NULL; n = next) {
++            struct IntuiMessage *m = (struct IntuiMessage *)n;
++            if (m->IDCMPWindow == q->w) { Remove(n); ReplyMsg(&m->ExecMessage); }
++        }
++        q->w->UserPort = NULL;
++        ModifyIDCMP(q->w, 0);
++        Permit();
++        CloseWindow(q->w);
++    }
 +    q->w = NULL;
 +    ReleaseSemaphore(&q->lock);
 +    FreeVec(q);
@@ -8478,7 +9003,7 @@
 +
 +void qrx_win_title(qrx_win *q, const char *title)
 +{
-+    if (!q || !q->w) return;
++    if (!q || !q->w || q->popup) return;
 +    ObtainSemaphore(&q->lock);
 +    strncpy(q->title, title ? title : "", sizeof q->title - 1);
 +    SetWindowTitles(q->w, q->title, (CONST_STRPTR)~0);
@@ -8491,13 +9016,43 @@
 +    ObtainSemaphore(&q->lock);
 +    struct Window *win = q->w;
 +    int ow = win->Width - win->BorderLeft - win->BorderRight, oh = win->Height - win->BorderTop - win->BorderBottom;
++    if (w < 1) w = 1;
++    if (h < 1) h = 1;
 +    if (ow != w || oh != h) SizeWindow(win, w - ow, h - oh);
 +    ReleaseSemaphore(&q->lock);
 +}
 +
++void qrx_win_move(qrx_win *q, int x, int y)
++{
++    if (!q || !q->w) return;
++    struct Window *win = q->w;
++    int dx = x - (win->LeftEdge + win->BorderLeft), dy = y - (win->TopEdge + win->BorderTop);
++    if (dx || dy) MoveWindow(win, dx, dy);
++}
++
++void qrx_win_position(qrx_win *q, int *x, int *y)
++{
++    *x = *y = 0;
++    if (!q || !q->w) return;
++    *x = q->w->LeftEdge + q->w->BorderLeft;
++    *y = q->w->TopEdge + q->w->BorderTop;
++}
++
++void qrx_win_front(qrx_win *q)
++{
++    if (!q || !q->w) return;
++    WindowToFront(q->w);
++    if (!q->popup) ActivateWindow(q->w);
++}
++
 +void qrx_win_blit(qrx_win *q, const void *pixels, int stride, int x, int y, int w, int h)
 +{
-+    if (!q) return;
++    if (!q || !wins_lock_ready) return;
++    /* the compositor's thread may still hold a window the main thread closed */
++    ObtainSemaphore(&wins_lock);
++    struct qrx_win *o = wins;
++    while (o && o != q) o = o->next;
++    if (!o) { ReleaseSemaphore(&wins_lock); return; }
 +    ObtainSemaphore(&q->lock);
 +    struct Window *win = q->w;
 +    if (win && w > 0 && h > 0) {
@@ -8508,32 +9063,183 @@
 +            WritePixelArray((APTR)pixels, x, y, stride, win->RPort, win->BorderLeft + x, win->BorderTop + y, w, h, RECTFMT_BGRA32);
 +    }
 +    ReleaseSemaphore(&q->lock);
++    ReleaseSemaphore(&wins_lock);
++}
++
++static unsigned mods_of(UWORD q)
++{
++    unsigned m = 0;
++    if (q & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT)) m |= QRX_MOD_SHIFT;
++    if (q & IEQUALIFIER_CONTROL) m |= QRX_MOD_CTRL;
++    if (q & (IEQUALIFIER_LALT | IEQUALIFIER_RALT)) m |= QRX_MOD_ALT;
++    if (q & (IEQUALIFIER_LCOMMAND | IEQUALIFIER_RCOMMAND)) m |= QRX_MOD_META;
++    if (q & IEQUALIFIER_CAPSLOCK) m |= QRX_MOD_CAPS;
++    return m;
++}
++
++static unsigned buttons_of(UWORD q)
++{
++    unsigned b = 0;
++    if (q & IEQUALIFIER_LEFTBUTTON) b |= QRX_BTN_LEFT;
++    if (q & IEQUALIFIER_RBUTTON) b |= QRX_BTN_RIGHT;
++    if (q & IEQUALIFIER_MIDBUTTON) b |= QRX_BTN_MIDDLE;
++    return b;
++}
++
++/* the character a raw key gives with these qualifiers (the keymap's, with dead keys), 0 for none */
++static unsigned char_of(struct IntuiMessage *m, UWORD qual)
++{
++    struct InputEvent ie;
++    UBYTE buf[8];
++    if (!KeymapBase) return 0;
++    memset(&ie, 0, sizeof ie);
++    ie.ie_Class = IECLASS_RAWKEY;
++    ie.ie_Code = m->Code & 0x7f;
++    ie.ie_Qualifier = qual;
++    ie.ie_EventAddress = m->IAddress ? *(APTR *)m->IAddress : NULL;
++    LONG n = MapRawKey(&ie, (STRPTR)buf, sizeof buf, NULL);
++    return n == 1 ? buf[0] : 0;
++}
++
++int qrx_win_poll(qrx_input *in)
++{
++    struct IntuiMessage *m;
++    if (!port) return 0;
++    while ((m = (struct IntuiMessage *)GetMsg(port)) != NULL) {
++        struct Window *w = m->IDCMPWindow;
++        qrx_win *q = (qrx_win *)w->UserData;
++        ULONG cls = m->Class;
++        UWORD code = m->Code, qual = m->Qualifier;
++        memset(in, 0, sizeof *in);
++        in->owner = q ? q->owner : NULL;
++        in->x = m->MouseX - w->BorderLeft;
++        in->y = m->MouseY - w->BorderTop;
++        in->mods = mods_of(qual);
++        in->buttons = buttons_of(qual);
++        in->secs = (unsigned)m->Seconds;
++        in->micros = (unsigned)m->Micros;
++        int keep = 1;
++        switch (cls) {
++        case IDCMP_MOUSEMOVE: {
++            /* only the last of a run of moves */
++            struct Node *n = port->mp_MsgList.lh_Head;
++            if (n->ln_Succ && ((struct IntuiMessage *)n)->Class == IDCMP_MOUSEMOVE &&
++                ((struct IntuiMessage *)n)->IDCMPWindow == w) keep = 0;
++            in->type = QRX_IN_MOVE;
++            break;
++        }
++        case IDCMP_MOUSEBUTTONS:
++            in->type = QRX_IN_BUTTON;
++            in->down = !(code & IECODE_UP_PREFIX);
++            switch (code & ~IECODE_UP_PREFIX) {
++            case IECODE_LBUTTON: in->button = 0; break;
++            case IECODE_RBUTTON: in->button = 1; break;
++            case IECODE_MBUTTON: in->button = 2; break;
++            default: keep = 0;
++            }
++            break;
++        case IDCMP_RAWKEY:
++            if (code == 0x7A || code == 0x7B) {          /* NM_WHEEL_UP, NM_WHEEL_DOWN */
++                in->type = QRX_IN_WHEEL;
++                in->steps = code == 0x7A ? -1 : 1;
++                break;
++            }
++            if ((code & 0x7f) >= 0x60 && (code & 0x7f) <= 0x67) { keep = 0; break; }   /* qualifier keys */
++            if ((code & 0x7f) >= 0x78) { keep = 0; break; }   /* other mouse and wheel codes */
++            in->type = QRX_IN_KEY;
++            in->rawkey = code & 0x7f;
++            in->down = !(code & IECODE_UP_PREFIX);
++            in->ch = char_of(m, qual & ~(IEQUALIFIER_CONTROL | IEQUALIFIER_LCOMMAND | IEQUALIFIER_RCOMMAND));
++            in->ch_plain = char_of(m, qual & (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT | IEQUALIFIER_CAPSLOCK));
++            if (qual & IEQUALIFIER_CONTROL) in->ch = in->ch_plain;
++            break;
++        case IDCMP_CLOSEWINDOW: in->type = QRX_IN_CLOSE; break;
++        case IDCMP_NEWSIZE:
++            in->type = QRX_IN_SIZE;
++            in->w = w->Width - w->BorderLeft - w->BorderRight;
++            in->h = w->Height - w->BorderTop - w->BorderBottom;
++            break;
++        case IDCMP_CHANGEWINDOW:
++            in->type = QRX_IN_MOVED;
++            in->x = w->LeftEdge + w->BorderLeft;
++            in->y = w->TopEdge + w->BorderTop;
++            in->w = w->Width - w->BorderLeft - w->BorderRight;
++            in->h = w->Height - w->BorderTop - w->BorderBottom;
++            break;
++        case IDCMP_ACTIVEWINDOW: in->type = QRX_IN_ACTIVE; in->down = 1; break;
++        case IDCMP_INACTIVEWINDOW: in->type = QRX_IN_ACTIVE; in->down = 0; break;
++        default: keep = 0;
++        }
++        ReplyMsg(&m->ExecMessage);
++        if (keep && in->owner) return 1;
++    }
++    return 0;
 +}
 --- /dev/null
 +++ b/widget/aros/aros_window_glue.h
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,66 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
-+/* QRX OS One 64 (AROS): Intuition windows for Gecko's top-level widgets (aros_window_glue.c).
-+ * Kept in C, apart from Gecko's C++, for the same reason as aros_appshell_glue.c. */
++/* QRX OS One 64 (AROS): Intuition windows for Gecko's top-level widgets and popups
++ * (aros_window_glue.c). Kept in C, apart from Gecko's C++, for the same reason as
++ * aros_appshell_glue.c. All of it runs on Gecko's main thread except qrx_win_blit. */
 +#ifndef aros_window_glue_h
 +#define aros_window_glue_h
 +#ifdef __cplusplus
 +extern "C" {
 +#endif
 +typedef struct qrx_win qrx_win;
-+/* a window on the default public screen (QRX OS One's desktop): inner size w x h at x, y */
-+qrx_win* qrx_win_open(int x, int y, int w, int h, const char* title);
++
++/* a window on the default public screen (QRX OS One's desktop): inner size w x h with its inner
++ * top left at x, y on the screen. A popup (menus, lists, tooltips) has no border and is not
++ * activated. owner: what qrx_win_poll hands back for this window's input (the widget). */
++qrx_win* qrx_win_open(int x, int y, int w, int h, const char* title, int popup, void* owner);
 +void qrx_win_close(qrx_win* win);
 +void qrx_win_title(qrx_win* win, const char* title);
 +void qrx_win_size(qrx_win* win, int w, int h);
++void qrx_win_move(qrx_win* win, int x, int y);       /* inner top left on the screen */
++void qrx_win_position(qrx_win* win, int* x, int* y); /* the same, as the window is now */
++void qrx_win_front(qrx_win* win);                    /* to the front */
 +/* pixels: the whole buffer, 32-bit B, G, R, A in memory order (what SWGL writes), stride bytes per row;
 + * the rectangle x, y, w, h of them to the same place inside the window. From any thread. */
 +void qrx_win_blit(qrx_win* win, const void* pixels, int stride, int x, int y, int w, int h);
 +/* the default public screen's size, 0 when there is none */
 +void qrx_win_screen_size(int* w, int* h);
++
++/* input from the windows' IDCMP ports, for the main thread's event loop (nsAppShell) */
++enum {
++  QRX_IN_MOVE = 1, /* the pointer moved: x, y inside the window */
++  QRX_IN_BUTTON,   /* button 0 left, 1 right, 2 middle; down 1 or 0; x, y */
++  QRX_IN_WHEEL,    /* steps, positive towards the user (the page moves up); x, y */
++  QRX_IN_KEY,      /* rawkey (Amiga raw key without the up bit), down, ch (the character, Latin-1,
++                      0 for none) and ch_plain (the same without Ctrl and Alt) */
++  QRX_IN_CLOSE,    /* the close gadget */
++  QRX_IN_SIZE,     /* new inner size w, h */
++  QRX_IN_MOVED,    /* the window moved: inner top left x, y on the screen */
++  QRX_IN_ACTIVE    /* the window became active (down 1) or inactive (0) */
++};
++#define QRX_MOD_SHIFT 1u
++#define QRX_MOD_CTRL 2u
++#define QRX_MOD_ALT 4u
++#define QRX_MOD_META 8u /* the Amiga keys */
++#define QRX_MOD_CAPS 16u
++#define QRX_BTN_LEFT 1u /* buttons held */
++#define QRX_BTN_RIGHT 2u
++#define QRX_BTN_MIDDLE 4u
++typedef struct qrx_input {
++  void* owner;
++  int type;
++  int x, y, w, h;
++  int button, down, steps;
++  int rawkey;
++  unsigned ch, ch_plain;
++  unsigned mods, buttons;
++  unsigned secs, micros; /* Intuition's time of the event */
++} qrx_input;
++/* the next input of any window, 1 when there was one; mouse moves come merged */
++int qrx_win_poll(qrx_input* in);
 +#ifdef __cplusplus
 +}
 +#endif
@@ -8622,13 +9328,15 @@
      "nsAppShell.cpp",
 --- /dev/null
 +++ b/widget/aros/nsAppShell.cpp
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,71 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +#include "nsAppShell.h"
 +#include "aros_appshell_glue.h"
++#include "aros_window_glue.h"
++#include <stdlib.h>
 +#include "gfxPlatform.h"
 +#include "HeadlessScreenHelper.h"
 +#include "mozilla/Hal.h"
@@ -8641,11 +9349,24 @@
 +using namespace mozilla;
 +using namespace mozilla::widget;
 +
++namespace mozilla::widget {
++void QrxWindowInput(const ::qrx_input& aIn);  // HeadlessWidget.cpp
++}
++
 +nsresult nsAppShell::Init() {
 +  if (qrx_appshell_init()) return NS_ERROR_FAILURE;
 +  hal::Init();
 +  if (XRE_IsParentProcess()) {
-+    /* the screens: the headless helper until widget/aros has Intuition windows */
++    /* the screen: the headless helper, given the size of the public screen the windows open on */
++    int w = 0, h = 0;
++    if (!gfxPlatform::IsHeadless()) qrx_win_screen_size(&w, &h);
++    if (w > 0 && h > 0 && !getenv("MOZ_HEADLESS_WIDTH")) {
++      char v[16];
++      snprintf(v, sizeof v, "%d", w);
++      setenv("MOZ_HEADLESS_WIDTH", v, 1);
++      snprintf(v, sizeof v, "%d", h);
++      setenv("MOZ_HEADLESS_HEIGHT", v, 1);
++    }
 +    ScreenManager::GetSingleton().SetHelper(MakeUnique<HeadlessScreenHelper>());
 +  }
 +  return nsBaseAppShell::Init();
@@ -8667,6 +9388,11 @@
 +      bool userAllowedQuit = true;
 +      appStartup->Quit(nsIAppStartup::eAttemptQuit, 0, &userAllowedQuit);
 +    }
++  }
++  if (got & QRX_APPSHELL_WINDOW) {
++    /* mouse, keyboard and window changes of the Intuition windows, to their widgets */
++    ::qrx_input in;
++    while (qrx_win_poll(&in)) QrxWindowInput(in);
 +  }
 +  if (got & QRX_APPSHELL_GECKO) {
 +    NativeEventCallback();
