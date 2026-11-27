@@ -194,10 +194,29 @@ __attribute__((noinline)) static u64 realign2(u64 a, u32 b, u64 c) {
 }
 static volatile u64 ra_in[3] = { 0xFFFFFFF0u, 0x123456789ULL, 0xF0F0F0F0F0ULL };
 i64 test_realign(void) { return (i64)realign1((u32)ra_in[0]) * 3 + (i64)realign2(ra_in[1], (u32)ra_in[0] >> 20, ra_in[2]); }
+/* frames beyond the reach of (d16,An): the arguments, the saved registers and the far locals of a
+ * function with more than 32 KB (and more than 64 KB) of frame. The backend once wrapped those
+ * displacements around to negative ones (Firefox's IndexedDB lost its `this`). */
+__attribute__((noinline)) static u64 bigframe1(u64 a, u64 b, u32 n) {
+    volatile u8 buf[40000];
+    for (u32 i = 0; i < n; i++) buf[i * 997 % 40000] = (u8)(a + i);
+    u64 r = 0;
+    for (u32 i = 0; i < n; i++) r = r * 31 + buf[i * 997 % 40000];
+    return r ^ b ^ ((u64)buf[39999] << 40) ^ ((u64)buf[0] << 48);
+}
+__attribute__((noinline)) static u64 bigframe2(u64 a, u64 b, u64 c, u64 d) {
+    volatile u64 big[10000];
+    big[0] = a; big[9999] = b; big[5000] = c ^ d;
+    return big[0] * 3 + big[9999] * 5 + big[5000] + a + b + c + d;
+}
+static volatile u64 bf_in[4] = { 0x1122334455667788ull, 0x0F0F0F0F12345678ull, 77, 0xABCDEF };
+i64 test_bigframe(void) {
+    return (i64)(bigframe1(bf_in[0], bf_in[1], 40000) + bigframe2(bf_in[0], bf_in[1], bf_in[2], bf_in[3]) * 7);
+}
 /* floating point in single and double precision goes through the library calls that do not exist yet
  * or through the FPU, which this core does not have: not tested here. */
 #ifdef HOST_TEST
 #include <stdio.h>
 #define T(n) printf(#n " %016llx\n", (unsigned long long)test_##n());
-int main(void) { T(sizes) T(globals) T(calls) T(bittest) T(frames) T(structs) T(varargs) T(widths) T(sha256) T(sort) T(list) T(memory) T(bswap) T(realign) return 0; }
+int main(void) { T(sizes) T(globals) T(calls) T(bittest) T(frames) T(structs) T(varargs) T(widths) T(sha256) T(sort) T(list) T(memory) T(bswap) T(realign) T(bigframe) return 0; }
 #endif
