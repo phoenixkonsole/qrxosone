@@ -9075,6 +9075,30 @@ index e9ef9799..35f5a5f5 100644
  
      return 0;
  }
+diff --git a/compiler/pthread/pthread_create.c b/compiler/pthread/pthread_create.c
+index 55281387..73ddd269 100644
+--- a/compiler/pthread/pthread_create.c
++++ b/compiler/pthread/pthread_create.c
+@@ -135,7 +135,9 @@ static void StarterFunc(void)
+         // tell the parent thread that we are done
+         Forbid();
+         inf->finished = TRUE;
+-        Signal(inf->waiter, SIGF_PARENT);
++        /* QRX: only a thread in pthread_join() waits for this; the parent may have ended long ago */
++        if (inf->waiter)
++            Signal(inf->waiter, SIGF_PARENT);
+     }
+     else
+     {
+@@ -174,7 +176,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start)
+     inf->start = start;
+     inf->arg = arg;
+     inf->parent = GET_THIS_TASK;
+-    inf->waiter = inf->parent;
++    inf->waiter = NULL;   /* QRX: set by pthread_join(), which then waits for finished */
+     if (attr)
+         inf->attr = *attr;
+     else
 diff --git a/compiler/pthread/pthread_intern.h b/compiler/pthread/pthread_intern.h
 index f91f3c55..1759b645 100644
 --- a/compiler/pthread/pthread_intern.h
