@@ -90,8 +90,8 @@ Die erste 64-Bit-App, `arch` = `m68k64`, nur im 64-Bit-Store sichtbar:
 
 | | |
 |---|---|
-| Datei | `firefox-153.8.0-qrx64-1.tar.xz`, 91.706.220 Bytes, installiert 546,4 MB |
-| SHA-256 | `491617c9bab7f03d963028fd64e92795d618e280f53c979b688e48b9995f4adb` |
+| Datei | `firefox-153.8.0-qrx64-1.tar.xz`, 91.732.384 Bytes, installiert 546,4 MB |
+| SHA-256 | `9b6b938b3e83142724dbf40e3274e21fb152c680909e1aa1b665cd3513ca59cc` |
 | Adresse | `https://github.com/phoenixkonsole/qrxosone/releases/download/appstore-firefox-153.8.0-1/firefox-153.8.0-qrx64-1.tar.xz` |
 | Inhalt | `firefox/`: Programm `firefox` (ELF, libxul gelinkt, ohne Debug-Abschnitte), `omni.ja`, `browser/omni.ja` (mit den AROS-Prefs `qrx-aros.js`), `Fonts/TrueType` (Bitstream Vera, Open Sans), Startskript `Start`, `start.html`, `NOTICE` |
 
@@ -110,6 +110,14 @@ tools/armithlon/appstore/add-to-catalog.sh OUT/firefox-153.8.0-qrx64-1.tar.xz fi
 ```
 
 **Noch zu tun (von Hand):** Release mit dem Tag `appstore-firefox-153.8.0-1` anlegen und genau diese Datei anhängen.
+
+Geprüft (27. November, x86-64-Engine `qrx_ec64_run`, 2 Kerne, 2 GB, System per hostfs): Archiv über das
+Store-Skript von einem lokalen Spiegel installiert (Hash geprüft), dann wie OPEN `Execute APPS:firefox/Start`
+auf dem 64-Bit-Desktop mit frischem Profil. Das Fenster öffnet sich mit Tab-Leiste, Adressleiste und der
+Startseite und läuft 25 Minuten ohne Absturz ([Screenshot](screenshots/firefox-appstore-qrxos64.png)).
+Vorher stürzte Firefox in IndexedDB ab: ein Fehler des m68k64-Compilers bei Stackrahmen über 32 KB
+(`tools/armithlon/ec64-llvm/README.md`). Offen: QuotaManager meldet beim ersten Einrichten des Speichers
+`NS_ERROR_STORAGE_IOERR`.
 
 Stand: **Vorschau.** Das Fenster nimmt noch keine Maus- und Tastatureingaben an, lässt sich nicht in der Größe ändern
 und nicht schließen. Kein offizieller Mozilla-Build; „Firefox“ ist eine Marke der Mozilla Foundation.

@@ -260,9 +260,9 @@ Two `bench` at once take as long on 4 cores as on 1: a new task stays on the cor
     sizes unswapped), so it does not work on a big-endian CPU. Not fixed: the disk uses FFS.
   - Thread stacks of at least 1 MB on m68k64: `pthread_attr_init` (a thread inherits its creator's
     stack, a thread made by a small-stacked task got AROS's 64 KB) and `pthread_attr_setstack`, which
-    `pthread_attr_setstacksize` calls (Gecko gives its threads 256 KB, sized for x86-64). Firefox's
-    IndexedDB thread ran over its stack in `DoDatabaseWork` (SQLite), with crashes that changed from
-    run to run (a release assertion, a bus error, Signal() on a garbage semaphore waiter).
+    `pthread_attr_setstacksize` calls (Gecko gives its threads 256 KB, sized for x86-64; m68k64's frames
+    are larger). A precaution: the Firefox crashes first suspected of a stack overflow (in IndexedDB's
+    `DoDatabaseWork`) came from the compiler, frames over 32 KB (`tools/armithlon/ec64-llvm/README.md`).
 
 ## State (2026-11-11)
 
