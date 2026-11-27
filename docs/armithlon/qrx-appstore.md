@@ -84,43 +84,34 @@ setzt 8 MB Stack und wechselt nach `APPS:blender`, wo Blender seine Skripte such
 fehlenden Hunk-Kopf (`0x3F3`) und startet es mit `Execute`. Das s-Bit übersteht das Entpacken auf dem Dateisystem des
 Pi nicht.
 
-## Firefox im Store (QRX OS One 64)
+## ThunderCat for AROS im Store (QRX OS One 64)
 
-Die erste 64-Bit-App, `arch` = `m68k64`, nur im 64-Bit-Store sichtbar:
+ThunderCat for AROS © 2026 by Pascal Papara, based on Firefox: der Browser für QRX OS One 64, gebaut aus
+dem Quelltext von Firefox 153.8.0 mit den QRX-Patches (`tools/armithlon/spidermonkey`). `arch` = `m68k64`,
+nur im 64-Bit-Store sichtbar.
 
 | | |
 |---|---|
-| Datei | `firefox-153.8.0-qrx64-1.tar.xz`, 91.732.384 Bytes, installiert 546,4 MB |
-| SHA-256 | `9b6b938b3e83142724dbf40e3274e21fb152c680909e1aa1b665cd3513ca59cc` |
-| Adresse | `https://github.com/phoenixkonsole/qrxosone/releases/download/appstore-firefox-153.8.0-1/firefox-153.8.0-qrx64-1.tar.xz` |
-| Inhalt | `firefox/`: Programm `firefox` (ELF, libxul gelinkt, ohne Debug-Abschnitte), `omni.ja`, `browser/omni.ja` (mit den AROS-Prefs `qrx-aros.js`), `Fonts/TrueType` (Bitstream Vera, Open Sans), Startskript `Start`, `start.html`, `NOTICE` |
+| Datei | `thundercat-153.8.0-qrx64-1.tar.xz`, 92.191.400 Bytes, installiert 547,2 MB |
+| SHA-256 | `ebb5e0183380a09282b4908c47e6598b72013644e375d96774c321bfa5decf4d` |
+| Adresse | `https://github.com/phoenixkonsole/qrxosone/releases/download/appstore-thundercat-153.8.0-1/thundercat-153.8.0-qrx64-1.tar.xz` |
+| Inhalt | `thundercat/`: Programm `ThunderCat`, `omni.ja`, `browser/omni.ja`, `Fonts/TrueType`, Startskript `Start` (optional eine Adresse: `Execute APPS:thundercat/Start URL`), `start.html`, `logo.png`, AROS-PNG-Icons, `NOTICE` |
 
-`Start` setzt 2 MB Stack, mountet `PIPE:`, weist `FONTS:` auf die mitgelieferten Schriften (oder hängt sie an ein
-vorhandenes `FONTS:` an), legt das Profil in `SYS:Home/Firefox` an (außerhalb des App-Ordners, ein Update behält es),
-setzt `TMPDIR`, `HOME` und `MOZ_FORCE_DISABLE_E10S` und öffnet Firefox mit 1000×680 im Fenster auf dem Desktop.
+`Start` setzt 2 MB Stack, mountet `PIPE:`, weist `FONTS:` auf die mitgelieferten Schriften, legt das Profil in
+`SYS:Home/ThunderCat` an und startet ThunderCat. Das erste Fenster ist 1000×700 groß und lässt den Desktop
+frei; eine selbst gewählte Größe merkt sich ThunderCat. Maus, Rad, Tastatur, Popups (Menüs, Vorschläge der
+Adressleiste), Fenstergröße und Schließen gehen über Intuition.
 
-Voraussetzungen: QRX OS One 64 startet per hostfs aus einem Host-Ordner (Profil und Omni-Archive brauchen lange
-Dateinamen), 2 GB Gast-RAM.
+Voraussetzungen: QRX OS One 64 startet per hostfs aus einem Host-Ordner, 2 GB Gast-RAM.
 
-Neu bauen (Linux, mit dem Gecko-Bau aus `tools/armithlon/spidermonkey`):
+Neu bauen: `tools/armithlon/spidermonkey/branding/install-branding.sh <Quellbaum>`, Gecko bauen, dann
+`tools/armithlon/spidermonkey/package-appstore.sh OBJ-BROWSER OUT 1` und
+`tools/armithlon/appstore/add-to-catalog.sh` (dazu die Spalte `m68k64`).
 
-```
-tools/armithlon/spidermonkey/package-appstore.sh OBJ-BROWSER OUT 1   # reproduzierbar, xz -9 single-threaded
-tools/armithlon/appstore/add-to-catalog.sh OUT/firefox-153.8.0-qrx64-1.tar.xz firefox Firefox ...   # + Spalte m68k64
-```
+**Noch zu tun (von Hand):** Release mit dem Tag `appstore-thundercat-153.8.0-1` anlegen und genau diese Datei
+anhängen. Das frühere Firefox-Archiv (`appstore-firefox-153.8.0-1`) ist durch ThunderCat ersetzt.
 
-**Noch zu tun (von Hand):** Release mit dem Tag `appstore-firefox-153.8.0-1` anlegen und genau diese Datei anhängen.
-
-Geprüft (27. November, x86-64-Engine `qrx_ec64_run`, 2 Kerne, 2 GB, System per hostfs): Archiv über das
-Store-Skript von einem lokalen Spiegel installiert (Hash geprüft), dann wie OPEN `Execute APPS:firefox/Start`
-auf dem 64-Bit-Desktop mit frischem Profil. Das Fenster öffnet sich mit Tab-Leiste, Adressleiste und der
-Startseite und läuft 25 Minuten ohne Absturz ([Screenshot](screenshots/firefox-appstore-qrxos64.png)).
-Vorher stürzte Firefox in IndexedDB ab: ein Fehler des m68k64-Compilers bei Stackrahmen über 32 KB
-(`tools/armithlon/ec64-llvm/README.md`). Offen: QuotaManager meldet beim ersten Einrichten des Speichers
-`NS_ERROR_STORAGE_IOERR`.
-
-Stand: **Vorschau.** Das Fenster nimmt noch keine Maus- und Tastatureingaben an, lässt sich nicht in der Größe ändern
-und nicht schließen. Kein offizieller Mozilla-Build; „Firefox“ ist eine Marke der Mozilla Foundation.
+Kein Mozilla-Produkt; „Firefox“ ist eine Marke der Mozilla Foundation.
 
 ## Tests (Stand 2026-11-24)
 
