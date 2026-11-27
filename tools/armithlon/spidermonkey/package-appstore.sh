@@ -6,6 +6,7 @@
 #   ThunderCat (Gecko's firefox program, without debug sections: llvm-strip --strip-debug),
 #   omni.ja, browser/omni.ja, application.ini, platform.ini            package-browser.py
 #   Start        the launcher (Execute script): PIPE:, the fonts, the environment, the profile
+#   xulstore.json  the first window's size and place (Start copies it into a new profile)
 #   logo.png, ThunderCat.info, Start.info   the logo (branding/make-logo.py), the icons as AROS PNG icons
 #   Fonts/TrueType   Bitstream Vera and Open Sans from the AROS source (Gecko reads FONTS:TrueType)
 #   start.html   the start page, NOTICE  licences and where the source is
@@ -27,7 +28,7 @@ rm "$W/$D/firefox"
 mkdir -p "$W/$D/Fonts/TrueType"
 cp "$AROSSRC"/workbench/fonts/truetype/bitstream/*.ttf "$AROSSRC"/workbench/fonts/truetype/opensans/*.ttf \
    "$W/$D/Fonts/TrueType/"
-cp "$HERE/appstore/Start" "$HERE/appstore/start.html" "$HERE/appstore/NOTICE" "$W/$D/"
+cp "$HERE/appstore/Start" "$HERE/appstore/start.html" "$HERE/appstore/NOTICE" "$HERE/appstore/xulstore.json" "$W/$D/"
 python3 "$HERE/branding/make-logo.py" "$W/logo" >/dev/null
 cp "$W/logo/thundercat-128.png" "$W/$D/logo.png"
 cp "$W/logo/thundercat-64.png" "$W/$D/ThunderCat.info"

@@ -28,6 +28,10 @@ EndIf
 If NOT EXISTS SYS:Home/ThunderCat
   MakeDir >NIL: SYS:Home/ThunderCat
 EndIf
+; a first start opens a window of 1000 x 700 with the desktop around it; later the size you chose
+If NOT EXISTS SYS:Home/ThunderCat/xulstore.json
+  Copy >NIL: APPS:thundercat/xulstore.json SYS:Home/ThunderCat/xulstore.json
+EndIf
 ; T: for Gecko's temporary files (TMPDIR /T); EXISTS T: on an unassigned T: would ask for a volume
 Assign >NIL: T: EXISTS
 If WARN
