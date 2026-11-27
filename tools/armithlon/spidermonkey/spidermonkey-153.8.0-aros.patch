@@ -5987,7 +5987,7 @@
    NotifyWindowMoved(mBounds.TopLeft());
  }
  
-@@ -257,7 +641,23 @@
+@@ -257,7 +641,25 @@
  void HeadlessWidget::ResizeInternal(int32_t aWidth, int32_t aHeight,
                                      bool aRepaint) {
    ConstrainSize(&aWidth, &aHeight);
@@ -6001,6 +6001,8 @@
 +    if (sw > 400 && sh > 300 && (aWidth > sw - 120 || aHeight > sh - 120)) {
 +      aWidth = std::min(1000, sw - 160);
 +      aHeight = std::min(700, sh - 160);
++      // not open yet and not placed: set in from the top left, so that the title bar shows
++      if (!mQrxWin && mBounds.x == 0 && mBounds.y == 0) mBounds.MoveTo(60, 40);
 +    }
 +  }
 +#endif

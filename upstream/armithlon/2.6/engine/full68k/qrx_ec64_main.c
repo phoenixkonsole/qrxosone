@@ -51,6 +51,7 @@
 #define MAX_BOOTS 8
 
 static int use_window, use_stdin, show_stats;
+static const char *profile_path;
 static const char *capture_path;
 
 static void capture_to(const qec64_board *b, const char *capture_path)
@@ -143,6 +144,32 @@ static void *stdin_reader(void *arg)
     char buf[256];
     ssize_t n;
     while ((n = read(0, buf, sizeof buf)) > 0) qec64_machine_console_push(m, buf, (size_t)n);
+    return NULL;
+}
+
+/* --profile FILE: every 2 ms of wall time each core's pc goes to FILE as a record of
+ * 16 bytes (little endian): u32 milliseconds since the start, u8 core, u8 flags (1 supervisor,
+ * 2 waiting after STOP), u16 0, u64 pc. tools/armithlon/ec64prof.py sums them up by symbol. */
+struct prof_args { qec64_machine *m; unsigned cores; FILE *f; int stop; };
+static void *profile_thread(void *arg)
+{
+    struct prof_args *p = arg;
+    double t0 = wall();
+    while (!__atomic_load_n(&p->stop, __ATOMIC_ACQUIRE)) {
+        struct timespec ts = { 0, 2000000 };
+        nanosleep(&ts, NULL);
+        uint32_t ms = (uint32_t)((wall() - t0) * 1000.0);
+        for (unsigned k = 0; k < p->cores; k++) {
+            qec64_cpu *c = qec64_machine_core(p->m, k);
+            uint8_t rec[16] = { 0 };
+            uint64_t pc = __atomic_load_n(&c->pc, __ATOMIC_RELAXED);
+            for (int i = 0; i < 4; i++) rec[i] = (uint8_t)(ms >> (8 * i));
+            rec[4] = (uint8_t)k;
+            rec[5] = (uint8_t)((c->supervisor ? 1 : 0) | (c->waiting ? 2 : 0));
+            for (int i = 0; i < 8; i++) rec[8 + i] = (uint8_t)(pc >> (8 * i));
+            fwrite(rec, 1, sizeof rec, p->f);
+        }
+    }
     return NULL;
 }
 
@@ -313,6 +340,7 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--capture-at") && i + 1 < argc) capture_at = argv[++i];
         else if (!strcmp(a, "--map") && i + 1 < argc) map_path = argv[++i];
         else if (!strcmp(a, "--stats")) show_stats = 1;
+        else if (!strcmp(a, "--profile") && i + 1 < argc) profile_path = argv[++i];
         else if (!strcmp(a, "--capture") && i + 1 < argc) capture_path = argv[++i];
         else if (!strcmp(a, "--audio-wav") && i + 1 < argc) wav_path = argv[++i];
         else if (!strcmp(a, "--host-view") && i + 1 < argc && n_views < 4) views[n_views++] = argv[++i];
@@ -322,7 +350,7 @@ int main(int argc, char **argv)
     }
     if (!kernel || cores < 1 || cores > QEC64_MAX_CORES || ram_mb < 64) {
         fprintf(stderr, "usage: %s [--cores N] [--ram MB] [--disk IMAGE [--disk-write]] [--hostfs DIR [--hostfs-ro]] [--cmdline TEXT] [--window | --stdin]\n"
-                        "       [--input TEXT] [--seconds S] [--map FILE] [--stats] core.elf [module...]\n", argv[0]);
+                        "       [--input TEXT] [--seconds S] [--map FILE] [--stats] [--profile FILE] core.elf [module...]\n", argv[0]);
         return 2;
     }
 #ifndef QEC64_WINDOW
@@ -397,6 +425,10 @@ int main(int argc, char **argv)
         if (use_stdin && !use_window && boot == 0) pthread_create(&reader, NULL, stdin_reader, m);
 
         struct run_args r = { m, L.pc, L.sp, seconds, 0, QEC64_RUNNING, 0 };
+        struct prof_args pa = { m, cores, NULL, 0 };
+        pthread_t pt;
+        if (profile_path && (pa.f = fopen(profile_path, boot ? "ab" : "wb")) != NULL) pthread_create(&pt, NULL, profile_thread, &pa);
+        else if (profile_path) fprintf(stderr, "[EC64] cannot write %s\n", profile_path);
         double t0 = wall();
 #ifdef QEC64_WINDOW
         if (use_window) {
@@ -415,6 +447,7 @@ int main(int argc, char **argv)
 #endif
             machine_thread(&r);
         double t1 = wall();
+        if (pa.f) { __atomic_store_n(&pa.stop, 1, __ATOMIC_RELEASE); pthread_join(pt, NULL); fclose(pa.f); }
 
         qec64_cpu *ender = qec64_machine_core(m, r.who);
         code = r.st == QEC64_HALTED ? (long long)ender->exit_code : -1;
