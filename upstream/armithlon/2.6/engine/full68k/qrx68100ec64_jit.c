@@ -1001,7 +1001,21 @@ static bool i_alu(T *t)
 {
     unsigned op = t->op, line = op >> 12, mode = (op >> 3) & 7, reg = op & 7, om = (op >> 6) & 7;
     unsigned r = regR(t, (op >> 9) & 7);
-    if ((line == 8 || line == 12) && (om == 3 || om == 7)) return false;   /* DIV, MUL */
+    if (line == 12 && (om == 3 || om == 7)) {               /* MULU.W, MULS.W: Dn.l = Dn.w * <ea>.w */
+        if (mode == 1) return false;
+        Loc l; if (!ea(t, mode, reg, 2, &l)) return false;
+        check_loc(t, &l, 2, false);
+        unsigned v = ld(t, &l, 2), a = tmp(t), b = tmp(t), p = tmp(t);
+        if (om == 7) { sext(t, a, v, 2); sext(t, b, get_d(t, r), 2); }
+        else { zext(t, a, v, 2); zext(t, b, get_d(t, r), 2); }
+        emit(t, 0x9B007C00u | (b << 16) | (a << 5) | p);       /* mul */
+        unsigned res = tmp(t);
+        zext(t, res, p, 4);
+        set_d(t, r, 4, res);
+        flags_logic(t, res, 4);
+        return true;
+    }
+    if ((line == 8 || line == 12) && (om == 3 || om == 7)) return false;   /* DIV */
     if (om == 3 || om == 7) {                               /* ADDA, SUBA, CMPA */
         unsigned s = om == 3 ? 2 : wide(t, 4);
         Loc l; if (!ea(t, mode, reg, s, &l)) return false;

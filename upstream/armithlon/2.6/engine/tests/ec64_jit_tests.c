@@ -166,6 +166,8 @@ static void gen_insn(void)
         if (bd == 2) w16((uint16_t)(rn(64) * 8)); else if (bd == 3) w32(rn(64) * 8);
         break;
     }
+    case 34: { EA e = gen_ea(2, 1 | 4 | 8);                    /* MULU.W, MULS.W */
+        w16((uint16_t)(0xC0C0 | rn(8) << 9 | rn(2) << 8 | e.m << 3 | e.r)); put_ea(&e); break; }
     default: { EA e = gen_ea(s, 1 | 4); w16((uint16_t)(0xD000 | rn(8) << 9 | szf(sz) << 6 | e.m << 3 | e.r)); put_ea(&e); break; }
     }
 }
