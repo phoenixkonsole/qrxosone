@@ -194,8 +194,20 @@ uint64_t qec64_machine_idle(qec64_cpu *c, uint64_t max_us)
 static int gf_owner = -1;
 static uint32_t gf_stopped;                    /* cores that are standing in gf_gate */
 static uint64_t gf_acquired, gf_ack_timeouts, gf_pause_timeouts;
-static void gf_nap(void)
+/* Waiting in the gate: the other side usually answers within microseconds (a chain of at most
+ * CHAIN_RUN instructions), and nanosleep() costs 50 us and more on Linux. So spin first (a CPU
+ * pause each time), then yield, and only after that sleep. n counts the calls of one wait. */
+static void gf_nap(unsigned n)
 {
+    if (n < 2000) {
+#if defined(__x86_64__) || defined(__i386__)
+        __builtin_ia32_pause();
+#elif defined(__aarch64__)
+        __asm__ volatile("yield");
+#endif
+        return;
+    }
+    if (n < 2200) { sched_yield(); return; }
     struct timespec t = { 0, 20000 };
     nanosleep(&t, NULL);
 }
@@ -272,10 +284,11 @@ static void gf_gate_in(qec64_cpu *c)
             if (c->supervisor || spins || gf_irq(c)) return;
             /* stand still until the owner is done */
             uint64_t until = now_us() + GF_PAUSE_US;
+            unsigned naps = 0;
             __atomic_fetch_or(&gf_stopped, 1u << id, __ATOMIC_SEQ_CST);
             while (__atomic_load_n(&gf_owner, __ATOMIC_ACQUIRE) == o && !m->stopping && !gf_irq(c)) {
-                if (now_us() > until) { gf_pause_timeouts++; break; }
-                gf_nap();
+                if ((naps & 63) == 63 && now_us() > until) { gf_pause_timeouts++; break; }
+                gf_nap(naps++);
             }
             __atomic_fetch_and(&gf_stopped, ~(1u << id), __ATOMIC_SEQ_CST);
             if (__atomic_load_n(&gf_owner, __ATOMIC_ACQUIRE) == o) return;   /* timed out or interrupted */
@@ -290,14 +303,15 @@ static void gf_gate_in(qec64_cpu *c)
             if ((int)k != id) __atomic_store_n(&m->cpu[k].gate_kick, 1, __ATOMIC_RELEASE);
         /* the others reach a block boundary, or sleep, or are not running yet */
         uint64_t until = now_us() + GF_ACK_US;
+        unsigned naps = 0;
         for (unsigned k = 0; k < m->cores; k++) {
             if ((int)k == id) continue;
             qec64_cpu *o2 = &m->cpu[k];
             while (__atomic_load_n(&o2->started, __ATOMIC_ACQUIRE) && !o2->waiting && !o2->supervisor &&
                    !(__atomic_load_n(&gf_stopped, __ATOMIC_ACQUIRE) >> k & 1) &&
                    !(__atomic_load_n(&idle_asleep, __ATOMIC_ACQUIRE) >> k & 1) && !m->stopping) {
-                if (now_us() > until) { gf_ack_timeouts++; break; }
-                gf_nap();
+                if ((naps & 63) == 63 && now_us() > until) { gf_ack_timeouts++; break; }
+                gf_nap(naps++);
             }
         }
         return;
