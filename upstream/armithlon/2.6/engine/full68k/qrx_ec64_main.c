@@ -460,6 +460,9 @@ int main(int argc, char **argv)
                 total += c->instructions;
                 fprintf(stderr, "[EC64] core %u: %" PRIu64 " instructions (%.1f million a second), pc %016" PRIx64 " %s\n", k,
                         c->instructions, c->instructions / (t1 - t0) / 1e6, c->pc, c->supervisor ? "supervisor" : "user");
+                if (show_stats)
+                    for (unsigned r = 0; r < 8; r++)
+                        fprintf(stderr, "[EC64]   d%u %016" PRIx64 "  a%u %016" PRIx64 "  a%u %016" PRIx64 "\n", r, c->d[r], r, c->a[r], r + 8, c->a[r + 8]);
             }
             fprintf(stderr, "[EC64] all cores: %.1f million instructions a second\n", total / (t1 - t0) / 1e6);
         }
