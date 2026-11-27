@@ -2,6 +2,7 @@
  * mode off it matches Musashi's 68040 integer instructions (tests/ec64_diff_tests.c).
  * Anything not listed there stops with QEC64_UNIMPLEMENTED rather than guessing. */
 #include "qrx68100ec64.h"
+#include "qrx_ec64_hostfp.h"
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1250,6 +1251,10 @@ static void execute(ctx *x)
     x->pfx = 0;
     x->start_pc = c->pc;
     x->op = fetch16(x);
+    if ((x->op & 0xFF00) == 0xAF00 && c->m64) {             /* host floating point, qrx_ec64_hostfp.h */
+        if (!qec64_hostfp(&c->d[0], c->d[1], x->op & 0xFF)) unimpl(x);
+        return;
+    }
     if ((x->op >> 12) == 0xA) {
         if (!c->m64 || (x->op & 0xFE0)) unimpl(x);
         x->pfx = x->op & 0x1F;

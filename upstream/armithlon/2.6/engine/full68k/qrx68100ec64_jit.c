@@ -18,6 +18,7 @@
  * new generation. Stores in translated code leave the block when they hit marked RAM.
  */
 #include "qrx68100ec64.h"
+#include "qrx_ec64_hostfp.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -624,6 +625,8 @@ static void h_div(qec64_cpu *c, uint64_t src, uint64_t e, uint64_t s)
         set_nz_(c, q, 4);
     }
 }
+/* $AFnn: qrx_ec64_hostfp.h; n is known (checked when translating) */
+static void h_hostfp(qec64_cpu *c, uint64_t n) { qec64_hostfp(&c->d[0], c->d[1], (unsigned)n); }
 static void spill_pending(T *t)
 {
     for (unsigned r = 0; r < 16; r++) {
@@ -1154,6 +1157,20 @@ static unsigned jit_off(void)
     return v;
 }
 /* One instruction: 1 translated, 2 translated and ends the block, 0 not translated. */
+/* $AFnn, host floating point (qrx_ec64_hostfp.h): a call to the same C code as the interpreter's */
+static bool i_hostfp(T *t)
+{
+    uint64_t probe = 0;
+    if ((t->op & 0xFF00) != 0xAF00 || !qec64_hostfp(&probe, 0, t->op & 0xFF)) return 0;
+    flush_flags(t);
+    spill_pending(t);
+    unsigned self = tmp(t), n = tmp(t);
+    mov_r(t, self, RCPU);
+    mov_imm(t, n, t->op & 0xFF);
+    unsigned args[2] = { self, n };
+    call(t, (void *)h_hostfp, args, 2);
+    return 1;
+}
 static int translate_one(T *t)
 {
     t->start = t->pc;
@@ -1164,7 +1181,7 @@ static int translate_one(T *t)
     t->pfx = 0;
     uint16_t op;
     if (!code16(t, &op)) { t->pc = t->start; return 0; }
-    if ((op >> 12) == 0xA) {
+    if ((op >> 12) == 0xA && (op & 0xFF00) != 0xAF00) {   /* a prefix; $AFnn is i_hostfp */
         if (op & 0xFE0) { t->pc = t->start; return 0; }
         t->pfx = op & 0x1F;
         if (!code16(t, &op) || (op >> 12) == 0xA) { t->pc = t->start; return 0; }
@@ -1188,6 +1205,7 @@ static int translate_one(T *t)
     case 7: res = i_moveq(t); break;
     case 8: case 9: case 11: case 12: case 13: res = i_alu(t); break;
     case 14: res = i_shift(t); break;
+    case 10: res = i_hostfp(t); break;
     default: res = 0; break;
     }
     if (res == 0 || t->bad) {                               /* undo this instruction's code */
