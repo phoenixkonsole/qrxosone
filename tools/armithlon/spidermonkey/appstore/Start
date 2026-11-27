@@ -1,4 +1,6 @@
 .key URL
+.bra {
+.ket }
 ; ThunderCat for AROS (Gecko 153.8.0) on QRX OS One 64, from the QRX App Store (APPS:thundercat)
 ; Gecko in one process, software rendering, in a window on the desktop.
 ; a step that fails (a folder that is already there, ...) must not end the script before ThunderCat starts
@@ -38,4 +40,4 @@ Set TMPDIR /T
 Set HOME /SYS/Home
 ; AROS cannot start Gecko's content processes (fork, shared memory handed to a child)
 Set MOZ_FORCE_DISABLE_E10S 1
-APPS:thundercat/ThunderCat --profile /SYS/Home/ThunderCat <URL$file:///APPS/thundercat/start.html>
+APPS:thundercat/ThunderCat --profile /SYS/Home/ThunderCat {URL$file:///APPS/thundercat/start.html}
