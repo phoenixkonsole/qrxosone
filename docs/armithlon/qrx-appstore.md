@@ -90,8 +90,8 @@ Die erste 64-Bit-App, `arch` = `m68k64`, nur im 64-Bit-Store sichtbar:
 
 | | |
 |---|---|
-| Datei | `firefox-153.8.0-qrx64-1.tar.xz`, 91.745.104 Bytes, installiert 546,4 MB |
-| SHA-256 | `89dbee4462726ecd24dc204ffc81098df37f62d1727c5342aeb8fb72f276f1eb` |
+| Datei | `firefox-153.8.0-qrx64-1.tar.xz`, 91.706.220 Bytes, installiert 546,4 MB |
+| SHA-256 | `491617c9bab7f03d963028fd64e92795d618e280f53c979b688e48b9995f4adb` |
 | Adresse | `https://github.com/phoenixkonsole/qrxosone/releases/download/appstore-firefox-153.8.0-1/firefox-153.8.0-qrx64-1.tar.xz` |
 | Inhalt | `firefox/`: Programm `firefox` (ELF, libxul gelinkt, ohne Debug-Abschnitte), `omni.ja`, `browser/omni.ja` (mit den AROS-Prefs `qrx-aros.js`), `Fonts/TrueType` (Bitstream Vera, Open Sans), Startskript `Start`, `start.html`, `NOTICE` |
 
