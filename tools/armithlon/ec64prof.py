@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Sums up a 68100EC64 profile (qrx_ec64_run --profile FILE) by function.
-Usage: ec64prof.py PROFILE LOG [--program ELF] [--kernel-map MAP] [--from S] [--to S] [--top N]
+Usage: ec64prof.py PROFILE LOG [--program ELF] [--kernel-map MAP] [--from S] [--to S] [--top N] [--core N]
   PROFILE  records of 16 bytes: u32 ms, u8 core, u8 flags (1 supervisor, 2 waiting, 4 owns the global
            Forbid, 8 stands still for it), u16, u64 pc
   LOG      the run's console log: the "module PATH at A-B" lines name the ROM modules; with
@@ -16,6 +16,8 @@ ap.add_argument('profile'); ap.add_argument('log')
 ap.add_argument('--program'); ap.add_argument('--kernel-map'); ap.add_argument('--kernel-base', default='0x100000')
 ap.add_argument('--from', dest='t0', type=float, default=0); ap.add_argument('--to', dest='t1', type=float, default=1e12)
 ap.add_argument('--top', type=int, default=40)
+ap.add_argument('--core', type=int, default=-1, help='only this core\'s samples')
+ap.add_argument('--task', help='only the samples of the tasks whose name contains this')
 ap.add_argument('--flags', type=int, default=0, help='only samples with one of these flag bits (4 owner of the global Forbid, 8 standing still for it)')
 ap.add_argument('--llvm', default='/opt/qrx-os-one/ec64llvm/build/bin')
 a = ap.parse_args()
@@ -73,22 +75,40 @@ def name(pc):
     return '%s:%s' % (mod, syms[j][1] if j >= 0 else '?')
 
 data = open(a.profile, 'rb').read()
+import os
+tasknames = {}
+if os.path.exists(a.profile + '.tasks'):   # the engine's task table: "index address name"
+    for line in open(a.profile + '.tasks', errors='replace'):
+        p_ = line.rstrip('\n').split(' ', 2)
+        if len(p_) >= 2: tasknames[int(p_[0])] = p_[2] if len(p_) > 2 else '?'
+tasks = collections.Counter(); taskcore = collections.Counter()
 cores = collections.Counter(); idle = collections.Counter(); owner = collections.Counter(); stopped = collections.Counter(); hot = collections.Counter(); mods = collections.Counter()
 n = 0
-for ms, core, fl, _, pc in struct.iter_unpack('<IBBHQ', data):
+for ms, core, fl, ti, pc in struct.iter_unpack('<IBBHQ', data):
     t = ms / 1000.0
+    tname = tasknames.get(ti, '?') if tasknames else None
+    if a.task and (tname is None or a.task not in tname): continue
     if t < a.t0 or t >= a.t1: continue
+    if a.core >= 0 and core != a.core: continue
     cores[core] += 1
     if fl & 4: owner[core] += 1
     if fl & 8: stopped[core] += 1
     if a.flags and not (fl & a.flags): continue
     if fl & 2: idle[core] += 1; continue
     nm_ = name(pc)
+    if tname is not None and nm_ != 'kernel:IdleTask':
+        tasks[tname] += 1; taskcore[(tname, core)] += 1
     hot[nm_] += 1; mods[nm_.split(':')[0]] += 1; n += 1
 for c in sorted(cores):
     print('core %d: %d samples, %.1f%% idle, %.1f%% owning the global Forbid, %.1f%% standing still for it' % (
         c, cores[c], 100.0 * idle[c] / cores[c], 100.0 * owner[c] / cores[c], 100.0 * stopped[c] / cores[c]))
 print('\nbusy samples by module:')
 for k, v in mods.most_common(12): print('  %6.2f%%  %s' % (100.0 * v / max(n, 1), k))
+if tasks:
+    print('\nbusy samples by task (share of all samples of the cores shown; per core):')
+    total = sum(cores.values())
+    for k, v in tasks.most_common(25):
+        per = '  '.join('c%d %5.1f%%' % (c, 100.0 * taskcore[(k, c)] / cores[c]) for c in sorted(cores))
+        print('  %6.2f%%  %-36s %s' % (100.0 * v / total, k[:36], per))
 print('\nhottest functions (share of busy samples):')
 for k, v in hot.most_common(a.top): print('  %6.2f%%  %s' % (100.0 * v / max(n, 1), k[:150]))

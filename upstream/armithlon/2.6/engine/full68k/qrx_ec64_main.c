@@ -151,11 +151,39 @@ static void *stdin_reader(void *arg)
 /* --profile FILE: every 2 ms of wall time each core's pc goes to FILE as a record of
  * 16 bytes (little endian): u32 milliseconds since the start, u8 core, u8 flags (1 supervisor,
  * 2 waiting after STOP, 4 owns the global Forbid, 8 stands still for it), u16 0, u64 pc. tools/armithlon/ec64prof.py sums them up by symbol. */
-struct prof_args { qec64_machine *m; unsigned cores; FILE *f; int stop; };
+struct prof_args { qec64_machine *m; unsigned cores; FILE *f; int stop; const char *tasks_path; };
+/* The task a core runs: ThisTask of its per-core data (A8, AROS's tls.h: offset 16), and the task's
+ * name (its Node's ln_Name at offset 24). Profile records carry an index into the tasks seen so far;
+ * PROFILE.tasks names them ("index address name"), written when a task is first seen. */
+#define PROF_TASKS 4096
+static uint64_t prof_task_ptr[PROF_TASKS];
+static unsigned prof_ntasks;
+static uint64_t be64(const uint8_t *b) { uint64_t v = 0; for (int i = 0; i < 8; i++) v = v << 8 | b[i]; return v; }
+static unsigned prof_task(qec64_cpu *c, FILE *names)
+{
+    uint64_t tls = c->a[8], task, name;
+    if (tls + 24 > c->ram_size) return 0xFFFF;
+    task = be64(c->ram + tls + 16);
+    for (unsigned i = 0; i < prof_ntasks; i++)
+        if (prof_task_ptr[i] == task) return i;
+    if (prof_ntasks >= PROF_TASKS || !names) return 0xFFFF;
+    char buf[64] = "?";
+    if (task && task + 32 <= c->ram_size && (name = be64(c->ram + task + 24)) && name < c->ram_size) {
+        unsigned n = 0;
+        while (n < sizeof buf - 1 && name + n < c->ram_size && c->ram[name + n] >= 32 && c->ram[name + n] < 127) { buf[n] = (char)c->ram[name + n]; n++; }
+        buf[n] = 0;
+    }
+    prof_task_ptr[prof_ntasks] = task;
+    fprintf(names, "%u %016llx %s\n", prof_ntasks, (unsigned long long)task, buf);
+    fflush(names);
+    return prof_ntasks++;
+}
+
 static void *profile_thread(void *arg)
 {
     struct prof_args *p = arg;
     double t0 = wall();
+    FILE *names = p->tasks_path ? fopen(p->tasks_path, "w") : NULL;
     while (!__atomic_load_n(&p->stop, __ATOMIC_ACQUIRE)) {
         struct timespec ts = { 0, 2000000 };
         nanosleep(&ts, NULL);
@@ -169,10 +197,13 @@ static void *profile_thread(void *arg)
             for (int i = 0; i < 4; i++) rec[i] = (uint8_t)(ms >> (8 * i));
             rec[4] = (uint8_t)k;
             rec[5] = (uint8_t)((c->supervisor ? 1 : 0) | (c->waiting ? 2 : 0) | (gowner == (int)k ? 4 : 0) | (gstopped >> k & 1 ? 8 : 0));
+            unsigned ti = prof_task(c, names);
+            rec[6] = (uint8_t)ti; rec[7] = (uint8_t)(ti >> 8);
             for (int i = 0; i < 8; i++) rec[8 + i] = (uint8_t)(pc >> (8 * i));
             fwrite(rec, 1, sizeof rec, p->f);
         }
     }
+    if (names) fclose(names);
     return NULL;
 }
 
@@ -428,7 +459,9 @@ int main(int argc, char **argv)
         if (use_stdin && !use_window && boot == 0) pthread_create(&reader, NULL, stdin_reader, m);
 
         struct run_args r = { m, L.pc, L.sp, seconds, 0, QEC64_RUNNING, 0 };
-        struct prof_args pa = { m, cores, NULL, 0 };
+        static char tasks_path[1100];
+        if (profile_path) snprintf(tasks_path, sizeof tasks_path, "%s.tasks", profile_path);
+        struct prof_args pa = { m, cores, NULL, 0, profile_path && boot == 0 ? tasks_path : NULL };
         pthread_t pt;
         if (profile_path && (pa.f = fopen(profile_path, boot ? "ab" : "wb")) != NULL) pthread_create(&pt, NULL, profile_thread, &pa);
         else if (profile_path) fprintf(stderr, "[EC64] cannot write %s\n", profile_path);
