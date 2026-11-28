@@ -1553,6 +1553,18 @@
  
  inline void FlushExecutionContext() {
    // No-op. Execution context is coherent with instruction cache.
+--- a/js/src/jit/JitOptions.cpp
++++ b/js/src/jit/JitOptions.cpp
+@@ -312,7 +312,8 @@
+   // Whether the W^X policy is enforced to mark JIT code pages as either
+   // writable or executable but never both at the same time. On Apple Silicon
+   // this must always be false because we use pthread_jit_write_protect_np.
+-#ifdef JS_USE_APPLE_FAST_WX
++#if defined(JS_USE_APPLE_FAST_WX) || defined(__AROS__)
++  // AROS (QRX OS One 64): no memory protection to switch
+   SET_DEFAULT(writeProtectCode, false);
+ #else
+   SET_DEFAULT(writeProtectCode, true);
 --- a/js/src/jit/LIR.h
 +++ b/js/src/jit/LIR.h
 @@ -2293,6 +2293,8 @@
@@ -1620,6 +1632,58 @@
  #elif defined(JS_CODEGEN_RISCV64)
  #  include "jit/riscv64/MoveEmitter-riscv64.h"
  #elif defined(JS_CODEGEN_WASM32)
+--- a/js/src/jit/ProcessExecutableMemory.cpp
++++ b/js/src/jit/ProcessExecutableMemory.cpp
+@@ -426,7 +426,27 @@
+   MOZ_CRASH("NYI for WASI.");
+ }
+ #  endif
+-#else  // !XP_WIN && !__wasi__
++#elif defined(__AROS__)
++// QRX OS One 64: no virtual memory and no memory protection. The region is allocated once
++// (MaxCodeBytesPerProcess of real memory); committing, decommitting and reprotecting do nothing.
++static void* ReserveProcessExecutableMemory(size_t bytes) {
++  void* p = nullptr;
++  if (posix_memalign(&p, ExecutableCodePageSize, bytes) != 0) {
++    return nullptr;
++  }
++  return p;
++}
++
++static void DeallocateProcessExecutableMemory(void* addr, size_t bytes) { free(addr); }
++
++[[nodiscard]] static bool CommitPages(void* addr, size_t bytes,
++                                      ProtectionSetting protection) {
++  return true;
++}
++
++static void DecommitPages(void* addr, size_t bytes) {}
++
++#else  // !XP_WIN && !__wasi__ && !__AROS__
+ #  ifndef MAP_NORESERVE
+ #    define MAP_NORESERVE 0
+ #  endif
+@@ -980,6 +1000,8 @@
+   if (!VirtualAlloc(pageStart, size, MEM_COMMIT, flags)) {
+     return false;
+   }
++#  elif defined(__AROS__)
++  MOZ_CRASH("writeProtectCode is off on AROS");
+ #  else
+   unsigned flags = ProtectionSettingToFlags(protection);
+   if (mprotect(pageStart, size, flags)) {
+--- a/js/src/jit/ProcessExecutableMemory.h
++++ b/js/src/jit/ProcessExecutableMemory.h
+@@ -18,6 +18,9 @@
+ // attacks.
+ #if JS_BITS_PER_WORD == 32
+ static const size_t MaxCodeBytesPerProcess = 140 * 1024 * 1024;
++#elif defined(__AROS__)
++// QRX OS One 64: AROS has no virtual memory, so the region is real memory, taken at startup.
++static const size_t MaxCodeBytesPerProcess = 64 * 1024 * 1024;
+ #else
+ // This is the largest number which satisfies various alignment static
+ // asserts that is <= INT32_MAX. If we ever want to increase this, we need to
 --- a/js/src/jit/Registers.h
 +++ b/js/src/jit/Registers.h
 @@ -18,6 +18,8 @@
