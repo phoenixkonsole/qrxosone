@@ -3,6 +3,10 @@ ac_add_options --enable-project=browser
 ac_add_options --target=m68k64-unknown-aros
 ac_add_options --enable-default-toolkit=cairo-aros
 ac_add_options --disable-jit
+# the Portable Baseline Interpreter: SpiderMonkey's baseline tier with inline caches, in C++ (no code
+# generation, so no JIT backend for m68k64 is needed); always on instead of the plain interpreter
+ac_add_options --enable-portable-baseline-interp
+ac_add_options --enable-portable-baseline-interp-force
 ac_add_options --disable-tests
 ac_add_options --disable-debug
 ac_add_options --disable-debug-symbols
