@@ -85,6 +85,10 @@ struct qec64_cpu {
     const bool *stopping;
     bool quiet, ordered;
     void (*on_wake)(qec64_cpu *self);
+    /* The FPU (long mode, docs/armithlon/68100ec64.md "FPU"): eight double-precision registers,
+     * FPCR (rounding mode in bits 5-4), FPSR (condition codes in bits 27-24: N Z I NAN), FPIAR. */
+    double fp[8];
+    uint32_t fpcr, fpsr, fpiar;
 };
 #define QEC64_CODE_SHIFT 8
 /* code_gen[0] is the generation. After it (in uint32 units): at QEC64_GEN_HEAD a 64-bit count of the

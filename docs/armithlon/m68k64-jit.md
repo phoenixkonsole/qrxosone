@@ -88,7 +88,7 @@ guest for that (stage 1 on, all of them with `--baseline-eager`).
   (`FlushICache`) becomes `CPUSHA` (the 68040's instruction), which the engine treats as an
   invalidation of the range and an FPGA core as what it is.
 
-## Floating point: a decision first
+## Floating point
 
 JavaScript numbers are doubles, and the Baseline ICs already use floating-point registers (`DoubleAdd`
 and the other arithmetic stubs, number comparisons, conversions); Ion more so. The 68100EC64 has no FPU.
@@ -104,9 +104,10 @@ Two ways:
    register shuffling, Ion's register allocation of floats has nothing to work with, and an FPGA
    68100EC64 has no host to hand `$AFnn` to.
 
-The recommendation is 1: the FPGA plan needs an FPU anyway, and the JIT is its first user. It adds
-to the ISA document, the interpreter, the engine's two JITs and the LLVM assembler (`llvm-mc` must
-encode the instructions, which the backend emits as bytes in any case).
+Decided (2026-11-28): 1. The FPU is in the ISA ("FPU" in [68100ec64.md](68100ec64.md)) and the
+reference interpreter; the engine's JITs run its instructions through the interpreter until they
+translate them, and AROS saves FP0-FP7, FPCR and FPSR with a task. The backend uses FP0-FP7 as its
+float registers, with FP7 as the scratch register.
 
 ## Testing
 

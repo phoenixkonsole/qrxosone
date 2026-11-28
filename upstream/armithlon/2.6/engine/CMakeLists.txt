@@ -379,6 +379,7 @@ if(QRX_ENABLE_MUSASHI)
     full68k/qrx_ec64_board.c full68k/qrx_ec64_boot.c full68k/qrx_hostnet.c full68k/qrx_netpolicy.c full68k/qrx_vault.c full68k/qrx_hostctl.c full68k/qrx_ec64_hostfs.c)
   target_include_directories(qrx_ec64 PUBLIC include)
   target_link_libraries(qrx_ec64 PUBLIC ${QRX_VAULT_CRYPTO})
+  target_link_libraries(qrx_ec64 PUBLIC m)   # the FPU: sqrt, nearbyint
   # the board's GL service (HOST_CALL service 8)
   target_sources(qrx_ec64 PRIVATE full68k/qrx_gl68k.c full68k/qrx_gl3.c)
   # generated code with unused locals; built without -Wall -Wextra elsewhere too
@@ -409,6 +410,10 @@ if(QRX_ENABLE_MUSASHI)
   target_link_libraries(qrx_ec64_tests PRIVATE qrx_ec64 pthread)
   target_compile_options(qrx_ec64_tests PRIVATE -UNDEBUG -Wall -Wextra)
   add_test(NAME ec64_long_mode_above_4gb_and_two_cores COMMAND qrx_ec64_tests)
+  add_executable(qrx_ec64_fpu_tests tests/ec64_fpu_tests.c)
+  target_link_libraries(qrx_ec64_fpu_tests PRIVATE qrx_ec64 m)
+  target_compile_options(qrx_ec64_fpu_tests PRIVATE -UNDEBUG -Wall -Wextra)
+  add_test(NAME ec64_fpu_double_precision COMMAND qrx_ec64_fpu_tests)
   # The 64-bit QRX OS One: AROS on the 68100EC64, headless or in a Mac window. qrx68100_full_run
   # (the 32-bit QRX OS One) does not link any of it.
   if(APPLE)

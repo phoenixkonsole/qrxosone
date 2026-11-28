@@ -1245,6 +1245,225 @@ static void op_shift(ctx *x)
     else n = cnt ? cnt : 8;
     dset(x, r, s, shift(c, c->d[r], s, kind, left, n));
 }
+/* ---- the FPU (long mode): the 68881/68040 encoding with coprocessor ID 1, double precision only,
+ * as ColdFire's. docs/armithlon/68100ec64.md "FPU" is the reference. */
+#define FPCC_N   0x08000000u
+#define FPCC_Z   0x04000000u
+#define FPCC_I   0x02000000u
+#define FPCC_NAN 0x01000000u
+static void fp_setcc(qec64_cpu *c, double v)
+{
+    uint32_t cc = 0;
+    if (v != v) cc = FPCC_NAN;
+    else {
+        if (__builtin_signbit(v)) cc |= FPCC_N;
+        if (v == 0) cc |= FPCC_Z;
+        if (__builtin_isinf(v)) cc |= FPCC_I;
+    }
+    c->fpsr = (c->fpsr & 0x00FFFFFFu) | cc;
+}
+static bool fp_cond(const qec64_cpu *c, unsigned cc)
+{
+    bool n = c->fpsr & FPCC_N, z = c->fpsr & FPCC_Z, nan = c->fpsr & FPCC_NAN;
+    switch (cc & 15) {   /* 16-31 are the same tests (the 68881's signalling forms; no traps here) */
+    case 0: return false;                       /* F */
+    case 1: return z;                           /* EQ */
+    case 2: return !(nan || z || n);            /* OGT */
+    case 3: return z || !(nan || n);            /* OGE */
+    case 4: return n && !(nan || z);            /* OLT */
+    case 5: return z || (n && !nan);            /* OLE */
+    case 6: return !(nan || z);                 /* OGL */
+    case 7: return !nan;                        /* OR */
+    case 8: return nan;                         /* UN */
+    case 9: return nan || z;                    /* UEQ */
+    case 10: return nan || !(n || z);           /* UGT */
+    case 11: return nan || z || !n;             /* UGE */
+    case 12: return nan || (n && !z);           /* ULT */
+    case 13: return nan || z || n;              /* ULE */
+    case 14: return !z;                         /* NE */
+    default: return true;                       /* T */
+    }
+}
+static double u2d(uint64_t u) { double d; memcpy(&d, &u, 8); return d; }
+static uint64_t d2u(double d) { uint64_t u; memcpy(&u, &d, 8); return u; }
+static float u2f(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
+static uint32_t f2u(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
+/* FPCR's rounding mode (bits 5-4: nearest, zero, minus, plus) for FINT and conversions to integers;
+ * arithmetic rounds to nearest */
+static double fp_round(const qec64_cpu *c, double v)
+{
+    switch ((c->fpcr >> 4) & 3) {
+    case 1: return __builtin_trunc(v);
+    case 2: return __builtin_floor(v);
+    case 3: return __builtin_ceil(v);
+    default: return __builtin_nearbyint(v);    /* the host rounds to nearest even */
+    }
+}
+/* a double to an integer of n bytes: rounded by FPCR, saturated; NaN gives 0 */
+static uint64_t fp_to_int(const qec64_cpu *c, double v, unsigned n)
+{
+    if (v != v) return 0;
+    v = fp_round(c, v);
+    int64_t lo = n == 8 ? INT64_MIN : -(INT64_C(1) << (n * 8 - 1)), hi = n == 8 ? INT64_MAX : (INT64_C(1) << (n * 8 - 1)) - 1;
+    if (v <= (double)lo) return (uint64_t)lo & size_mask(n);
+    if (v >= (double)hi) return (uint64_t)hi & size_mask(n);   /* (double)INT64_MAX is 2^63: saturates */
+    return (uint64_t)(int64_t)v & size_mask(n);
+}
+/* source formats: 0 L, 1 S, 4 W, 5 D, 6 B; the W prefix makes L a 64-bit integer (Q). X and P do not exist. */
+static unsigned fp_fmt_size(ctx *x, unsigned fmt)
+{
+    switch (fmt) {
+    case 0: return (x->pfx & PFX_W) ? 8 : 4;
+    case 1: return 4;
+    case 4: return 2;
+    case 5: return 8;
+    case 6: return 1;
+    default: unimpl(x); return 0;
+    }
+}
+static double fp_load(ctx *x, unsigned mode, unsigned reg, unsigned fmt)
+{
+    unsigned n = fp_fmt_size(x, fmt);
+    /* a data register holds L, S, W, B, and under W a 64-bit integer; D comes from memory or #imm */
+    if (mode == 1 || (mode == 0 && fmt == 5)) unimpl(x);
+    loc l = ea(x, mode, reg, n);
+    uint64_t v = ld(x, &l, n);
+    switch (fmt) {
+    case 0: return n == 8 ? (double)(int64_t)v : (double)(int32_t)(uint32_t)v;
+    case 1: return (double)u2f((uint32_t)v);
+    case 4: return (double)(int16_t)(uint16_t)v;
+    case 5: return u2d(v);
+    default: return (double)(int8_t)(uint8_t)v;
+    }
+}
+static void fp_store(ctx *x, unsigned mode, unsigned reg, unsigned fmt, double v)
+{
+    unsigned n = fp_fmt_size(x, fmt);
+    if (mode == 1 || (mode == 0 && fmt == 5)) unimpl(x);
+    need_data_alterable(x, mode, reg);
+    loc l = ea(x, mode, reg, n);
+    uint64_t u;
+    switch (fmt) {
+    case 1: u = f2u((float)v); break;
+    case 5: u = d2u(v); break;
+    default: u = fp_to_int(x->c, v, n); break;
+    }
+    st(x, &l, n, u);
+}
+static void op_fpu(ctx *x)
+{
+    qec64_cpu *c = x->c;
+    unsigned op = x->op, mode = (op >> 3) & 7, reg = op & 7, type = (op >> 6) & 7;
+    if (!c->m64 || ((op >> 9) & 7) != 1) unimpl(x);
+    if (type == 2 || type == 3) {                       /* FBcc.W, FBcc.L */
+        uint64_t base = c->pc;
+        int64_t disp = type == 2 ? (int16_t)fetch16(x) : (int32_t)fetch32(x);
+        if (op & 0x20) unimpl(x);
+        if (fp_cond(c, op & 0x1F)) c->pc = (base + (uint64_t)disp) & amask(x);
+        return;
+    }
+    if (type == 1) {                                     /* FScc */
+        unsigned cc = fetch16(x);
+        if (mode == 1 || cc & 0xFFE0) unimpl(x);
+        need_data_alterable(x, mode, reg);
+        loc l = ea(x, mode, reg, 1);
+        st(x, &l, 1, fp_cond(c, cc & 0x1F) ? 0xFF : 0);
+        return;
+    }
+    if (type != 0) unimpl(x);                            /* FSAVE, FRESTORE, FDBcc, FTRAPcc: none */
+    unsigned w2 = fetch16(x), kind = w2 >> 13;
+    if (kind == 4 || kind == 5) {                        /* FMOVE(M) of FPCR, FPSR, FPIAR: 10 dr reglist */
+        unsigned list = (w2 >> 10) & 7, to_mem = kind == 5;
+        if (!list || (w2 & 0x3FF)) unimpl(x);
+        uint32_t *regs[3] = { &c->fpcr, &c->fpsr, &c->fpiar };   /* bits 12, 11, 10 */
+        unsigned count = __builtin_popcount(list);
+        if (count > 1 && mode < 2) unimpl(x);
+        if (mode == 1 && !(list == 1)) unimpl(x);         /* only FPIAR to and from An */
+        if (mode == 4) {                                  /* -(An): the whole block, lowest register first */
+            unsigned r = regB(x, reg);
+            aset(x, r, c->a[r] - 4 * count);
+            uint64_t a = c->a[r];
+            for (unsigned i = 0; i < 3; i++) if (list & (4 >> i)) {
+                if (to_mem) wr(x, a, 4, *regs[i]); else *regs[i] = (uint32_t)rd(x, a, 4);
+                a += 4;
+            }
+        } else for (unsigned i = 0; i < 3; i++) if (list & (4 >> i)) {
+            if (to_mem) { if (mode == 7 && reg == 4) unimpl(x); need_data_alterable(x, mode == 1 ? 0 : mode, reg); }
+            loc l = ea(x, mode, reg, 4);
+            if (to_mem) st(x, &l, 4, *regs[i]); else *regs[i] = (uint32_t)ld(x, &l, 4);
+        }
+        c->fpcr &= 0xFFFFu;
+        return;
+    }
+    if (kind == 6 || kind == 7) {                        /* FMOVEM FPn: 11 dr mode(2) 000 reglist */
+        unsigned to_mem = kind == 7, lmode = (w2 >> 11) & 3, list = w2 & 0xFF;
+        if (lmode & 1) unimpl(x);                        /* dynamic lists: none */
+        if (w2 & 0x0700) unimpl(x);
+        if (lmode == 0) {                                /* predecrement: bit 0 is FP0 ... bit 7 FP7, stores only */
+            if (!to_mem || mode != 4) unimpl(x);
+            unsigned r = regB(x, reg);
+            uint64_t a = c->a[r];
+            for (int i = 7; i >= 0; i--) if (list & (1u << i)) { a -= 8; wr(x, a, 8, d2u(c->fp[i])); }
+            aset(x, r, a);
+            return;
+        }
+        /* postincrement and control modes: bit 7 is FP0 ... bit 0 FP7 */
+        if (mode == 0 || mode == 1 || mode == 4 || (mode == 3 && to_mem) || (mode == 7 && reg == 4)) unimpl(x);
+        if (to_mem) need_alterable_mem(x, mode, reg);
+        uint64_t a;
+        unsigned r = regB(x, reg);
+        if (mode == 3) a = c->a[r];
+        else { loc l = ea(x, mode, reg, 8); a = l.addr; }
+        for (unsigned i = 0; i < 8; i++) if (list & (0x80u >> i)) {
+            if (to_mem) wr(x, a, 8, d2u(c->fp[i])); else c->fp[i] = u2d(rd(x, a, 8));
+            a += 8;
+        }
+        if (mode == 3) aset(x, r, a);
+        return;
+    }
+    /* FPIAR: the address of the last arithmetic or FMOVE of data, as on the 68881 (not FMOVEM, not
+     * the control registers, not FBcc and FScc) */
+    c->fpiar = (uint32_t)x->start_pc;
+    if (kind == 3) {                                     /* FMOVE FPn,<ea>: 011 format src 0000000 */
+        unsigned fmt = (w2 >> 10) & 7, src = (w2 >> 7) & 7;
+        if (w2 & 0x7F) unimpl(x);
+        fp_store(x, mode, reg, fmt, c->fp[src]);
+        return;
+    }
+    if (kind != 0 && kind != 2) unimpl(x);               /* 0 R/M=0: FPn source; 2: <ea> source */
+    unsigned dst = (w2 >> 7) & 7, opmode = w2 & 0x7F;
+    if (kind == 0 && (mode | reg)) unimpl(x);            /* register to register: the <ea> field is 0 */
+    double s = kind == 0 ? c->fp[(w2 >> 10) & 7] : fp_load(x, mode, reg, (w2 >> 10) & 7);
+    double d = c->fp[dst], r;
+    bool single = (opmode & 0x44) == 0x40;               /* FSxxx rounds to single precision */
+    switch (opmode) {
+    case 0x00: case 0x40: case 0x44: r = s; break;                              /* FMOVE */
+    case 0x01: r = fp_round(c, s); break;                                         /* FINT */
+    case 0x03: r = __builtin_trunc(s); break;                                     /* FINTRZ */
+    case 0x04: case 0x41: case 0x45: r = __builtin_sqrt(s); break;               /* FSQRT */
+    case 0x18: case 0x58: case 0x5C: r = __builtin_fabs(s); break;               /* FABS */
+    case 0x1A: case 0x5A: case 0x5E: r = -s; break;                               /* FNEG */
+    case 0x20: case 0x60: case 0x64: r = d / s; break;                            /* FDIV */
+    case 0x22: case 0x62: case 0x66: r = d + s; break;                            /* FADD */
+    case 0x23: case 0x63: case 0x67: r = d * s; break;                            /* FMUL */
+    case 0x28: case 0x68: case 0x6C: r = d - s; break;                            /* FSUB */
+    case 0x38:                                                                    /* FCMP */
+        /* the 68881's: NaN unordered; equal gives Z (with N when both are negative, -0 and -0 or
+         * -inf and -inf, and I as well for two infinities); else N when the destination is less */
+        if (d != d || s != s) c->fpsr = (c->fpsr & 0x00FFFFFFu) | FPCC_NAN;
+        else if (d == s) {
+            c->fpsr = (c->fpsr & 0x00FFFFFFu) | FPCC_Z;
+            if (__builtin_signbit(d) && __builtin_signbit(s)) c->fpsr |= FPCC_N;
+            if (__builtin_isinf(d)) c->fpsr |= FPCC_I;
+        } else c->fpsr = (c->fpsr & 0x00FFFFFFu) | (d < s ? FPCC_N : 0);
+        return;
+    case 0x3A: fp_setcc(c, s); return;                                            /* FTST */
+    default: unimpl(x); return;
+    }
+    if (single) r = (double)(float)r;
+    c->fp[dst] = r;
+    fp_setcc(c, r);
+}
 static void execute(ctx *x)
 {
     qec64_cpu *c = x->c;
@@ -1280,6 +1499,7 @@ static void execute(ctx *x)
     }
     case 8: case 9: case 11: case 12: case 13: op_alu(x); break;
     case 14: op_shift(x); break;
+    case 15: op_fpu(x); break;
     default: unimpl(x);
     }
 }
