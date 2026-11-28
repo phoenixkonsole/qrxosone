@@ -414,6 +414,12 @@ if(QRX_ENABLE_MUSASHI)
   target_link_libraries(qrx_ec64_fpu_tests PRIVATE qrx_ec64 m)
   target_compile_options(qrx_ec64_fpu_tests PRIVATE -UNDEBUG -Wall -Wextra)
   add_test(NAME ec64_fpu_double_precision COMMAND qrx_ec64_fpu_tests)
+  # SpiderMonkey's m68k64 encoder (tools/armithlon/spidermonkey/jit-m68k64) against the interpreter
+  enable_language(CXX)
+  add_executable(qrx_ec64_encoding_tests tests/ec64_encoding_tests.cpp)
+  target_link_libraries(qrx_ec64_encoding_tests PRIVATE qrx_ec64)
+  target_compile_options(qrx_ec64_encoding_tests PRIVATE -UNDEBUG -Wall -Wextra -std=c++17)
+  add_test(NAME ec64_spidermonkey_encoder COMMAND qrx_ec64_encoding_tests)
   # The 64-bit QRX OS One: AROS on the 68100EC64, headless or in a Mac window. qrx68100_full_run
   # (the 32-bit QRX OS One) does not link any of it.
   if(APPLE)

@@ -941,6 +941,12 @@ static void op_line4(ctx *x)
         c->pc = l.addr;
         return;
     }
+    if ((op & 0xFFF8) == 0x49C0) {       /* EXTB.L: before LEA, whose pattern it fits (LEA Dn does not exist) */
+        unsigned r = regB(x, reg), s = wide(x, 4);
+        uint64_t v = (uint64_t)(int64_t)(int8_t)c->d[r];
+        dset(x, r, s, v); logic_flags(c, v, s);
+        return;
+    }
     if ((op & 0xF1C0) == 0x41C0) {       /* LEA */
         if (mode < 2 || mode == 3 || mode == 4 || (mode == 7 && reg == 4)) unimpl(x);
         loc l = ea(x, mode, reg, 4);
@@ -969,12 +975,6 @@ static void op_line4(ctx *x)
             uint64_t v = (uint64_t)(int64_t)(int8_t)c->d[r];
             dset(x, r, 2, v); logic_flags(c, v, 2);
         }
-        return;
-    }
-    if ((op & 0xFFF8) == 0x49C0) {       /* EXTB.L */
-        unsigned r = regB(x, reg), s = wide(x, 4);
-        uint64_t v = (uint64_t)(int64_t)(int8_t)c->d[r];
-        dset(x, r, s, v); logic_flags(c, v, s);
         return;
     }
     if ((op & 0xFB80) == 0x4880) { op_movem(x); return; }

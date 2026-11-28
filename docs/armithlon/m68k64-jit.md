@@ -109,6 +109,16 @@ reference interpreter; the engine's JITs run its instructions through the interp
 translate them, and AROS saves FP0-FP7, FPCR and FPSR with a task. The backend uses FP0-FP7 as its
 float registers, with FP7 as the scratch register.
 
+## Progress
+
+- The encoder (`tools/armithlon/spidermonkey/jit-m68k64/Encoding-m68k64.h`, no SpiderMonkey types):
+  moves and constants, every addressing mode it makes (with D8-D15/A8-A15 through the prefix), the
+  integer ALU, shifts, 64-bit multiply and divide, branches with 32-bit displacements, JSR/RTS,
+  LINK/UNLK, CAS, bit operations, and the FPU. `tests/ec64_encoding_tests.cpp` in the engine runs what it
+  encodes on the reference interpreter: 4939 checks. It found that the interpreter never reached
+  EXTB.L (0x49C0 fits LEA's pattern, which came first); since the fix the 68040 comparison against
+  Musashi covers those 54 more instructions, with no difference.
+
 ## Testing
 
 - The assembler: a table of instructions with their encodings, checked against `llvm-mc` and the
