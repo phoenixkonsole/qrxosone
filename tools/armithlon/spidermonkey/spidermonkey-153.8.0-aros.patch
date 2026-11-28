@@ -1909,12 +1909,20 @@
      PRIntn rv;
      sigwait(&sigwait_set, &rv);
  #    endif
-@@ -1509,6 +1517,8 @@
+@@ -1509,6 +1517,16 @@
    prctl(PR_SET_NAME, (unsigned long)(name));
  #  elif defined(NETBSD)
    result = pthread_setname_np(thread->id, "%s", (void*)name);
 +#  elif defined(AROS)
-+  /* AROS: no pthread_setname_np; NSPR keeps the name (PR_GetThreadName) */
++  /* AROS: pthread_setname_np names the thread's task (its Node's ln_Name), so tools that list
++   * tasks (and the 68100EC64's profiles) show Gecko's thread names */
++  {
++    /* it refuses a name longer than the task's (NAMELEN of AROS's pthread, 32 with the 0) */
++    char shortName[32];
++    strncpy(shortName, name, sizeof shortName - 1);
++    shortName[sizeof shortName - 1] = 0;
++    pthread_setname_np(thread->id, shortName);
++  }
  #  else /* not BSD */
    /*
     * On OSX, pthread_setname_np is only available in 10.6 or later, so test
