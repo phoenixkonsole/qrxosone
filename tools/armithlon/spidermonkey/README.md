@@ -91,4 +91,8 @@ the unofficial branding (`brand.ftl`, `brand.properties`, in the patch) and the 
 - Colours on big endian: SWGL reads B, G, R, A bytes; Gecko's OS_RGBA there is A, R, G, B, so
   RenderTextureHostSWGL hands SWGL a byte-swapped copy of such images; Skia's kBGRA_8888 is A, R, G, B
   in a big-endian memory, so A8R8G8B8 maps to it and the canvas uses OS_RGBA.
+- Not in ThunderCat: DRM (EME with Widevine). The Widevine CDM is Google's, licensed to browser
+  makers only; for DRM content QRX OS One runs an official Firefox of another platform, which brings
+  its own. ClearKey, Gecko's open EME, needs no licence. WebRTC is planned, after sound output
+  (a cubeb backend for the board) and the media codecs.
 - Packaging: `package-appstore.sh OBJ OUT REV` (the App Store archive `thundercat-153.8.0-qrx64-REV`).
