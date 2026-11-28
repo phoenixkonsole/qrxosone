@@ -1,5 +1,5 @@
 diff --git a/arch/all-native/econsole/econsole.c b/arch/all-native/econsole/econsole.c
-index 21e84100..54d70958 100644
+index 21e8410088..54d7095856 100644
 --- a/arch/all-native/econsole/econsole.c
 +++ b/arch/all-native/econsole/econsole.c
 @@ -11,6 +11,7 @@
@@ -61,7 +61,7 @@ index 21e84100..54d70958 100644
      for (i = 0; i < ARRAY_SIZE(econsole_files); i++) {
          if (strcmp(econsole_files[i].ef_Name, file) == 0) {
 diff --git a/arch/all-native/econsole/mmakefile.src b/arch/all-native/econsole/mmakefile.src
-index de479bdc..817f9c5a 100644
+index de479bdc07..817f9c5a70 100644
 --- a/arch/all-native/econsole/mmakefile.src
 +++ b/arch/all-native/econsole/mmakefile.src
 @@ -14,6 +14,6 @@ USER_CPPFLAGS += -DAROS_CPU="\"$(AROS_TARGET_CPU)\""
@@ -73,7 +73,7 @@ index de479bdc..817f9c5a 100644
  
  %common
 diff --git a/arch/all-runtime/bsdsocket/include/proto/bsdsocket.h b/arch/all-runtime/bsdsocket/include/proto/bsdsocket.h
-index 5c829a7c..9ea386d2 100644
+index 5c829a7c09..9ea386d2d3 100644
 --- a/arch/all-runtime/bsdsocket/include/proto/bsdsocket.h
 +++ b/arch/all-runtime/bsdsocket/include/proto/bsdsocket.h
 @@ -8,7 +8,12 @@
@@ -91,7 +91,7 @@ index 5c829a7c..9ea386d2 100644
   #ifdef __BSDSOCKET_STDLIBBASE__
 diff --git a/arch/m68k64-all/crt/mmakefile.src b/arch/m68k64-all/crt/mmakefile.src
 new file mode 100644
-index 00000000..6680ba15
+index 0000000000..6680ba151f
 --- /dev/null
 +++ b/arch/m68k64-all/crt/mmakefile.src
 @@ -0,0 +1,35 @@
@@ -132,14 +132,14 @@ index 00000000..6680ba15
 +%common
 diff --git a/arch/m68k64-all/crt/posixc/.gitignore b/arch/m68k64-all/crt/posixc/.gitignore
 new file mode 100644
-index 00000000..0d77ed2f
+index 0000000000..0d77ed2f62
 --- /dev/null
 +++ b/arch/m68k64-all/crt/posixc/.gitignore
 @@ -0,0 +1 @@
 +mmakefile
 diff --git a/arch/m68k64-all/crt/posixc/siglongjmp.s b/arch/m68k64-all/crt/posixc/siglongjmp.s
 new file mode 100644
-index 00000000..f70e1df2
+index 0000000000..f70e1df2cd
 --- /dev/null
 +++ b/arch/m68k64-all/crt/posixc/siglongjmp.s
 @@ -0,0 +1,15 @@
@@ -160,7 +160,7 @@ index 00000000..f70e1df2
 +	jmp (%a1)
 diff --git a/arch/m68k64-all/crt/posixc/sigsetjmp.s b/arch/m68k64-all/crt/posixc/sigsetjmp.s
 new file mode 100644
-index 00000000..af7a6755
+index 0000000000..af7a67557f
 --- /dev/null
 +++ b/arch/m68k64-all/crt/posixc/sigsetjmp.s
 @@ -0,0 +1,14 @@
@@ -180,7 +180,7 @@ index 00000000..af7a6755
 +	rts
 diff --git a/arch/m68k64-all/crt/posixc/vfork.s b/arch/m68k64-all/crt/posixc/vfork.s
 new file mode 100644
-index 00000000..a8dd3609
+index 0000000000..a8dd3609d1
 --- /dev/null
 +++ b/arch/m68k64-all/crt/posixc/vfork.s
 @@ -0,0 +1,23 @@
@@ -209,7 +209,7 @@ index 00000000..a8dd3609
 +	jsr (AROS_CDEFNAME(__vfork),%pc)
 diff --git a/arch/m68k64-all/crt/posixc/vfork_longjmp.s b/arch/m68k64-all/crt/posixc/vfork_longjmp.s
 new file mode 100644
-index 00000000..14059fc1
+index 0000000000..14059fc1a8
 --- /dev/null
 +++ b/arch/m68k64-all/crt/posixc/vfork_longjmp.s
 @@ -0,0 +1,15 @@
@@ -230,14 +230,14 @@ index 00000000..14059fc1
 +	jmp (%a1)
 diff --git a/arch/m68k64-all/crt/stdc/.gitignore b/arch/m68k64-all/crt/stdc/.gitignore
 new file mode 100644
-index 00000000..0d77ed2f
+index 0000000000..0d77ed2f62
 --- /dev/null
 +++ b/arch/m68k64-all/crt/stdc/.gitignore
 @@ -0,0 +1 @@
 +mmakefile
 diff --git a/arch/m68k64-all/crt/stdc/fenv.c b/arch/m68k64-all/crt/stdc/fenv.c
 new file mode 100644
-index 00000000..c2a5ef04
+index 0000000000..c2a5ef0442
 --- /dev/null
 +++ b/arch/m68k64-all/crt/stdc/fenv.c
 @@ -0,0 +1,35 @@
@@ -278,7 +278,7 @@ index 00000000..c2a5ef04
 +const fenv_t __fe_dfl_env = 0;
 diff --git a/arch/m68k64-all/crt/stdc/longjmp.s b/arch/m68k64-all/crt/stdc/longjmp.s
 new file mode 100644
-index 00000000..38e42588
+index 0000000000..38e4258842
 --- /dev/null
 +++ b/arch/m68k64-all/crt/stdc/longjmp.s
 @@ -0,0 +1,15 @@
@@ -299,7 +299,7 @@ index 00000000..38e42588
 +	jmp (%a1)
 diff --git a/arch/m68k64-all/crt/stdc/setjmp.s b/arch/m68k64-all/crt/stdc/setjmp.s
 new file mode 100644
-index 00000000..2f62f96d
+index 0000000000..2f62f96d7f
 --- /dev/null
 +++ b/arch/m68k64-all/crt/stdc/setjmp.s
 @@ -0,0 +1,14 @@
@@ -319,7 +319,7 @@ index 00000000..2f62f96d
 +	rts
 diff --git a/arch/m68k64-all/exec/alert_cpu.c b/arch/m68k64-all/exec/alert_cpu.c
 new file mode 100644
-index 00000000..c06d9eed
+index 0000000000..c06d9eed0a
 --- /dev/null
 +++ b/arch/m68k64-all/exec/alert_cpu.c
 @@ -0,0 +1,42 @@
@@ -367,7 +367,7 @@ index 00000000..c06d9eed
 +}
 diff --git a/arch/m68k64-all/exec/execstubs.s b/arch/m68k64-all/exec/execstubs.s
 new file mode 100644
-index 00000000..70b4de08
+index 0000000000..70b4de0814
 --- /dev/null
 +++ b/arch/m68k64-all/exec/execstubs.s
 @@ -0,0 +1,47 @@
@@ -420,7 +420,7 @@ index 00000000..70b4de08
 +#endif
 diff --git a/arch/m68k64-all/exec/mmakefile.src b/arch/m68k64-all/exec/mmakefile.src
 new file mode 100644
-index 00000000..b23deb19
+index 0000000000..b23deb19e6
 --- /dev/null
 +++ b/arch/m68k64-all/exec/mmakefile.src
 @@ -0,0 +1,30 @@
@@ -456,7 +456,7 @@ index 00000000..b23deb19
 +%common
 diff --git a/arch/m68k64-all/exec/newstackswap.c b/arch/m68k64-all/exec/newstackswap.c
 new file mode 100644
-index 00000000..1e420b78
+index 0000000000..1e420b781d
 --- /dev/null
 +++ b/arch/m68k64-all/exec/newstackswap.c
 @@ -0,0 +1,107 @@
@@ -569,7 +569,7 @@ index 00000000..1e420b78
 +
 diff --git a/arch/m68k64-all/exec/preparecontext.c b/arch/m68k64-all/exec/preparecontext.c
 new file mode 100644
-index 00000000..322de773
+index 0000000000..322de77330
 --- /dev/null
 +++ b/arch/m68k64-all/exec/preparecontext.c
 @@ -0,0 +1,78 @@
@@ -653,7 +653,7 @@ index 00000000..322de773
 +} /* PrepareContext() */
 diff --git a/arch/m68k64-all/exec/stackswap.S b/arch/m68k64-all/exec/stackswap.S
 new file mode 100644
-index 00000000..e83166e1
+index 0000000000..e83166e173
 --- /dev/null
 +++ b/arch/m68k64-all/exec/stackswap.S
 @@ -0,0 +1,61 @@
@@ -720,7 +720,7 @@ index 00000000..e83166e1
 +	rts
 diff --git a/arch/m68k64-all/include/aros/atomic.h b/arch/m68k64-all/include/aros/atomic.h
 new file mode 100644
-index 00000000..43397306
+index 0000000000..4339730615
 --- /dev/null
 +++ b/arch/m68k64-all/include/aros/atomic.h
 @@ -0,0 +1,26 @@
@@ -752,7 +752,7 @@ index 00000000..43397306
 +#endif /* AROS_M68K64_ATOMIC_H */
 diff --git a/arch/m68k64-all/include/aros/cpu.h b/arch/m68k64-all/include/aros/cpu.h
 new file mode 100644
-index 00000000..89a8f506
+index 0000000000..89a8f50697
 --- /dev/null
 +++ b/arch/m68k64-all/include/aros/cpu.h
 @@ -0,0 +1,168 @@
@@ -926,7 +926,7 @@ index 00000000..89a8f506
 +#endif /* AROS_M68K64_CPU_H */
 diff --git a/arch/m68k64-all/include/aros/cpucontext.h b/arch/m68k64-all/include/aros/cpucontext.h
 new file mode 100644
-index 00000000..cf5b9989
+index 0000000000..cf5b9989a7
 --- /dev/null
 +++ b/arch/m68k64-all/include/aros/cpucontext.h
 @@ -0,0 +1,35 @@
@@ -967,7 +967,7 @@ index 00000000..cf5b9989
 +#endif
 diff --git a/arch/m68k64-all/include/aros/fenv.h b/arch/m68k64-all/include/aros/fenv.h
 new file mode 100644
-index 00000000..9326c14e
+index 0000000000..9326c14e14
 --- /dev/null
 +++ b/arch/m68k64-all/include/aros/fenv.h
 @@ -0,0 +1,275 @@
@@ -1248,7 +1248,7 @@ index 00000000..9326c14e
 +#endif	/* !_FENV_H_ */
 diff --git a/arch/m68k64-all/include/aros/genmodule.h b/arch/m68k64-all/include/aros/genmodule.h
 new file mode 100644
-index 00000000..fed94c15
+index 0000000000..fed94c15af
 --- /dev/null
 +++ b/arch/m68k64-all/include/aros/genmodule.h
 @@ -0,0 +1,109 @@
@@ -1363,7 +1363,7 @@ index 00000000..fed94c15
 +#endif /* AROS_M68K64_GENMODULE_H */
 diff --git a/arch/m68k64-all/include/asm/cpu.h b/arch/m68k64-all/include/asm/cpu.h
 new file mode 100644
-index 00000000..c9112332
+index 0000000000..c9112332ba
 --- /dev/null
 +++ b/arch/m68k64-all/include/asm/cpu.h
 @@ -0,0 +1,22 @@
@@ -1391,7 +1391,7 @@ index 00000000..c9112332
 +#endif /*ASM_M68K64_CPU_H*/
 diff --git a/arch/m68k64-all/include/mmakefile.src b/arch/m68k64-all/include/mmakefile.src
 new file mode 100644
-index 00000000..158e9618
+index 0000000000..158e961835
 --- /dev/null
 +++ b/arch/m68k64-all/include/mmakefile.src
 @@ -0,0 +1,8 @@
@@ -1405,7 +1405,7 @@ index 00000000..158e9618
 +%copy_includes mmake=compiler-includes path=asm/m68k64 dir=asm
 diff --git a/arch/m68k64-all/kernel/cpu_init.c b/arch/m68k64-all/kernel/cpu_init.c
 new file mode 100644
-index 00000000..34ec31b4
+index 0000000000..34ec31b4fd
 --- /dev/null
 +++ b/arch/m68k64-all/kernel/cpu_init.c
 @@ -0,0 +1,28 @@
@@ -1439,7 +1439,7 @@ index 00000000..34ec31b4
 +ADD2INITLIB(cpu_Init, 5);
 diff --git a/arch/m68k64-all/kernel/createcontext.c b/arch/m68k64-all/kernel/createcontext.c
 new file mode 100644
-index 00000000..0f3940c3
+index 0000000000..0f3940c37b
 --- /dev/null
 +++ b/arch/m68k64-all/kernel/createcontext.c
 @@ -0,0 +1,39 @@
@@ -1484,7 +1484,7 @@ index 00000000..0f3940c3
 +}
 diff --git a/arch/m68k64-all/kernel/getcpunumber.c b/arch/m68k64-all/kernel/getcpunumber.c
 new file mode 100644
-index 00000000..9d1feb91
+index 0000000000..9d1feb9127
 --- /dev/null
 +++ b/arch/m68k64-all/kernel/getcpunumber.c
 @@ -0,0 +1,19 @@
@@ -1509,7 +1509,7 @@ index 00000000..9d1feb91
 +}
 diff --git a/arch/m68k64-all/kernel/mmakefile.src b/arch/m68k64-all/kernel/mmakefile.src
 new file mode 100644
-index 00000000..f2e1792f
+index 0000000000..f2e1792f8b
 --- /dev/null
 +++ b/arch/m68k64-all/kernel/mmakefile.src
 @@ -0,0 +1,30 @@
@@ -1545,7 +1545,7 @@ index 00000000..f2e1792f
 +%common
 diff --git a/arch/m68k64-native/boot/mmakefile.src b/arch/m68k64-native/boot/mmakefile.src
 new file mode 100644
-index 00000000..1ac3556a
+index 0000000000..1ac3556ad9
 --- /dev/null
 +++ b/arch/m68k64-native/boot/mmakefile.src
 @@ -0,0 +1,94 @@
@@ -1645,14 +1645,14 @@ index 00000000..1ac3556a
 +%common
 diff --git a/arch/m68k64-native/exec/.gitignore b/arch/m68k64-native/exec/.gitignore
 new file mode 100644
-index 00000000..0d77ed2f
+index 0000000000..0d77ed2f62
 --- /dev/null
 +++ b/arch/m68k64-native/exec/.gitignore
 @@ -0,0 +1 @@
 +mmakefile
 diff --git a/arch/m68k64-native/exec/cachecleare.c b/arch/m68k64-native/exec/cachecleare.c
 new file mode 100644
-index 00000000..897c3d35
+index 0000000000..897c3d35c5
 --- /dev/null
 +++ b/arch/m68k64-native/exec/cachecleare.c
 @@ -0,0 +1,29 @@
@@ -1687,7 +1687,7 @@ index 00000000..897c3d35
 +} /* CacheClearE */
 diff --git a/arch/m68k64-native/exec/cachepredma.c b/arch/m68k64-native/exec/cachepredma.c
 new file mode 100644
-index 00000000..e8066a41
+index 0000000000..e8066a4199
 --- /dev/null
 +++ b/arch/m68k64-native/exec/cachepredma.c
 @@ -0,0 +1,38 @@
@@ -1731,7 +1731,7 @@ index 00000000..e8066a41
 +} /* CachePreDMA() */
 diff --git a/arch/m68k64-native/exec/coldreboot.c b/arch/m68k64-native/exec/coldreboot.c
 new file mode 100644
-index 00000000..ce40b7ef
+index 0000000000..ce40b7ef1a
 --- /dev/null
 +++ b/arch/m68k64-native/exec/coldreboot.c
 @@ -0,0 +1,41 @@
@@ -1778,7 +1778,7 @@ index 00000000..ce40b7ef
 +}
 diff --git a/arch/m68k64-native/exec/exec_idle.c b/arch/m68k64-native/exec/exec_idle.c
 new file mode 100644
-index 00000000..026444f9
+index 0000000000..026444f91b
 --- /dev/null
 +++ b/arch/m68k64-native/exec/exec_idle.c
 @@ -0,0 +1,30 @@
@@ -1814,7 +1814,7 @@ index 00000000..026444f9
 +}
 diff --git a/arch/m68k64-native/exec/exec_platform.h b/arch/m68k64-native/exec/exec_platform.h
 new file mode 100644
-index 00000000..59a73f37
+index 0000000000..59a73f3709
 --- /dev/null
 +++ b/arch/m68k64-native/exec/exec_platform.h
 @@ -0,0 +1,230 @@
@@ -2050,7 +2050,7 @@ index 00000000..59a73f37
 +#endif /* __EXEC_PLATFORM_H */
 diff --git a/arch/m68k64-native/exec/mmakefile.src b/arch/m68k64-native/exec/mmakefile.src
 new file mode 100644
-index 00000000..529aeae3
+index 0000000000..529aeae3d8
 --- /dev/null
 +++ b/arch/m68k64-native/exec/mmakefile.src
 @@ -0,0 +1,46 @@
@@ -2102,7 +2102,7 @@ index 00000000..529aeae3
 +TARGETDIR = $(BD_OBJDIR$(BDID))
 diff --git a/arch/m68k64-native/exec/platform_init.c b/arch/m68k64-native/exec/platform_init.c
 new file mode 100644
-index 00000000..a93df7f7
+index 0000000000..a93df7f77a
 --- /dev/null
 +++ b/arch/m68k64-native/exec/platform_init.c
 @@ -0,0 +1,284 @@
@@ -2392,7 +2392,7 @@ index 00000000..a93df7f7
 +ADD2INITLIB(Exec_M68K64CPUInit, 0)
 diff --git a/arch/m68k64-native/exec/superstate.c b/arch/m68k64-native/exec/superstate.c
 new file mode 100644
-index 00000000..6a97b6ad
+index 0000000000..6a97b6ad47
 --- /dev/null
 +++ b/arch/m68k64-native/exec/superstate.c
 @@ -0,0 +1,21 @@
@@ -2419,7 +2419,7 @@ index 00000000..6a97b6ad
 +} /* SuperState() */
 diff --git a/arch/m68k64-native/exec/userstate.c b/arch/m68k64-native/exec/userstate.c
 new file mode 100644
-index 00000000..7c10d485
+index 0000000000..7c10d4850e
 --- /dev/null
 +++ b/arch/m68k64-native/exec/userstate.c
 @@ -0,0 +1,18 @@
@@ -2443,7 +2443,7 @@ index 00000000..7c10d485
 +} /* UserState() */
 diff --git a/arch/m68k64-native/kernel/alloccpumask.c b/arch/m68k64-native/kernel/alloccpumask.c
 new file mode 100644
-index 00000000..a39fbdd8
+index 0000000000..a39fbdd8e5
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/alloccpumask.c
 @@ -0,0 +1,27 @@
@@ -2476,7 +2476,7 @@ index 00000000..a39fbdd8
 +}
 diff --git a/arch/m68k64-native/kernel/clearcpumask.c b/arch/m68k64-native/kernel/clearcpumask.c
 new file mode 100644
-index 00000000..5567bb52
+index 0000000000..5567bb5214
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/clearcpumask.c
 @@ -0,0 +1,29 @@
@@ -2511,7 +2511,7 @@ index 00000000..5567bb52
 +}
 diff --git a/arch/m68k64-native/kernel/cli.c b/arch/m68k64-native/kernel/cli.c
 new file mode 100644
-index 00000000..e654c6f3
+index 0000000000..e654c6f32d
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/cli.c
 @@ -0,0 +1,26 @@
@@ -2543,7 +2543,7 @@ index 00000000..e654c6f3
 +}
 diff --git a/arch/m68k64-native/kernel/cpuinmask.c b/arch/m68k64-native/kernel/cpuinmask.c
 new file mode 100644
-index 00000000..5f6a78c9
+index 0000000000..5f6a78c9e0
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/cpuinmask.c
 @@ -0,0 +1,31 @@
@@ -2580,7 +2580,7 @@ index 00000000..5f6a78c9
 +}
 diff --git a/arch/m68k64-native/kernel/freecpumask.c b/arch/m68k64-native/kernel/freecpumask.c
 new file mode 100644
-index 00000000..3352302d
+index 0000000000..3352302d63
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/freecpumask.c
 @@ -0,0 +1,29 @@
@@ -2615,7 +2615,7 @@ index 00000000..3352302d
 +}
 diff --git a/arch/m68k64-native/kernel/getcpucount.c b/arch/m68k64-native/kernel/getcpucount.c
 new file mode 100644
-index 00000000..3db5909e
+index 0000000000..3db5909e1d
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/getcpucount.c
 @@ -0,0 +1,27 @@
@@ -2648,7 +2648,7 @@ index 00000000..3db5909e
 +}
 diff --git a/arch/m68k64-native/kernel/getcpumask.c b/arch/m68k64-native/kernel/getcpumask.c
 new file mode 100644
-index 00000000..9a7f1247
+index 0000000000..9a7f1247e2
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/getcpumask.c
 @@ -0,0 +1,30 @@
@@ -2684,7 +2684,7 @@ index 00000000..9a7f1247
 +}
 diff --git a/arch/m68k64-native/kernel/intr.c b/arch/m68k64-native/kernel/intr.c
 new file mode 100644
-index 00000000..aa2575bf
+index 0000000000..aa2575bf99
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/intr.c
 @@ -0,0 +1,467 @@
@@ -3157,7 +3157,7 @@ index 00000000..aa2575bf
 +}
 diff --git a/arch/m68k64-native/kernel/issuper.c b/arch/m68k64-native/kernel/issuper.c
 new file mode 100644
-index 00000000..130a4216
+index 0000000000..130a4216de
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/issuper.c
 @@ -0,0 +1,28 @@
@@ -3191,7 +3191,7 @@ index 00000000..130a4216
 +}
 diff --git a/arch/m68k64-native/kernel/kernel_arch.h b/arch/m68k64-native/kernel/kernel_arch.h
 new file mode 100644
-index 00000000..41e5fd00
+index 0000000000..41e5fd00f2
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_arch.h
 @@ -0,0 +1,27 @@
@@ -3224,7 +3224,7 @@ index 00000000..41e5fd00
 +extern void ictl_disable_irq(uint8_t irq, struct KernelBase *KernelBase);
 diff --git a/arch/m68k64-native/kernel/kernel_cpu.c b/arch/m68k64-native/kernel/kernel_cpu.c
 new file mode 100644
-index 00000000..d1820ae6
+index 0000000000..d1820ae60f
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_cpu.c
 @@ -0,0 +1,179 @@
@@ -3409,7 +3409,7 @@ index 00000000..d1820ae6
 +ADD2INITLIB(cpu_TLSInit, 0);
 diff --git a/arch/m68k64-native/kernel/kernel_cpu.h b/arch/m68k64-native/kernel/kernel_cpu.h
 new file mode 100644
-index 00000000..f77202f8
+index 0000000000..f77202f857
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_cpu.h
 @@ -0,0 +1,51 @@
@@ -3466,7 +3466,7 @@ index 00000000..f77202f8
 +#endif /* CPU_M68K64_H_ */
 diff --git a/arch/m68k64-native/kernel/kernel_debug.c b/arch/m68k64-native/kernel/kernel_debug.c
 new file mode 100644
-index 00000000..19e529cb
+index 0000000000..19e529cbf2
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_debug.c
 @@ -0,0 +1,19 @@
@@ -3491,7 +3491,7 @@ index 00000000..19e529cb
 +}
 diff --git a/arch/m68k64-native/kernel/kernel_intern.h b/arch/m68k64-native/kernel/kernel_intern.h
 new file mode 100644
-index 00000000..97e3ffac
+index 0000000000..97e3ffac57
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_intern.h
 @@ -0,0 +1,72 @@
@@ -3569,7 +3569,7 @@ index 00000000..97e3ffac
 +#endif /*KERNEL_INTERN_H_*/
 diff --git a/arch/m68k64-native/kernel/kernel_ipi.h b/arch/m68k64-native/kernel/kernel_ipi.h
 new file mode 100644
-index 00000000..e0ad50d7
+index 0000000000..e0ad50d7b2
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_ipi.h
 @@ -0,0 +1,2 @@
@@ -3577,10 +3577,10 @@ index 00000000..e0ad50d7
 +#include "kernel_smp.h"
 diff --git a/arch/m68k64-native/kernel/kernel_scheduler.c b/arch/m68k64-native/kernel/kernel_scheduler.c
 new file mode 100644
-index 00000000..8d01e9cc
+index 0000000000..9fdd3d9306
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_scheduler.c
-@@ -0,0 +1,462 @@
+@@ -0,0 +1,465 @@
 +/*
 +    The x86 scheduler (arch/all-pc/kernel/kernel_scheduler.c) with the affinity test of the
 +    68100EC64 port in place of the APIC one.
@@ -3611,6 +3611,7 @@ index 00000000..8d01e9cc
 +#define __AROS_KERNEL__
 +
 +#include "exec_intern.h"
++void m68k64_KickLowerCores(struct Task *task);   /* kernel_smp.c */
 +
 +
 +#define LOWSTACKWARN
@@ -3857,6 +3858,8 @@ index 00000000..8d01e9cc
 +        Enqueue(&SysBase->TaskReady, &task->tc_Node);
 +#if defined(__AROSEXEC_SMP__)
 +        KrnSpinUnLock(&PrivExecBase(SysBase)->TaskReadySpinLock);
++        /* QRX: it may run on a core that idles meanwhile (kernel_smp.c) */
++        m68k64_KickLowerCores(task);
 +#endif
 +    }
 +#if defined(__AROSEXEC_SMP__)
@@ -4045,10 +4048,10 @@ index 00000000..8d01e9cc
 +}
 diff --git a/arch/m68k64-native/kernel/kernel_smp.c b/arch/m68k64-native/kernel/kernel_smp.c
 new file mode 100644
-index 00000000..ebadbe57
+index 0000000000..3b834e1f82
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_smp.c
-@@ -0,0 +1,250 @@
+@@ -0,0 +1,291 @@
 +/*
 +    Copyright (C) 2026, The AROS Development Team. All rights reserved.
 +
@@ -4075,6 +4078,7 @@ index 00000000..ebadbe57
 +#include "kernel_scheduler.h"
 +#include "kernel_smp.h"
 +#include <exec_platform.h>
++#include <etask.h>
 +
 +#define D(x)
 +
@@ -4114,6 +4118,7 @@ index 00000000..ebadbe57
 +    unsigned int n;
 +
 +    m68k64_CoresUp = (cpumask_t)1 << boot->CPUNumber;
++    cpu_TLS[boot->CPUNumber] = boot;    /* m68k64_KickLowerCores() reads each core's ThisTask */
 +
 +    for (n = 1; n < m68k64_CoreCount && n < M68K64_MAX_CORES; n++)
 +    {
@@ -4213,6 +4218,45 @@ index 00000000..ebadbe57
 +    }
 +}
 +
++/*
++    QRX: a task has just gone onto the ready list. AROS's Signal() tells another core only when the
++    task may not run on this one; a core that runs something of lower priority (its idle task, mostly)
++    would otherwise pick the task up at its next timer tick, 20 ms later, while the task waits ready.
++    ThunderCat's main thread spent half of the time it did not run that way (2026-11-28, off-CPU
++    profile, ec64offcpu.py), with the second core idle 69% of the time. This sends a reschedule to
++    each other core the task may run on that is in its idle task. Any state.
++*/
++void m68k64_KickLowerCores(struct Task *task)
++{
++    tls_t *mine = TLS_PTR_GET();
++    struct KernelBase *KernelBase = (struct KernelBase *)mine->KernelBase;
++    cpumask_t up = __atomic_load_n(&m68k64_CoresUp, __ATOMIC_ACQUIRE), allow = ~(cpumask_t)0, mask = 0;
++    unsigned int me = mine->CPUNumber, n;
++    BYTE pri = task->tc_Node.ln_Pri;
++
++    if (task->tc_Flags & TF_ETASK)
++    {
++        void *aff = IntETask(task->tc_UnionETask.tc_ETask)->iet_CpuAffinity;
++        if (aff && (IPTR)aff != TASKAFFINITY_ANY)
++            allow = *(cpumask_t *)aff;
++    }
++    for (n = 0; n < M68K64_MAX_CORES && n < m68k64_CoreCount; n++)
++    {
++        cpumask_t bit = (cpumask_t)1 << n;
++        struct Task *running;
++        if (n == me || !(up & bit) || !(allow & bit) || !cpu_TLS[n])
++            continue;
++        running = __atomic_load_n(&cpu_TLS[n]->ThisTask, __ATOMIC_RELAXED);
++        /* only a core in its idle task (priority -127, platform_init.c): waking a core that runs
++         * a task of its own makes the two cores preempt each other's tasks back and forth (a
++         * reschedule ends the time slice), which took 80% of both cores in a first try */
++        if (!running || (running->tc_Node.ln_Pri <= -127 && running->tc_Node.ln_Pri < pri))
++            mask |= bit;
++    }
++    if (mask)
++        core_DoIPI(IPI_RESCHEDULE, &mask, KernelBase);
++}
++
 +/* TRAP #3 in supervisor state */
 +void cpu_Trap3(regs_t *regs)
 +{
@@ -4301,10 +4345,10 @@ index 00000000..ebadbe57
 +}
 diff --git a/arch/m68k64-native/kernel/kernel_smp.h b/arch/m68k64-native/kernel/kernel_smp.h
 new file mode 100644
-index 00000000..f9afad4d
+index 0000000000..9990174205
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_smp.h
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,55 @@
 +/*
 +    Copyright (C) 2026, The AROS Development Team. All rights reserved.
 +
@@ -4335,6 +4379,8 @@ index 00000000..f9afad4d
 +extern unsigned int m68k64_CoreCount;
 +extern volatile cpumask_t m68k64_CoresUp;
 +extern volatile unsigned long m68k64_IPIPending[M68K64_MAX_CORES];
++struct Task;
++void m68k64_KickLowerCores(struct Task *task);   /* a task went ready: wake cores running less */
 +
 +/* A hook run on other cores, as on x86 (exec's signal.c uses its arguments) */
 +#include <utility/hooks.h>
@@ -4360,7 +4406,7 @@ index 00000000..f9afad4d
 +#endif
 diff --git a/arch/m68k64-native/kernel/maygetchar.c b/arch/m68k64-native/kernel/maygetchar.c
 new file mode 100644
-index 00000000..f64c7244
+index 0000000000..f64c72448b
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/maygetchar.c
 @@ -0,0 +1,24 @@
@@ -4390,7 +4436,7 @@ index 00000000..f64c7244
 +}
 diff --git a/arch/m68k64-native/kernel/mmakefile.src b/arch/m68k64-native/kernel/mmakefile.src
 new file mode 100644
-index 00000000..e8184fe5
+index 0000000000..e8184fe58a
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/mmakefile.src
 @@ -0,0 +1,38 @@
@@ -4434,7 +4480,7 @@ index 00000000..e8184fe5
 +%common
 diff --git a/arch/m68k64-native/kernel/schedulecpu.c b/arch/m68k64-native/kernel/schedulecpu.c
 new file mode 100644
-index 00000000..67354a69
+index 0000000000..67354a6993
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/schedulecpu.c
 @@ -0,0 +1,28 @@
@@ -4468,7 +4514,7 @@ index 00000000..67354a69
 +}
 diff --git a/arch/m68k64-native/kernel/spininit.c b/arch/m68k64-native/kernel/spininit.c
 new file mode 100644
-index 00000000..49a53daf
+index 0000000000..49a53daf4a
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/spininit.c
 @@ -0,0 +1,27 @@
@@ -4501,7 +4547,7 @@ index 00000000..49a53daf
 +}
 diff --git a/arch/m68k64-native/kernel/spinislocked.c b/arch/m68k64-native/kernel/spinislocked.c
 new file mode 100644
-index 00000000..db383a75
+index 0000000000..db383a75f6
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/spinislocked.c
 @@ -0,0 +1,25 @@
@@ -4532,7 +4578,7 @@ index 00000000..db383a75
 +}
 diff --git a/arch/m68k64-native/kernel/spinlock.c b/arch/m68k64-native/kernel/spinlock.c
 new file mode 100644
-index 00000000..56f9b178
+index 0000000000..56f9b178b3
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/spinlock.c
 @@ -0,0 +1,35 @@
@@ -4573,7 +4619,7 @@ index 00000000..56f9b178
 +}
 diff --git a/arch/m68k64-native/kernel/spintrylock.c b/arch/m68k64-native/kernel/spintrylock.c
 new file mode 100644
-index 00000000..7f8e567e
+index 0000000000..7f8e567eb0
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/spintrylock.c
 @@ -0,0 +1,54 @@
@@ -4633,7 +4679,7 @@ index 00000000..7f8e567e
 +}
 diff --git a/arch/m68k64-native/kernel/spinunlock.c b/arch/m68k64-native/kernel/spinunlock.c
 new file mode 100644
-index 00000000..2a01170d
+index 0000000000..2a01170dd4
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/spinunlock.c
 @@ -0,0 +1,36 @@
@@ -4675,7 +4721,7 @@ index 00000000..2a01170d
 +}
 diff --git a/arch/m68k64-native/kernel/sti.c b/arch/m68k64-native/kernel/sti.c
 new file mode 100644
-index 00000000..ed1cd192
+index 0000000000..ed1cd192ad
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/sti.c
 @@ -0,0 +1,26 @@
@@ -4707,7 +4753,7 @@ index 00000000..ed1cd192
 +}
 diff --git a/arch/m68k64-native/kernel/tags.c b/arch/m68k64-native/kernel/tags.c
 new file mode 100644
-index 00000000..76e71e17
+index 0000000000..76e71e17ef
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/tags.c
 @@ -0,0 +1,68 @@
@@ -4781,7 +4827,7 @@ index 00000000..76e71e17
 +}
 diff --git a/arch/m68k64-native/kernel/tls.h b/arch/m68k64-native/kernel/tls.h
 new file mode 100644
-index 00000000..47c18aac
+index 0000000000..47c18aac76
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/tls.h
 @@ -0,0 +1,76 @@
@@ -4863,7 +4909,7 @@ index 00000000..47c18aac
 +#endif
 diff --git a/arch/m68k64-native/qrx/battclock/battclock_intern.h b/arch/m68k64-native/qrx/battclock/battclock_intern.h
 new file mode 100644
-index 00000000..adb051c4
+index 0000000000..adb051c4d0
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/battclock/battclock_intern.h
 @@ -0,0 +1,18 @@
@@ -4887,7 +4933,7 @@ index 00000000..adb051c4
 +#endif //BATTCLOCK_INTERN_H
 diff --git a/arch/m68k64-native/qrx/battclock/mmakefile.src b/arch/m68k64-native/qrx/battclock/mmakefile.src
 new file mode 100644
-index 00000000..d63e4ee4
+index 0000000000..d63e4ee4ad
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/battclock/mmakefile.src
 @@ -0,0 +1,9 @@
@@ -4902,7 +4948,7 @@ index 00000000..d63e4ee4
 +%common
 diff --git a/arch/m68k64-native/qrx/battclock/readbattclock.c b/arch/m68k64-native/qrx/battclock/readbattclock.c
 new file mode 100644
-index 00000000..f9075513
+index 0000000000..f90755131c
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/battclock/readbattclock.c
 @@ -0,0 +1,28 @@
@@ -4936,7 +4982,7 @@ index 00000000..f9075513
 +}
 diff --git a/arch/m68k64-native/qrx/boot/boot.c b/arch/m68k64-native/qrx/boot/boot.c
 new file mode 100644
-index 00000000..a59a71a6
+index 0000000000..a59a71a64a
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/boot/boot.c
 @@ -0,0 +1,44 @@
@@ -4986,7 +5032,7 @@ index 00000000..a59a71a6
 +}
 diff --git a/arch/m68k64-native/qrx/boot/ldscript.lds b/arch/m68k64-native/qrx/boot/ldscript.lds
 new file mode 100644
-index 00000000..fc781cda
+index 0000000000..fc781cda18
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/boot/ldscript.lds
 @@ -0,0 +1,80 @@
@@ -5072,7 +5118,7 @@ index 00000000..fc781cda
 +}
 diff --git a/arch/m68k64-native/qrx/boot/mmakefile.src b/arch/m68k64-native/qrx/boot/mmakefile.src
 new file mode 100644
-index 00000000..2595e9b1
+index 0000000000..2595e9b115
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/boot/mmakefile.src
 @@ -0,0 +1,108 @@
@@ -5186,7 +5232,7 @@ index 00000000..2595e9b1
 +%common
 diff --git a/arch/m68k64-native/qrx/ec64gfx/mmakefile.src b/arch/m68k64-native/qrx/ec64gfx/mmakefile.src
 new file mode 100644
-index 00000000..f3cd977e
+index 0000000000..f3cd977e45
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/mmakefile.src
 @@ -0,0 +1,18 @@
@@ -5210,7 +5256,7 @@ index 00000000..f3cd977e
 +  files=$(FILES) conffile=vesagfx.conf uselibs="oop stdc.static" usesdks="private"
 diff --git a/arch/m68k64-native/qrx/ec64gfx/vesagfx.conf b/arch/m68k64-native/qrx/ec64gfx/vesagfx.conf
 new file mode 100644
-index 00000000..e73e0541
+index 0000000000..e73e05419b
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/vesagfx.conf
 @@ -0,0 +1,48 @@
@@ -5264,7 +5310,7 @@ index 00000000..e73e0541
 +##end class
 diff --git a/arch/m68k64-native/qrx/ec64gfx/vesagfx_bitmap.h b/arch/m68k64-native/qrx/ec64gfx/vesagfx_bitmap.h
 new file mode 100644
-index 00000000..136b74f7
+index 0000000000..136b74f797
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/vesagfx_bitmap.h
 @@ -0,0 +1,36 @@
@@ -5306,7 +5352,7 @@ index 00000000..136b74f7
 +#endif /* VESAGFX_BITMAP_H */
 diff --git a/arch/m68k64-native/qrx/ec64gfx/vesagfx_bitmapclass.c b/arch/m68k64-native/qrx/ec64gfx/vesagfx_bitmapclass.c
 new file mode 100644
-index 00000000..80171bab
+index 0000000000..80171bab85
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/vesagfx_bitmapclass.c
 @@ -0,0 +1,219 @@
@@ -5531,7 +5577,7 @@ index 00000000..80171bab
 +}
 diff --git a/arch/m68k64-native/qrx/ec64gfx/vesagfx_cursor.h b/arch/m68k64-native/qrx/ec64gfx/vesagfx_cursor.h
 new file mode 100644
-index 00000000..2e6e6b01
+index 0000000000..2e6e6b0196
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/vesagfx_cursor.h
 @@ -0,0 +1,16 @@
@@ -5553,7 +5599,7 @@ index 00000000..2e6e6b01
 +#endif /* VESAGFX_CURSOR_H */
 diff --git a/arch/m68k64-native/qrx/ec64gfx/vesagfx_hidd.h b/arch/m68k64-native/qrx/ec64gfx/vesagfx_hidd.h
 new file mode 100644
-index 00000000..ea559a18
+index 0000000000..ea559a1887
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/vesagfx_hidd.h
 @@ -0,0 +1,25 @@
@@ -5584,7 +5630,7 @@ index 00000000..ea559a18
 +#endif /* VESAGFX_HIDD_H */
 diff --git a/arch/m68k64-native/qrx/ec64gfx/vesagfx_hiddclass.c b/arch/m68k64-native/qrx/ec64gfx/vesagfx_hiddclass.c
 new file mode 100644
-index 00000000..c6e07d22
+index 0000000000..c6e07d22c2
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/vesagfx_hiddclass.c
 @@ -0,0 +1,247 @@
@@ -5837,7 +5883,7 @@ index 00000000..c6e07d22
 +}
 diff --git a/arch/m68k64-native/qrx/ec64gfx/vesagfx_init.c b/arch/m68k64-native/qrx/ec64gfx/vesagfx_init.c
 new file mode 100644
-index 00000000..e83d698a
+index 0000000000..e83d698a61
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/vesagfx_init.c
 @@ -0,0 +1,124 @@
@@ -5967,7 +6013,7 @@ index 00000000..e83d698a
 +ADD2INITLIB(VESAGfx_Init, 0)
 diff --git a/arch/m68k64-native/qrx/ec64gfx/vesagfx_intern.h b/arch/m68k64-native/qrx/ec64gfx/vesagfx_intern.h
 new file mode 100644
-index 00000000..2677e8dc
+index 0000000000..2677e8dcea
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/vesagfx_intern.h
 @@ -0,0 +1,70 @@
@@ -6043,7 +6089,7 @@ index 00000000..2677e8dc
 +#endif /* VESAGFX_INTERN_H */
 diff --git a/arch/m68k64-native/qrx/ec64gfx/vesagfx_support.c b/arch/m68k64-native/qrx/ec64gfx/vesagfx_support.c
 new file mode 100644
-index 00000000..5d4848db
+index 0000000000..5d4848dbd8
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/vesagfx_support.c
 @@ -0,0 +1,223 @@
@@ -6272,7 +6318,7 @@ index 00000000..5d4848db
 +}
 diff --git a/arch/m68k64-native/qrx/ec64gfx/vesagfx_support.h b/arch/m68k64-native/qrx/ec64gfx/vesagfx_support.h
 new file mode 100644
-index 00000000..4fff861f
+index 0000000000..4fff861f40
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/ec64gfx/vesagfx_support.h
 @@ -0,0 +1,51 @@
@@ -6329,7 +6375,7 @@ index 00000000..4fff861f
 +#endif /* VESAGFX_SUPPORT_H */
 diff --git a/arch/m68k64-native/qrx/kernel/kernel_startup.c b/arch/m68k64-native/qrx/kernel/kernel_startup.c
 new file mode 100644
-index 00000000..ba5e312a
+index 0000000000..ba5e312af2
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/kernel/kernel_startup.c
 @@ -0,0 +1,277 @@
@@ -6612,7 +6658,7 @@ index 00000000..ba5e312a
 +
 diff --git a/arch/m68k64-native/qrx/kernel/ldscript.lds b/arch/m68k64-native/qrx/kernel/ldscript.lds
 new file mode 100644
-index 00000000..bf4b33d1
+index 0000000000..bf4b33d1f6
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/kernel/ldscript.lds
 @@ -0,0 +1,41 @@
@@ -6659,7 +6705,7 @@ index 00000000..bf4b33d1
 +}
 diff --git a/arch/m68k64-native/qrx/kernel/mmakefile.src b/arch/m68k64-native/qrx/kernel/mmakefile.src
 new file mode 100644
-index 00000000..32d11655
+index 0000000000..32d11655ca
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/kernel/mmakefile.src
 @@ -0,0 +1,52 @@
@@ -6717,7 +6763,7 @@ index 00000000..32d11655
 +%common
 diff --git a/arch/m68k64-native/qrx/kernel/selftest.c b/arch/m68k64-native/qrx/kernel/selftest.c
 new file mode 100644
-index 00000000..410cb866
+index 0000000000..410cb866f2
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/kernel/selftest.c
 @@ -0,0 +1,295 @@
@@ -7018,7 +7064,7 @@ index 00000000..410cb866
 +}
 diff --git a/arch/m68k64-native/qrx/mmakefile.src b/arch/m68k64-native/qrx/mmakefile.src
 new file mode 100644
-index 00000000..1eca1aca
+index 0000000000..1eca1aca33
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/mmakefile.src
 @@ -0,0 +1,7 @@
@@ -7031,7 +7077,7 @@ index 00000000..1eca1aca
 +%common
 diff --git a/arch/m68k64-native/qrx/qrxdisk/mmakefile.src b/arch/m68k64-native/qrx/qrxdisk/mmakefile.src
 new file mode 100644
-index 00000000..5e1f3567
+index 0000000000..5e1f3567f9
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/qrxdisk/mmakefile.src
 @@ -0,0 +1,10 @@
@@ -7047,7 +7093,7 @@ index 00000000..5e1f3567
 +%common
 diff --git a/arch/m68k64-native/qrx/qrxdisk/qrxdisk.conf b/arch/m68k64-native/qrx/qrxdisk/qrxdisk.conf
 new file mode 100644
-index 00000000..0533704e
+index 0000000000..0533704ef0
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/qrxdisk/qrxdisk.conf
 @@ -0,0 +1,12 @@
@@ -7065,7 +7111,7 @@ index 00000000..0533704e
 +##end cdefprivate
 diff --git a/arch/m68k64-native/qrx/qrxdisk/qrxdisk_device.c b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_device.c
 new file mode 100644
-index 00000000..f9d70911
+index 0000000000..f9d7091157
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_device.c
 @@ -0,0 +1,463 @@
@@ -7534,7 +7580,7 @@ index 00000000..f9d70911
 +}
 diff --git a/arch/m68k64-native/qrx/qrxdisk/qrxdisk_intern.h b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_intern.h
 new file mode 100644
-index 00000000..8055c61b
+index 0000000000..8055c61b8d
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/qrxdisk/qrxdisk_intern.h
 @@ -0,0 +1,20 @@
@@ -7560,7 +7606,7 @@ index 00000000..8055c61b
 +#endif
 diff --git a/arch/m68k64-native/qrx/qrxhostfs/mmakefile.src b/arch/m68k64-native/qrx/qrxhostfs/mmakefile.src
 new file mode 100644
-index 00000000..63ef4776
+index 0000000000..63ef477628
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/qrxhostfs/mmakefile.src
 @@ -0,0 +1,13 @@
@@ -7579,7 +7625,7 @@ index 00000000..63ef4776
 +%common
 diff --git a/arch/m68k64-native/qrx/qrxhostfs/qrxhostfs-handler.c b/arch/m68k64-native/qrx/qrxhostfs/qrxhostfs-handler.c
 new file mode 100644
-index 00000000..4a3babaa
+index 0000000000..4a3babaa3c
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/qrxhostfs/qrxhostfs-handler.c
 @@ -0,0 +1,420 @@
@@ -8005,7 +8051,7 @@ index 00000000..4a3babaa
 +#endif
 diff --git a/arch/m68k64-native/qrx/qrxhostfs/qrxsys.conf b/arch/m68k64-native/qrx/qrxhostfs/qrxsys.conf
 new file mode 100644
-index 00000000..91f6d346
+index 0000000000..91f6d34603
 --- /dev/null
 +++ b/arch/m68k64-native/qrx/qrxhostfs/qrxsys.conf
 @@ -0,0 +1,11 @@
@@ -8021,7 +8067,7 @@ index 00000000..91f6d346
 +Resident=QRXSys
 +##end handler
 diff --git a/compiler/arossupport/include/asmcall.h b/compiler/arossupport/include/asmcall.h
-index 2041aeea..40035525 100644
+index 2041aeea02..40035525a1 100644
 --- a/compiler/arossupport/include/asmcall.h
 +++ b/compiler/arossupport/include/asmcall.h
 @@ -63,6 +63,7 @@
@@ -8033,7 +8079,7 @@ index 2041aeea..40035525 100644
  #   error unsupported CPU type
  #endif
 diff --git a/compiler/arossupport/include/atomic.h b/compiler/arossupport/include/atomic.h
-index dfb7b3ec..e4fb3265 100644
+index dfb7b3ec49..e4fb326532 100644
 --- a/compiler/arossupport/include/atomic.h
 +++ b/compiler/arossupport/include/atomic.h
 @@ -15,6 +15,10 @@
@@ -8048,7 +8094,7 @@ index dfb7b3ec..e4fb3265 100644
  #include <aros/m68k/atomic.h>
  #endif
 diff --git a/compiler/arossupport/include/libcall.h b/compiler/arossupport/include/libcall.h
-index c21238d3..fc0a6354 100644
+index c21238d3d8..fc0a6354d8 100644
 --- a/compiler/arossupport/include/libcall.h
 +++ b/compiler/arossupport/include/libcall.h
 @@ -77,6 +77,7 @@
@@ -8060,7 +8106,7 @@ index c21238d3..fc0a6354 100644
  #   error unsupported CPU type
  #endif
 diff --git a/compiler/crt/posixc/include/aros/features.h b/compiler/crt/posixc/include/aros/features.h
-index e9188a40..c7f53c7f 100644
+index e9188a4064..c7f53c7fa7 100644
 --- a/compiler/crt/posixc/include/aros/features.h
 +++ b/compiler/crt/posixc/include/aros/features.h
 @@ -122,8 +122,13 @@
@@ -8079,7 +8125,7 @@ index e9188a40..c7f53c7f 100644
  
  /* Enable features based on _POSIX_C_SOURCE level */
 diff --git a/compiler/crt/posixc/include/aros/posixc/alloca.h b/compiler/crt/posixc/include/aros/posixc/alloca.h
-index 7bbba37f..e3a5ebc2 100644
+index 7bbba37f47..e3a5ebc2aa 100644
 --- a/compiler/crt/posixc/include/aros/posixc/alloca.h
 +++ b/compiler/crt/posixc/include/aros/posixc/alloca.h
 @@ -12,7 +12,8 @@
@@ -8094,7 +8140,7 @@ index 7bbba37f..e3a5ebc2 100644
  #include <aros/types/size_t.h>
 diff --git a/compiler/crt/posixc/include/aros/posixc/dlfcn.h b/compiler/crt/posixc/include/aros/posixc/dlfcn.h
 new file mode 100644
-index 00000000..9dd28bd5
+index 0000000000..9dd28bd5c6
 --- /dev/null
 +++ b/compiler/crt/posixc/include/aros/posixc/dlfcn.h
 @@ -0,0 +1,38 @@
@@ -8137,7 +8183,7 @@ index 00000000..9dd28bd5
 +
 +#endif /* _POSIXC_DLFCN_H_ */
 diff --git a/compiler/crt/posixc/include/aros/posixc/errno.h b/compiler/crt/posixc/include/aros/posixc/errno.h
-index e6ba2c36..6b0446ea 100644
+index e6ba2c36da..6b0446ea9f 100644
 --- a/compiler/crt/posixc/include/aros/posixc/errno.h
 +++ b/compiler/crt/posixc/include/aros/posixc/errno.h
 @@ -90,6 +90,7 @@
@@ -8149,7 +8195,7 @@ index e6ba2c36..6b0446ea 100644
  #define	ENOLCK		77		/* No locks available */
  #define	EFTYPE		79		/* Inappropriate file type or format */
 diff --git a/compiler/crt/posixc/include/aros/posixc/fcntl.h b/compiler/crt/posixc/include/aros/posixc/fcntl.h
-index 69124257..2b01e254 100644
+index 69124257a9..2b01e254a6 100644
 --- a/compiler/crt/posixc/include/aros/posixc/fcntl.h
 +++ b/compiler/crt/posixc/include/aros/posixc/fcntl.h
 @@ -88,14 +88,18 @@
@@ -8190,7 +8236,7 @@ index 69124257..2b01e254 100644
  
 diff --git a/compiler/crt/posixc/include/aros/posixc/poll.h b/compiler/crt/posixc/include/aros/posixc/poll.h
 new file mode 100644
-index 00000000..cd4e4d9f
+index 0000000000..cd4e4d9f41
 --- /dev/null
 +++ b/compiler/crt/posixc/include/aros/posixc/poll.h
 @@ -0,0 +1,38 @@
@@ -8233,7 +8279,7 @@ index 00000000..cd4e4d9f
 +
 +#endif /* _POSIXC_POLL_H_ */
 diff --git a/compiler/crt/posixc/include/aros/posixc/signal.h b/compiler/crt/posixc/include/aros/posixc/signal.h
-index af58738e..a03393c1 100644
+index af58738ebd..a03393c1df 100644
 --- a/compiler/crt/posixc/include/aros/posixc/signal.h
 +++ b/compiler/crt/posixc/include/aros/posixc/signal.h
 @@ -112,7 +112,7 @@
@@ -8260,7 +8306,7 @@ index af58738e..a03393c1 100644
  int	sigfillset(sigset_t *);
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/mman.h b/compiler/crt/posixc/include/aros/posixc/sys/mman.h
 new file mode 100644
-index 00000000..c84a735e
+index 0000000000..c84a735e31
 --- /dev/null
 +++ b/compiler/crt/posixc/include/aros/posixc/sys/mman.h
 @@ -0,0 +1,59 @@
@@ -8324,7 +8370,7 @@ index 00000000..c84a735e
 +
 +#endif /* _POSIXC_SYS_MMAN_H_ */
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/resource.h b/compiler/crt/posixc/include/aros/posixc/sys/resource.h
-index 5aba0d51..6935373a 100644
+index 5aba0d5177..6935373a2b 100644
 --- a/compiler/crt/posixc/include/aros/posixc/sys/resource.h
 +++ b/compiler/crt/posixc/include/aros/posixc/sys/resource.h
 @@ -13,11 +13,10 @@
@@ -8400,7 +8446,7 @@ index 5aba0d51..6935373a 100644
  
  __END_DECLS
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/select.h b/compiler/crt/posixc/include/aros/posixc/sys/select.h
-index 5376ef09..dd4ca11c 100644
+index 5376ef09a0..dd4ca11c19 100644
 --- a/compiler/crt/posixc/include/aros/posixc/sys/select.h
 +++ b/compiler/crt/posixc/include/aros/posixc/sys/select.h
 @@ -45,8 +45,10 @@ __BEGIN_DECLS
@@ -8417,7 +8463,7 @@ index 5376ef09..dd4ca11c 100644
  __END_DECLS
  
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/stat.h b/compiler/crt/posixc/include/aros/posixc/sys/stat.h
-index a7e99803..6e7bce30 100644
+index a7e9980309..6e7bce30a8 100644
 --- a/compiler/crt/posixc/include/aros/posixc/sys/stat.h
 +++ b/compiler/crt/posixc/include/aros/posixc/sys/stat.h
 @@ -140,7 +140,7 @@ __BEGIN_DECLS
@@ -8468,7 +8514,7 @@ index a7e99803..6e7bce30 100644
  __END_DECLS
  
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/statvfs.h b/compiler/crt/posixc/include/aros/posixc/sys/statvfs.h
-index 2b1e1a53..1d26d01f 100644
+index 2b1e1a53e5..1d26d01f03 100644
 --- a/compiler/crt/posixc/include/aros/posixc/sys/statvfs.h
 +++ b/compiler/crt/posixc/include/aros/posixc/sys/statvfs.h
 @@ -25,6 +25,10 @@ struct statvfs {
@@ -8483,7 +8529,7 @@ index 2b1e1a53..1d26d01f 100644
  
  int statvfs(const char *path, struct statvfs *buf);
 diff --git a/compiler/crt/posixc/include/aros/posixc/sys/wait.h b/compiler/crt/posixc/include/aros/posixc/sys/wait.h
-index 76e58e6c..17b9b22e 100644
+index 76e58e6c48..17b9b22ea9 100644
 --- a/compiler/crt/posixc/include/aros/posixc/sys/wait.h
 +++ b/compiler/crt/posixc/include/aros/posixc/sys/wait.h
 @@ -15,7 +15,7 @@
@@ -8526,7 +8572,7 @@ index 76e58e6c..17b9b22e 100644
  
  __END_DECLS
 diff --git a/compiler/crt/posixc/include/aros/posixc/time.h b/compiler/crt/posixc/include/aros/posixc/time.h
-index 88cddcd4..2eca2e73 100644
+index 88cddcd418..2eca2e7329 100644
 --- a/compiler/crt/posixc/include/aros/posixc/time.h
 +++ b/compiler/crt/posixc/include/aros/posixc/time.h
 @@ -54,8 +54,13 @@ char *strptime(const char *, const char *, struct tm *);
@@ -8544,7 +8590,7 @@ index 88cddcd4..2eca2e73 100644
  
  #endif /* _POSIXC_TIME_H_ */
 diff --git a/compiler/crt/posixc/include/aros/posixc/unistd.h b/compiler/crt/posixc/include/aros/posixc/unistd.h
-index 3859d78b..05cc84d4 100644
+index 3859d78bb8..05cc84d462 100644
 --- a/compiler/crt/posixc/include/aros/posixc/unistd.h
 +++ b/compiler/crt/posixc/include/aros/posixc/unistd.h
 @@ -44,7 +44,7 @@
@@ -8597,7 +8643,7 @@ index 3859d78b..05cc84d4 100644
  
  /* C library internal functions to initialize environ handling simulation
 diff --git a/compiler/crt/posixc/include/mmakefile.src b/compiler/crt/posixc/include/mmakefile.src
-index 6184560f..389b2673 100644
+index 6184560f9a..389b26731c 100644
 --- a/compiler/crt/posixc/include/mmakefile.src
 +++ b/compiler/crt/posixc/include/mmakefile.src
 @@ -1,7 +1,7 @@
@@ -8610,7 +8656,7 @@ index 6184560f..389b2673 100644
  INCLUDES :=  $(filter-out $(FILTER_OUT), $(INCLUDES))
  
 diff --git a/compiler/crt/posixc/vfwprintf.c b/compiler/crt/posixc/vfwprintf.c
-index 3835fe13..305a276f 100644
+index 3835fe13f3..305a276f65 100644
 --- a/compiler/crt/posixc/vfwprintf.c
 +++ b/compiler/crt/posixc/vfwprintf.c
 @@ -11,7 +11,7 @@
@@ -8635,7 +8681,7 @@ index 3835fe13..305a276f 100644
      if (FWrite(fh, &wc, 1, sizeof(wchar_t)) == WEOF)
      {
 diff --git a/compiler/crt/stdc/include/aros/stdc/_strings.h b/compiler/crt/stdc/include/aros/stdc/_strings.h
-index e68bd88b..dd30caf1 100644
+index e68bd88b01..dd30caf19c 100644
 --- a/compiler/crt/stdc/include/aros/stdc/_strings.h
 +++ b/compiler/crt/stdc/include/aros/stdc/_strings.h
 @@ -62,9 +62,16 @@ static __inline__ char *rindex(const char * s, int c)
@@ -8659,7 +8705,7 @@ index e68bd88b..dd30caf1 100644
  __END_DECLS
  
 diff --git a/compiler/crt/stdc/include/aros/stdc/fenv.h b/compiler/crt/stdc/include/aros/stdc/fenv.h
-index 8655d386..7ad54e0b 100644
+index 8655d386fd..7ad54e0bd7 100644
 --- a/compiler/crt/stdc/include/aros/stdc/fenv.h
 +++ b/compiler/crt/stdc/include/aros/stdc/fenv.h
 @@ -13,6 +13,8 @@
@@ -8672,7 +8718,7 @@ index 8655d386..7ad54e0b 100644
  #   include <aros/riscv64/fenv.h>
  #elif defined __riscv
 diff --git a/compiler/crt/stdc/include/aros/stdc/setjmp.h b/compiler/crt/stdc/include/aros/stdc/setjmp.h
-index 4fd49edf..ec73592f 100644
+index 4fd49edfd0..ec73592fdc 100644
 --- a/compiler/crt/stdc/include/aros/stdc/setjmp.h
 +++ b/compiler/crt/stdc/include/aros/stdc/setjmp.h
 @@ -21,6 +21,9 @@
@@ -8686,7 +8732,7 @@ index 4fd49edf..ec73592f 100644
  #   define _JMPLEN 12
  #elif __riscv
 diff --git a/compiler/crt/stdc/include/aros/stdc/stdcnotimpl.h b/compiler/crt/stdc/include/aros/stdc/stdcnotimpl.h
-index df0e073f..e1ed83ae 100644
+index df0e073fde..e1ed83ae12 100644
 --- a/compiler/crt/stdc/include/aros/stdc/stdcnotimpl.h
 +++ b/compiler/crt/stdc/include/aros/stdc/stdcnotimpl.h
 @@ -9,6 +9,16 @@
@@ -8707,7 +8753,7 @@ index df0e073f..e1ed83ae 100644
  # define STDC_NOTIMPL(x)
  # if !defined(STDC_INCLUDE_STDLIB_NOTIMPL)
 diff --git a/compiler/crt/stdc/include/aros/stdc/stddef.h b/compiler/crt/stdc/include/aros/stdc/stddef.h
-index 17e60324..07f7ef47 100644
+index 17e6032453..07f7ef47a6 100644
 --- a/compiler/crt/stdc/include/aros/stdc/stddef.h
 +++ b/compiler/crt/stdc/include/aros/stdc/stddef.h
 @@ -13,6 +13,16 @@
@@ -8728,7 +8774,7 @@ index 17e60324..07f7ef47 100644
  #define offsetof(type, member)      __builtin_offsetof(type, member)
  #else
 diff --git a/compiler/crt/stdc/include/aros/stdc/string.h b/compiler/crt/stdc/include/aros/stdc/string.h
-index 8fe62c9c..8d55f75f 100644
+index 8fe62c9c83..8d55f75f09 100644
 --- a/compiler/crt/stdc/include/aros/stdc/string.h
 +++ b/compiler/crt/stdc/include/aros/stdc/string.h
 @@ -73,6 +73,9 @@ STDC_STRING_NOTIMPL(
@@ -8742,7 +8788,7 @@ index 8fe62c9c..8d55f75f 100644
  size_t strnlen(const char *, size_t);
  STDC_STRING_NOTIMPL(
 diff --git a/compiler/crt/stdc/include/aros/stdc/wchar.h b/compiler/crt/stdc/include/aros/stdc/wchar.h
-index 9a11f07e..fb962b8c 100644
+index 9a11f07e15..fb962b8cc0 100644
 --- a/compiler/crt/stdc/include/aros/stdc/wchar.h
 +++ b/compiler/crt/stdc/include/aros/stdc/wchar.h
 @@ -30,6 +30,11 @@ struct tm;
@@ -8767,7 +8813,7 @@ index 9a11f07e..fb962b8c 100644
  #if !defined(STDC_NOINLINE) && !defined(STDC_NOINLINE_WCHAR)
  __header_inline int wcwidth(wchar_t wc) {
 diff --git a/compiler/crt/stdc/include/aros/stdc/wctype.h b/compiler/crt/stdc/include/aros/stdc/wctype.h
-index 3053d5b9..d557b078 100644
+index 3053d5b946..d557b078a6 100644
 --- a/compiler/crt/stdc/include/aros/stdc/wctype.h
 +++ b/compiler/crt/stdc/include/aros/stdc/wctype.h
 @@ -27,6 +27,7 @@ int iswcntrl(wint_t);
@@ -8779,7 +8825,7 @@ index 3053d5b9..d557b078 100644
  int iswspace(wint_t);
  int iswupper(wint_t);
 diff --git a/compiler/crt/stdc/include/aros/types/wctrans_t.h b/compiler/crt/stdc/include/aros/types/wctrans_t.h
-index b8820505..4b5b679d 100644
+index b8820505e9..4b5b679dfa 100644
 --- a/compiler/crt/stdc/include/aros/types/wctrans_t.h
 +++ b/compiler/crt/stdc/include/aros/types/wctrans_t.h
 @@ -6,10 +6,9 @@
@@ -8797,7 +8843,7 @@ index b8820505..4b5b679d 100644
  
  #if (0)
 diff --git a/compiler/crt/stdc/include/aros/types/wctype_t.h b/compiler/crt/stdc/include/aros/types/wctype_t.h
-index ad0a116d..3197b1f5 100644
+index ad0a116d6f..3197b1f5e3 100644
 --- a/compiler/crt/stdc/include/aros/types/wctype_t.h
 +++ b/compiler/crt/stdc/include/aros/types/wctype_t.h
 @@ -8,10 +8,9 @@
@@ -8815,7 +8861,7 @@ index ad0a116d..3197b1f5 100644
  
  #if 0
 diff --git a/compiler/crt/stdc/math/fpmath.h b/compiler/crt/stdc/math/fpmath.h
-index b090280a..4ca12dd5 100644
+index b090280a58..4ca12dd5bc 100644
 --- a/compiler/crt/stdc/math/fpmath.h
 +++ b/compiler/crt/stdc/math/fpmath.h
 @@ -36,6 +36,8 @@
@@ -8829,7 +8875,7 @@ index b090280a..4ca12dd5 100644
  #elif defined __powerpc__
 diff --git a/compiler/crt/stdc/math/m68k64/_fpmath.h b/compiler/crt/stdc/math/m68k64/_fpmath.h
 new file mode 100644
-index 00000000..603e3c5b
+index 0000000000..603e3c5b05
 --- /dev/null
 +++ b/compiler/crt/stdc/math/m68k64/_fpmath.h
 @@ -0,0 +1,53 @@
@@ -8887,7 +8933,7 @@ index 00000000..603e3c5b
 +	(a)[1] = (uint32_t)(u).bits.manh;		\
 +} while(0)
 diff --git a/compiler/include/aros/cpu.h b/compiler/include/aros/cpu.h
-index 449f841e..d5fc1c23 100644
+index 449f841e07..d5fc1c23d3 100644
 --- a/compiler/include/aros/cpu.h
 +++ b/compiler/include/aros/cpu.h
 @@ -50,6 +50,8 @@
@@ -8900,7 +8946,7 @@ index 449f841e..d5fc1c23 100644
  #   include <aros/m68k/cpu.h>
  #elif defined __MORPHOS__
 diff --git a/compiler/include/aros/genmodule.h b/compiler/include/aros/genmodule.h
-index 7d005cb8..22c0beb7 100644
+index 7d005cb819..22c0beb7dc 100644
 --- a/compiler/include/aros/genmodule.h
 +++ b/compiler/include/aros/genmodule.h
 @@ -21,6 +21,8 @@
@@ -8913,7 +8959,7 @@ index 7d005cb8..22c0beb7 100644
  #   include <aros/m68k/genmodule.h>
  #elif defined __MORPHOS__
 diff --git a/compiler/include/aros/printertag.h b/compiler/include/aros/printertag.h
-index e7ff4647..43ad6aab 100644
+index e7ff46477d..43ad6aabf1 100644
 --- a/compiler/include/aros/printertag.h
 +++ b/compiler/include/aros/printertag.h
 @@ -23,6 +23,8 @@
@@ -8926,7 +8972,7 @@ index e7ff4647..43ad6aab 100644
  #define AROS_PRINTER_MAGIC   0x8082          /* ret */
  #else
 diff --git a/compiler/include/aros/symbolsets.h b/compiler/include/aros/symbolsets.h
-index 18741e5b..68887d74 100644
+index 18741e5b6a..68887d74ea 100644
 --- a/compiler/include/aros/symbolsets.h
 +++ b/compiler/include/aros/symbolsets.h
 @@ -182,9 +182,18 @@ for                                                                          \
@@ -8949,7 +8995,7 @@ index 18741e5b..68887d74 100644
  #endif
  
 diff --git a/compiler/include/asm.c b/compiler/include/asm.c
-index 7d8dec88..9de087d5 100644
+index 7d8dec88ab..9de087d566 100644
 --- a/compiler/include/asm.c
 +++ b/compiler/include/asm.c
 @@ -24,6 +24,10 @@
@@ -8964,7 +9010,7 @@ index 7d8dec88..9de087d5 100644
  #define DEFINE(sym, val) \
      asm volatile("\n.asciz \"#define " #sym " %0 \"": : "i" (val))
 diff --git a/compiler/include/dos/elf.h b/compiler/include/dos/elf.h
-index 8f02aa1a..dee70530 100644
+index 8f02aa1a07..dee705301f 100644
 --- a/compiler/include/dos/elf.h
 +++ b/compiler/include/dos/elf.h
 @@ -87,6 +87,7 @@
@@ -8985,7 +9031,7 @@ index 8f02aa1a..dee70530 100644
  #define AROS_ELF_REL            SHT_RELA
  #define relo                    rela
 diff --git a/compiler/include/exec/interrupts.h b/compiler/include/exec/interrupts.h
-index fb0deae2..5baa1a89 100644
+index fb0deae20a..5baa1a8978 100644
 --- a/compiler/include/exec/interrupts.h
 +++ b/compiler/include/exec/interrupts.h
 @@ -27,6 +27,8 @@
@@ -8998,7 +9044,7 @@ index fb0deae2..5baa1a89 100644
  #include <aros/m68k/cpucontext.h>
  #elif defined __powerpc__
 diff --git a/compiler/include/utility/tagitem.h b/compiler/include/utility/tagitem.h
-index 6b67c3f4..1e2321a3 100644
+index 6b67c3f433..1e2321a311 100644
 --- a/compiler/include/utility/tagitem.h
 +++ b/compiler/include/utility/tagitem.h
 @@ -14,7 +14,16 @@
@@ -9019,7 +9065,7 @@ index 6b67c3f4..1e2321a3 100644
  struct TagItem
  {
 diff --git a/compiler/pthread/pthread.c b/compiler/pthread/pthread.c
-index 11f4e00f..b2c4921c 100644
+index 11f4e00f78..b2c4921c91 100644
 --- a/compiler/pthread/pthread.c
 +++ b/compiler/pthread/pthread.c
 @@ -819,6 +819,13 @@ int pthread_attr_setstack(pthread_attr_t *attr, void *stackaddr, size_t stacksiz
@@ -9037,7 +9083,7 @@ index 11f4e00f..b2c4921c 100644
      attr->stacksize = stacksize;
  
 diff --git a/compiler/pthread/pthread.h b/compiler/pthread/pthread.h
-index 3239e940..4ad70b59 100644
+index 3239e9409e..4ad70b59c5 100644
 --- a/compiler/pthread/pthread.h
 +++ b/compiler/pthread/pthread.h
 @@ -25,8 +25,16 @@
@@ -9153,7 +9199,7 @@ index 3239e940..4ad70b59 100644
  #if defined(CLIB_BSDSOCKET_PROTOS_H) || defined(CLIB_SOCKET_PROTOS_H)
  #if defined(DEFINES_BSDSOCKET_PROTOS_H) || defined(DEFINES_SOCKET_PROTOS_H)
 diff --git a/compiler/pthread/pthread_attr_init.c b/compiler/pthread/pthread_attr_init.c
-index e9ef9799..35f5a5f5 100644
+index e9ef9799f1..35f5a5f5c0 100644
 --- a/compiler/pthread/pthread_attr_init.c
 +++ b/compiler/pthread/pthread_attr_init.c
 @@ -46,6 +46,13 @@ int pthread_attr_init(pthread_attr_t *attr)
@@ -9171,7 +9217,7 @@ index e9ef9799..35f5a5f5 100644
      return 0;
  }
 diff --git a/compiler/pthread/pthread_create.c b/compiler/pthread/pthread_create.c
-index 55281387..73ddd269 100644
+index 55281387ac..73ddd269b7 100644
 --- a/compiler/pthread/pthread_create.c
 +++ b/compiler/pthread/pthread_create.c
 @@ -135,7 +135,9 @@ static void StarterFunc(void)
@@ -9195,7 +9241,7 @@ index 55281387..73ddd269 100644
          inf->attr = *attr;
      else
 diff --git a/compiler/pthread/pthread_intern.h b/compiler/pthread/pthread_intern.h
-index f91f3c55..1759b645 100644
+index f91f3c55cf..1759b64529 100644
 --- a/compiler/pthread/pthread_intern.h
 +++ b/compiler/pthread/pthread_intern.h
 @@ -1,3 +1,5 @@
@@ -9205,7 +9251,7 @@ index f91f3c55..1759b645 100644
    Copyright (C) 2014 Szilard Biro
    Copyright (C) 2018 Harry Sintonen
 diff --git a/compiler/pthread/sched.c b/compiler/pthread/sched.c
-index b5274f00..7facfc58 100644
+index b5274f008f..7facfc58cf 100644
 --- a/compiler/pthread/sched.c
 +++ b/compiler/pthread/sched.c
 @@ -1,3 +1,5 @@
@@ -9215,7 +9261,7 @@ index b5274f00..7facfc58 100644
    Copyright (C) 2014 Szilard Biro
    Copyright (C) 2018 Harry Sintonen
 diff --git a/compiler/pthread/semaphore.c b/compiler/pthread/semaphore.c
-index a74eb75e..5572751e 100644
+index a74eb75eba..5572751e79 100644
 --- a/compiler/pthread/semaphore.c
 +++ b/compiler/pthread/semaphore.c
 @@ -1,3 +1,5 @@
@@ -9256,7 +9302,7 @@ index a74eb75e..5572751e 100644
      D(bug("%s(%s, %d, %u, %u)\n", __FUNCTION__, name, oflag, mode, value));
  
 diff --git a/compiler/pthread/semaphore.h b/compiler/pthread/semaphore.h
-index 30756652..eb75f14e 100644
+index 3075665242..eb75f14ebc 100644
 --- a/compiler/pthread/semaphore.h
 +++ b/compiler/pthread/semaphore.h
 @@ -37,6 +37,9 @@
@@ -9287,7 +9333,7 @@ index 30756652..eb75f14e 100644
  int sem_unlink(const char *name);
  int sem_getvalue(sem_t *sem, int *sval);
 diff --git a/configure.in b/configure.in
-index ecfba952..bbb25f8f 100644
+index ecfba9521d..bbb25f8f4a 100644
 --- a/configure.in
 +++ b/configure.in
 @@ -2069,6 +2069,36 @@ case "$target_os" in
@@ -9350,7 +9396,7 @@ index ecfba952..bbb25f8f 100644
  # Host compiler support scripts and spec
 diff --git a/configure~ b/configure~
 new file mode 100755
-index 00000000..72e51e7b
+index 0000000000..72e51e7b45
 --- /dev/null
 +++ b/configure~
 @@ -0,0 +1,21048 @@
@@ -30403,7 +30449,7 @@ index 00000000..72e51e7b
 +
 +
 diff --git a/rom/dos/boot.c b/rom/dos/boot.c
-index adf0a368..cb3dad27 100644
+index adf0a3684a..cb3dad279e 100644
 --- a/rom/dos/boot.c
 +++ b/rom/dos/boot.c
 @@ -134,7 +134,8 @@ void __dos_Boot(struct DosLibrary *DOSBase, ULONG BootFlags, UBYTE Flags)
@@ -30417,7 +30463,7 @@ index adf0a368..cb3dad27 100644
      }
  
 diff --git a/rom/dos/internalloadseg_elf.c b/rom/dos/internalloadseg_elf.c
-index e806ceb0..ae76ff22 100644
+index e806ceb0b7..ae76ff22f9 100644
 --- a/rom/dos/internalloadseg_elf.c
 +++ b/rom/dos/internalloadseg_elf.c
 @@ -478,6 +478,39 @@ static int relocate
@@ -30461,7 +30507,7 @@ index e806ceb0..ae76ff22 100644
  
              case R_PPC_ADDR32:
 diff --git a/rom/dos/runcommand.c b/rom/dos/runcommand.c
-index aa280e8a..2ba7b935 100644
+index aa280e8a4b..2ba7b935f1 100644
 --- a/rom/dos/runcommand.c
 +++ b/rom/dos/runcommand.c
 @@ -98,10 +98,11 @@ static inline void __inline_Exec_RestoreTaskStorage(APTR __arg1, APTR __SysBase)
@@ -30494,7 +30540,7 @@ index aa280e8a..2ba7b935 100644
      if (!archsuitable)
      {
 diff --git a/rom/dosboot/bootflags.h b/rom/dosboot/bootflags.h
-index e7d58051..e49748f9 100644
+index e7d58051c9..e49748f9d4 100644
 --- a/rom/dosboot/bootflags.h
 +++ b/rom/dosboot/bootflags.h
 @@ -14,5 +14,6 @@
@@ -30505,7 +30551,7 @@ index e7d58051..e49748f9 100644
  
  #endif /* DOSBOOT_BOOTFLAGS_H */
 diff --git a/rom/dosboot/dosboot_init.c b/rom/dosboot/dosboot_init.c
-index 65834b14..963b8a03 100644
+index 65834b14d1..963b8a0358 100644
 --- a/rom/dosboot/dosboot_init.c
 +++ b/rom/dosboot/dosboot_init.c
 @@ -192,6 +192,11 @@ int dosboot_Init(LIBBASETYPEPTR LIBBASE)
@@ -30521,7 +30567,7 @@ index 65834b14..963b8a03 100644
                  {
                      LIBBASE->db_BootFlags |= BF_EMERGENCY_CONSOLE;
 diff --git a/rom/exec/allocsignal.c b/rom/exec/allocsignal.c
-index f7f63ff1..e81b7e62 100644
+index f7f63ff1d7..e81b7e622c 100644
 --- a/rom/exec/allocsignal.c
 +++ b/rom/exec/allocsignal.c
 @@ -15,6 +15,7 @@
@@ -30551,7 +30597,7 @@ index f7f63ff1..e81b7e62 100644
      return signalNum;
  }
 diff --git a/rom/exec/etask.h b/rom/exec/etask.h
-index 44ae4014..3574902e 100644
+index 44ae4014cd..3574902e72 100644
 --- a/rom/exec/etask.h
 +++ b/rom/exec/etask.h
 @@ -62,6 +62,12 @@ struct IntETask
@@ -30569,7 +30615,7 @@ index 44ae4014..3574902e 100644
      STRPTR              iet_Me;
 diff --git a/rom/exec/exec_local.h b/rom/exec/exec_local.h
 new file mode 100644
-index 00000000..3f297825
+index 0000000000..3f297825cb
 --- /dev/null
 +++ b/rom/exec/exec_local.h
 @@ -0,0 +1,92 @@
@@ -30666,7 +30712,7 @@ index 00000000..3f297825
 +#endif
 +#endif
 diff --git a/rom/exec/exec_locks.c b/rom/exec/exec_locks.c
-index cad0d0ba..f4f9102f 100644
+index cad0d0ba93..f4f9102f82 100644
 --- a/rom/exec/exec_locks.c
 +++ b/rom/exec/exec_locks.c
 @@ -83,9 +83,9 @@ int ExecLock__InternObtainSystemLock(struct List *systemList, ULONG mode, ULONG
@@ -30694,7 +30740,7 @@ index cad0d0ba..f4f9102f 100644
  
          EXEC_SPINLOCK_LOCK(lock, NULL, mode);
 diff --git a/rom/exec/exec_util.c b/rom/exec/exec_util.c
-index 5da6d785..37555df1 100644
+index 5da6d78536..37555df154 100644
 --- a/rom/exec/exec_util.c
 +++ b/rom/exec/exec_util.c
 @@ -142,7 +142,22 @@ Exec_InitETask(struct Task *task, struct Task *parent, struct ExecBase *SysBase)
@@ -30721,7 +30767,7 @@ index 5da6d785..37555df1 100644
          D(bug("[EXEC:ETask] Init: CPU #%d, mask %08x\n", cpunum, IntETask(et)->iet_CpuAffinity);)
      }
 diff --git a/rom/exec/exec_util.h b/rom/exec/exec_util.h
-index 6d7149c3..10fb551e 100644
+index 6d7149c35f..10fb551e39 100644
 --- a/rom/exec/exec_util.h
 +++ b/rom/exec/exec_util.h
 @@ -58,6 +58,13 @@
@@ -30739,7 +30785,7 @@ index 6d7149c3..10fb551e 100644
  #ifndef PC
  #error unsupported CPU type
 diff --git a/rom/exec/getmsg.c b/rom/exec/getmsg.c
-index 82b8992d..da0bcb14 100644
+index 82b8992d92..da0bcb1476 100644
 --- a/rom/exec/getmsg.c
 +++ b/rom/exec/getmsg.c
 @@ -13,6 +13,8 @@
@@ -30772,7 +30818,7 @@ index 82b8992d..da0bcb14 100644
      /* All done. */
      ASSERT_VALID_PTR_OR_NULL(msg);
 diff --git a/rom/exec/initresident.c b/rom/exec/initresident.c
-index 36c15163..3db52ff6 100644
+index 36c15163af..3db52ff68b 100644
 --- a/rom/exec/initresident.c
 +++ b/rom/exec/initresident.c
 @@ -77,7 +77,8 @@
@@ -30786,7 +30832,7 @@ index 36c15163..3db52ff6 100644
              APTR structure;
              ULONG_FUNC init;
 diff --git a/rom/exec/memory.h b/rom/exec/memory.h
-index 1e4764ee..3091070e 100644
+index 1e4764eeea..3091070e74 100644
 --- a/rom/exec/memory.h
 +++ b/rom/exec/memory.h
 @@ -10,11 +10,12 @@
@@ -30806,7 +30852,7 @@ index 1e4764ee..3091070e 100644
  #if defined(__AROSEXEC_BROKENMEMLOCK__)
  #define MEM_LOCK        ObtainSemaphore(&PrivExecBase(SysBase)->MemListSem)
 diff --git a/rom/exec/obtainsemaphorelist.c b/rom/exec/obtainsemaphorelist.c
-index 8feb8e23..8e64390a 100644
+index 8feb8e2380..8e64390a37 100644
 --- a/rom/exec/obtainsemaphorelist.c
 +++ b/rom/exec/obtainsemaphorelist.c
 @@ -72,6 +72,7 @@
@@ -30827,7 +30873,7 @@ index 8feb8e23..8e64390a 100644
      {
          ss = (struct SignalSemaphore *)sigSem->lh_Head;
 diff --git a/rom/exec/procure.c b/rom/exec/procure.c
-index ac23d51a..afc1151f 100644
+index ac23d51a2c..afc1151f0f 100644
 --- a/rom/exec/procure.c
 +++ b/rom/exec/procure.c
 @@ -67,6 +67,7 @@
@@ -30847,7 +30893,7 @@ index ac23d51a..afc1151f 100644
  
      return 0;
 diff --git a/rom/exec/putmsg.c b/rom/exec/putmsg.c
-index e1ee66f0..d43150ab 100644
+index e1ee66f08a..d43150ab63 100644
 --- a/rom/exec/putmsg.c
 +++ b/rom/exec/putmsg.c
 @@ -12,7 +12,9 @@
@@ -30882,7 +30928,7 @@ index e1ee66f0..d43150ab 100644
      if (port->mp_SigTask)
      {
 diff --git a/rom/exec/releasesemaphore.c b/rom/exec/releasesemaphore.c
-index 8cdd3da9..ae20e5e8 100644
+index 8cdd3da954..ae20e5e80c 100644
 --- a/rom/exec/releasesemaphore.c
 +++ b/rom/exec/releasesemaphore.c
 @@ -10,9 +10,40 @@
@@ -30981,7 +31027,7 @@ index 8cdd3da9..ae20e5e8 100644
      AROS_LIBFUNC_EXIT
  } /* ReleaseSemaphore */
 diff --git a/rom/exec/semaphores.c b/rom/exec/semaphores.c
-index 39590c2d..a60d4956 100644
+index 39590c2dc8..a60d4956ff 100644
 --- a/rom/exec/semaphores.c
 +++ b/rom/exec/semaphores.c
 @@ -12,6 +12,12 @@
@@ -31079,7 +31125,7 @@ index 39590c2d..a60d4956 100644
      return retval;
  }
 diff --git a/rom/exec/semaphores.h b/rom/exec/semaphores.h
-index 4354150c..514a2b7c 100644
+index 4354150cbe..514a2b7cab 100644
 --- a/rom/exec/semaphores.h
 +++ b/rom/exec/semaphores.h
 @@ -12,6 +12,27 @@
@@ -31111,7 +31157,7 @@ index 4354150c..514a2b7c 100644
  void InternalObtainSemaphore(struct SignalSemaphore *sigSem, struct Task *owner, struct TraceLocation *caller, struct ExecBase *SysBase);
  ULONG InternalAttemptSemaphore(struct SignalSemaphore *sigSem, struct Task *owner, struct TraceLocation *caller, struct ExecBase *SysBase);
 diff --git a/rom/exec/setsignal.c b/rom/exec/setsignal.c
-index 7ed6532a..15b5928d 100644
+index 7ed6532ad1..15b5928dab 100644
 --- a/rom/exec/setsignal.c
 +++ b/rom/exec/setsignal.c
 @@ -13,6 +13,7 @@
@@ -31141,18 +31187,21 @@ index 7ed6532a..15b5928d 100644
  
      return old;
 diff --git a/rom/exec/signal.c b/rom/exec/signal.c
-index a7d30c49..373abbdb 100644
+index a7d30c49dd..585b3d60d3 100644
 --- a/rom/exec/signal.c
 +++ b/rom/exec/signal.c
-@@ -18,6 +18,7 @@
+@@ -18,6 +18,10 @@
  #include <utility/hooks.h>
  
  #include "kernel_ipi.h"
 +#include "exec_local.h"
++#if defined(__m68k64__) && defined(__AROSEXEC_SMP__)
++void m68k64_KickLowerCores(struct Task *task);   /* arch/m68k64-native/kernel/kernel_smp.c */
++#endif
  
  AROS_UFH3(IPTR, signal_hook,
      AROS_UFHA(struct IPIHook *, hook, A0),
-@@ -93,6 +94,29 @@ AROS_UFH3(IPTR, signal_hook,
+@@ -93,6 +97,29 @@ AROS_UFH3(IPTR, signal_hook,
      struct KernelBase *KernelBase = __kernelBase;
      int cpunum = KrnGetCPUNumber();
  
@@ -31182,7 +31231,7 @@ index a7d30c49..373abbdb 100644
      /*
          * # If current CPU number is not the task's CPU and the task is running now, send signal to that task
          *   from CPU which the task is running on.
-@@ -154,7 +178,7 @@ AROS_UFH3(IPTR, signal_hook,
+@@ -154,7 +181,7 @@ AROS_UFH3(IPTR, signal_hook,
          D(bug("[Exec] %s(0x%p, %08lX)\n", __func__, task, signalSet);)
  #endif
  
@@ -31191,7 +31240,7 @@ index a7d30c49..373abbdb 100644
          D(
              bug("[Exec] %s: Signaling 0x%p '%s', state = %08x\n", __func__, task, task->tc_Node.ln_Name, task->tc_State);
  #if (0)
-@@ -207,7 +231,7 @@ AROS_UFH3(IPTR, signal_hook,
+@@ -207,7 +234,7 @@ AROS_UFH3(IPTR, signal_hook,
                      KrnScheduleCPU(IntETask(task->tc_UnionETask.tc_ETask)->iet_CpuAffinity);
                  }
  #endif
@@ -31200,7 +31249,20 @@ index a7d30c49..373abbdb 100644
  
                  /* All done. */
                  return;
-@@ -271,7 +295,7 @@ AROS_UFH3(IPTR, signal_hook,
+@@ -266,12 +293,20 @@ AROS_UFH3(IPTR, signal_hook,
+                     krnSysCallReschedTask(task, TS_READY);
+                     KrnScheduleCPU(IntETask(task->tc_UnionETask.tc_ETask)->iet_CpuAffinity);
+                 }
++#if defined(__m68k64__)
++                else
++                {
++                    /* QRX: it may run here too, but this core keeps its own task: an idle core
++                     * takes it now instead of at its next timer tick (kernel_smp.c) */
++                    m68k64_KickLowerCores(task);
++                }
++#endif
+ #endif
+                 D(else bug("[Exec] %s: Letting Task process signal when next scheduled to run...\n", __func__);)
              }
          }
  
@@ -31210,7 +31272,7 @@ index a7d30c49..373abbdb 100644
          D(
              bug("[Exec] %s: 0x%p finished signal processing\n", __func__, task);
 diff --git a/rom/exec/vacate.c b/rom/exec/vacate.c
-index 89f70020..d8ba66b6 100644
+index 89f700205e..d8ba66b664 100644
 --- a/rom/exec/vacate.c
 +++ b/rom/exec/vacate.c
 @@ -53,6 +53,7 @@
@@ -31222,7 +31284,7 @@ index 89f70020..d8ba66b6 100644
  
      /*
 diff --git a/rom/exec/wait.c b/rom/exec/wait.c
-index 5f77f4b7..e0a30624 100644
+index 5f77f4b76b..e0a3062429 100644
 --- a/rom/exec/wait.c
 +++ b/rom/exec/wait.c
 @@ -14,6 +14,7 @@
@@ -31275,7 +31337,7 @@ index 5f77f4b7..e0a30624 100644
      /* All done. */
      return rcvd;
 diff --git a/rom/exec/waitio.c b/rom/exec/waitio.c
-index f7420647..98d90ecf 100644
+index f7420647bd..98d90ecf5c 100644
 --- a/rom/exec/waitio.c
 +++ b/rom/exec/waitio.c
 @@ -7,6 +7,9 @@
@@ -31310,7 +31372,7 @@ index f7420647..98d90ecf 100644
  
      /* All done. Get returncode. */
 diff --git a/rom/exec/waitport.c b/rom/exec/waitport.c
-index c7b8b229..2f3e0285 100644
+index c7b8b229d9..2f3e028559 100644
 --- a/rom/exec/waitport.c
 +++ b/rom/exec/waitport.c
 @@ -8,9 +8,11 @@
@@ -31363,7 +31425,7 @@ index c7b8b229..2f3e0285 100644
  
      D(bug("[Exec] WaitPort: Returning...\n");)
 diff --git a/rom/filesys/afs/filehandles1.c b/rom/filesys/afs/filehandles1.c
-index b699dfbe..31e16707 100644
+index b699dfbe37..31e16707d1 100644
 --- a/rom/filesys/afs/filehandles1.c
 +++ b/rom/filesys/afs/filehandles1.c
 @@ -250,6 +250,13 @@ UBYTE buffer[32];
@@ -31381,7 +31443,7 @@ index b699dfbe..31e16707 100644
                          }
                          if (*name == '/')
 diff --git a/rom/filesys/afs/filehandles2.c b/rom/filesys/afs/filehandles2.c
-index 2a961c41..88178d6d 100644
+index 2a961c416e..88178d6d19 100644
 --- a/rom/filesys/afs/filehandles2.c
 +++ b/rom/filesys/afs/filehandles2.c
 @@ -454,9 +454,21 @@ UBYTE buffer[256];
@@ -31407,7 +31469,7 @@ index 2a961c41..88178d6d 100644
          entryname[len] = 0;
          return findBlock(afsbase, ah, buffer, &block, error);
 diff --git a/rom/graphics/fakegfxhidd.c b/rom/graphics/fakegfxhidd.c
-index 7d4386bc..b8773878 100644
+index 7d4386bc44..b87738784c 100644
 --- a/rom/graphics/fakegfxhidd.c
 +++ b/rom/graphics/fakegfxhidd.c
 @@ -31,10 +31,18 @@
@@ -31430,7 +31492,7 @@ index 7d4386bc..b8773878 100644
  /******************************************************************************/
  
 diff --git a/rom/intuition/intuition_intern.h b/rom/intuition/intuition_intern.h
-index b38f24da..a2f7f51a 100644
+index b38f24da4e..a2f7f51ae2 100644
 --- a/rom/intuition/intuition_intern.h
 +++ b/rom/intuition/intuition_intern.h
 @@ -1086,6 +1086,9 @@ extern void CheckRectFill(struct RastPort *rp, WORD x1, WORD y1, WORD x2, WORD y
@@ -31444,7 +31506,7 @@ index b38f24da..a2f7f51a 100644
  extern void RenderScreenBar(struct Screen *scr, BOOL refresh, struct IntuitionBase *IntuitionBase);
  extern void UpdateMouseCoords(struct Window *win);
 diff --git a/rom/intuition/mmakefile.src b/rom/intuition/mmakefile.src
-index e8f0c1b4..27a76e41 100644
+index e8f0c1b4db..27a76e4125 100644
 --- a/rom/intuition/mmakefile.src
 +++ b/rom/intuition/mmakefile.src
 @@ -146,6 +146,7 @@ FUNCS := \
@@ -31457,7 +31519,7 @@ index e8f0c1b4..27a76e41 100644
  	setpointer \
 diff --git a/rom/intuition/qrxresizescreen.c b/rom/intuition/qrxresizescreen.c
 new file mode 100644
-index 00000000..0c319c29
+index 0000000000..0c319c29d4
 --- /dev/null
 +++ b/rom/intuition/qrxresizescreen.c
 @@ -0,0 +1,140 @@
@@ -31602,7 +31664,7 @@ index 00000000..0c319c29
 +    return TRUE;
 +}
 diff --git a/rom/intuition/setiprefs.c b/rom/intuition/setiprefs.c
-index d8da23a0..39c41de5 100644
+index d8da23a0f0..39c41de579 100644
 --- a/rom/intuition/setiprefs.c
 +++ b/rom/intuition/setiprefs.c
 @@ -85,6 +85,23 @@
@@ -31630,7 +31692,7 @@ index d8da23a0..39c41de5 100644
              {
                  BOOL try = TRUE;
 diff --git a/rom/kernel/mmakefile.src b/rom/kernel/mmakefile.src
-index 311035d3..73b476e2 100644
+index 311035d3fb..73b476e23a 100644
 --- a/rom/kernel/mmakefile.src
 +++ b/rom/kernel/mmakefile.src
 @@ -27,6 +27,10 @@ PRIV_KERNEL_INCLUDES = \
@@ -31645,7 +31707,7 @@ index 311035d3..73b476e2 100644
  USER_CPPFLAGS := -D__AROS_EXEC_LIBRARY__ \
  	        -DAROS_ARCHITECTURE="\"$(AROS_TARGET_PLATFORM)\""
 diff --git a/rom/task/task_init.c b/rom/task/task_init.c
-index 648eeed8..6988135a 100644
+index 648eeed82f..6988135a71 100644
 --- a/rom/task/task_init.c
 +++ b/rom/task/task_init.c
 @@ -213,11 +213,15 @@ static LONG taskres_Init(struct TaskResBase *TaskResBase)
@@ -31669,7 +31731,7 @@ index 648eeed8..6988135a 100644
  }
 diff --git a/scripts/elf-clang.in b/scripts/elf-clang.in
 new file mode 100644
-index 00000000..25f8231c
+index 0000000000..25f8231ce0
 --- /dev/null
 +++ b/scripts/elf-clang.in
 @@ -0,0 +1,7 @@
@@ -31681,7 +31743,7 @@ index 00000000..25f8231c
 +
 +exec @orig_target_cc@ "$@" -static
 diff --git a/tools/collect-aros/backend-generic.c b/tools/collect-aros/backend-generic.c
-index ea064f79..528ae785 100644
+index ea064f7966..528ae7855e 100644
 --- a/tools/collect-aros/backend-generic.c
 +++ b/tools/collect-aros/backend-generic.c
 @@ -90,7 +90,7 @@ void collect_libs(const char *file, setnode **liblist_ptr)
@@ -31694,7 +31756,7 @@ index ea064f79..528ae785 100644
  
              cp = strchr(secname + 14, '.');
 diff --git a/tools/collect-aros/env.h.in b/tools/collect-aros/env.h.in
-index c74931fb..82b5c48b 100644
+index c74931fb34..82b5c48b2f 100644
 --- a/tools/collect-aros/env.h.in
 +++ b/tools/collect-aros/env.h.in
 @@ -57,6 +57,9 @@
@@ -31708,7 +31770,7 @@ index c74931fb..82b5c48b 100644
  #define OBJECT_FORMAT "-mm68kelf"
  #endif
 diff --git a/workbench/c/shellcommands/mmakefile.src b/workbench/c/shellcommands/mmakefile.src
-index c4f70888..2183751c 100644
+index c4f7088867..2183751c7e 100644
 --- a/workbench/c/shellcommands/mmakefile.src
 +++ b/workbench/c/shellcommands/mmakefile.src
 @@ -105,6 +105,6 @@ FILES := \
@@ -31721,7 +31783,7 @@ index c4f70888..2183751c 100644
  %common
 diff --git a/workbench/fs/qrxhostfs/mmakefile.src b/workbench/fs/qrxhostfs/mmakefile.src
 new file mode 100644
-index 00000000..04cb97ef
+index 0000000000..04cb97ef3e
 --- /dev/null
 +++ b/workbench/fs/qrxhostfs/mmakefile.src
 @@ -0,0 +1,13 @@
@@ -31740,7 +31802,7 @@ index 00000000..04cb97ef
 +%common
 diff --git a/workbench/fs/qrxhostfs/qrxhostfs-handler.c b/workbench/fs/qrxhostfs/qrxhostfs-handler.c
 new file mode 100644
-index 00000000..4a3babaa
+index 0000000000..4a3babaa3c
 --- /dev/null
 +++ b/workbench/fs/qrxhostfs/qrxhostfs-handler.c
 @@ -0,0 +1,420 @@
@@ -32166,7 +32228,7 @@ index 00000000..4a3babaa
 +#endif
 diff --git a/workbench/fs/qrxpipe/mmakefile.src b/workbench/fs/qrxpipe/mmakefile.src
 new file mode 100644
-index 00000000..dc7fad42
+index 0000000000..dc7fad420e
 --- /dev/null
 +++ b/workbench/fs/qrxpipe/mmakefile.src
 @@ -0,0 +1,13 @@
@@ -32185,7 +32247,7 @@ index 00000000..dc7fad42
 +%common
 diff --git a/workbench/fs/qrxpipe/qrxpipe-handler.c b/workbench/fs/qrxpipe/qrxpipe-handler.c
 new file mode 100644
-index 00000000..4c766fbe
+index 0000000000..4c766fbeb3
 --- /dev/null
 +++ b/workbench/fs/qrxpipe/qrxpipe-handler.c
 @@ -0,0 +1,252 @@
@@ -32442,7 +32504,7 @@ index 00000000..4c766fbe
 +    AROS_PROCFUNC_EXIT
 +}
 diff --git a/workbench/libs/cgfx/mmakefile.src b/workbench/libs/cgfx/mmakefile.src
-index cf5700f0..3780afd1 100644
+index cf5700f00f..3780afd1db 100644
 --- a/workbench/libs/cgfx/mmakefile.src
 +++ b/workbench/libs/cgfx/mmakefile.src
 @@ -53,7 +53,7 @@ FUNCS := \
@@ -32455,7 +32517,7 @@ index cf5700f0..3780afd1 100644
  #MM includes-copy
  
 diff --git a/workbench/network/common/include/arpa/inet.h b/workbench/network/common/include/arpa/inet.h
-index cbd735c3..add9110c 100644
+index cbd735c337..add9110cc4 100644
 --- a/workbench/network/common/include/arpa/inet.h
 +++ b/workbench/network/common/include/arpa/inet.h
 @@ -70,6 +70,16 @@
@@ -32476,7 +32538,7 @@ index cbd735c3..add9110c 100644
  /* XXX all new diversions!! argh!! */
  #if __BSD_VISIBLE
 diff --git a/workbench/network/common/include/net/if.h b/workbench/network/common/include/net/if.h
-index 0acb732f..0f2812f5 100644
+index 0acb732f81..0f2812f58c 100644
 --- a/workbench/network/common/include/net/if.h
 +++ b/workbench/network/common/include/net/if.h
 @@ -511,6 +511,14 @@ struct if_nameindex {
@@ -32495,7 +32557,7 @@ index 0acb732f..0f2812f5 100644
  #include <net/if_arp.h>
  #endif
 diff --git a/workbench/network/common/include/netdb.h b/workbench/network/common/include/netdb.h
-index cdc9ab55..4ea11961 100644
+index cdc9ab55f3..4ea11961e9 100644
 --- a/workbench/network/common/include/netdb.h
 +++ b/workbench/network/common/include/netdb.h
 @@ -90,7 +90,10 @@ struct	protoent {
@@ -32542,7 +32604,7 @@ index cdc9ab55..4ea11961 100644
  #endif /* !NETDB_H */
  
 diff --git a/workbench/network/common/include/proto/bsdsocket.h b/workbench/network/common/include/proto/bsdsocket.h
-index 5c829a7c..9ea386d2 100644
+index 5c829a7c09..9ea386d2d3 100644
 --- a/workbench/network/common/include/proto/bsdsocket.h
 +++ b/workbench/network/common/include/proto/bsdsocket.h
 @@ -8,7 +8,12 @@
@@ -32559,7 +32621,7 @@ index 5c829a7c..9ea386d2 100644
  #if !defined(SocketBase) && !defined(__NOLIBBASE__) && !defined(__BSDSOCKET_NOLIBBASE__)
   #ifdef __BSDSOCKET_STDLIBBASE__
 diff --git a/workbench/network/common/include/sys/cdefs.h b/workbench/network/common/include/sys/cdefs.h
-index ee0fc143..afc28190 100644
+index ee0fc143a1..afc2819049 100644
 --- a/workbench/network/common/include/sys/cdefs.h
 +++ b/workbench/network/common/include/sys/cdefs.h
 @@ -95,6 +95,12 @@
@@ -32602,7 +32664,7 @@ index ee0fc143..afc28190 100644
  #define __ISO_C_VISIBLE         1999
  #elif _POSIX_C_SOURCE >= 199506
 diff --git a/workbench/network/common/include/sys/socket.h b/workbench/network/common/include/sys/socket.h
-index 1ff6d2ab..3efaecda 100644
+index 1ff6d2ab9e..3efaecdac5 100644
 --- a/workbench/network/common/include/sys/socket.h
 +++ b/workbench/network/common/include/sys/socket.h
 @@ -654,4 +654,29 @@ struct splice {
@@ -32636,7 +32698,7 @@ index 1ff6d2ab..3efaecda 100644
 +
  #endif /* !_SYS_SOCKET_H_ */
 diff --git a/workbench/network/common/include/sys/syslog.h b/workbench/network/common/include/sys/syslog.h
-index b083557d..5dff85f2 100644
+index b083557db6..5dff85f2d1 100644
 --- a/workbench/network/common/include/sys/syslog.h
 +++ b/workbench/network/common/include/sys/syslog.h
 @@ -191,6 +191,7 @@ CODE facilitynames[] = {

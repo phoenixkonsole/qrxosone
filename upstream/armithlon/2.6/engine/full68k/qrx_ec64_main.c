@@ -158,6 +158,7 @@ struct prof_args { qec64_machine *m; unsigned cores; FILE *f; int stop; const ch
 #define PROF_TASKS 4096
 static uint64_t prof_task_ptr[PROF_TASKS];
 static unsigned prof_ntasks;
+static uint64_t prof_offcpu_task;   /* QRX_EC64_PROF_OFFCPU: the task whose waits are recorded */
 static uint64_t be64(const uint8_t *b) { uint64_t v = 0; for (int i = 0; i < 8; i++) v = v << 8 | b[i]; return v; }
 static unsigned prof_task(qec64_cpu *c, FILE *names)
 {
@@ -174,9 +175,38 @@ static unsigned prof_task(qec64_cpu *c, FILE *names)
         buf[n] = 0;
     }
     prof_task_ptr[prof_ntasks] = task;
+    { const char *want = getenv("QRX_EC64_PROF_OFFCPU");
+      if (want && !prof_offcpu_task && !strcmp(buf, want)) prof_offcpu_task = task; }
     fprintf(names, "%u %016llx %s\n", prof_ntasks, (unsigned long long)task, buf);
     fflush(names);
     return prof_ntasks++;
+}
+
+/* QRX_EC64_PROF_OFFCPU=NAME: whenever the task of that name runs on no core, the record goes on
+ * with its saved stack (tc_SPReg, offset 96 of struct Task on m68k64; tc_SPUpper at 112): ms, then
+ * 64 big-endian words from the stack pointer up, to PROFILE.offcpu. ec64offcpu.py names the
+ * return addresses among them: what the task was waiting in. */
+static void prof_offcpu(qec64_machine *m, unsigned cores, FILE *f, uint32_t ms)
+{
+    if (!f || !prof_offcpu_task) return;
+    qec64_cpu *c0 = qec64_machine_core(m, 0);
+    for (unsigned k = 0; k < cores; k++) {
+        qec64_cpu *c = qec64_machine_core(m, k);
+        uint64_t tls = c->a[8];
+        if (tls + 24 <= c->ram_size && be64(c->ram + tls + 16) == prof_offcpu_task) return;  /* running */
+    }
+    uint64_t t = prof_offcpu_task;
+    if (t + 120 > c0->ram_size) return;
+    uint64_t sp = be64(c0->ram + t + 96), top = be64(c0->ram + t + 112);
+    uint8_t rec[8 + 64 * 8] = { 0 };
+    for (int i = 0; i < 4; i++) rec[i] = (uint8_t)(ms >> (8 * i));
+    rec[4] = c0->ram[t + 33];   /* tc_State */
+    for (unsigned w = 0; w < 64; w++) {
+        uint64_t a = sp + 8 * w;
+        if (a + 8 > c0->ram_size || (top && a + 8 > top)) break;
+        memcpy(rec + 8 + 8 * w, c0->ram + a, 8);
+    }
+    fwrite(rec, 1, sizeof rec, f);
 }
 
 static void *profile_thread(void *arg)
@@ -184,6 +214,13 @@ static void *profile_thread(void *arg)
     struct prof_args *p = arg;
     double t0 = wall();
     FILE *names = p->tasks_path ? fopen(p->tasks_path, "w") : NULL;
+    const char *offname = getenv("QRX_EC64_PROF_OFFCPU");
+    FILE *off = NULL;
+    if (offname && p->tasks_path) {
+        char path[1200];
+        snprintf(path, sizeof path, "%.*s.offcpu", (int)(strlen(p->tasks_path) - 6), p->tasks_path);
+        off = fopen(path, "wb");
+    }
     while (!__atomic_load_n(&p->stop, __ATOMIC_ACQUIRE)) {
         struct timespec ts = { 0, 2000000 };
         nanosleep(&ts, NULL);
@@ -202,8 +239,10 @@ static void *profile_thread(void *arg)
             for (int i = 0; i < 8; i++) rec[8 + i] = (uint8_t)(pc >> (8 * i));
             fwrite(rec, 1, sizeof rec, p->f);
         }
+        prof_offcpu(p->m, p->cores, off, ms);
     }
     if (names) fclose(names);
+    if (off) fclose(off);
     return NULL;
 }
 
