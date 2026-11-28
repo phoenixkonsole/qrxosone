@@ -1644,6 +1644,26 @@
  #elif defined(JS_CODEGEN_RISCV64)
  #  include "jit/riscv64/SharedICRegisters-riscv64.h"
  #elif defined(JS_CODEGEN_WASM32)
+--- a/js/src/jit/moz.build
++++ b/js/src/jit/moz.build
+@@ -216,6 +216,17 @@
+     ]
+     if CONFIG["JS_SIMULATOR_MIPS64"]:
+         UNIFIED_SOURCES += ["mips64/Simulator-mips64.cpp"]
++elif CONFIG["JS_CODEGEN_M68K64"]:
++    # QRX OS One 64: the 68100EC64 (docs/armithlon/m68k64-jit.md)
++    UNIFIED_SOURCES += [
++        "m68k64/Architecture-m68k64.cpp",
++        "m68k64/Assembler-m68k64.cpp",
++        "m68k64/CodeGenerator-m68k64.cpp",
++        "m68k64/Lowering-m68k64.cpp",
++        "m68k64/MacroAssembler-m68k64.cpp",
++        "m68k64/MoveEmitter-m68k64.cpp",
++        "m68k64/Trampoline-m68k64.cpp",
++    ]
+ elif CONFIG["JS_CODEGEN_LOONG64"]:
+     UNIFIED_SOURCES += [
+         "loong64/Architecture-loong64.cpp",
 --- a/js/src/shell/OSObject.cpp
 +++ b/js/src/shell/OSObject.cpp
 @@ -1038,7 +1038,7 @@
