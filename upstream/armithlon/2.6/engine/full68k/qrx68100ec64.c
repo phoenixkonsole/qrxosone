@@ -1387,10 +1387,23 @@ static void op_fpu(ctx *x)
                 if (to_mem) wr(x, a, 4, *regs[i]); else *regs[i] = (uint32_t)rd(x, a, 4);
                 a += 4;
             }
-        } else for (unsigned i = 0; i < 3; i++) if (list & (4 >> i)) {
+        } else if (count == 1 || mode == 7 && reg == 4) {    /* one register, or #imm for several */
             if (to_mem) { if (mode == 7 && reg == 4) unimpl(x); need_data_alterable(x, mode == 1 ? 0 : mode, reg); }
-            loc l = ea(x, mode, reg, 4);
-            if (to_mem) st(x, &l, 4, *regs[i]); else *regs[i] = (uint32_t)ld(x, &l, 4);
+            for (unsigned i = 0; i < 3; i++) if (list & (4 >> i)) {
+                loc l = ea(x, mode, reg, 4);
+                if (to_mem) st(x, &l, 4, *regs[i]); else *regs[i] = (uint32_t)ld(x, &l, 4);
+            }
+        } else {                                          /* several: one address, the registers in a row */
+            if (to_mem) need_alterable_mem(x, mode, reg);
+            unsigned r = regB(x, reg);
+            uint64_t a;
+            if (mode == 3) a = c->a[r];
+            else { loc l = ea(x, mode, reg, 4); a = l.addr; }
+            for (unsigned i = 0; i < 3; i++) if (list & (4 >> i)) {
+                if (to_mem) wr(x, a, 4, *regs[i]); else *regs[i] = (uint32_t)rd(x, a, 4);
+                a += 4;
+            }
+            if (mode == 3) aset(x, r, a);
         }
         c->fpcr &= 0xFFFFu;
         return;

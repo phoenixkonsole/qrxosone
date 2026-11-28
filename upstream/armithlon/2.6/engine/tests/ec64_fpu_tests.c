@@ -153,6 +153,14 @@ static void moves(void)
     CHECK(c.fp[0] == 1 && c.fp[1] == 2 && c.fp[7] == 7 && c.a[7] == 0x30000, "FMOVEM: %g %g %g sp %" PRIx64,
           c.fp[0], c.fp[1], c.fp[7], c.a[7]);
     CHECK(c.d[2] == (uint32_t)(CODE + 0x0C), "FPIAR, the last FNEG: %" PRIx64, c.d[2]);
+    /* FPCR and FPSR together at (d16,An), as AROS saves them with a task, and back */
+    fresh(); c.fpcr = 0x20; c.fpsr = 0x08000000; c.a[0] = DATA;
+    run(W(0xF228, 0xB800, 0x0040, 0x4E71));      /* FMOVEM FPCR/FPSR,64(A0); NOP */
+    CHECK(get32(DATA + 64) == 0x20 && get32(DATA + 68) == 0x08000000, "FMOVEM FPCR/FPSR,64(A0): %08x %08x",
+          get32(DATA + 64), get32(DATA + 68));
+    fresh(); put64(DATA + 64, UINT64_C(0x0000001004000000));
+    run(W(0xF228, 0x9800, 0x0040, 0x4E71));      /* FMOVEM 64(A0),FPCR/FPSR */
+    CHECK(c.fpcr == 0x10 && c.fpsr == 0x04000000, "FMOVEM 64(A0),FPCR/FPSR: %x %x", c.fpcr, c.fpsr);
     fresh(); c.fp[2] = 3;
     run(W(0xF228, 0xF020, 0x0010));              /* FMOVEM FP2,16(A0) */
     CHECK(get64(DATA + 16) == bits(3.0), "FMOVEM to (d16,An): %016" PRIx64, get64(DATA + 16));

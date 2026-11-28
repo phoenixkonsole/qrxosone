@@ -926,7 +926,7 @@ index 0000000000..89a8f50697
 +#endif /* AROS_M68K64_CPU_H */
 diff --git a/arch/m68k64-all/include/aros/cpucontext.h b/arch/m68k64-all/include/aros/cpucontext.h
 new file mode 100644
-index 0000000000..cf5b9989a7
+index 0000000000..fe225c9cce
 --- /dev/null
 +++ b/arch/m68k64-all/include/aros/cpucontext.h
 @@ -0,0 +1,35 @@
@@ -955,7 +955,7 @@ index 0000000000..cf5b9989a7
 +    ULONG reserved;
 +};
 +
-+#define ECF_FPU         (1 << 0)   /* No FPU yet, never set */
++#define ECF_FPU         (1 << 0)   /* not used: the kernel keeps the FPU's state behind the context */
 +
 +/* SR values */
 +#define SR_SUPERVISOR   0x2000
@@ -1405,7 +1405,7 @@ index 0000000000..158e961835
 +%copy_includes mmake=compiler-includes path=asm/m68k64 dir=asm
 diff --git a/arch/m68k64-all/kernel/cpu_init.c b/arch/m68k64-all/kernel/cpu_init.c
 new file mode 100644
-index 0000000000..34ec31b4fd
+index 0000000000..26a820f6b2
 --- /dev/null
 +++ b/arch/m68k64-all/kernel/cpu_init.c
 @@ -0,0 +1,28 @@
@@ -1430,7 +1430,7 @@ index 0000000000..34ec31b4fd
 +
 +static int cpu_Init(struct KernelBase *KernelBase)
 +{
-+    /* The 68100EC64 has no FPU yet: the context is the integer registers, PC and SR */
++    /* The integer registers, PC and SR, then the FPU's registers (kernel_cpu.h) */
 +    KernelBase->kb_ContextSize = sizeof(struct AROSCPUContext);
 +
 +    return TRUE;
@@ -3224,10 +3224,10 @@ index 0000000000..41e5fd00f2
 +extern void ictl_disable_irq(uint8_t irq, struct KernelBase *KernelBase);
 diff --git a/arch/m68k64-native/kernel/kernel_cpu.c b/arch/m68k64-native/kernel/kernel_cpu.c
 new file mode 100644
-index 0000000000..d1820ae60f
+index 0000000000..65ad51de8e
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_cpu.c
-@@ -0,0 +1,179 @@
+@@ -0,0 +1,181 @@
 +/*
 +    Copyright (C) 2023, The AROS Development Team. All rights reserved.
 +*/
@@ -3349,6 +3349,7 @@ index 0000000000..d1820ae60f
 +
 +    /* Cache running task's context */
 +    STORE_TASKSTATE(task, regs)
++    m68k64_FPUSave((struct AROSCPUContext *)task->tc_UnionETask.tc_ETask->et_RegFrame);
 +
 +    core_Switch();
 +}
@@ -3379,6 +3380,7 @@ index 0000000000..d1820ae60f
 +
 +    /* Restore the task's state */
 +    RESTORE_TASKSTATE(task, regs)
++    m68k64_FPULoad((struct AROSCPUContext *)task->tc_UnionETask.tc_ETask->et_RegFrame);
 +
 +    /* Handle tasks's flags */
 +    if (task->tc_Flags & TF_EXCEPT)
@@ -3409,10 +3411,10 @@ index 0000000000..d1820ae60f
 +ADD2INITLIB(cpu_TLSInit, 0);
 diff --git a/arch/m68k64-native/kernel/kernel_cpu.h b/arch/m68k64-native/kernel/kernel_cpu.h
 new file mode 100644
-index 0000000000..f77202f857
+index 0000000000..8a282a658b
 --- /dev/null
 +++ b/arch/m68k64-native/kernel/kernel_cpu.h
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,76 @@
 +/*
 +    Copyright (C) 2026, The AROS Development Team. All rights reserved.
 +
@@ -3441,8 +3443,33 @@ index 0000000000..f77202f857
 +
 +/* We use native context format, no conversion needed */
 +#define regs_t struct ExceptionContext
-+/* There are no private add-ons */
-+#define AROSCPUContext ExceptionContext
++/*
++    A task's context: the integer registers as an exception builds them on the supervisor stack (272
++    bytes, intr.c), then the FPU's state (docs/armithlon/68100ec64.md "FPU"). Only a task switch saves
++    and loads the FPU: the kernel's own code does not use it. KrnCreateContext() clears it.
++*/
++struct AROSCPUContext
++{
++    struct ExceptionContext regs;
++    UQUAD fp[8];                /* FP0-FP7, doubles */
++    ULONG fpcr, fpsr;
++};
++
++/* FMOVEM FP0-FP7,(A0) and FMOVEM FPCR/FPSR,(64,A0); the loads the other way */
++static inline void m68k64_FPUSave(struct AROSCPUContext *ctx)
++{
++    asm volatile ("   move.q %0, %%a0\n"
++                  "   .short 0xF210, 0xF0FF\n"
++                  "   .short 0xF228, 0xB800, 64\n"
++                  : : "a"(ctx->fp) : "a0", "memory");
++}
++static inline void m68k64_FPULoad(struct AROSCPUContext *ctx)
++{
++    asm volatile ("   move.q %0, %%a0\n"
++                  "   .short 0xF210, 0xD0FF\n"
++                  "   .short 0xF228, 0x9800, 64\n"
++                  : : "a"(ctx->fp) : "a0", "memory");
++}
 +
 +#define ADDTIME(dest, src)			        \
 +    (dest)->tv_micro += (src)->tv_micro;	\
