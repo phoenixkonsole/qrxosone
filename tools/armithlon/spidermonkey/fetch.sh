@@ -14,6 +14,8 @@ echo "824d5e0bbcae30825ee4ec3267d21018b01d33ac2fda50065de8c41153d4ec85  dl/$V.es
 xz -dc dl/$V.esr.tar.xz | tar -x --exclude="$V/testing/web-platform/tests" \
   --exclude="$V/testing/web-platform/mozilla/tests"
 patch -p1 -d $V < "$HERE/spidermonkey-153.8.0-aros.patch"
+# the 68100EC64's JIT backend (docs/armithlon/m68k64-jit.md; only built with --enable-jit)
+mkdir -p $V/js/src/jit/m68k64 && cp "$HERE"/jit-m68k64/* $V/js/src/jit/m68k64/
 # the patch changes vendored crates (libc, getrandom, rustix, socket2, mtu, errno, libloading: AROS);
 # cargo checks their file checksums
 python3 -I "$HERE/fix-checksums.py" $(grep -o '^+++ b/third_party/rust/[^/]*' "$HERE/spidermonkey-153.8.0-aros.patch" |
