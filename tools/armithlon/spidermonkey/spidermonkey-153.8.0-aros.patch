@@ -1475,6 +1475,23 @@
    /* nothing */
  #else
    MOZ_RELEASE_ASSERT(mprotect(region, length, int(prot)) == 0);
+--- a/js/src/jit/CacheIRCompiler.h
++++ b/js/src/jit/CacheIRCompiler.h
+@@ -1397,8 +1397,12 @@
+   }
+ 
+   int32_t getStubRawInt32(const uint8_t* stubData, uint32_t offset) const {
+-    MOZ_ASSERT(uintptr_t(stubData + offset) % sizeof(int32_t) == 0);
+-    return *reinterpret_cast<const int32_t*>(stubData + offset);
++    // A RawInt32 field takes a whole word (StubField::sizeIsWord; copyStubData
++    // writes it as uintptr_t). Reading its first four bytes gives the value on
++    // a little-endian machine only; on a big-endian one (QRX OS One 64) they
++    // are the word's high half, 0. So read the word.
++    MOZ_ASSERT(uintptr_t(stubData + offset) % sizeof(uintptr_t) == 0);
++    return int32_t(*reinterpret_cast<const uintptr_t*>(stubData + offset));
+   }
+ 
+   int32_t getStubRawInt32(ICCacheIRStub* stub, uint32_t offset) const {
 --- a/js/src/shell/OSObject.cpp
 +++ b/js/src/shell/OSObject.cpp
 @@ -1038,7 +1038,7 @@
@@ -1495,6 +1512,51 @@
      JS_FN_HELP("system", os_system, 1, 0,
  "system(command)",
  "  Execute command on the current host, returning result code or throwing an\n"
+--- a/js/src/util/StructuredSpewer.cpp
++++ b/js/src/util/StructuredSpewer.cpp
+@@ -60,7 +60,8 @@
+   static mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire> threadCounter;
+ 
+   char suffix_path[2048] = {0};
+-  SprintfLiteral(suffix_path, "%s.%d.%u", path, getpid(), threadCounter++);
++  SprintfLiteral(suffix_path, "%s.%d.%u", path, int(getpid()),  // QRX: AROS pid_t is long
++                 threadCounter++);
+ 
+   if (!output_.init(suffix_path)) {
+     // Returning here before we've emplaced the JSONPrinter
+--- a/js/src/vm/CharacterEncoding.cpp
++++ b/js/src/vm/CharacterEncoding.cpp
+@@ -3,6 +3,12 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "js/CharacterEncoding.h"
++
++#ifdef __AROS__
++#  define QRX_AROS_OR(x) true  // QRX: AROS's mbsinit() does not report the initial state after a conversion
++#else
++#  define QRX_AROS_OR(x) (x)
++#endif
+ 
+ #include "mozilla/CheckedInt.h"
+ #include "mozilla/DebugOnly.h"
+@@ -693,7 +699,7 @@
+                               JSMSG_CANT_CONVERT_TO_WIDE);
+     return nullptr;
+   }
+-  MOZ_ASSERT(std::mbsinit(&mb),
++  MOZ_ASSERT(QRX_AROS_OR(std::mbsinit(&mb)),
+              "multi-byte state is in its initial state when no conversion "
+              "error occured");
+ 
+@@ -817,7 +823,7 @@
+                               JSMSG_CANT_CONVERT_TO_NARROW);
+     return nullptr;
+   }
+-  MOZ_ASSERT(std::mbsinit(&mb),
++  MOZ_ASSERT(QRX_AROS_OR(std::mbsinit(&mb)),
+              "multi-byte state is in its initial state when no conversion "
+              "error occured");
+ 
 --- a/layout/base/nsLayoutUtils.cpp
 +++ b/layout/base/nsLayoutUtils.cpp
 @@ -9792,6 +9792,10 @@
