@@ -13372,7 +13372,7 @@
 +}  // namespace mozilla
 --- /dev/null
 +++ b/widget/aros/aros_appshell_glue.c
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,61 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13428,10 +13428,15 @@
 + * sqrt and sqrtf) as the 68100EC64's host floating point instruction. They come before
 + * compiler-rt's and Rust's compiler_builtins in libxul, so all of Gecko uses them; WebRender's
 + * software rasteriser spent about a third of its time in the soft float routines. */
++int qrx_appshell_task_priority(int pri)
++{
++    return SetTaskPri(FindTask(NULL), pri);
++}
++
 +#include "aros_hostfp.inc"
 --- /dev/null
 +++ b/widget/aros/aros_appshell_glue.h
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,28 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13448,6 +13453,8 @@
 +#define QRX_APPSHELL_WINDOW 4  /* a window's port has messages */
 +
 +int qrx_appshell_init(void);
++/* the priority of the calling task (Gecko's main thread); returns the old one */
++int qrx_appshell_task_priority(int pri);
 +void qrx_appshell_shutdown(void);
 +void qrx_appshell_wake(void);                       /* any thread */
 +void qrx_appshell_add_wait_mask(unsigned long mask);
@@ -14380,7 +14387,7 @@
 +]
 --- /dev/null
 +++ b/widget/aros/nsAppShell.cpp
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,74 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14407,6 +14414,9 @@
 +
 +nsresult nsAppShell::Init() {
 +  if (qrx_appshell_init()) return NS_ERROR_FAILURE;
++  /* QRX_MAINPRI=n: the main thread's task priority (its helpers stay at 0), so that it takes a core
++   * from them as soon as it is ready instead of at the end of their time slice */
++  if (const char* p = getenv("QRX_MAINPRI")) qrx_appshell_task_priority(atoi(p));
 +  hal::Init();
 +  if (XRE_IsParentProcess()) {
 +    /* the screen: the headless helper, given the size of the public screen the windows open on */
