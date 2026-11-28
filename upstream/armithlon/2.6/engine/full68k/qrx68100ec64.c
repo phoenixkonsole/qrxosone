@@ -1340,6 +1340,14 @@ static bool to_exception(ctx *x)
                 }
                 fputc('\n', stderr);
             }
+            /* the stack: return addresses among its words name the callers (qrxbt.py reads the
+             * lines as "QRXBT stack" words) */
+            for (unsigned k = 0; k < 96; k++) {
+                uint64_t a = c->a[7] + 8 * k, v = 0;
+                if (a + 8 > c->ram_size) break;
+                for (unsigned b = 0; b < 8; b++) v = v << 8 | c->ram[a + b];
+                fprintf(stderr, "QRXBT stack %016llx\n", (unsigned long long)v);
+            }
         }
         return take_exception(x, 2, x->start_pc, true, c->fault_addr);
     case QEC64_UNIMPLEMENTED:
